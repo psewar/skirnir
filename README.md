@@ -269,6 +269,10 @@ Decision). `/admin/state` zeigt ausserdem `build` (Deploy-Manifest) und `supply_
 
 ## Web-UI
 
+![Übersicht der Web-UI mit Live-Grafiken und Knotentabelle](design/ui-uebersicht.png)
+
+*Übersicht in der lokalen Entwicklungsumgebung (`test/dev_env.py`) mit zwei Fake-Knoten und synthetischem Verkehr.*
+
 Eine Seite ([router/ui.html](router/ui.html)), ohne externe Bibliotheken, fünf Tabs:
 
 - **Übersicht:** Knoten mit Zustand, Breaker, GPU, VRAM, Last und geladenen Modellen; Cloud-Anbieter mit Budgetbalken;
