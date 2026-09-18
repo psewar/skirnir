@@ -1,0 +1,23 @@
+# Jevlike-Dienst neben dem Router auf router-host (LXC). Nur lokal erreichbar: 127.0.0.1:8081 -> Router-Konfiguration
+#   decision_engine.jevlike.endpoint: http://127.0.0.1:8081
+# Modelle liegen ausserhalb des Bildes unter /opt/skirnir-jevlike/models (Checkpoints + optional HF-Cache).
+services:
+  jevlike:
+    image: skirnir-jevlike
+    build: .
+    container_name: skirnir-jevlike
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - /opt/skirnir-jevlike/models:/models:ro
+    command: ["--checkpoint", "/models/skirnir-router-tiny.pt", "--model-name", "skirnir-router-tiny", "--threads", "2"]
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

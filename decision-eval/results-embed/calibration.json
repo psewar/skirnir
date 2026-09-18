@@ -1,0 +1,9 @@
+{
+ "jevlike/embed": {
+  "temperature": 0.5,
+  "ece_before": 0.1118,
+  "ece_after": 0.0783,
+  "measured_at": "2026-09-17",
+  "n_validation": 189
+ }
+}

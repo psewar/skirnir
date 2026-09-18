@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Deploy des Routers in seinen LXC-Container ueber den LXC-Host (SSH root, Passwort aus dem Secret-Store).
+
+Ablauf: SFTP nach <lxc-host>:/tmp/ollama-router/ -> Datei-Push in den Container (CT_PUSH) -> systemd reload/restart -> Smoke-Test.
+Aufruf:  python deploy.py              (voller Deploy)
+         python deploy.py --status     (nur Status + Journal)
+         python deploy.py --pull-roles (roles.yaml des CT in den Ops-Ordner holen, zur Ansicht/Sicherung)
+
+Alles Standortspezifische (LXC-Host, CT-Nummer, Router-Hostname, Secrets-Ordner, Produktivkonfiguration, Secret-Store-
+Zugang des CT) kommt aus dem Ops-Ordner ausserhalb des Repos, siehe ops_env.py. Das Repo enthaelt nur config.example.yaml.
+"""
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+
+import paramiko
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import ops_env  # noqa: E402
+
+ROUTER_DIR = os.path.join(HERE, "..", "router")
+OPS = ops_env.load()
+CT = OPS["CT"]
+secrets_env = None   # nach load_secrets() gesetzt; decision-embed/deploy_ct.py nutzt connect()/run()/ct_exec()/ct_push() von hier
+
+FILES = [  # (lokal, Zielpfad im Container, mode); Quelle ist ROUTER_DIR, ausser bei absoluten Pfaden (Ops-Ordner).
+           # Liegt im Ops-Ordner unter router/ eine Datei gleichen Namens (z. B. ollama-router-cert.path mit dem echten
+           # Zertifikatspfad), gewinnt sie - so bleibt das Repo generisch und der Standort privat.
+    ("router.py", "/opt/ollama-router/router.py", "0755"),
+    ("ui.html", "/opt/ollama-router/ui.html", "0644"),
+    ("skirnir.png", "/opt/ollama-router/skirnir.png", "0644"),    # Logo im UI-Kopf
+    ("favicon.png", "/opt/ollama-router/favicon.png", "0644"),    # Tab-Icon (128 px), auch /favicon.ico
+    ("decision-tfidf.json", "/etc/ollama-router/decision-tfidf.json", "0644"),   # Decision Engine Stufe 1 (train_tfidf.py)
+    (OPS["CONFIG_YAML"], "/etc/ollama-router/config.yaml", "0600"),
+    (OPS["RENDER_ENV_CONF"], "/etc/ollama-router/render-env.conf", "0600"),
+    ("ollama-router.service", "/etc/systemd/system/ollama-router.service", "0644"),
+    ("ollama-router-cert.path", "/etc/systemd/system/ollama-router-cert.path", "0644"),
+    ("ollama-router-cert.service", "/etc/systemd/system/ollama-router-cert.service", "0644"),
+    ("render-env.sh", "/opt/ollama-router/render-env.sh", "0755"),
+    ("ollama-router-secrets.service", "/etc/systemd/system/ollama-router-secrets.service", "0644"),
+    ("ollama-router-secrets.timer", "/etc/systemd/system/ollama-router-secrets.timer", "0644"),
+    ("ollama-router-secrets-refresh.service", "/etc/systemd/system/ollama-router-secrets-refresh.service", "0644"),
+]
+# router.py ist nur der Einstieg; der Code liegt im Paket router/ollama_router/. Unterpakete (z. B. ollama_router/decision/)
+# werden rekursiv mitgenommen, __pycache__ nicht - ein fehlendes Unterpaket liess den Router nach dem Deploy mit ImportError
+# im Neustart-Kreis haengen.
+PKG_DIR = os.path.join(ROUTER_DIR, "ollama_router")
+PKG_SUBDIRS = []
+for _root, _dirs, _files in os.walk(PKG_DIR):
+    _dirs[:] = sorted(d for d in _dirs if d != "__pycache__")
+    _rel = os.path.relpath(_root, PKG_DIR).replace(os.sep, "/")
+    if _rel != ".":
+        PKG_SUBDIRS.append(_rel)
+    for f in sorted(_files):
+        if f.endswith(".py"):
+            _sub = "" if _rel == "." else _rel + "/"
+            FILES.append((f"ollama_router/{_sub}{f}", f"/opt/ollama-router/ollama_router/{_sub}{f}", "0644"))
+_MKDIRS = " ".join(f"/opt/ollama-router/ollama_router/{d}" for d in PKG_SUBDIRS)
+_TMPDIRS = " ".join(f"/tmp/ollama-router/ollama_router/{d}" for d in PKG_SUBDIRS)
+# Rollen, die in der UI geaendert werden, liegen in /etc/ollama-router/roles.yaml (nicht im Repo).
+# deploy.py laesst diese Datei in Ruhe; `--pull-roles` holt sie in den Ops-Ordner.
+
+
+def _local(local):
+    if os.path.isabs(local):
+        return local
+    override = os.path.join(OPS["OPS"], "router", local)
+    return override if os.path.isfile(override) else os.path.join(ROUTER_DIR, local)
+
+
+def _staged(local):
+    """Name unter /tmp/ollama-router/ auf dem LXC-Host (Ops-Dateien unter ihrem Dateinamen)."""
+    return os.path.basename(local) if os.path.isabs(local) else local
+
+
+def ct_host():
+    return ops_env.ct_host(OPS)
+
+
+def run(c, cmd, timeout=120):
+    _, o, e = c.exec_command(cmd, timeout=timeout)
+    out = o.read().decode(errors="replace")
+    err = e.read().decode(errors="replace")
+    rc = o.channel.recv_exit_status()
+    return rc, out, err
+
+
+def ct_exec(cmd):
+    """Shell-Kommando im Container (Vorlage CT_EXEC aus deploy.env)."""
+    q = "'" + cmd.replace("'", "'\\''") + "'"
+    return OPS["CT_EXEC"].format(ct=CT, cmd=q)
+
+
+def ct_push(src, dst, mode):
+    """Datei vom LXC-Host in den Container (Vorlage CT_PUSH aus deploy.env)."""
+    return OPS["CT_PUSH"].format(ct=CT, src=src, dst=dst, mode=mode)
+
+
+def connect():
+    global secrets_env
+    secrets_env = ops_env.load_secrets(OPS)
+    c = paramiko.SSHClient()
+    c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    c.connect(ct_host(), username=OPS["HOST_USER"], password=os.environ[OPS["HOST_PASS_ENV"]], timeout=20)
+    return c
+
+
+def main():
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # systemctl-Ausgabe enthaelt Unicode-Punkte, Windows-Konsole ist cp1252
+    host = OPS["ROUTER_HOST"]
+    c = connect()
+    status_only = "--status" in sys.argv
+    if "--pull-roles" in sys.argv:
+        rc, out, err = run(c, ct_exec("cat /etc/ollama-router/roles.yaml 2>/dev/null || echo '# (keine roles.yaml vorhanden)'"))
+        open(OPS["ROLES_YAML"], "w", encoding="utf-8").write(out)
+        print("roles.yaml geholt:", len(out), "Bytes ->", OPS["ROLES_YAML"])
+        c.close()
+        return
+    if not status_only:
+        # Stufe 6: Konfiguration lokal gegen das Schema pruefen (ohne die evtl. veraltete lokale roles.yaml) - fail-closed
+        chk = subprocess.run([sys.executable, os.path.join(ROUTER_DIR, "router.py"), "--check", OPS["CONFIG_YAML"], "--pure"],
+                             capture_output=True, text=True)
+        print("Schema-Check lokal:", (chk.stdout + chk.stderr).strip())
+        if chk.returncode != 0:
+            print("Abbruch: config.yaml ungueltig, nichts ausgerollt")
+            sys.exit(2)
+        # Deploy-Manifest (Supply Chain): Zeitpunkt, Quelle, SHA-256 jeder ausgerollten Datei -> /admin/state build
+        manifest = {"deployed_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "source": os.path.abspath(ROUTER_DIR), "by": os.environ.get("USERNAME") or os.environ.get("USER"),
+                    "files": {_staged(local): hashlib.sha256(open(_local(local), "rb").read()).hexdigest() for local, _, _ in FILES}}
+        with open(os.path.join(ROUTER_DIR, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=1)
+        FILES.append(("manifest.json", "/etc/ollama-router/manifest.json", "0644"))
+        run(c, f"mkdir -p /tmp/ollama-router/ollama_router {_TMPDIRS}")
+        sftp = c.open_sftp()
+        for local, remote, _ in FILES:
+            sftp.put(_local(local), f"/tmp/ollama-router/{_staged(local)}")
+        sftp.close()
+        rc, out, err = run(c, ct_exec(f"mkdir -p /opt/ollama-router/ollama_router /etc/ollama-router {_MKDIRS}"))
+        for local, remote, mode in FILES:
+            rc, out, err = run(c, ct_push(f"/tmp/ollama-router/{_staged(local)}", remote, mode))
+            if rc != 0:
+                print("push failed:", local, out, err)
+                sys.exit(1)
+        run(c, "rm -rf /tmp/ollama-router")
+        rc, out, err = run(c, ct_exec("python3 /opt/ollama-router/router.py --check /etc/ollama-router/config.yaml && "
+                                  "python3 -c \"import yaml; yaml.safe_load(open(\\\"/etc/ollama-router/config.yaml\\\"))\" && "
+                                  "dpkg -s python3-cryptography >/dev/null 2>&1 || (apt-get install -y -q python3-cryptography >/dev/null 2>&1 && echo cryptography-installiert); systemctl daemon-reload && systemctl enable ollama-router >/dev/null 2>&1; systemctl enable --now ollama-router-cert.path >/dev/null 2>&1; systemctl enable --now ollama-router-secrets.timer >/dev/null 2>&1; /opt/ollama-router/render-env.sh; systemctl restart --no-block ollama-router; sleep 3; echo restarted"))
+        print(out.strip(), err.strip())
+        if "Konfiguration ok" not in out:
+            print("Abbruch: Schema-Check auf dem CT fehlgeschlagen - Dienst NICHT neu gestartet (alter Prozess laeuft weiter, Dateien sind aber schon ersetzt)")
+            c.close()
+            sys.exit(1)
+        time.sleep(3)
+    ui_pass = os.environ.get(OPS["UI_PASS_ENV"], "")
+    rc, out, err = run(c, ct_exec("systemctl --no-pager --lines=0 status ollama-router | head -5; "
+                              "echo ---; journalctl -u ollama-router --no-pager -n 25 -o short; "
+                              f"echo ---; curl -s -m 5 --resolve {host}:11434:127.0.0.1 https://{host}:11434/api/version; echo; "   # /api/version ist von der Client-Auth ausgenommen (Stufe 2); /api/tags braeuchte im enforce-Modus ein Token
+                              f"echo ---; curl -s -m 5 -u {OPS['UI_USER']}:{ui_pass} --resolve {host}:11435:127.0.0.1 https://{host}:11435/admin/state | head -c 400; echo; "
+                              f"echo ---; systemctl is-active ollama-router-cert.path; openssl s_client -connect 127.0.0.1:11435 -servername {host} </dev/null 2>/dev/null | openssl x509 -noout -subject -enddate"))
+    print(out)
+    if err.strip():
+        print("STDERR:", err)
+    c.close()
+
+
+if __name__ == "__main__":
+    main()

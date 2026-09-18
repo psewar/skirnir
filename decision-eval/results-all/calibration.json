@@ -1,0 +1,30 @@
+{
+ "jevlike/embed": {
+  "temperature": 0.5,
+  "ece_before": 0.1118,
+  "ece_after": 0.0783,
+  "measured_at": "2026-09-17",
+  "n_validation": 189
+ },
+ "rules": {
+  "temperature": 0.8,
+  "ece_before": 0.1528,
+  "ece_after": 0.1694,
+  "measured_at": "2026-09-17",
+  "n_validation": 189
+ },
+ "jevlike/tfidf": {
+  "temperature": 0.5,
+  "ece_before": 0.134,
+  "ece_after": 0.1038,
+  "measured_at": "2026-09-17",
+  "n_validation": 189
+ },
+ "local_llm": {
+  "temperature": 0.5,
+  "ece_before": 0.0227,
+  "ece_after": 0.0227,
+  "measured_at": "2026-09-17",
+  "n_validation": 189
+ }
+}

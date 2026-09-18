@@ -1,0 +1,6 @@
+# Alles als Text mit LF im Arbeitsverzeichnis: Skripte und systemd-Units gehen per deploy.py auf einen Linux-CT,
+# CRLF (globales core.autocrlf) wuerde render-env.sh und die Units brechen. Binaerdateien ausgenommen.
+* text=auto eol=lf
+*.png binary
+*.exe binary
+*.ps1 text eol=crlf

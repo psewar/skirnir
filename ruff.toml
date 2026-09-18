@@ -1,0 +1,7 @@
+# Lint fuer den Router (2026-09-16): nur echte Fehler und die zwei Bugbear-Regeln, die im Refactoring aufgefallen sind.
+#   python -m ruff check router/ollama_router
+line-length = 150
+target-version = "py311"   # Debian 12 auf dem CT
+
+[lint]
+select = ["F", "E9", "B904", "B905"]

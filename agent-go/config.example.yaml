@@ -1,0 +1,99 @@
+# ollama-router-agent - Beispielkonfiguration fuer einen neuen GPU-Rechner
+# =====================================================================
+# Der Agent meldet den Rechner beim Ollama-Router an. Er braucht KEINEN Token, keine Firewall-Regel,
+# kein Zertifikat und keine IP/MAC von Hand: beim ersten Start erzeugt er ein Schluesselpaar, meldet
+# Hostname, GPU, VRAM und MAC selbst und wartet, bis der Knoten in der Router-UI freigegeben ist.
+# Nach der Freigabe schickt der Router den MQTT-Zugang fuer das HA-Geraet durch den Tunnel.
+#
+# Voraussetzungen auf dem Rechner
+#   - NVIDIA-Treiber (nvidia-smi funktioniert), Ollama installiert und gestartet (darf auf localhost bleiben),
+#     gewuenschte Modelle einmal gepullt (der Router routet nur Rollen, deren Modelle der Knoten hat)
+#   - Netzwerkzugang zu https://router.example.net:11435
+#
+# ---------------------------------------------------------------------
+# WINDOWS
+#   1. Ordner anlegen, z. B. C:\ollama-router-agent\  mit  dist\ollama-router-agent.exe  und  Install-Service.ps1
+#      (beides aus <repo>\agent-go\)
+#   2. Diese Datei anpassen und speichern als  C:\ProgramData\ollama-router-agent\config.yaml
+#   3. Einmal als Administrator:
+#        powershell -ExecutionPolicy Bypass -File "C:\ollama-router-agent\Install-Service.ps1"
+#      -> Dienst "OllamaRouterAgent" (Autostart vor dem Login, Neustart bei Absturz), Schluessel unter
+#         C:\ProgramData\ollama-router-agent\identity\ (DPAPI-geschuetzt), Logs unter ...\logs\
+#   4. Router-UI https://router.example.net:11435  -> "Registrierte Agenten" -> freigeben
+#      (dabei WOL erlauben ja/nein, Gewicht, MQTT-Geraet in HA). HA kann neue Knoten per Benachrichtigung melden.
+#   Nuetzlich (ohne Admin): ollama-router-agent.exe status | identity | restart
+#   Update: neue Binary nach dist\, Install-Service.ps1 erneut als Administrator.
+#
+# LINUX (systemd)
+#   1. Binary:  sudo install -m 755 ollama-router-agent-linux-amd64 /usr/local/bin/ollama-router-agent
+#   2. Config:  sudo mkdir -p /etc/ollama-router-agent && sudo cp config.yaml /etc/ollama-router-agent/config.yaml
+#               (identity.dir und logging.dir unten fuer Linux setzen, siehe Kommentare)
+#   3. Unit:    sudo cp ollama-router-agent.service /etc/systemd/system/
+#               sudo systemctl daemon-reload && sudo systemctl enable --now ollama-router-agent
+#   4. Router-UI -> "Registrierte Agenten" -> freigeben
+#   Pruefen:    ollama-router-agent status --config /etc/ollama-router-agent/config.yaml ; journalctl -u ollama-router-agent -f
+#   Hinweis: Dienstinstallation per Verb (install/apply-rules) und DPAPI gibt es nur unter Windows; unter Linux liegt der
+#            Schluessel als Datei mit Modus 0600 im identity.dir.
+#
+# WAKE-ON-LAN: der Rechner muss es selbst koennen (BIOS + Netzwerkadapter "Wake on Magic Packet"); die MAC kennt der
+#              Router vom Agenten, die Erlaubnis setzt du bei der Freigabe.
+# ---------------------------------------------------------------------
+
+# node: mein-rechner            # Knotenname im Router; leer = Hostname in Kleinbuchstaben
+
+router:
+  url: https://router.example.net:11435     # einzige Pflichtangabe
+
+tunnel:
+  enabled: true
+  upstream: http://127.0.0.1:11434              # lokales Ollama
+
+# identity:
+#   dir: /var/lib/ollama-router-agent           # Linux; Windows-Standard: C:\ProgramData\ollama-router-agent\identity
+# logging:
+#   dir: /var/log/ollama-router-agent           # Linux; Windows-Standard: C:\ProgramData\ollama-router-agent\logs
+# health:
+#   listen: 127.0.0.1:10398                     # /health fuer 'status'
+
+# mqtt:                                         # kommt nach der Freigabe vom Router; lokal nur zum Ueberschreiben:
+#   enabled: false                              #   ... oder um das HA-Geraet fuer diesen Rechner abzuschalten
+#   password_secret: MQTT_PASSWORD              #   statt password: Schluesselname im Secret-Store (Block secret_store unten)
+#   alias_model: assist:latest                  #   optional: Alias-Modell, das der Knoten fuehrt -> zwei HA-Entitaeten (Basismodell, strukturfaehig)
+# secret_store:                                 # nur mit mqtt.password_secret: Universal-Auth-API (Client-ID/-Secret -> Token)
+#   domain: https://secrets.example.net
+#   project_id: 00000000-0000-0000-0000-000000000000
+#   environment: prod
+#   client_id: ...
+#   client_secret: ...
+
+# children:                                     # optionale Kindprozesse, die der Agent startet/ueberwacht (Beispiel: ein STT-Server)
+#   - name: stt
+#     cmd: 'C:\Pfad\zu\python.exe'
+#     args: ['C:\Pfad\stt_server.py', '--uri', 'tcp://0.0.0.0:10300']
+#     cwd: 'C:\Pfad'
+#     health_tcp_port: 10300
+#     startup_grace_s: 120
+#   - name: ollama                              # Ollama selbst als Dienst-Kind statt Tray-App (laeuft dann schon vor der Anmeldung)
+#     cmd: 'C:\Users\<benutzer>\AppData\Local\Programs\Ollama\ollama.exe'
+#     args: ['serve']
+#     env:                                      # Benutzer-Umgebungsvariablen gelten fuer das Dienstkonto nicht -> hier setzen
+#       - 'OLLAMA_HOST=0.0.0.0:11434'
+#       - 'OLLAMA_MODELS=C:\Users\<benutzer>\.ollama\models'         # + grant_modify; Lesen auf den Ollama-Programmordner
+#       - 'USERPROFILE=C:\ProgramData\ollama-router-agent\ollama-home' # ~/.ollama des Dienstes; + grant_modify
+#       - 'OLLAMA_NUM_PARALLEL=2'
+#     health_tcp_port: 11434
+#     startup_grace_s: 60
+#     # Achtung: die Tray-App 'ollama app.exe' dann nicht mehr autostarten lassen - sie startet sekuendlich einen eigenen Server
+
+install:                                        # nur Windows (Install-Service.ps1 / install / apply-rules)
+  service_name: OllamaRouterAgent
+  display_name: Ollama Router Agent
+  account: 'NT SERVICE\OllamaRouterAgent'       # virtuelles Dienstkonto ohne Passwort; '' = LocalSystem
+  allow_control_users:
+    - 'RECHNERNAME\benutzer'                    # darf den Dienst ohne Admin starten/stoppen (services.msc oder 'restart')
+  # grant_read: []                              # zusaetzliche Lesepfade fuer das Dienstkonto (z. B. Python fuer Kinder)
+  # grant_modify: []                            # zusaetzliche Schreibpfade (z. B. ein OpenVINO-Cache)
+  # firewall:                                   # eingehende Regeln nur fuer Kinder, die im LAN lauschen (der Tunnel braucht keine)
+  #   - name: Wyoming STT (ollama-router-agent)
+  #     port: 10300
+  #     program: 'C:\Pfad\zu\python.exe'

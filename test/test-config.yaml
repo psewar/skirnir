@@ -1,0 +1,134 @@
+router:
+  listen: 127.0.0.1:21434
+  control_listen: 127.0.0.1:21435
+  ollama_poll_s: 1
+  offline_after_misses: 2
+  heartbeat_stale_s: 5
+  heartbeat_interval_s: 2   # nur zur Provisionierung; der Test schickt Heartbeats selbst
+  agent_missing_problem_s: 8
+  expose_concrete_models: true
+  request_timeout_s: 60
+  heartbeat_token: "testtoken"
+  api_tls: true
+  limits: { max_images: 2, max_tools: 8, max_messages: 50 }   # Stufe 1: Request-Groessenlimits (413)
+  public_url: https://localhost:21435
+  control_tls:
+    cert: test-cert.pem
+    key: test-key.pem
+  control_auth:
+    users:            # Passwort "geheim" (pbkdf2, 1000 Iterationen für schnelle Tests)
+      tester: "pbkdf2:1000:00112233445566778899aabbccddeeff:31617294d94a4e6727a5f7234d028be826494544665db1a5726e938115bead1e"
+  client_auth:                # Stufe 2; Tokens: tester-token, restricted-token, limited-token (sha256 unten)
+    mode: observe
+    audit_log: audit.jsonl
+    clients:
+      tester:     { token_sha256: "92351a5d9f14769f34d89bc109610b2c3cba5f1ef03274aec3a7d1b63e363b12", roles: ["*"], models: true }
+      restricted: { token_sha256: "0f27d1cf84b10bf9181cf82dde4112ece87a7d7c13c9d565c97124921ae9ea84", roles: ["klein"], models: false }
+      limited:    { token_sha256: "bbde8d72b38e2bae5b127e234e5e66230d265a7e382c01a553c8e8642805858d", roles: ["*"], requests_per_minute: 3 }
+      batchy:     { token_sha256: "851316b236294c5de61e8586d95145351a53a4d3a65352c71fea3d911ec86b08", roles: ["*"], max_priority: batch }   # Stufe 3: Kappung
+      lokal:      { token_sha256: "1d7a80becc3a0c2c2302230a610b95b6dde73975b2399105369475b88013c542", roles: ["*"], cloud: false }   # Stufe 5: Opt-out
+  cloud:                        # Stufe 5: Fake-Anbieter auf 21010 (fake_cloud.py); Schluessel aus secrets.env (schreibt run_tests)
+    enabled: true
+    default_data_class: personal
+    max_cloud_data_class: internal
+    credential_scan: block
+    egress_allow: ["127.0.0.1"]
+    providers:
+      testcloud:  { kind: openai,    base_url: "http://127.0.0.1:21010/v1", api_key_env: CLOUD_TEST_KEY,  secrets_file: secrets.env, budget_month_chf: 1.9, warn_at_percent: 50, max_inflight: 4 }
+      testclaude: { kind: anthropic, base_url: "http://127.0.0.1:21010",    api_key_env: CLAUDE_TEST_KEY, secrets_file: secrets.env, budget_month_chf: 5.0 }
+  wol:
+    wait_up_s: 4
+    retry_interval_s: 2
+    cooldown_s: 30
+    broadcast_addresses: ["127.0.0.1"]
+
+modes:
+  busy_enter: { gpu_util_pct: 40, sustain_s: 2, or_foreign_vram_gib: 3.0, util_requires_foreign_gib: 1.0, foreign_sustain_s: 2 }
+  busy_exit: { below_for_s: 2 }
+  vram_reserve_gib: { free: 1.0, busy: 2.0 }
+  keep_alive: { free: -1, busy: 5m }
+  unload_on_busy: true
+  vram_settle_s: 8              # Nachlauf nach einem Unload, bis nvidia-smi nachgezogen hat
+  unload_on_busy_interval_s: 2   # produktiv 30; der Test darf nicht davon abhaengen, ob das Netz vorher schon zuschlug
+  warm_first: true
+  prewarm: { on_free: true, free_delay_s: 6, on_online: true, online_delay_s: 0, residency_idle_s: 3, residency_check_s: 1 }
+  fit_overhead_gib: 0.8
+  breaker: { failures: 3, window_s: 60, open_s: 2 }          # Stufe 3 (produktiv open_s 30)
+  admission: { max_inflight_default: 4, aging_s: 30, max_wait_s: 20, max_queue: 16 }
+
+models:
+  qwen3.6:35b-a3b: { weights_gib: 20.6, kv_gib_per_1k: 0.001 }
+  qwen3-coder:30b: { weights_gib: 17.3, kv_gib_per_1k: 0.096 }
+  granite4.2:8b:   { weights_gib: 4.95, kv_gib_per_1k: 0.158 }
+  gpt-oss:20b:     { weights_gib: 11.95, kv_gib_per_1k: 0.002, capabilities: { structured: false } }   # Katalog-Override (Stufe 1)
+  "testcloud:mini":   { cloud: testcloud,  capabilities: { tools: true, vision: true, structured: true },  price_chf_per_m: { input: 1000, output: 10000 } }   # Stufe 5: 0.32 CHF je Fake-Aufruf
+  "testclaude:sonnet": { cloud: testclaude, capabilities: { tools: true, vision: true, structured: false }, price_chf_per_m: { input: 3, output: 15 } }
+
+nodes:
+  # big ist NICHT statisch konfiguriert: der Fake-Agent meldet sich mit Schluessel an und wird im Test freigegeben
+  small:                     # kleine Karte (8 GB): nur granite
+    ollama: http://127.0.0.1:21002
+    vram_total_gib: 8.0
+    wol: false
+    weight: 1
+    foreign_vram_baseline_gib: 1.0
+
+roles:
+  standard:
+    exposed_as: "standard:latest"
+    tiers:
+      - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
+      - { model: granite4.2:8b,   num_ctx: 32768, busy_ok: true }
+      - { model: granite4.2:8b,   num_ctx: 16384, busy_ok: true }
+  gross:
+    exposed_as: "gross:latest"
+    tiers:
+      - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
+  strikt:                    # Override: strikt nach Rang, kein warm-zuerst
+    exposed_as: "strikt:latest"
+    latency_first: false
+    tiers:
+      - { model: qwen3-coder:30b, num_ctx: 65536 }
+      - { model: granite4.2:8b,   num_ctx: 16384, busy_ok: true }
+  assist:
+    exposed_as: "assist:latest"
+    priority: interactive      # Stufe 3/6: muss einen roles.yaml-Override (UI) ueberleben
+    tiers:
+      - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
+      - { model: granite4.2:8b,   num_ctx: 16384, busy_ok: true }
+  kanarie:                     # Stufe 6: Canary 100 % (granite statt qwen), Shadow 100 % (qwen nach der Antwort).
+    exposed_as: "kanarie:latest"   # Rang 1 bleibt qwen (gleicher Blob wie standard), sonst wuerde prewarm ein weiteres Modell
+    tiers:                          # vorladen und die VRAM-Rechnung der Busy-Tests kippen (so passiert 2026-09-10).
+      - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
+      - { model: granite4.2:8b,   num_ctx: 4096, busy_ok: true }   # damit die Rolle bei offline big (small) bedienbar bleibt
+    canary: { model: granite4.2:8b, num_ctx: 16384, percent: 100, busy_ok: true }
+    shadow: { model: qwen3.6:35b-a3b, num_ctx: 65536, percent: 100 }
+  wolke:                       # Stufe 5: lokal zuerst, Cloud als letzte Stufe (Fall 1: kein Knoten, Fall 2: Faehigkeit fehlt, Fall 3: execution cloud)
+    exposed_as: "wolke:latest"
+    tiers:
+      - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
+      - { model: "testcloud:mini", num_ctx: 128000 }
+  wolke2:                      # Stufe 5: Cloud zuerst (Anthropic), lokal als Ausweich
+    exposed_as: "wolke2:latest"
+    tiers:
+      - { model: "testclaude:sonnet", num_ctx: 200000 }
+      - { model: granite4.2:8b, num_ctx: 4096, busy_ok: true }
+  code:
+    exposed_as: "code:latest"
+    tiers:
+      - { model: qwen3-coder:30b, num_ctx: 65536 }
+      - { model: qwen3-coder:30b, num_ctx: 32768 }
+
+decision_engine:               # Auto-Rolle (2026-09-16): Kette Fake-Jevlike (Port 21020) -> Regeln, Fallback standard
+  enabled: true
+  role: auto
+  options: [standard, gross, assist, code]
+  default: standard
+  chain: [jevlike, rules]
+  context_chars: 512
+  policy: { min_top_probability: 0.5, min_margin: 0.2, max_entropy_ratio: 0.75 }
+  jevlike: { endpoint: "http://127.0.0.1:21020", model: fake-router-v1, timeout_s: 2 }
+  local_llm: { model: "standard:latest", timeout_s: 20 }
+  tfidf: { model_path: ../router/decision-tfidf.json }
+  embed: { endpoint: "http://127.0.0.1:21020", model: fake-embed, timeout_s: 2 }
+  capture: { enabled: true, path: decisions.jsonl, clients: [tester], anonymize: true, max_context_chars: 400 }

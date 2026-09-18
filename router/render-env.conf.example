@@ -1,0 +1,9 @@
+# Vorlage fuer /etc/ollama-router/render-env.conf - im Ops-Ordner als router/render-env.conf ablegen, deploy.py rollt sie aus (0600).
+# Zugang zum Secret-Store (Universal Auth, Rolle viewer): entweder die drei Variablen direkt setzen ...
+SECRET_STORE_DOMAIN=https://secrets.example.net
+SECRET_STORE_CLIENT_ID=00000000-0000-0000-0000-000000000000
+SECRET_STORE_CLIENT_SECRET=changeme
+# ... oder eine Datei nennen, die sie setzt (wird per `.` eingelesen):
+# SECRET_STORE_AUTH_FILE=/etc/ollama-router/secret-store-auth.env
+PROJECT_ID=00000000-0000-0000-0000-000000000000
+ENVIRONMENT=prod

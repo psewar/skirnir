@@ -1,0 +1,52 @@
+# Skirnir - was nicht ins Repo gehoert
+__pycache__/
+*.pyc
+
+# Laufzeit-/Testartefakte (werden von run_tests.py / dev_env.py erzeugt)
+test/*.log
+test/dev-*.yaml
+test/dev-env.out
+test/audit.jsonl
+test/nodes.json
+test/perf.json
+test/usage.json
+test/roles.yaml
+test/secrets.env
+test/*.key
+test/*.pem
+test/*.ndjson
+test/perf-*.log
+test/perf-config.yaml
+test/perf-profile.txt
+test/perf-result.json
+test/locked-config.yaml
+test/decisions.jsonl
+
+# Deploy-Ausgabe (Manifest entsteht bei jedem deploy.py-Lauf)
+router/manifest.json
+
+# alter PowerShell-Agent: Konfiguration traegt einen Token, Log ist Laufzeit
+agent/agent-config.json
+agent/agent.log
+
+# gebaute Binaries des Go-Agenten (build.sh erzeugt sie)
+agent-go/dist/
+
+# Vor-Split-Original des Routers (Referenz, nicht Quelle)
+tools/router.py.orig
+
+# Decision Engine: venv, Modelle/HF-Cache und Auswertungsartefakte (Daten und Berichte bleiben im Repo)
+decision-jevlike/.venv/
+decision-jevlike/models/
+decision-eval/eval-*.log
+decision-eval/results*/report.json
+decision-embed/models/
+
+# Standortspezifisches lebt im Ops-Ordner ausserhalb des Repos (skirnir-ops/, siehe deploy/ops_env.py) - falls es doch hier landet:
+router/config.yaml
+router/config.yaml.*
+router/roles.yaml
+router/render-env.conf
+deploy/*_backup*.json
+deploy/client_auth_baseline.json
+decision-eval/*.log

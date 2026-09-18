@@ -1,0 +1,22 @@
+# systemd-Unit fuer den ollama-router-agent auf Linux (siehe config.example.yaml, Abschnitt LINUX)
+# Installation: sudo cp ollama-router-agent.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#               && sudo systemctl enable --now ollama-router-agent
+[Unit]
+Description=Ollama Router Agent (Tunnel zum Ollama-Router, GPU-Heartbeat, HA-MQTT)
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ollama-router-agent run --config /etc/ollama-router-agent/config.yaml
+Restart=always
+RestartSec=5
+# Schluessel (0600) und Provisionierung liegen in identity.dir, Logs in logging.dir - beide Pfade in der Config setzen
+# (z. B. /var/lib/ollama-router-agent und /var/log/ollama-router-agent) und dem Dienst gehoeren lassen:
+User=root
+ProtectSystem=full
+ReadWritePaths=/var/lib/ollama-router-agent /var/log/ollama-router-agent
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,48 @@
+{
+ "total": 1282,
+ "options": [
+  "standard",
+  "gross",
+  "assist",
+  "code"
+ ],
+ "per_role": {
+  "standard": 293,
+  "gross": 378,
+  "assist": 302,
+  "code": 309
+ },
+ "groups": 127,
+ "splits": {
+  "train": {
+   "n": 961,
+   "per_role": {
+    "standard": 194,
+    "gross": 258,
+    "assist": 247,
+    "code": 262
+   },
+   "groups": 89
+  },
+  "validation": {
+   "n": 189,
+   "per_role": {
+    "standard": 62,
+    "gross": 84,
+    "assist": 22,
+    "code": 21
+   },
+   "groups": 19
+  },
+  "test": {
+   "n": 132,
+   "per_role": {
+    "standard": 37,
+    "gross": 36,
+    "assist": 33,
+    "code": 26
+   },
+   "groups": 19
+  }
+ }
+}

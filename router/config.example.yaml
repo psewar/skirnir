@@ -1,0 +1,254 @@
+# Skirnir - Beispielkonfiguration (Ziel auf dem Router-Host: /etc/ollama-router/config.yaml)
+# Die Produktivkonfiguration liegt AUSSERHALB des Repos (Ops-Ordner, siehe deploy/ops_env.py); deploy.py rollt sie aus.
+# Algorithmus: design/routing-algorithm.md
+
+router:
+  listen: 0.0.0.0:11434
+  control_listen: 0.0.0.0:11435
+  public_url: https://router.example.net:11435
+  control_tls:                   # Zertifikat fuer public_url (z. B. Let's Encrypt); Renewal -> ollama-router-cert.path startet den Dienst neu
+    cert: /etc/ollama-router/certs/fullchain.pem
+    key: /etc/ollama-router/certs/privkey.pem
+  ollama_poll_s: 5                # Takt fuer /api/tags + /api/ps (welche Modelle geladen sind)
+  heartbeat_interval_s: 2         # Takt, in dem Agenten GPU-Auslastung und VRAM melden; wird an die Agenten
+                                  # provisioniert und gilt bei deren naechster Verbindung (also nach dem Deploy)
+  offline_after_misses: 3
+  heartbeat_stale_s: 10
+  agent_missing_problem_s: 300  # Agent hat schon gemeldet und schweigt seit 5 min -> HA-Problem (Alarm-Automation)
+  expose_concrete_models: true   # konkrete Modellnamen werden 1:1 geroutet (404 wenn kein Knoten sie hat); Rollen = nach Zweck
+  request_timeout_s: 600
+  limits:                        # Stufe 1: grobe Request-Groessenlimits, 413 vor dem Backend (Body-Limit bleibt 64 MiB)
+    max_images: 16
+    max_tools: 128
+    max_messages: 1000
+  session_affinity_ttl_s: 1800   # Stufe 1: routing.session_id haelt eine Sitzung so lange auf ihrem warmen Knoten
+  cloud:                         # Stufe 5: Cloud-Anbieter sind MODELLE im Katalog (cloud: <anbieter>)
+    enabled: true                #   und werden als Stufe in genau die Rollen gelegt, die es duerfen. Kein Opt-in pro Client;
+    default_data_class: personal #   ein Client nimmt sich aus per routing.execution: local oder clients.<c>.cloud: false.
+    max_cloud_data_class: internal   # Datenklasse ist eine DEKLARATION (routing.data_class, sonst clients.<c>.data_class, sonst
+                                 #   default). Cloud nur bis einschliesslich dieser Klasse: mit den Vorgaben also nur, wenn der
+                                 #   Client 'internal' oder 'public' deklariert (siehe README).
+    credential_scan: block       # Prompts mit erkennbaren Schluesseln/Passwoertern gehen nie in die Cloud
+    providers:
+      openai:                    # Schluessel als OPENAI_API_KEY in secrets.env
+        kind: openai
+        base_url: https://api.openai.com/v1
+        api_key_env: OPENAI_API_KEY
+        secrets_file: /etc/ollama-router/secrets.env
+        budget_month_chf: 10     # erschoepft = Anbieter faellt als Stufe weg; Warnung als HA-Problem ab warn_at_percent
+        warn_at_percent: 80
+        region: us               # OpenAI ohne EU-Datenresidenz in diesem Tarif
+        timeout_s: 120
+      anthropic:                 # enabled: false, bis ein Schluessel vorliegt (API-Konto mit Guthaben,
+        kind: anthropic          #   Schluessel als ANTHROPIC_API_KEY in secrets.env)
+        enabled: false
+        base_url: https://api.anthropic.com
+        api_key_env: ANTHROPIC_API_KEY
+        secrets_file: /etc/ollama-router/secrets.env
+        budget_month_chf: 10
+        warn_at_percent: 80
+        region: us
+  control_auth:                  # Basic Auth fuer UI + /admin/*; Klartext im Secret-Store
+    users:
+      admin: "pbkdf2:200000:5c942b7d89c730d5ab088b5196767550:39f5b53d41e18fe3e854f4487f84150b96cbf928b797eba07b965980840a04b0"   # Passwort "changeme" - ersetzen: python3 router.py --hash '<passwort>'
+      deploy: "pbkdf2:200000:5c942b7d89c730d5ab088b5196767550:39f5b53d41e18fe3e854f4487f84150b96cbf928b797eba07b965980840a04b0"   # Passwort "changeme" - ersetzen: python3 router.py --hash '<passwort>'
+  client_auth:                   # Stufe 2 (design/roadmap.md): wer darf den API-Port 11434 rufen.
+    locked: true                 # Modus nur per config.yaml + Deploy aenderbar (UI/POST /admin/client_auth -> 403)
+    mode: enforce                # observe = alles bedienen, Unbekannte zaehlen (UI/State) und ins Audit-Log;
+                                 # enforce = 401 ohne gueltige Identitaet. Umschalten zur Laufzeit: POST /admin/client_auth.
+    audit_log: /var/log/ollama-router/audit.jsonl
+    clients:
+      home-assistant:            # HA-Ollama-Integration: API-Key im Eintrag -> "Authorization: Bearer <token>"
+        token_sha256: "057ba03d6c44104863dc7361fe4578965d1887360f90a0895882e58a6248fc86"         # sha256 des Client-Tokens (hier: von "changeme" - ersetzen)
+        roles: ["*"]             #   sha256 des Tokens
+        models: true
+        requests_per_minute: 120
+      node-red:                  # zwei Wege: llm-config (/v1) hat ein apiKey-Credential -> Bearer;
+        token_sha256: "057ba03d6c44104863dc7361fe4578965d1887360f90a0895882e58a6248fc86"         #   node-red-contrib-ollama sendet seinen API-Key NUR mit useCloud (= ollama.com),
+        ip: ["192.0.2.20"]      #   kann fuer unseren Host also keinen Header -> Quell-IP nodered-host (TLS, LAN).
+        roles: ["*"]             #   Klartext im Secret-Store
+        models: true
+        requests_per_minute: 120
+      agent-cli:                 # Beispiel fuer einen Client, dessen Sonden (/api/tags, /v1/models) keinen Header senden:
+        ip: ["192.0.2.30"]       #   Quell-IP als Identitaet; ein gueltiger Token hat Vorrang (auth.py prueft ihn zuerst).
+        token_sha256: "057ba03d6c44104863dc7361fe4578965d1887360f90a0895882e58a6248fc86"         #   API-Key im Modell-Block -> "Authorization: Bearer <token>".
+        roles: ["*"]             #   Klartext im Secret-Store
+        models: true
+        requests_per_minute: 60  #   Einzelplatz-Werkzeug, braucht keine 120
+      agent-gateway:             # Beispiel Agenten-Framework: nativer Pfad (/api/chat), NICHT /v1 -
+        token_sha256: "057ba03d6c44104863dc7361fe4578965d1887360f90a0895882e58a6248fc86"         #   manche Frameworks brechen ueber /v1 ihr Tool-Calling.
+        roles: ["*"]             #   apiKey am ollama-Provider -> "Authorization: Bearer <token>".
+        models: true             #   Klartext im Secret-Store
+        requests_per_minute: 60  #   Einzelplatz-Werkzeug wie agent-cli.
+  api_tls: true                  # 11434 mit demselben LE-Zertifikat wie 11435 (HA/Node-RED: https://router.example.net:11434)
+  openai:                        # OpenAI-kompatibel: /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings
+    enabled: true                # (Node-RED node-red-contrib-mcp: Base-URL https://router.example.net:11434/v1, Modell = Rolle)
+    default_think: false         # OpenAI-Clients kennen kein think: false = kein unsichtbares Nachdenken (wie HA-AI-Tasks); null = Ollama-Default
+  wol:
+    wait_up_s: 90
+    retry_interval_s: 20
+    cooldown_s: 300
+    broadcast_addresses: ["255.255.255.255", "192.0.2.255"]
+
+# Home Assistant: Router als Geraet "Ollama Router" per MQTT-Discovery (MQTT-Broker auf ha-host).
+# Passwort kommt aus /etc/ollama-router/secrets.env (MQTT_PASSWORD, von Hand oder per render-env.sh).
+mqtt:
+  host: ha.example.net   # per Name, TLS-Zertifikat (LE) lautet darauf
+  port: 8883
+  tls: true
+  username: skirnir
+  password_env: MQTT_PASSWORD
+  password_file: /etc/ollama-router/secrets.env   # roh gelesen; EnvironmentFile-Parsing von systemd veraendert Sonderzeichen
+  base_topic: ollama-router
+  discovery_prefix: homeassistant
+  interval_s: 10
+
+modes:
+  busy_enter:
+    gpu_util_pct: 40
+    sustain_s: 10
+    util_requires_foreign_gib: 1.0   # Auslastung zählt nur, wenn zusätzlich >= 1 GiB fremdes VRAM belegt ist
+    or_foreign_vram_gib: 6.0         # ODER allein: fremdes VRAM (über foreign_vram_baseline_gib des Knotens hinaus) ...
+                                     # nicht zu knapp waehlen: ein Desktop mit mehreren Monitoren braucht schon einige GiB,
+                                     # und die gelernte Baseline kann darunter liegen. Ein Spiel belegt deutlich mehr;
+                                     # sparsamere GPU-Last faengt der Auslastungspfad oben ab.
+    foreign_sustain_s: 15            # ... wenn es so lange anhält (Modellwechsel erzeugt kurze Fehlmessungen)
+  busy_exit:
+    below_for_s: 15               # so lange muss Ruhe herrschen, bis der Knoten wieder free ist.
+                                  # Das ist die eigentliche Wartezeit nach dem Spielen - NICHT die Abtastrate
+                                  # (ausgewertet wird bei jedem Heartbeat). Kuerzer = schneller wieder nutzbar,
+                                  # aber ein Spiel in einem Ladebildschirm gilt frueher als beendet und der
+                                  # prewarm (free_delay_s) legt wieder ein Modell ins VRAM.
+  vram_reserve_gib:
+    free: 1.0
+    busy: 2.0
+  keep_alive:
+    free: -1
+    busy: 5m
+  unload_on_busy: true
+  vram_settle_s: 8                # Nachlauf nach einem Unload: /api/ps meldet sofort 0, nvidia-smi zieht erst
+                                  # nach - ohne das erscheint der freiwerdende Speicher als 'fremdes VRAM'
+  fit_overhead_gib: 0.8
+  # "warm zuerst": Rangliste = Reihenfolge fuer Kaltstarts und Qualitaetsobergrenze; ist ein Modell der Liste
+  # irgendwo schon geladen, gewinnt es (unter mehreren warmen das ranghoechste). Pro Rolle per latency_first ueberschreibbar.
+  warm_first: true
+  # Rang-1-Modelle vorladen, wenn ein Knoten (wieder) frei wird, sonst bleibt die Liste nach dem Spielen beim Kleinmodell haengen
+  prewarm:
+    on_free: true
+    free_delay_s: 20        # erst nach der Exit-Hysterese + Puffer, damit ein kurz pausiertes Spiel nicht sofort das VRAM zurueckbekommt
+    on_online: true
+    online_delay_s: 0
+    residency_idle_s: 300   # Rang-1 wieder vorwaermen, wenn ein konkret angefordertes Fremdmodell es verdraengt hat und
+    residency_check_s: 60   #   seit 5 min ungenutzt ist - sonst bleibt "warm zuerst" dauerhaft auf der Ausweichstufe
+                            #   (sonst laeuft alles auf der Ausweichstufe des zweiten Knotens weiter). 0 = aus.
+  # Stufe 3 Scheduler (design/roadmap.md). Score je Kandidat einer Stufe: warm +100, je laufende Anfrage -10, voller Knoten
+  # -50, freies VRAM (Anteil) x2, Gewicht x1, gemessenes Tempo (EWMA tok/s / 100) x2, juengste Fehlerrate x20, Breaker-Probe -5.
+  # Die Vorgaben bilden die alte Reihenfolge ab (warm > wenig Last > freies VRAM > Gewicht); nur abweichende Gewichte eintragen.
+  score: {}
+  breaker:                  # Circuit Breaker je Knoten: nach `failures` Backend-Fehlern (Verbindung, 5xx vor dem ersten Byte)
+    failures: 3             #   binnen window_s ist der Knoten open_s lang kein Kandidat; danach eine Probe (half_open),
+    window_s: 60            #   Erfolg = closed, Fehler = wieder open. Ein Neustart des Knotens (offline -> online) setzt zurueck.
+    open_s: 30
+  admission:                # Admission Control: hoechstens max_inflight Anfragen je Knoten (Policy im Register, sonst Default);
+    max_inflight_default: 2 #   weitere warten IM ROUTER mit Prioritaet (routing.priority bzw. roles.<r>.priority: interactive <
+    aging_s: 30             #   normal < batch, Client-Kappung ueber client_auth.clients.<c>.max_priority). Alterung: je aging_s
+    max_wait_s: 120         #   Wartezeit eine Klasse aufwaerts, damit batch nicht verhungert. Laenger als max_wait_s (oder
+    max_queue: 64           #   routing.deadline_ms) -> 503 mit Klartext. max_inflight sollte OLLAMA_NUM_PARALLEL des Knotens
+                            #   entsprechen, sonst wartet der Rest doch wieder ohne Prioritaet in Ollamas eigener Schlange.
+
+# Beispielwerte, gemessen auf einer RTX 5090 (KV f16, flash attention): /api/ps size_vram in GiB
+# bei num_ctx 8192 und 32768; kv_gib_per_1k = Differenz / 24.
+models:
+  qwen3.6:35b-a3b:      # 20.59 @8k, 20.59 @32k, 20.61 @64k -> hybride Attention, KV vernachlässigbar
+    weights_gib: 20.6
+    kv_gib_per_1k: 0.001
+  qwen3-coder:30b:      # 18.04 @8k, 20.34 @32k
+    weights_gib: 17.3
+    kv_gib_per_1k: 0.096
+  gpt-oss:20b:          # 11.97 @8k, 12.02 @32k (Sliding Window)
+    weights_gib: 11.95
+    kv_gib_per_1k: 0.002
+    capabilities: { structured: false }   # antwortet auf format-Schema mit HTTP 500 (HA-AI-Task 'structure'); Router lehnt vorher mit 400 ab
+  granite4.2:8b:        # 6.22 @8k, 10.02 @32k -> wächst deutlich
+    weights_gib: 4.95
+    kv_gib_per_1k: 0.158
+  # Stufe 5: Cloud-Modelle (kein VRAM, Preise in CHF je 1 Mio. Tokens fuer Budget/Usage; Listenpreise USD ~ CHF, Stand 2026-09).
+  # Nur ueber Rollen erreichbar, nicht als konkreter Modellname.
+  "openai:gpt-5-mini":
+    cloud: openai
+    capabilities: { tools: true, vision: true, structured: true, thinking: false }
+    reasoning: true          # think: false -> reasoning_effort minimal (sonst ~130 Denk-Token fuer ein 'OK')
+    price_chf_per_m: { input: 0.25, output: 2.0 }
+    context_tokens: 400000
+  "openai:gpt-5":
+    cloud: openai
+    capabilities: { tools: true, vision: true, structured: true, thinking: false }
+    reasoning: true          # think: false -> reasoning_effort minimal (sonst ~130 Denk-Token fuer ein 'OK')
+    price_chf_per_m: { input: 1.25, output: 10.0 }
+    context_tokens: 400000
+  "anthropic:claude-sonnet-4-5":
+    cloud: anthropic
+    provider_model: claude-sonnet-4-5
+    capabilities: { tools: true, vision: true, structured: false, thinking: false }
+    price_chf_per_m: { input: 3.0, output: 15.0 }
+    context_tokens: 200000
+
+nodes: {}   # Knoten kommen ueber die Registrierung (Agent-Schluessel, Freigabe in der UI -> /etc/ollama-router/nodes.json).
+            # Hier nur noch Knoten OHNE Agent (ollama: http://... URL) oder Policy-Vorgaben fuer einen Namen.
+# Rollen = stabile Modellnamen für HA. busy_ok = darf auf einem Knoten im Spielmodus laufen.
+# granite4.2:8b statt gpt-oss:20b als Kleinmodell: kann HA-"structure" (gpt-oss antwortet darauf HTTP 500) und ist kleiner.
+roles:
+  standard:
+    exposed_as: "standard:latest"
+    tiers:
+      - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
+      - { model: qwen3.6:35b-a3b, num_ctx: 32768 }
+      - { model: granite4.2:8b,   num_ctx: 32768, busy_ok: true }
+      - { model: granite4.2:8b,   num_ctx: 16384, busy_ok: true }
+  gross:
+    exposed_as: "gross:latest"
+    tiers:
+      - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
+      - { model: qwen3.6:35b-a3b, num_ctx: 32768 }
+  assist:
+    exposed_as: "assist:latest"
+    priority: interactive   # Sprachassistent: wird beim Warten auf einen Platz vor normal/batch zugelassen (Stufe 3)
+    tiers:
+      - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
+      - { model: qwen3.6:35b-a3b, num_ctx: 32768 }
+      - { model: granite4.2:8b,   num_ctx: 32768, busy_ok: true }
+      - { model: granite4.2:8b,   num_ctx: 16384, busy_ok: true }
+  code:
+    exposed_as: "code:latest"
+    tiers:
+      - { model: qwen3-coder:30b, num_ctx: 65536 }
+      - { model: qwen3-coder:30b, num_ctx: 32768 }
+      - { model: granite4.2:8b,   num_ctx: 32768, busy_ok: true }
+  # HINWEIS: Aenderungen aus der UI landen in /etc/ollama-router/roles.yaml und ueberlagern diese Basis
+  # (z. B. eine Cloud-Stufe am Ende von gross). Hier steht nur die Basis fuer einen Neuaufbau.
+  cloud:                         # Stufe 5: ausdrueckliche Cloud-Rolle (Fall 3: zu komplex fuer lokal); lokal nur als Ausweich
+    exposed_as: "cloud:latest"
+    priority: normal
+    tiers:
+      - { model: "openai:gpt-5-mini", num_ctx: 128000 }
+      - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
+
+decision_engine:                 # Decision Engine (design/decision-engine.md): Auto-Rolle auto:latest.
+  enabled: true                  #   Ohne tfidf-Modell und embed-Container: enabled: false oder chain: [local_llm, rules].
+  role: auto
+  options: [standard, gross, assist, code]
+  default: standard
+  chain: [embed, local_llm, tfidf, rules]   # embed (CPU, 10-19 ms, 93 %) zuerst, LLM bei Unsicherheit (~6 %), tfidf/rules wenn der GPU-Knoten fehlt
+  context_chars: 512
+  policy: { min_top_probability: 0.5, min_margin: 0.2, max_entropy_ratio: 0.75 }
+  tfidf: { model_path: /etc/ollama-router/decision-tfidf.json }   # Stufe 1 (decision-eval/train_tfidf.py), rein Python, <1 ms; Datei per deploy.py
+  embed: { endpoint: http://127.0.0.1:8082, model: skirnir-embed-e5-small-v1, timeout_s: 2 }   # Stufe 2 (decision-embed/), Container auf dem Router-Host
+  local_llm:                     # erste Stufe der Kette; Rollenbeschreibungen sind Pflicht (s. u.)
+    model: "assist:latest"
+    timeout_s: 20
+    descriptions:                # ohne Beschreibung waehlte qwen3.6 fuer "Licht an" standard - die Namen allein sagen ihm nichts
+      standard: "kurze Alltagsfragen, Zusammenfassungen, Uebersetzungen, kleine Texte"
+      gross: "lange, tiefe Analysen, Konzepte, Gutachten, mehrstufige Planung"
+      assist: "Smart-Home-Sprachbefehle und Hausfragen: Licht, Heizung, Timer, Einkaufsliste, Wetter"
+      code: "Programmieren: Code schreiben, Fehler suchen, Skripte, SQL, YAML-Automationen"
+  capture: { enabled: false, path: /var/lib/ollama-router/decisions.jsonl, clients: [], anonymize: true, max_context_chars: 2000 }   # Trainingsdaten nur fuer Clients im Opt-in, anonymisiert

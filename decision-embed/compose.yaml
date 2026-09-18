@@ -1,0 +1,19 @@
+# Embedding-Entscheidungsdienst (Stufe 2) neben dem Router auf router-host. Nur lokal erreichbar:
+#   decision_engine.embed.endpoint: http://127.0.0.1:8082
+# /opt/skirnir-embed/models/e5-small/: model_quantized.onnx, tokenizer.json, config.json, export.json, head.json
+services:
+  embed:
+    image: skirnir-embed
+    build: .
+    container_name: skirnir-embed
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8082:8082"
+    volumes:
+      - /opt/skirnir-embed/models:/models:ro
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

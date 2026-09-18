@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skirnir</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<style>
+  :root { --bg:#0f1419; --card:#161c24; --line:#273241; --fg:#e6edf3; --muted:#8b98a8; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --acc:#58a6ff; --cloud:#c084fc; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, Segoe UI, sans-serif; }
+  header { padding:12px 22px; border-bottom:1px solid var(--line); display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:22px; } header .muted { color:var(--muted); }
+  main { padding:18px 22px; display:grid; gap:18px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  section h2 { margin:0 0 10px; font-size:15px; }
+  .wide { grid-column: 1 / -1; }
+  table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+  .badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; border:1px solid var(--line); color:var(--muted); margin:1px 2px 1px 0; }
+  .badge.cap { color:var(--fg); } .badge.cloud { color:var(--cloud); border-color:var(--cloud); }
+  .badge.open { color:var(--bad); border-color:var(--bad); } .badge.half_open { color:var(--warn); border-color:var(--warn); }
+  .state { font-weight:700; } .state.free { color:var(--ok); } .state.busy { color:var(--warn); } .state.offline { color:var(--bad); }
+  .loaded { color:var(--ok); } .cloudc { color:var(--cloud); }
+  .role { border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-bottom:10px; }
+  .role h3 { margin:0 0 6px; font-size:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .role h3 code { color:var(--acc); }
+  .tier { display:grid; grid-template-columns: 28px 1fr 110px 90px 90px; gap:6px; align-items:center; margin:3px 0; }
+  .exp { display:grid; grid-template-columns: 90px 1fr 110px 80px; gap:6px; align-items:center; margin:4px 0; font-size:12px; }
+  select, input[type=number], input[type=text], textarea { background:#0b0f14; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:4px 6px; font:inherit; }
+  input[type=number] { width:100%; } select { width:100%; }
+  button { background:#1f2a37; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:4px 10px; cursor:pointer; font:inherit; }
+  button:hover { border-color:var(--acc); } button.primary { background:#1f6feb; border-color:#1f6feb; } button.small { padding:1px 6px; font-size:12px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
+  .muted { color:var(--muted); } .warn { color:var(--warn); } .bad { color:var(--bad); } .ok { color:var(--ok); }
+  pre { background:#0b0f14; border:1px solid var(--line); border-radius:4px; padding:8px; white-space:pre-wrap; max-height:260px; overflow:auto; font-size:12px; }
+  .decisions div { font-family: ui-monospace, Consolas, monospace; font-size:12px; padding:2px 0; border-bottom:1px dashed var(--line); }
+  #msg { min-height:18px; }
+  .tiles { display:grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap:12px; }
+  .tile { border:1px solid var(--line); border-radius:6px; padding:10px 12px; } .tile h4 { margin:0 0 6px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+  .big { font-size:20px; font-weight:700; }
+  .bar { height:6px; background:#0b0f14; border:1px solid var(--line); border-radius:3px; overflow:hidden; margin-top:4px; } .bar i { display:block; height:100%; background:var(--acc); }
+  .bar.warn i { background:var(--warn); } .bar.bad i { background:var(--bad); }
+  header img { height:60px; width:auto; align-self:center; margin:-4px 0 -4px 0; border-radius:14px; }   /* Kachel-Logo (Skirnir, 2026-09-16): eigener dunkler Grund, keine helle Kachel mehr noetig */
+  nav.tabs { display:flex; gap:4px; padding:8px 22px 0; border-bottom:1px solid var(--line); background:var(--card); }
+  nav.tabs button { background:transparent; border:1px solid transparent; border-bottom:none; border-radius:6px 6px 0 0; padding:7px 14px; color:var(--muted); font-size:14px; }
+  nav.tabs button:hover { color:var(--fg); border-color:transparent; } nav.tabs button.active { color:var(--fg); background:var(--bg); border-color:var(--line); margin-bottom:-1px; padding-bottom:8px; }
+  nav.tabs button .dot { color:var(--warn); margin-left:4px; }
+  main section[data-tab] { display:none; } main[data-active="uebersicht"] section[data-tab="uebersicht"], main[data-active="rollen"] section[data-tab="rollen"],
+  main[data-active="katalog"] section[data-tab="katalog"], main[data-active="einstellungen"] section[data-tab="einstellungen"],
+  main[data-active="clients"] section[data-tab="clients"] { display:block; }
+  .settings { display:grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap:12px; }
+  .srow { display:grid; grid-template-columns: 1fr 150px 26px; gap:6px; align-items:center; padding:3px 0; border-bottom:1px dashed var(--line); font-size:13px; }
+  .srow:last-child { border-bottom:none; } .srow .lbl { color:var(--fg); } .srow .base { color:var(--muted); font-size:11px; }
+  .srow.over .lbl { color:var(--acc); } .srow input[type=text] { width:100%; }
+  .srow .chk { display:flex; flex-wrap:wrap; gap:6px; font-size:12px; } .srow .chk label { white-space:nowrap; }
+  .sub { margin:8px 0 2px; font-size:12px; color:var(--cloud); font-weight:600; }
+  .charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:12px; margin-top:12px; }
+  canvas.spark { width:100%; height:46px; display:block; margin-top:4px; } canvas.chart { width:100%; height:190px; display:block; }
+  .legend span { margin-right:12px; font-size:12px; } .legend b { color:var(--fg); }
+  .client { border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+  .client h3 { margin:0 0 6px; font-size:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .client .srow { grid-template-columns: 1fr 190px 26px; }
+  .tok { background:#0b0f14; border:1px solid var(--warn); border-radius:4px; padding:8px; margin:6px 0; font-size:12px; }
+  .tok code { font-family: ui-monospace, Consolas, monospace; word-break: break-all; color:var(--fg); font-size:13px; }
+  .newclient { display:grid; grid-template-columns: 1.2fr 1.4fr 1fr auto; gap:6px; align-items:center; margin-bottom:12px; }
+  .newmodel { display:grid; grid-template-columns: 1.4fr 1fr 1fr 80px 80px 90px auto; gap:6px; align-items:center; margin-top:8px; font-size:12px; }
+  .inl { width:70px !important; padding:2px 4px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="/skirnir.png" alt="Skirnir">
+  <h1>Skirnir</h1>
+  <span class="muted" id="hdr">…</span>
+  <span class="muted" style="margin-left:auto">HA spricht <code>https://router.example.net:11434</code> · Rollen erscheinen dort als <code>&lt;rolle&gt;:latest</code></span>
+</header>
+<nav class="tabs" id="tabs">
+  <button data-tab="uebersicht" onclick="showTab('uebersicht')">Übersicht</button>
+  <button data-tab="rollen" onclick="showTab('rollen')">Rollen<span class="dot" hidden>●</span></button>
+  <button data-tab="clients" onclick="showTab('clients')">Clients<span class="dot" hidden>●</span></button>
+  <button data-tab="katalog" onclick="showTab('katalog')">Modellkatalog<span class="dot" hidden>●</span></button>
+  <button data-tab="einstellungen" onclick="showTab('einstellungen')">Einstellungen<span class="dot" hidden>●</span></button>
+</nav>
+<main id="main" data-active="uebersicht">
+  <section class="wide" data-tab="uebersicht">
+    <h2>Live <span class="muted" style="font-weight:normal">– aus <code>/metrics</code> alle 3 s; Verläufe der letzten 10 Minuten entstehen im Browser, „seit Start“ = seit dem letzten Router-Neustart, Tage aus usage.json</span></h2>
+    <div class="tiles" id="live">
+      <div class="tile"><h4>Anfragen / min</h4><div class="big" id="lv-rpm">–</div><canvas class="spark" id="sp-rpm"></canvas></div>
+      <div class="tile"><h4>Antwort-Tokens / s</h4><div class="big" id="lv-tps">–</div><canvas class="spark" id="sp-tps"></canvas></div>
+      <div class="tile"><h4>GPU-Auslastung %</h4><div class="legend" id="lv-gpu">–</div><canvas class="spark" id="sp-gpu"></canvas></div>
+      <div class="tile"><h4>VRAM frei GiB</h4><div class="legend" id="lv-vram">–</div><canvas class="spark" id="sp-vram"></canvas></div>
+      <div class="tile"><h4>Laufend · wartend</h4><div class="big" id="lv-inflight">–</div><canvas class="spark" id="sp-inflight"></canvas></div>
+    </div>
+    <div class="charts">
+      <div class="tile"><h4>Anfragen je Tag <span class="muted">– 30 Tage, Fehler rot, Linie = Tokens (k)</span></h4><canvas class="chart" id="ch-days"></canvas></div>
+      <div class="tile"><h4>Antwortzeiten seit Start <span class="muted">– Sekunden je Anfrage</span></h4><canvas class="chart" id="ch-dur"></canvas></div>
+      <div class="tile"><h4>Anfragen seit Start nach Knoten</h4><canvas class="chart" id="ch-node"></canvas></div>
+      <div class="tile"><h4>… nach Rolle</h4><canvas class="chart" id="ch-role"></canvas></div>
+      <div class="tile"><h4>… nach Client</h4><canvas class="chart" id="ch-client"></canvas></div>
+      <div class="tile"><h4>Tempo je Modell <span class="muted">– EWMA tok/s, Modell @ Knoten</span></h4><canvas class="chart" id="ch-tps"></canvas></div>
+      <div class="tile" style="grid-column:1 / -1"><h4>Effektiv genutzte Modelle <span class="muted">– Anfragen/min je konkretem Modell, letzte 10 Minuten, gestapelt; Legende = Anteil im 30-s-Fenster</span></h4><div class="legend" id="lv-models">–</div><canvas class="chart" id="ch-models"></canvas></div>
+      <div class="tile"><h4>Anfragen seit Start nach Modell</h4><canvas class="chart" id="ch-model-share"></canvas></div>
+      <div class="tile"><h4>Antwort-Tokens seit Start nach Modell</h4><canvas class="chart" id="ch-model-tokens"></canvas></div>
+    </div>
+  </section>
+
+  <section class="wide" data-tab="uebersicht">
+    <h2>Knoten</h2>
+    <table id="nodes"><thead><tr><th>Knoten</th><th>Zustand</th><th>GPU</th><th>VRAM frei / fremd</th><th title="laufende Anfragen / Admission-Grenze · wartende">Last</th><th>Geladen</th><th>Modelle (grün = geladen)</th></tr></thead><tbody></tbody></table>
+    <h2 style="margin-top:14px">Cloud-Anbieter <span class="muted" style="font-weight:normal">– Modelle im Katalog (<span class="cloudc">☁</span>), Stufe nur in Rollen, die es erlauben; Datenklasse, Credential-Scan und Budget begrenzen (README „Cloud")</span></h2>
+    <table id="cloud"><thead><tr><th>Anbieter</th><th>Status</th><th>Modelle</th><th>Ausgaben Monat / Budget</th><th>Breaker</th><th>Region · Datenklasse max.</th></tr></thead><tbody></tbody></table>
+    <h2 style="margin-top:14px">Registrierte Agenten <span class="muted" style="font-weight:normal">– jeder Agent meldet sich mit seinem Schlüssel; neue warten hier auf Freigabe. Fakten (GPU, VRAM, MAC) kommen vom Agenten, Policy (WOL, Gewicht, MQTT, gleichzeitige Anfragen) setzt du hier</span></h2>
+    <table id="registry"><thead><tr><th>Knoten</th><th>Status</th><th>Rechner</th><th>GPU / VRAM</th><th>MAC (WOL)</th><th title="Desktop-Grundverbrauch ohne Ollama: gelernter Median; Policy-Wert überschreibt">Baseline</th><th>Policy</th><th></th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section data-tab="rollen">
+    <h2>Rollen <span class="muted" style="font-weight:normal">– Rangliste für Kaltstarts und Qualitätsobergrenze; ein geladenes Modell der Liste gewinnt (<em>warm zuerst</em>), Rang-1 wird nach einer Spielphase wieder vorgeladen; <em>busy_ok</em> darf auf einem Spiel-Rechner laufen; <span class="cloudc">☁</span> = Cloud-Stufe</span></h2>
+    <div id="roles"></div>
+    <div class="row">
+      <input type="text" id="newRole" placeholder="neue Rolle, z. B. vision" style="width:200px">
+      <button onclick="addRole()">+ Rolle</button>
+      <label style="margin-left:auto"><input type="checkbox" id="exposeConcrete"> konkrete Modellnamen auch in HA anbieten</label>
+    </div>
+    <div class="row">
+      <button class="primary" onclick="save()">Speichern &amp; live schalten</button>
+      <span id="msg"></span>
+    </div>
+  </section>
+
+  <section data-tab="rollen">
+    <h2>Ausprobieren</h2>
+    <div class="row">
+      <select id="tryModel" style="width:220px"></select>
+      <input type="number" id="tryCtx" placeholder="num_ctx (optional)" style="width:140px">
+      <select id="tryExec" style="width:150px" title="routing.execution: auto = Rollenreihenfolge, local = nie Cloud, cloud = Cloud-Stufen zuerst"><option value="">execution: auto</option><option value="local">execution: local</option><option value="cloud">execution: cloud</option></select>
+      <select id="tryClass" style="width:170px" title="routing.data_class: Deklaration; Cloud nur bis zur konfigurierten Grenze"></select>
+      <select id="tryPrio" style="width:150px" title="routing.priority"><option value="">Priorität: Rolle</option><option value="interactive">interactive</option><option value="normal">normal</option><option value="batch">batch</option></select>
+      <label class="muted" title="thinking-Modelle (glm, qwen3.6, gpt-oss, granite) erzeugen sonst hunderte unsichtbare Denk-Token vor der Antwort"><input type="checkbox" id="tryThink"> Nachdenken (think)</label>
+      <button class="primary" onclick="tryIt()">Senden</button>
+    </div>
+    <textarea id="tryPrompt" rows="3" style="width:100%">Antworte in einem Satz: Was ist ein Router?</textarea>
+    <pre id="tryOut" class="muted">Ergebnis erscheint hier: gewählter Knoten, Stufe, Modell, Kontext, Dauer, übersprungene Stufen mit Grund, Antwort.</pre>
+    <h2 style="margin-top:14px">Lasttest <span class="muted" style="font-weight:normal">– Modell und Prompt von oben, n Anfragen mit Parallelität c durch den Router; Sonden mit Priorität <em>interactive</em> alle 2 s zeigen, ob Sprachbefehle den Stau überholen</span></h2>
+    <div class="row">
+      <label class="muted">n <input type="number" id="ltN" value="60" min="1" max="300" style="width:70px"></label>
+      <label class="muted">parallel <input type="number" id="ltC" value="6" min="1" max="16" style="width:60px"></label>
+      <label class="muted" title="alle 2 s eine Anfrage mit routing.priority interactive - ihre Wartezeit im Vergleich zeigt die Prioritätswirkung"><input type="checkbox" id="ltProbe" checked> Priorität prüfen</label>
+      <button class="primary" id="ltBtn" onclick="loadTest()">Lasttest starten</button>
+      <span class="muted" id="ltMsg"></span>
+    </div>
+    <pre id="ltOut" class="muted">Durchsatz, Latenz (Median / p95 / max), Wartezeit normal vs. interactive, Modellzeit, Verteilung auf Knoten.</pre>
+  </section>
+
+  <section class="wide" data-tab="clients">
+    <h2>Clients <span class="muted" style="font-weight:normal">– wer den API-Port 11434 rufen darf. Identität über Secret (Bearer) und/oder Quell-IP; Rollen, Datenklasse und Cloud-Freigabe je Client. Ein neues Secret zeigt der Router genau einmal im Klartext, gespeichert wird nur der Hash</span></h2>
+    <div class="newclient">
+      <input type="text" id="ncName" placeholder="neuer Client, z. B. pi-voice (a-z, 0-9, -, _)">
+      <input type="text" id="ncIp" placeholder="Quell-IP(s), optional, Komma-getrennt">
+      <input type="text" id="ncNote" placeholder="Notiz, optional">
+      <button class="primary" onclick="addClient()">+ Client anlegen &amp; Secret erzeugen</button>
+    </div>
+    <div class="settings" id="clients"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" onclick="save()">Speichern &amp; live schalten</button>
+      <span id="cmsg" class="muted"></span>
+    </div>
+  </section>
+
+  <section class="wide" data-tab="katalog">
+    <h2>Modellkatalog <span class="muted" style="font-weight:normal">– lokale Modelle messen und benchmarken, Cloud-Modelle mit Preisen pflegen</span></h2>
+    <p class="muted" style="margin:0 0 8px">
+      <b>VRAM-Bedarf = Gewichte + Kontext-Kosten × Kontextgrösse + <span id="ovh">0.8</span> GiB Reserve</b>. Gemessen wird bei 8k und 32k Kontext auf einem freien Knoten.
+      Cloud-Modelle (<span class="cloudc">☁</span>) brauchen kein VRAM; ihre Preise (CHF je 1 Mio. Tokens) speisen Budget und Usage.
+    </p>
+    <div class="newmodel" id="newModel" title="Cloud-Modell in den Katalog aufnehmen: Name im Router (z. B. openai:gpt-5.4), Anbieter, Name beim Anbieter (leer = Teil nach dem Doppelpunkt), Preise CHF je 1 Mio. Tokens, Kontext">
+      <input type="text" id="nmName" placeholder="☁ neues Cloud-Modell, z. B. openai:gpt-5.4">
+      <select id="nmProv"></select>
+      <input type="text" id="nmPM" placeholder="Name beim Anbieter (optional)">
+      <input type="number" id="nmIn" placeholder="in CHF/M" step="0.01" min="0">
+      <input type="number" id="nmOut" placeholder="out CHF/M" step="0.01" min="0">
+      <input type="number" id="nmCtx" placeholder="Kontext" step="1000" min="1000">
+      <span><label class="muted" title="think: false -> reasoning_effort minimal"><input type="checkbox" id="nmReason" checked> reasoning</label> <button class="small" onclick="addCloudModel()">+ aufnehmen</button></span>
+    </div>
+    <div class="row"><button class="primary" onclick="save()">Speichern &amp; live schalten</button><span id="kmsg" class="muted"></span></div>
+    <table id="models"><thead><tr><th>Modell</th><th title="Speicher des Modells ohne Kontext">Gewichte</th><th title="Zuwachs pro 1000 Token Kontext (KV-Cache)">Kontext-Kosten</th><th title="Gewichte + Kontext + Reserve; bei Cloud: Preis in / out">VRAM @8k / @32k / @64k</th><th>Quelle</th><th title="Benchmark: gen tok/s · prompt tok/s · TTFT | passiv: EWMA der letzten Anfragen · Fehlerrate">Tempo (warm)</th><th>Capabilities</th><th>Knoten</th><th></th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section class="wide" data-tab="einstellungen">
+    <h2>Einstellungen <span class="muted" style="font-weight:normal">– alles, was der Router zur Laufzeit liest; <span style="color:var(--acc)">blau</span> = in der UI geändert (roles.yaml), ↺ = zurück auf config.yaml. Ports, TLS, Logins, MQTT, Identitäten (Tokens/IP) und Anbieter-Endpunkte bleiben Deploy-Sache</span></h2>
+    <div class="settings" id="settings"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" onclick="save()">Speichern &amp; live schalten</button>
+      <span id="smsg" class="muted"></span>
+    </div>
+  </section>
+
+  <section class="wide" data-tab="uebersicht">
+    <h2>Betrieb <span class="muted" style="font-weight:normal">– Nutzung heute, Warteschlange, Scheduler, Build</span></h2>
+    <div class="tiles" id="ops"></div>
+  </section>
+
+  <section class="wide" data-tab="uebersicht">
+    <h2>Letzte Entscheidungen <span class="muted" style="font-weight:normal">– <span class="cloudc">☁</span> Cloud · 🐤 Canary · 👥 Client · Grund: warm-first / rank / affinity / canary / cloud</span></h2>
+    <div class="decisions" id="decisions"></div>
+  </section>
+</main>
+<script>
+let CFG = null, STATE = null, dirty = false;
+let SET_CHANGES = {}, MODEL_CHANGES = {}, MODEL_DELETES = [];   // Stufe 7: Einstellungen / Katalog-Cloud-Modelle bis zum Speichern
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const isCloud = m => !!((CFG && CFG.models[m]) || {}).cloud;
+const fmtChf = v => (v ?? 0).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + ' CHF';
+
+const TABS = ['uebersicht', 'rollen', 'clients', 'katalog', 'einstellungen'];
+const NEW_TOKENS = {};   // Client -> einmalig gezeigtes Secret (nur im Browser-Speicher dieser Seite)
+const isClientPath = p => p.startsWith('router.client_auth.clients.');
+function showTab(name) {
+  if (!TABS.includes(name)) name = 'uebersicht';
+  $('#main').dataset.active = name;
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  try { localStorage.setItem('skirnir.tab', name); } catch {}
+  if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  if (name === 'uebersicht' && STATE) setTimeout(renderLive, 0);   // Canvas erst zeichnen, wenn der Tab sichtbar ist
+}
+function markDirty() {   // Punkt am Tab, solange etwas nicht gespeichert ist
+  $('nav.tabs button[data-tab=rollen] .dot').hidden = !(dirty && rolesDirty);
+  $('nav.tabs button[data-tab=katalog] .dot').hidden = !(Object.keys(MODEL_CHANGES).length || MODEL_DELETES.length);
+  $('nav.tabs button[data-tab=einstellungen] .dot').hidden = !Object.keys(SET_CHANGES).some(p => !isClientPath(p));
+  $('nav.tabs button[data-tab=clients] .dot').hidden = !Object.keys(SET_CHANGES).some(isClientPath);
+}
+let rolesDirty = false;
+window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const t = await r.text();
+  let j; try { j = JSON.parse(t); } catch { j = { error: t }; }
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+function allModels() {
+  const s = new Set(Object.keys(CFG.models));
+  if (STATE) for (const n of Object.values(STATE.nodes)) for (const m of n.models) s.add(m);
+  return [...s].sort((a, b) => (isCloud(a) - isCloud(b)) || a.localeCompare(b));
+}
+const modelLabel = m => (isCloud(m) ? '☁ ' : '') + m;
+
+function renderNodes() {
+  const tb = $('#nodes tbody'); tb.innerHTML = '';
+  const waiting = (STATE.admission || {}).by_node || {};
+  for (const [name, n] of Object.entries(STATE.nodes)) {
+    const loaded = new Set(Object.keys(n.loaded));
+    const digestLoaded = m => loaded.has(m) || (n.loaded_names_by_digest || []).includes(m);
+    const models = n.models.map(m => `<span class="badge ${digestLoaded(m) ? 'loaded' : ''}">${esc(m)}</span>`).join('');
+    const gpu = n.gpu_known ? `${n.gpu_util} %` : '<span class="muted">kein Agent</span>';
+    const vram = n.gpu_known ? `${(n.vram_free_gib ?? 0).toFixed(1)} GiB / ${n.foreign_vram_gib} GiB` : '–';
+    const brk = n.breaker && n.breaker !== 'closed' ? ` <span class="badge ${n.breaker}" title="Circuit Breaker">${esc(n.breaker)}</span>` : '';
+    const last = `${n.inflight} / ${n.max_inflight ?? '?'}${waiting[name] ? ` · <span class="warn">${waiting[name]} wartend</span>` : ''}`;
+    tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(name)}</b><div class="muted">${esc(n.gpu || '')} ${n.wol ? '· WOL' : ''}</div></td>
+      <td><span class="state ${n.state}">${n.state}</span>${brk}<div class="muted">${esc(n.busy_reason || '')}</div></td>
+      <td>${gpu}</td><td>${vram}</td><td>${last}</td>
+      <td>${Object.entries(n.loaded).map(([m, g]) => `<div class="loaded">${esc(m)} <span class="muted">${g} GiB</span></div>`).join('') || '<span class="muted">–</span>'}</td>
+      <td>${models}</td></tr>`);
+  }
+  const b = STATE.build || {};
+  const ca = STATE.client_auth || {};
+  $('#hdr').innerHTML = `v${STATE.version}${b.deployed_at ? ' · Deploy ' + esc(b.deployed_at.replace('T', ' ')) : ''} · ${new Date().toLocaleTimeString('de-CH')}${STATE.public_url ? ' · ' + esc(STATE.public_url) : ''}${location.protocol === 'https:' ? ' · TLS' : ' · <span class="bad">KEIN TLS</span>'} · Client-Auth <b>${esc(ca.mode || '?')}</b>`;
+}
+
+function renderCloud() {
+  const tb = $('#cloud tbody'); tb.innerHTML = '';
+  const cc = STATE.cloud_config || {};
+  const entries = Object.entries(STATE.cloud || {});
+  if (!entries.length) { tb.innerHTML = `<tr><td colspan="6" class="muted">keine Cloud-Anbieter konfiguriert (router.cloud)</td></tr>`; return; }
+  for (const [name, c] of entries) {
+    const st = !c.enabled ? '<span class="muted">deaktiviert</span>' : !c.key ? '<span class="bad">kein Schlüssel</span>' : '<span class="ok">aktiv</span>';
+    const pct = c.budget_percent ?? 0;
+    const cls = pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : '';
+    const bar = c.budget_month_chf ? `<div class="bar ${cls}"><i style="width:${Math.min(100, pct)}%"></i></div>` : '';
+    tb.insertAdjacentHTML('beforeend', `<tr><td><b>☁ ${esc(name)}</b><div class="muted">${esc(c.kind)} · ${esc(c.base_url)}</div></td>
+      <td>${st}${cc.enabled === false ? '<div class="muted">Cloud global aus</div>' : ''}</td>
+      <td>${(c.models || []).map(m => `<span class="badge cloud">${esc(m)}</span>`).join('') || '<span class="muted">–</span>'}</td>
+      <td><b class="${cls}">${fmtChf(c.spend_month_chf)}</b> <span class="muted">/ ${c.budget_month_chf ? fmtChf(c.budget_month_chf) : 'kein Budget'}${c.budget_percent != null ? ' (' + c.budget_percent + ' %)' : ''}</span>${bar}</td>
+      <td>${c.breaker === 'closed' ? '<span class="ok">closed</span>' : `<span class="badge ${esc(c.breaker)}">${esc(c.breaker)}</span>`}${c.inflight ? ` · ${c.inflight} aktiv` : ''}</td>
+      <td class="muted">${esc(c.region || '–')} · ${esc(c.max_data_class || cc.max_cloud_data_class || '–')}</td></tr>`);
+  }
+}
+
+function renderModels() {
+  const tb = $('#models tbody'); tb.innerHTML = '';
+  const onNodes = m => Object.entries(STATE.nodes).filter(([, n]) => n.models.includes(m)).map(([k]) => k).join(', ');
+  const ovh = STATE.fit_overhead_gib ?? 0.8; $('#ovh').textContent = ovh;
+  const measuring = STATE.measuring || {};
+  const capsEff = STATE.capabilities_effective || {};
+  for (const m of allModels()) {
+    const c = (STATE.catalog_effective || {})[m] || CFG.models[m] || {};
+    const capList = capsEff[m] || STATE.capabilities[m] || [];
+    const caps = capList.filter(x => x !== 'completion').map(x => `<span class="badge cap">${esc(x)}</span>`).join('') || '<span class="muted">?</span>';
+    const perf = Object.values(STATE.perf || {}).filter(p => p.model === m);
+    const tempo = perf.length ? perf.map(p => {
+      const b = p.bench, a = p.passive, e = p.ewma, o = p.outcomes || {};
+      const n = (o.recent || []).length, err = n ? Math.round(100 * (o.recent || []).filter(x => x !== 'ok').length / n) : 0;
+      const bt = b ? `<b>${b.gen_tps}</b> tok/s · ${b.prompt_tps ?? '–'} prompt · ${b.ttft_ms} ms` : (e ? `<b>${e.gen_tps}</b> tok/s <span class="muted">(EWMA)</span>` : '<span class="muted">kein Benchmark</span>');
+      const at = a ? `<div class="muted">∅ ${a.n}: ${a.gen_tps} tok/s · ${a.prompt_tps || '–'} prompt · ${a.ttft_ms} ms${n ? ` · <span class="${err ? 'warn' : ''}">${err} % Fehler</span>` : ''}</div>` : '';
+      return `<div title="${esc(p.node)}${b ? ', Benchmark ' + esc(b.at) + ' @' + b.num_ctx : ''}">${perf.length > 1 ? '<span class="muted">' + esc(p.node) + ':</span> ' : ''}${bt}</div>${at}`;
+    }).join('') : '<span class="muted">–</span>';
+    if (isCloud(m)) {
+      const pr = c.price_chf_per_m || {};
+      const uiModel = (CFG.ui_models || []).includes(m);
+      const ed = (k, v, ph) => `<input class="inl" type="number" step="0.01" min="0" value="${v ?? ''}" placeholder="${ph}" title="${ph} CHF je 1 Mio. Tokens" onchange="modelField('${esc(m)}','${k}',this.value)">`;
+      tb.insertAdjacentHTML('beforeend', `<tr><td><span class="cloudc">☁</span> ${esc(m)}${c.provider_model ? `<div class="muted">${esc(c.provider_model)}</div>` : ''}${uiModel ? '<div class="muted">aus der UI</div>' : ''}</td><td class="muted">–</td><td class="muted">–</td>
+        <td><span class="cloudc">${ed('input', pr.input, 'in')} / ${ed('output', pr.output, 'out')}</span><div class="muted">Kontext <input class="inl" type="number" step="1000" min="1000" value="${c.context_tokens ?? ''}" onchange="modelField('${esc(m)}','context_tokens',this.value)"></div></td>
+        <td class="muted">Katalog</td><td>${tempo}</td><td>${caps}</td><td class="cloudc">cloud:${esc(c.cloud)}</td>
+        <td>${uiModel ? `<button class="small" title="aus dem Katalog entfernen (nur Einträge aus der UI)" onclick="delCloudModel('${esc(m)}')">✕</button>` : ''}</td></tr>`);
+      continue;
+    }
+    const known = c.weights_gib != null;
+    const need = k => known ? (c.weights_gib + (c.kv_gib_per_1k || 0) * k + ovh).toFixed(1) : '?';
+    let src;
+    if (!known) src = '<span class="warn">unbekannt → Dateigrösse +20 %</span>';
+    else if (c.source === 'gemessen') src = `<span class="ok">gemessen</span><span class="muted"> ${esc(c.measured_at || '')}${c.measured_on ? ' auf ' + esc(c.measured_on) : ''}${c.partial_offload ? ' <span class="bad">⚠ partial offload</span>' : ''}</span>`;
+    else if ((c.source || '').startsWith('Alias')) src = `<span class="muted">${esc(c.source)}</span>`;
+    else src = '<span class="warn">geschätzt</span>';
+    const mst = measuring[m], bst = (STATE.benching || {})[m];
+    const busyAny = Object.keys(measuring).length || Object.keys(STATE.benching || {}).length;
+    const btn = mst ? `<span class="warn">${esc(mst.step)}${mst.error ? ': ' + esc(mst.error) : ''}</span>`
+      : bst ? `<span class="warn">Benchmark: ${esc(bst.step)}${bst.error ? ': ' + esc(bst.error) : ''}</span>`
+      : (busyAny ? '<button class="small" disabled>Messen</button> <button class="small" disabled>Benchmark</button>'
+        : `<button class="small" onclick="measure('${esc(m)}')" title="lädt das Modell bei 8k und 32k Kontext auf einem freien Knoten (~1 Min.)">${c.source === 'gemessen' ? 'neu messen' : 'Messen'}</button>
+           <button class="small" onclick="bench('${esc(m)}')" title="standardisierter Warm-Benchmark (~30 s)">Benchmark</button>`);
+    tb.insertAdjacentHTML('beforeend', `<tr><td>${esc(m)}</td><td>${known ? c.weights_gib + ' GiB' : '–'}</td>
+      <td>${known ? ((c.kv_gib_per_1k || 0) * 1000 < 10 ? '≈ 0' : (c.kv_gib_per_1k * 1024).toFixed(0) + ' MiB') + ' / 1k Token' : '–'}</td>
+      <td>${need(8)} / ${need(32)} / ${need(64)} GiB</td><td>${src}</td><td>${tempo}</td><td>${caps}</td><td class="muted">${esc(onNodes(m)) || '–'}</td><td>${btn}</td></tr>`);
+  }
+}
+
+function expEditor(rname, kind, r) {
+  const v = r[kind];
+  const label = kind === 'canary' ? '🐤 Canary' : '🌒 Shadow';
+  const tip = kind === 'canary' ? 'Anteil der Anfragen läuft auf diesem Modell (auch kalt), Ergebnis geht an den Client - Kandidat mit echtem Verkehr messen'
+    : 'Anteil der Anfragen läuft NACH der Antwort noch einmal auf diesem Modell; der Client merkt nichts, Tempo/Fehler/Usage (Client shadow) zeigen den Kandidaten';
+  if (!v) return `<div class="exp"><span class="muted" title="${tip}">${label}</span><span><button class="small" onclick="CFG.roles['${esc(rname)}'].${kind}={model:allModels()[0],num_ctx:8192,percent:10};dirty=true;renderRoles()">+ einrichten</button></span><span></span><span></span></div>`;
+  const opts = allModels().map(m => `<option value="${esc(m)}" ${m === v.model ? 'selected' : ''}>${esc(modelLabel(m))}</option>`).join('');
+  return `<div class="exp"><span class="muted" title="${tip}">${label}</span>
+    <select onchange="CFG.roles['${esc(rname)}'].${kind}.model=this.value;dirty=true">${opts}</select>
+    <input type="number" value="${v.num_ctx}" step="1024" min="1024" title="num_ctx" onchange="CFG.roles['${esc(rname)}'].${kind}.num_ctx=+this.value;dirty=true">
+    <span style="display:flex;gap:4px;align-items:center"><input type="number" value="${v.percent}" min="0" max="100" style="width:56px" title="Prozent der Anfragen" onchange="CFG.roles['${esc(rname)}'].${kind}.percent=+this.value;dirty=true">%
+      <button class="small" title="entfernen" onclick="CFG.roles['${esc(rname)}'].${kind}=null;dirty=true;renderRoles()">✕</button></span></div>`;
+}
+
+function renderRoles() {
+  const box = $('#roles'); box.innerHTML = '';
+  const opts = sel => allModels().map(m => `<option value="${esc(m)}" ${m === sel ? 'selected' : ''}>${esc(modelLabel(m))}</option>`).join('');
+  const capsEff = STATE.capabilities_effective || {};
+  for (const [rname, r] of Object.entries(CFG.roles)) {
+    const caps = r.tiers.map(t => capsEff[t.model] || STATE.capabilities[t.model]);
+    const toolsWarn = caps.some(c => c && !c.includes('tools')) ? '<span class="warn" title="HA-Voice/AI-Task brauchen tools">⚠ eine Stufe ohne tools</span>' : '';
+    const cloudTiers = r.tiers.filter(t => isCloud(t.model)).length;
+    const cloudInfo = cloudTiers ? `<span class="cloudc" title="Cloud-Stufe(n): greift, wenn kein lokaler Knoten kann, eine Fähigkeit fehlt oder der Client execution: cloud verlangt - Datenklasse, Scan und Budget begrenzen">☁ ${cloudTiers} Cloud-Stufe${cloudTiers > 1 ? 'n' : ''}</span>` : '';
+    const lf = r.latency_first;
+    const prio = r.priority || 'normal';
+    let html = `<div class="role" data-role="${esc(rname)}"><h3><code>${esc(rname)}:latest</code>
+      <label class="muted" title="leer = globale Einstellung (warm_first=${CFG.warm_first})"><select onchange="CFG.roles['${esc(rname)}'].latency_first=(this.value===''?null:this.value==='1');dirty=true" style="width:auto">
+        <option value="" ${lf === null || lf === undefined ? 'selected' : ''}>warm zuerst: global (${CFG.warm_first ? 'an' : 'aus'})</option>
+        <option value="1" ${lf === true ? 'selected' : ''}>warm zuerst: an</option>
+        <option value="0" ${lf === false ? 'selected' : ''}>warm zuerst: aus (strikt nach Rang)</option></select></label>
+      <label class="muted" title="Prioritätsklasse beim Warten auf einen vollen Knoten: interactive vor normal vor batch (Alterung verhindert Verhungern)"><select onchange="CFG.roles['${esc(rname)}'].priority=this.value;dirty=true" style="width:auto">
+        ${['interactive', 'normal', 'batch'].map(p => `<option value="${p}" ${p === prio ? 'selected' : ''}>Priorität: ${p}</option>`).join('')}</select></label>
+      ${toolsWarn} ${cloudInfo}<button class="small" style="margin-left:auto" onclick="delRole('${esc(rname)}')">Rolle löschen</button></h3>
+      <div class="tier muted" style="font-size:11px"><span></span><span>Modell</span><span>num_ctx max</span><span>busy_ok</span><span></span></div>`;
+    r.tiers.forEach((t, i) => {
+      html += `<div class="tier"><span class="muted">${i + 1}.</span>
+        <select onchange="CFG.roles['${esc(rname)}'].tiers[${i}].model=this.value;dirty=true;renderRoles()">${opts(t.model)}</select>
+        <input type="number" value="${t.num_ctx}" step="1024" min="1024" onchange="CFG.roles['${esc(rname)}'].tiers[${i}].num_ctx=+this.value;dirty=true">
+        ${isCloud(t.model) ? '<span class="cloudc" title="Cloud: kein busy, kein VRAM">☁ Cloud</span>' : `<input type="checkbox" ${t.busy_ok ? 'checked' : ''} onchange="CFG.roles['${esc(rname)}'].tiers[${i}].busy_ok=this.checked;dirty=true">`}
+        <span><button class="small" onclick="moveTier('${esc(rname)}',${i},-1)">↑</button> <button class="small" onclick="moveTier('${esc(rname)}',${i},1)">↓</button> <button class="small" onclick="delTier('${esc(rname)}',${i})">✕</button></span></div>`;
+    });
+    html += `<div class="row"><button class="small" onclick="addTier('${esc(rname)}')">+ Stufe</button></div>`;
+    html += expEditor(rname, 'canary', r) + expEditor(rname, 'shadow', r) + `</div>`;
+    box.insertAdjacentHTML('beforeend', html);
+  }
+  $('#exposeConcrete').checked = !!CFG.expose_concrete_models;
+  const sel = $('#tryModel'); const cur = sel.value;
+  sel.innerHTML = Object.keys(CFG.roles).map(r => `<option value="${esc(r)}:latest">Rolle ${esc(r)}</option>`).join('') + allModels().filter(m => !isCloud(m)).map(m => `<option>${esc(m)}</option>`).join('');
+  if (cur) sel.value = cur;
+  const cc = STATE.cloud_config || {}; const cls = $('#tryClass'); const curc = cls.value;
+  cls.innerHTML = `<option value="">Datenklasse: Default (${esc(cc.default_data_class || 'personal')})</option>` + (cc.data_classes || []).map(d => `<option value="${esc(d)}">Datenklasse: ${esc(d)}</option>`).join('');
+  if (curc) cls.value = curc;
+}
+
+function modelField(m, k, v) {
+  const c = CFG.models[m] || {};
+  const e = MODEL_CHANGES[m] || { cloud: c.cloud, provider_model: c.provider_model, price_chf_per_m: { ...(c.price_chf_per_m || {}) }, context_tokens: c.context_tokens, reasoning: c.reasoning, capabilities: c.capabilities };
+  if (k === 'context_tokens') e.context_tokens = v ? +v : undefined; else e.price_chf_per_m[k] = +v;
+  MODEL_CHANGES[m] = e; dirty = true; $('#kmsg').innerHTML = '<span class="warn">ungespeicherte Änderungen</span>'; markDirty();
+}
+function addCloudModel() {
+  const name = $('#nmName').value.trim(), prov = $('#nmProv').value;
+  if (!name || !prov) { $('#kmsg').innerHTML = '<span class="bad">Name und Anbieter angeben</span>'; return; }
+  if (!name.includes(':')) { $('#kmsg').innerHTML = '<span class="bad">Name als anbieter:modell, z. B. openai:gpt-5.4</span>'; return; }
+  MODEL_CHANGES[name] = { cloud: prov, provider_model: $('#nmPM').value.trim() || undefined, price_chf_per_m: { input: +$('#nmIn').value || 0, output: +$('#nmOut').value || 0 },
+    context_tokens: +$('#nmCtx').value || undefined, reasoning: $('#nmReason').checked, capabilities: { tools: true, vision: true, structured: prov !== 'anthropic', thinking: false } };
+  CFG.models[name] = { ...MODEL_CHANGES[name] }; dirty = true; renderModels(); renderRoles();
+  $('#kmsg').innerHTML = `<span class="warn">${esc(name)} vorgemerkt – Speichern nicht vergessen</span>`; markDirty();
+  ['nmName', 'nmPM', 'nmIn', 'nmOut', 'nmCtx'].forEach(i => $('#' + i).value = '');
+}
+function delCloudModel(m) {
+  if (!confirm(`${m} aus dem Katalog entfernen? Rollen, die es benutzen, blockieren das Speichern.`)) return;
+  MODEL_DELETES.push(m); delete MODEL_CHANGES[m]; delete CFG.models[m]; dirty = true; renderModels(); renderRoles(); markDirty();
+}
+
+function fmtVal(it, v) {
+  if (v === null || v === undefined) return it.nullable ? 'leer' : String(it.default ?? '–');
+  if (Array.isArray(v)) return v.join(', ');
+  return String(v);
+}
+function setChange(path, v) {
+  SET_CHANGES[path] = v; dirty = true; markDirty();
+  if (isClientPath(path)) $('#cmsg').innerHTML = '<span class="warn">ungespeicherte Änderungen</span>';
+  $('#smsg').innerHTML = `<span class="warn">${Object.keys(SET_CHANGES).length} Änderung(en), noch nicht gespeichert</span>`;
+}
+function resetSetting(path) { setChange(path, null); renderSettings(); renderClients(); }
+function settingInput(it) {
+  const p = esc(it.path);
+  let v = it.path in SET_CHANGES ? SET_CHANGES[it.path] : (it.set ? it.value : null);
+  const pending = it.path in SET_CHANGES;
+  if (pending && v === null) v = it.base_set ? it.base : null;   // Reset vorgemerkt: Basiswert zeigen
+  const shown = v === null || v === undefined ? (it.nullable ? null : it.default) : v;
+  const num = t => `<input type="number" value="${shown ?? ''}" ${it.min != null ? `min="${it.min}"` : ''} ${it.max != null ? `max="${it.max}"` : ''} step="${it.step ?? (it.type === 'int' ? 1 : 'any')}" placeholder="${it.nullable ? 'leer' : ''}" onchange="setChange('${p}', this.value === '' ? null : +this.value)">`;
+  switch (it.type) {
+    case 'bool': return `<label><input type="checkbox" ${shown ? 'checked' : ''} onchange="setChange('${p}', this.checked)"> ${shown ? 'an' : 'aus'}</label>`;
+    case 'int': case 'float': return num();
+    case 'choice': return `<select onchange="setChange('${p}', this.value === '' ? null : this.value)">${it.nullable ? `<option value="" ${shown == null ? 'selected' : ''}>leer</option>` : ''}${(it.choices || []).map(c => `<option value="${esc(c)}" ${c === shown ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
+    case 'tristate': return `<select onchange="setChange('${p}', this.value === '' ? null : this.value === 'true')"><option value="false" ${shown === false ? 'selected' : ''}>false</option><option value="true" ${shown === true ? 'selected' : ''}>true</option><option value="" ${shown == null ? 'selected' : ''}>leer</option></select>`;
+    case 'list': { const cur = new Set(shown || []); return `<div class="chk">${(it.choices || []).map(c => `<label><input type="checkbox" ${cur.has(c) ? 'checked' : ''} onchange="listToggle('${p}', '${esc(c)}', this.checked)"> ${esc(c)}</label>`).join('')}</div>`; }
+    default: return `<input type="text" value="${esc(shown ?? '')}" placeholder="${it.nullable ? 'leer' : ''}" onchange="setChange('${p}', this.value === '' ? null : this.value)">`;
+  }
+}
+function listToggle(path, item, on) {
+  const it = (CFG.settings.items || []).find(x => x.path === path);
+  const cur = new Set(path in SET_CHANGES && SET_CHANGES[path] ? SET_CHANGES[path] : (it.set ? it.value : it.default) || []);
+  if (on) cur.add(item); else cur.delete(item);
+  if (item === '*' && on) { cur.clear(); cur.add('*'); } else if (on) cur.delete('*');
+  setChange(path, [...cur]); renderSettings(); renderClients();
+}
+function renderSettings() {
+  const box = $('#settings'); const s = CFG.settings || { groups: [], items: [] };
+  const byGroup = {}; for (const it of s.items) (byGroup[it.group] = byGroup[it.group] || []).push(it);
+  box.innerHTML = s.groups.filter(g => g !== 'Clients' && byGroup[g]).map(g => {
+    const items = byGroup[g].slice().sort((a, b) => (a.entity || '').localeCompare(b.entity || ''));   // je Anbieter/Client zusammen (stabil: Reihenfolge der Allowlist bleibt)
+    let html = `<div class="tile"><h4>${esc(g)}</h4>`;
+    let lastEntity = undefined;
+    for (const it of items) {
+      if (it.entity !== lastEntity) { lastEntity = it.entity; if (it.entity) html += `<div class="sub">${g === 'Clients' ? '👥' : '☁'} ${esc(it.entity)}</div>`; }
+      const pending = it.path in SET_CHANGES, over = it.overridden || (pending && SET_CHANGES[it.path] !== null);
+      const baseTxt = `config.yaml: ${esc(fmtVal(it, it.base_set ? it.base : null))}${it.note ? ' · ' + esc(it.note) : ''}`;
+      html += `<div class="srow ${over ? 'over' : ''}" title="${esc(it.help || '')}"><div><span class="lbl">${esc(it.label)}</span>${pending ? ' <span class="warn">●</span>' : ''}<div class="base">${baseTxt}</div></div>
+        <div>${settingInput(it)}</div><div>${it.overridden || pending ? `<button class="small" title="zurück auf config.yaml" onclick="resetSetting('${esc(it.path)}')">↺</button>` : ''}</div></div>`;
+    }
+    return html + '</div>';
+  }).join('') || '<span class="muted">keine Einstellungen</span>';
+  const sel = $('#nmProv'); sel.innerHTML = (CFG.cloud_providers || []).map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+}
+
+function renderClients() {
+  const box = $('#clients'); const cls = CFG.clients || {}; const stats = (STATE.client_auth || {}).clients || {};
+  const items = (CFG.settings?.items || []).filter(it => it.group === 'Clients');
+  box.innerHTML = Object.entries(cls).map(([name, c]) => {
+    const s = stats[name] || {};
+    const seen = s.last_seen_s != null ? (s.last_seen_s < 90 ? 'vor ' + Math.round(s.last_seen_s) + ' s' : 'vor ' + Math.round(s.last_seen_s / 60) + ' min') : 'noch nie gesehen';
+    const ident = [c.source === 'intern' ? 'Start-Zufall im Speicher' : c.has_token ? `Secret <span class="muted">(sha256 ${esc(c.token_prefix)}…${c.token_rotated ? ', rotiert ' + esc(c.token_rotated.replace('T', ' ')) : ''})</span>` : '<span class="warn">kein Secret</span>',
+                   (c.ip || []).length ? `IP ${esc((c.ip || []).join(', '))}` : ''].filter(Boolean).join(' · ');
+    const tok = NEW_TOKENS[name] ? `<div class="tok"><b class="warn">Neues Secret – nur jetzt sichtbar:</b> <code id="tok-${esc(name)}">${esc(NEW_TOKENS[name])}</code>
+        <button class="small" onclick="navigator.clipboard.writeText(NEW_TOKENS['${esc(name)}']).then(()=>this.textContent='kopiert')">kopieren</button>
+        <div class="muted">In den Client eintragen (HA: API-Key im Ollama-Eintrag „Skirnir“, Node-RED: apiKey der llm-config, sonst <code>Authorization: Bearer …</code>) und in Secret-Store ablegen. Der Router kennt nur den Hash; das alte Secret ist ab sofort ungültig.</div></div>` : '';
+    const internal = c.source === 'intern';
+    const rows = internal ? '' : items.filter(it => it.entity === name).map(it => {
+      const pending = it.path in SET_CHANGES, over = it.overridden || (pending && SET_CHANGES[it.path] !== null);
+      return `<div class="srow ${over ? 'over' : ''}" title="${esc(it.help || '')}"><div><span class="lbl">${esc(it.label)}</span>${pending ? ' <span class="warn">●</span>' : ''}<div class="base">config.yaml: ${esc(fmtVal(it, it.base_set ? it.base : null))}</div></div>
+        <div>${settingInput(it)}</div><div>${it.overridden || pending ? `<button class="small" title="zurück auf config.yaml" onclick="resetSetting('${esc(it.path)}')">↺</button>` : ''}</div></div>`;
+    }).join('');
+    return `<div class="client"><h3>${internal ? '🐦' : '👥'} ${esc(name)} <span class="badge">${internal ? 'intern' : c.source === 'ui' ? 'aus der UI' : 'config.yaml'}</span>
+        <span class="muted" style="font-size:12px">${s.total ?? 0} Anfragen · ${seen}${s.via ? ' · via ' + esc(s.via) : ''}${s.forbidden ? ` · <span class="warn">${s.forbidden} verboten</span>` : ''}${s.rate_limited ? ` · <span class="warn">${s.rate_limited} gedrosselt</span>` : ''}</span>
+        <span style="margin-left:auto">${internal ? '' : `<button class="small" onclick="rotateToken('${esc(name)}')" title="neues zufälliges Secret; das alte gilt sofort nicht mehr">${c.has_token ? '🔑 Secret erneuern' : '🔑 Secret erzeugen'}</button>`}
+        ${c.source === 'ui' ? ` <button class="small" onclick="delClient('${esc(name)}')">Client löschen</button>` : ''}</span></h3>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Identität: ${ident}${c.note ? ' · ' + esc(c.note) : ''}</div>${tok}${rows}</div>`;
+  }).join('') || '<span class="muted">keine Clients konfiguriert (client_auth.clients)</span>';
+}
+async function rotateToken(name) {
+  if (!confirm(`Neues Secret für ${name} erzeugen? Das bisherige gilt sofort nicht mehr – der Client muss danach umgestellt werden.`)) return;
+  try { const r = await api(`/admin/clients/${encodeURIComponent(name)}/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        NEW_TOKENS[name] = r.token; await load(); showTab('clients'); $('#cmsg').innerHTML = `<span class="ok">Secret für ${esc(name)} erzeugt – jetzt kopieren</span>`; }
+  catch (e) { $('#cmsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function addClient() {
+  const name = $('#ncName').value.trim().toLowerCase(), ip = $('#ncIp').value.trim(), note = $('#ncNote').value.trim();
+  if (!/^[a-z0-9][a-z0-9_-]{0,40}$/.test(name)) { $('#cmsg').innerHTML = '<span class="bad">Name: a-z, 0-9, - und _</span>'; return; }
+  if (CFG.clients && CFG.clients[name]) { $('#cmsg').innerHTML = '<span class="bad">gibt es schon</span>'; return; }
+  const spec = { roles: ['*'] }; if (ip) spec.ip = ip; if (note) spec.note = note;
+  try {
+    await api('/admin/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clients: { [name]: spec } }) });
+    const r = await api(`/admin/clients/${encodeURIComponent(name)}/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    NEW_TOKENS[name] = r.token; ['ncName', 'ncIp', 'ncNote'].forEach(i => $('#' + i).value = '');
+    await load(); showTab('clients'); $('#cmsg').innerHTML = `<span class="ok">${esc(name)} angelegt – Secret jetzt kopieren; Rollen/Datenklasse unten anpassen und speichern</span>`;
+  } catch (e) { $('#cmsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function delClient(name) {
+  if (!confirm(`Client ${name} löschen? Sein Secret und seine Einstellungen verfallen.`)) return;
+  try { await api('/admin/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delete_clients: [name] }) });
+        delete NEW_TOKENS[name]; await load(); showTab('clients'); $('#cmsg').innerHTML = `<span class="ok">${esc(name)} gelöscht</span>`; }
+  catch (e) { $('#cmsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+
+// ---- Live-Statistik: /metrics parsen, Verlaeufe puffern, mit Canvas zeichnen (keine externe Bibliothek) ----
+const PAL = ['#58a6ff', '#3fb950', '#d29922', '#c084fc', '#f85149', '#79c0ff', '#56d364', '#e3b341'];
+const LIVE = { rpm: [], tps: [], gpu: {}, vram: {}, inflight: [], waiting: [], models: {}, modelHist: [], prevReq: null, prevTok: null, prevT: null };
+let METRICS = null, USAGE = null;
+function parseMetrics(txt) {
+  const out = {};
+  for (const line of txt.split('\n')) {
+    if (!line || line[0] === '#') continue;
+    const m = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{([^}]*)\})?\s+(\S+)/); if (!m) continue;
+    const labels = {};
+    if (m[3]) for (const kv of m[3].match(/[a-zA-Z_][a-zA-Z0-9_]*="(?:[^"\\]|\\.)*"/g) || []) { const i = kv.indexOf('='); labels[kv.slice(0, i)] = kv.slice(i + 2, -1); }
+    (out[m[1]] = out[m[1]] || []).push({ l: labels, v: parseFloat(m[4]) });
+  }
+  return out;
+}
+const msum = (name, pred) => (METRICS?.[name] || []).filter(s => !pred || pred(s.l)).reduce((a, s) => a + (isNaN(s.v) ? 0 : s.v), 0);
+function groupBy(name, key, pred) { const g = {}; for (const s of METRICS?.[name] || []) { if ((pred && !pred(s.l)) || isNaN(s.v)) continue; const k = s.l[key] || '–'; g[k] = (g[k] || 0) + s.v; } return g; }
+const fmtN = v => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(Math.round(v * 10) / 10);
+function sampleLive() {
+  const now = Date.now() / 1000, MAX = 200;
+  const req = msum('skirnir_requests_total'), tok = msum('skirnir_tokens_total', l => l.kind === 'completion');
+  // Raten ueber ein 30-s-Fenster (glatter als Stichprobe zu Stichprobe); Zaehler-Ruecksprung = Router-Neustart
+  LIVE.hist = (LIVE.hist || []).filter(h => now - h.t <= 30).concat([{ t: now, req, tok }]);
+  const base = LIVE.hist[0];
+  if (LIVE.prevT != null && base && now - base.t >= 2) {
+    const dt = now - base.t;
+    let rpm = (req - base.req) * 60 / dt, tps = (tok - base.tok) / dt;
+    if (rpm < 0 || tps < 0) { rpm = 0; tps = 0; LIVE.hist = [{ t: now, req, tok }]; }
+    LIVE.rpm.push(rpm); LIVE.tps.push(tps);
+    for (const [n, node] of Object.entries(STATE.nodes)) {
+      (LIVE.gpu[n] = LIVE.gpu[n] || []).push(node.gpu_known ? node.gpu_util : null);
+      (LIVE.vram[n] = LIVE.vram[n] || []).push(node.gpu_known ? node.vram_free_gib : null);
+    }
+    LIVE.inflight.push(Object.values(STATE.nodes).reduce((a, n) => a + (n.inflight || 0), 0));
+    LIVE.waiting.push((STATE.admission || {}).waiting || 0);
+    sampleModels(now, dt);
+    for (const k of ['rpm', 'tps', 'inflight', 'waiting']) LIVE[k] = LIVE[k].slice(-MAX);
+    for (const o of [LIVE.gpu, LIVE.vram, LIVE.models]) for (const k in o) o[k] = o[k].slice(-MAX);
+  } else {
+    LIVE.modelHist = LIVE.modelHist.filter(h => now - h.t <= 30).concat([{ t: now, per: groupBy('skirnir_requests_total', 'model') }]);
+  }
+  LIVE.prevT = now; LIVE.prevReq = req; LIVE.prevTok = tok;
+}
+// Anfragen/min je konkretem Modell im 30-s-Fenster; neue Modelle bekommen Nullen fuer die Vergangenheit, damit alle Reihen gleich lang sind.
+function sampleModels(now, dt) {
+  const per = groupBy('skirnir_requests_total', 'model');
+  LIVE.modelHist = LIVE.modelHist.filter(h => now - h.t <= 30).concat([{ t: now, per }]);
+  const base = LIVE.modelHist[0].per, len = Math.max(0, ...Object.values(LIVE.models).map(a => a.length));
+  for (const m of new Set([...Object.keys(per), ...Object.keys(LIVE.models)])) {
+    const arr = LIVE.models[m] || (LIVE.models[m] = new Array(len).fill(0));
+    const rate = Math.max(0, ((per[m] || 0) - (base[m] || 0)) * 60 / dt);
+    arr.push(Number.isFinite(rate) ? rate : 0);
+  }
+}
+function stacked(id, series) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x;
+  const n = Math.max(2, ...series.map(s => s.v.length)); const tot = Array.from({ length: n }, (_, i) => series.reduce((a, s) => a + (s.v[i] || 0), 0));
+  const max = Math.max(1e-9, ...tot);
+  if (!series.length || !tot.some(v => v > 0)) { g.fillStyle = '#8b98a8'; g.fillText('noch keine Anfragen im Fenster', 8, h / 2); return; }
+  const X = i => 1 + (i / (n - 1)) * (w - 2), Y = v => h - 2 - (v / max) * (h - 16);
+  const acc = new Array(n).fill(0);
+  for (const s of series) {
+    const lo = acc.slice(); for (let i = 0; i < n; i++) acc[i] += s.v[i] || 0;
+    g.beginPath(); for (let i = 0; i < n; i++) g.lineTo(X(i), Y(acc[i])); for (let i = n - 1; i >= 0; i--) g.lineTo(X(i), Y(lo[i]));
+    g.closePath(); g.fillStyle = s.c + 'cc'; g.fill();
+  }
+  g.fillStyle = '#8b98a8'; g.fillText(fmtN(max) + ' /min', 2, 10);
+}
+function cv(id) {
+  const c = $(id); if (!c) return null; const r = c.getBoundingClientRect(); if (!r.width || !r.height) return null;
+  const dpr = window.devicePixelRatio || 1; c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, r.width, r.height); g.font = '11px system-ui, sans-serif'; g.textBaseline = 'alphabetic';
+  return { g, w: r.width, h: r.height };
+}
+function spark(id, series, opts = {}) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x;
+  const all = series.flatMap(s => s.v).filter(v => v != null && !isNaN(v));
+  if (!all.length) { g.fillStyle = '#8b98a8'; g.fillText('sammelt …', 4, h / 2 + 4); return; }
+  const min = opts.min ?? 0, max = Math.max(opts.max ?? 0, ...all, min + 1e-9);
+  const n = Math.max(2, ...series.map(s => s.v.length));
+  const X = i => 1 + (i / (n - 1)) * (w - 2), Y = v => h - 2 - ((v - min) / (max - min)) * (h - 14);
+  series.forEach(s => {
+    g.strokeStyle = s.c; g.lineWidth = 1.5; g.beginPath(); let on = false;
+    s.v.forEach((v, i) => { if (v == null || isNaN(v)) { on = false; return; } on ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)); on = true; });
+    g.stroke();
+    if (opts.fill && series.length === 1 && s.v.length) { g.lineTo(X(s.v.length - 1), h - 2); g.lineTo(X(0), h - 2); g.closePath(); g.fillStyle = s.c + '33'; g.fill(); }
+  });
+  g.fillStyle = '#8b98a8'; g.fillText(fmtN(max), 2, 10);
+}
+function bars(id, labels, series, opts = {}) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x; const padL = 30, padB = 18, padT = 10, cw = w - padL - 6, ch = h - padB - padT;
+  if (!labels.length) { g.fillStyle = '#8b98a8'; g.fillText('noch keine Daten', padL, h / 2); return; }
+  const totals = labels.map((_, i) => series.reduce((a, s) => a + (s.v[i] || 0), 0)); const max = Math.max(1, ...totals);
+  g.strokeStyle = '#273241'; for (const f of [0, 0.5, 1]) { const y = padT + ch - f * ch; g.beginPath(); g.moveTo(padL, y); g.lineTo(w - 6, y); g.stroke(); g.fillStyle = '#8b98a8'; g.fillText(fmtN(max * f), 0, y + 4); }
+  const bw = cw / labels.length, step = Math.ceil(labels.length / 12);
+  labels.forEach((lab, i) => {
+    let y = padT + ch;
+    for (const s of series) { const v = s.v[i] || 0, bh = v / max * ch; g.fillStyle = s.c; g.fillRect(padL + i * bw + bw * 0.15, y - bh, Math.max(1, bw * 0.7), bh); y -= bh; }
+    if (i % step === 0) { g.fillStyle = '#8b98a8'; g.textAlign = 'center'; g.fillText(lab, padL + i * bw + bw / 2, h - 4); g.textAlign = 'left'; }
+  });
+  if (opts.line && opts.line.v.some(v => v > 0)) {
+    const lmax = Math.max(1e-9, ...opts.line.v); g.strokeStyle = opts.line.c; g.lineWidth = 1.5; g.beginPath();
+    opts.line.v.forEach((v, i) => { const px = padL + i * bw + bw / 2, py = padT + ch - v / lmax * ch; i ? g.lineTo(px, py) : g.moveTo(px, py); });
+    g.stroke(); g.fillStyle = opts.line.c; g.textAlign = 'right'; g.fillText(fmtN(lmax) + 'k', w - 6, padT + 10); g.textAlign = 'left';
+  }
+}
+function donut(id, parts) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x;
+  const entries = Object.entries(parts).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]); const total = entries.reduce((a, [, v]) => a + v, 0);
+  if (!total) { g.fillStyle = '#8b98a8'; g.fillText('noch keine Anfragen seit dem Start', 8, h / 2); return; }
+  const r = Math.min(h / 2 - 8, 72), cx = r + 10, cy = h / 2; let a0 = -Math.PI / 2;
+  entries.forEach(([, v], i) => { const a1 = a0 + v / total * 2 * Math.PI; g.beginPath(); g.arc(cx, cy, r, a0, a1); g.arc(cx, cy, r * 0.62, a1, a0, true); g.closePath(); g.fillStyle = PAL[i % PAL.length]; g.fill(); a0 = a1; });
+  g.fillStyle = '#e6edf3'; g.textAlign = 'center'; g.font = 'bold 15px system-ui, sans-serif'; g.fillText(fmtN(total), cx, cy + 5); g.font = '11px system-ui, sans-serif'; g.textAlign = 'left';
+  entries.slice(0, 9).forEach(([lab, v], i) => { const y = 16 + i * 17; g.fillStyle = PAL[i % PAL.length]; g.fillRect(cx + r + 14, y - 8, 9, 9); g.fillStyle = '#e6edf3'; g.fillText(`${lab}  ${Math.round(100 * v / total)} %  (${fmtN(v)})`, cx + r + 28, y); });
+}
+function hbars(id, rows) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x;
+  if (!rows.length) { g.fillStyle = '#8b98a8'; g.fillText('noch keine Messung', 8, h / 2); return; }
+  const max = Math.max(1e-9, ...rows.map(r => r.v)), rh = Math.min(24, (h - 4) / rows.length), labW = Math.min(200, w * 0.45);
+  rows.forEach((r, i) => { const y = 2 + i * rh; g.fillStyle = '#8b98a8'; g.fillText(r.label.length > 30 ? r.label.slice(0, 29) + '…' : r.label, 2, y + rh * 0.68);
+    const bw = Math.max(1, (w - labW - 48) * r.v / max); g.fillStyle = r.c; g.fillRect(labW, y + 4, bw, rh - 8); g.fillStyle = '#e6edf3'; g.fillText(fmtN(r.v), labW + bw + 5, y + rh * 0.68); });
+}
+function renderLive() {
+  if ($('#main').dataset.active !== 'uebersicht') return;   // unsichtbare Canvas haben keine Groesse
+  const nodes = Object.keys(STATE.nodes); const last = a => a.length ? a[a.length - 1] : null; const col = i => PAL[i % PAL.length];
+  $('#lv-rpm').textContent = last(LIVE.rpm) != null ? fmtN(last(LIVE.rpm)) : '–'; spark('#sp-rpm', [{ v: LIVE.rpm, c: PAL[0] }], { fill: true });
+  $('#lv-tps').textContent = last(LIVE.tps) != null ? fmtN(last(LIVE.tps)) : '–'; spark('#sp-tps', [{ v: LIVE.tps, c: PAL[1] }], { fill: true });
+  $('#lv-gpu').innerHTML = nodes.map((n, i) => `<span style="color:${col(i)}">● ${esc(n)} <b>${STATE.nodes[n].gpu_known ? STATE.nodes[n].gpu_util + ' %' : '–'}</b></span>`).join('') || '–';
+  spark('#sp-gpu', nodes.map((n, i) => ({ v: LIVE.gpu[n] || [], c: col(i) })), { max: 100 });
+  $('#lv-vram').innerHTML = nodes.map((n, i) => `<span style="color:${col(i)}">● ${esc(n)} <b>${STATE.nodes[n].gpu_known ? (STATE.nodes[n].vram_free_gib ?? 0).toFixed(1) : '–'}</b></span>`).join('') || '–';
+  spark('#sp-vram', nodes.map((n, i) => ({ v: LIVE.vram[n] || [], c: col(i) })), { max: Math.max(1, ...nodes.map(n => STATE.nodes[n].vram_total_gib || 0)) });
+  $('#lv-inflight').innerHTML = `${last(LIVE.inflight) ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">laufend</span> · <span class="${last(LIVE.waiting) ? 'warn' : ''}">${last(LIVE.waiting) ?? 0}</span> <span class="muted" style="font-size:12px;font-weight:normal">wartend</span>`;
+  spark('#sp-inflight', [{ v: LIVE.inflight, c: PAL[0] }, { v: LIVE.waiting, c: PAL[2] }]);
+  const days = Object.entries((USAGE || {}).days || {}).sort();
+  bars('#ch-days', days.map(([d]) => d.slice(8) + '.' + d.slice(5, 7)), [{ v: days.map(([, d]) => (d.requests || 0) - (d.errors || 0)), c: PAL[0] }, { v: days.map(([, d]) => d.errors || 0), c: PAL[4] }],
+       { line: { v: days.map(([, d]) => ((d.prompt_tokens || 0) + (d.completion_tokens || 0)) / 1000), c: PAL[2] } });
+  const bk = {}; for (const s of METRICS?.skirnir_request_duration_seconds_bucket || []) bk[s.l.le] = (bk[s.l.le] || 0) + s.v;
+  const les = Object.keys(bk).filter(k => k !== '+Inf').sort((a, b) => Number(a) - Number(b)); let prev = 0;
+  const per = les.map(le => { const c = bk[le] - prev; prev = bk[le]; return c; }); if (les.length) per.push((bk['+Inf'] ?? prev) - prev);
+  bars('#ch-dur', les.length ? [...les.map(l => '≤' + l), '>' + les[les.length - 1]] : [], [{ v: per, c: PAL[3] }]);
+  donut('#ch-node', groupBy('skirnir_requests_total', 'node')); donut('#ch-role', groupBy('skirnir_requests_total', 'role')); donut('#ch-client', groupBy('skirnir_requests_total', 'client'));
+  hbars('#ch-tps', (METRICS?.skirnir_perf_gen_tps || []).filter(s => s.v > 0).sort((a, b) => b.v - a.v).slice(0, 8).map((s, i) => ({ label: `${s.l.model} @ ${s.l.node}`, v: s.v, c: col(i) })));
+  renderModels(last, col);
+}
+// Effektiv genutzte Modelle: gestapelter Verlauf (Anfragen/min je Modell), Legende mit aktuellem Anteil, Donuts seit Start
+function renderModels(last, col) {
+  const active = Object.entries(LIVE.models).filter(([, a]) => a.some(v => v > 0)).sort((a, b) => (last(b[1]) || 0) - (last(a[1]) || 0) || b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0));
+  const totalNow = active.reduce((a, [, v]) => a + (last(v) || 0), 0);
+  $('#lv-models').innerHTML = active.length ? active.map(([m, v], i) => `<span style="color:${col(i)}">● ${esc(m)} <b>${totalNow ? Math.round(100 * (last(v) || 0) / totalNow) + ' %' : '–'}</b> <span class="muted">${fmtN(last(v) || 0)}/min</span></span>`).join('') : '<span class="muted">noch keine Anfragen im 30-s-Fenster</span>';
+  stacked('#ch-models', active.map(([, v], i) => ({ v, c: col(i) })));
+  donut('#ch-model-share', groupBy('skirnir_requests_total', 'model'));
+  donut('#ch-model-tokens', groupBy('skirnir_tokens_total', 'model', l => l.kind === 'completion'));
+}
+async function loadMetrics() {
+  try { const r = await fetch('/metrics'); if (r.ok) METRICS = parseMetrics(await r.text()); } catch {}
+  try { USAGE = await api('/admin/usage'); } catch {}
+}
+
+function renderOps() {
+  const u = STATE.usage_today || {}, adm = STATE.admission || {}, sch = STATE.scheduler || {}, b = STATE.build || {}, sc = STATE.supply_chain || {};
+  const cloudSpend = Object.values(STATE.cloud || {}).reduce((a, c) => a + (c.spend_month_chf || 0), 0);
+  const q = (adm.entries || []).map(e => `<div class="muted">${esc(e.priority)} · ${esc(e.role)} → ${esc(e.node)} · ${e.waiting_s} s</div>`).join('');
+  const w = sch.score || {};
+  $('#ops').innerHTML = `
+    <div class="tile"><h4>Nutzung heute</h4><div class="big">${u.requests ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">Anfragen</span></div>
+      <div class="muted">${((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)).toLocaleString('de-CH')} Tokens · ${u.errors ?? 0} Fehler · <span class="cloudc">${fmtChf(u.cost_chf)}</span> Cloud</div>
+      <div class="muted">Cloud im Monat: <b class="cloudc">${fmtChf(cloudSpend)}</b> · Sessions ${STATE.sessions ?? 0} · Idempotency ${(STATE.idempotency || {}).entries ?? 0}</div></div>
+    <div class="tile"><h4>Warteschlange</h4><div class="big ${adm.waiting ? 'warn' : ''}">${adm.waiting ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">wartend</span></div>${q || '<div class="muted">niemand wartet</div>'}</div>
+    <div class="tile"><h4>Scheduler</h4><div class="muted">Score: warm ${w.warm} · Anfrage −${w.inflight} · voll −${w.saturated} · VRAM ×${w.vram_free} · Gewicht ×${w.weight} · Tempo ×${w.speed} · Fehler −${w.errors}</div>
+      <div class="muted">Breaker: ${(sch.breaker || {}).failures} Fehler / ${(sch.breaker || {}).window_s} s → ${(sch.breaker || {}).open_s} s offen</div>
+      <div class="muted">Admission: ${(sch.admission || {}).max_inflight_default} je Knoten · Alterung ${(sch.admission || {}).aging_s} s · max. Wartezeit ${(sch.admission || {}).max_wait_s} s</div></div>
+    <div class="tile"><h4>Build &amp; Supply Chain</h4><div class="muted">${b.present ? `Deploy ${esc((b.deployed_at || '').replace('T', ' '))} von ${esc(b.by || '?')} · ${Object.keys(b.files || {}).length} Dateien (SHA-256)` : 'kein Manifest'}</div>
+      ${Object.entries(sc).map(([n, v]) => `<div class="muted">${esc(n)}: Ollama ${esc(v.ollama_version || '?')} · ${Object.keys(v.models || {}).length} Modelle</div>`).join('')}</div>`;
+}
+
+function renderDecisions() {
+  $('#decisions').innerHTML = (STATE.decisions || []).slice().reverse().map(d => {
+    const t = d.ts.slice(11);
+    if (d.event === 'route') return `<div>${t} <b>${esc(d.role)}</b> → ${d.cloud || String(d.node).startsWith('cloud:') ? '<span class="cloudc">☁ </span>' : ''}${esc(d.node)} · ${esc(d.model)} · tier ${d.tier} · ctx ${d.ctx ?? 'default'} · ${d.warm ? '<span class="ok">warm</span>' : 'kalt'}${d.canary ? ' · 🐤' : ''}${d.reason ? ' · <span class="muted">' + esc(d.reason) + '</span>' : ''}${d.skipped ? ` · <span class="warn">${d.skipped} übersprungen</span>` : ''}${d.client ? ' · 👥 ' + esc(d.client) : ''}${d.via && d.via !== 'ollama' ? ' · ' + esc(d.via) : ''}</div>`;
+    if (d.event === 'no_node') return `<div class="bad">${t} <b>${esc(d.role)}</b> → kein Knoten verfügbar</div>`;
+    if (d.event === 'unsatisfiable') return `<div class="bad">${t} <b>${esc(d.role)}</b> → keine Stufe kann: ${esc(d.reasons || '')}</div>`;
+    if (d.event === 'breaker') return `<div class="${d.state === 'closed' ? 'ok' : 'bad'}">${t} Breaker ${esc(d.node)} → ${esc(d.state)} ${esc(d.reason || '')}</div>`;
+    if (d.event === 'queued') return `<div class="warn">${t} Warteschlange: <b>${esc(d.role)}</b> (${esc(d.priority)}) wartet auf ${esc(d.node)} (${d.inflight} aktiv)</div>`;
+    if (d.event === 'admission_timeout') return `<div class="bad">${t} Deadline: <b>${esc(d.role)}</b> (${esc(d.priority)}) nach ${d.waited_ms} ms abgewiesen</div>`;
+    if (d.event === 'shadow') return `<div class="muted">${t} 🌒 Shadow <b>${esc(d.role)}</b> → ${esc(d.model)} auf ${esc(d.node || '–')}: ${esc(d.status)}${d.ms ? ' · ' + d.ms + ' ms' : ''}</div>`;
+    if (d.event === 'prewarm') return `<div class="muted">${t} prewarm ${esc(d.model)} auf ${esc(d.node)} (${esc(d.reason || '')})</div>`;
+    if (d.event === 'loadtest') return `<div class="muted">${t} 🧪 Lasttest ${d.n} × ${d.concurrency} parallel: ${d.seconds} s, ${d.throughput} Anfragen/s</div>`;
+    if (d.event === 'decision') return `<div>${t} 🧭 Auto-Rolle: ${esc(d.engine)} → <b>${esc(d.selected)}</b> <span class="muted">p ${d.top} · Abstand ${d.margin} · ${d.latency_ms} ms${(d.fallback || []).length ? ' · Fallback: ' + esc(d.fallback.join(' | ')) : ''}</span>${d.client ? ' · 👥 ' + esc(d.client) : ''}</div>`;
+    return `<div class="warn">${t} ${esc(d.event)} ${esc(d.node || '')} ${esc(d.reason || d.state || '')}</div>`;
+  }).join('') || '<span class="muted">noch keine</span>';
+}
+
+function addRole() { const n = $('#newRole').value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, ''); if (!n || CFG.roles[n]) return; CFG.roles[n] = { latency_first: false, priority: 'normal', tiers: [{ model: allModels()[0], num_ctx: 8192, busy_ok: true }] }; dirty = true; $('#newRole').value = ''; renderRoles(); }
+function delRole(r) { if (confirm(`Rolle ${r} löschen? HA-Subentries, die sie nutzen, bekommen dann 404.`)) { delete CFG.roles[r]; dirty = true; renderRoles(); } }
+function addTier(r) { CFG.roles[r].tiers.push({ model: allModels()[0], num_ctx: 8192, busy_ok: true }); dirty = true; renderRoles(); }
+function delTier(r, i) { CFG.roles[r].tiers.splice(i, 1); dirty = true; renderRoles(); }
+function moveTier(r, i, d) { const t = CFG.roles[r].tiers; const j = i + d; if (j < 0 || j >= t.length) return; [t[i], t[j]] = [t[j], t[i]]; dirty = true; renderRoles(); }
+
+async function save() {
+  const roles = {};
+  for (const [n, r] of Object.entries(CFG.roles)) {
+    roles[n] = { tiers: r.tiers, latency_first: r.latency_first, priority: r.priority || 'normal' };
+    if (r.canary) roles[n].canary = r.canary;
+    if (r.shadow) roles[n].shadow = r.shadow;
+  }
+  const body = { roles, expose_concrete_models: $('#exposeConcrete').checked };
+  if (Object.keys(SET_CHANGES).length) body.settings = SET_CHANGES;
+  if (Object.keys(MODEL_CHANGES).length) body.models = MODEL_CHANGES;
+  if (MODEL_DELETES.length) body.delete_models = MODEL_DELETES;
+  try {
+    const r = await api('/admin/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const n = Object.keys(SET_CHANGES).length;
+    SET_CHANGES = {}; MODEL_CHANGES = {}; MODEL_DELETES = [];
+    const ok = `<span class="ok">gespeichert (${r.roles} Rollen${n ? ', ' + n + ' Einstellung(en)' : ''}), Router neu konfiguriert</span>`;
+    dirty = false; rolesDirty = false; await load();
+    $('#msg').innerHTML = ok; $('#kmsg').innerHTML = ok; $('#cmsg').innerHTML = ok;
+    $('#smsg').innerHTML = `<span class="ok">gespeichert – ${r.settings ?? 0} Einstellung(en) weichen von config.yaml ab</span>`;
+    markDirty();
+  } catch (e) { for (const id of ['#msg', '#kmsg', '#smsg', '#cmsg']) $(id).innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+
+function durationLine(r) {   // Gesamtdauer aufgeteilt: Warteschlange (Admission) + Modell (Ollama) + Rest (Router, Netz, Tunnel)
+  const total = r.seconds || 0, q = (r.queued_ms || 0) / 1000, m = (r.backend_ms || 0) / 1000, rest = Math.max(0, total - q - m);
+  const f = v => v.toFixed(v < 10 ? 2 : 1) + ' s';
+  const parts = [`${q >= 0.5 ? '⚠ ' : ''}Warteschlange ${f(q)}`, `Modell ${f(m)}${r.load_ms > 100 ? ` (davon Laden ${(r.load_ms / 1000).toFixed(1)} s)` : ''}`, `Router/Netz ${f(rest)}`];
+  return `Dauer: ${f(total)} = ${parts.join(' + ')}`;
+}
+async function tryIt() {
+  const out = $('#tryOut'); out.textContent = '… läuft'; out.className = '';
+  const body = { model: $('#tryModel').value, prompt: $('#tryPrompt').value, think: $('#tryThink').checked,
+                 routing: { execution: $('#tryExec').value || undefined, data_class: $('#tryClass').value || undefined, priority: $('#tryPrio').value || undefined } };
+  if ($('#tryCtx').value) body.num_ctx = +$('#tryCtx').value;
+  try {
+    const r = await api('/admin/try', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = r.decision || {}, ri = r.routing || {};
+    const think = r.thinking_chars ? ` (davon unsichtbares Nachdenken: ~${Math.round(r.thinking_chars / 4)} Token ≈ ${(r.thinking_chars / 4 / (r.perf ? r.perf.gen_tps : 1)).toFixed(1)} s)` : '';
+    const skipped = (ri.skipped || []).map(s => `  - Stufe ${s.tier} ${s.model}@${s.ctx}: ${s.reason}`).join('\n');
+    out.textContent = (r.status === 200
+      ? `Knoten: ${d.node} (${d.node_state})${ri.cloud ? ' ☁ Cloud' : ''}   Stufe: ${d.tier}   Modell: ${d.model}   ctx: ${d.ctx ?? 'default'}   ${d.warm ? 'warm' : 'Kaltstart'}   Grund: ${ri.reason || d.reason || '–'}   Priorität: ${ri.priority || '–'}${ri.data_class ? '   Datenklasse: ' + ri.data_class : ''}
+${durationLine(r)}${r.perf ? `\nTempo: ${r.perf.gen_tps} tok/s gen · ${r.perf.prompt_tps ?? '–'} tok/s prompt · ${r.perf.tokens} Token${think}` : ''}${skipped ? '\nübersprungen:\n' + skipped : ''}
+\n${r.answer}`
+      : `HTTP ${r.status}: ${r.answer}`);
+    await refresh();
+  } catch (e) { out.textContent = 'Fehler: ' + e.message; }
+}
+
+async function loadTest() {
+  const out = $('#ltOut'), btn = $('#ltBtn'); const n = +$('#ltN').value || 20, c = +$('#ltC').value || 4;
+  if (!confirm(`${n} Anfragen mit ${c} parallel an ${$('#tryModel').value} schicken? Das belegt die GPU für einige Sekunden.`)) return;
+  btn.disabled = true; out.className = ''; out.textContent = `… läuft (${n} Anfragen, ${c} parallel)`; $('#ltMsg').textContent = '';
+  const body = { model: $('#tryModel').value, prompt: $('#tryPrompt').value, n, concurrency: c, probe_interactive: $('#ltProbe').checked };
+  if ($('#tryCtx').value) body.num_ctx = +$('#tryCtx').value;
+  const f = v => v == null ? '–' : v.toFixed(2) + ' s';
+  try {
+    const r = await api('/admin/loadtest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const s = r.normal, p = r.interactive;
+    const line = (label, x) => `${label}: ${x.ok}/${x.count} ok   Latenz p50 ${f(x.wall_p50)} · p95 ${f(x.wall_p95)} · max ${f(x.wall_max)}   Wartezeit ∅ ${f(x.queue_mean)} · max ${f(x.queue_max)}   Modell ∅ ${f(x.model_mean)}`;
+    let txt = `${r.n} Anfragen, ${r.concurrency} parallel, ${r.model}: ${r.seconds} s gesamt → ${r.throughput} Anfragen/s\n` + line('normal     ', s) + `\nKnoten: ${Object.entries(s.nodes).map(([k, v]) => k + ' ' + v).join(', ')}`;
+    if (p && p.count) {
+      txt += '\n' + line('interactive', p);
+      const gain = s.queue_mean != null && p.queue_mean != null ? s.queue_mean - p.queue_mean : null;
+      txt += gain != null ? `\n→ interactive wartete im Mittel ${f(Math.abs(gain))} ${gain > 0 ? 'kürzer' : 'länger'} als normal${gain > 0.2 ? ' – Priorität wirkt' : gain > -0.2 ? ' – kein messbarer Unterschied (Schlange zu kurz?)' : ' – ⚠ Priorität wirkt nicht'}` : '';
+    }
+    if (s.errors && s.errors.length) txt += `\nFehler: ${s.errors.join(' | ')}`;
+    out.textContent = txt; await refresh();
+  } catch (e) { out.textContent = 'Fehler: ' + e.message; }
+  btn.disabled = false;
+}
+async function bench(m) {
+  try { const r = await api('/admin/bench', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: m }) });
+        $('#msg').innerHTML = `<span class="ok">Benchmark von ${esc(m)} läuft auf ${esc(r.node)} …</span>`; await refresh(); }
+  catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function measure(m) {
+  try { const r = await api('/admin/measure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: m }) });
+        $('#msg').innerHTML = `<span class="ok">Messung von ${esc(m)} läuft auf ${esc(r.node)} …</span>`; await refresh(); }
+  catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function renderRegistry() {
+  let r; try { r = await api('/admin/nodes'); } catch (e) { return; }
+  const tb = $('#registry tbody'); tb.innerHTML = '';
+  if (!r.nodes.length) { tb.innerHTML = '<tr><td colspan="8" class="muted">noch kein Agent registriert</td></tr>'; return; }
+  for (const n of r.nodes) {
+    const f = n.facts || {}, p = n.policy || {};
+    const st = n.state === 'approved' ? `<span class="state ${n.node_state || 'offline'}">${n.node_state || 'offline'}</span>`
+      : n.state === 'pending' ? '<span class="state busy">wartet auf Freigabe</span>' : '<span class="state offline">gesperrt</span>';
+    const pol = `<label><input type="checkbox" ${p.wol ? 'checked' : ''} onchange="nodePolicy('${n.fp}', {wol: this.checked})"> WOL</label><br>
+      <label>Gewicht <input type="number" min="1" max="10" value="${p.weight ?? 1}" style="width:48px" onchange="nodePolicy('${n.fp}', {weight: +this.value})"></label><br>
+      <label title="gleichzeitige Anfragen (Admission); leer = Default aus der Konfiguration; sollte OLLAMA_NUM_PARALLEL des Rechners entsprechen">gleichzeitig <input type="number" min="1" max="32" value="${p.max_inflight ?? ''}" placeholder="def" style="width:48px" onchange="nodePolicy('${n.fp}', {max_inflight: this.value ? +this.value : null})"></label><br>
+      <label title="busy ab dieser GPU-Auslastung in % (mit >= 1 GiB fremdem VRAM); leer = global (Einstellungen › Busy-Erkennung)">busy ab GPU <input type="number" min="1" max="100" value="${p.busy_gpu_util_pct ?? ''}" placeholder="glob" style="width:48px" onchange="nodePolicy('${n.fp}', {busy_gpu_util_pct: this.value ? +this.value : null})"> %</label><br>
+      <label title="busy ab so viel fremdem VRAM über der Baseline in GiB; leer = global. Kleine Karten brauchen kleinere Werte: auf 16 GiB neben 8 GiB Ollama bleibt einem Spiel nie 6 GiB">busy ab fremd <input type="number" min="0.1" max="64" step="0.5" value="${p.busy_foreign_gib ?? ''}" placeholder="glob" style="width:48px" onchange="nodePolicy('${n.fp}', {busy_foreign_gib: this.value ? +this.value : null})"> GiB</label><br>
+      <label><input type="checkbox" ${p.mqtt === false ? '' : 'checked'} onchange="nodePolicy('${n.fp}', {mqtt: this.checked})"> MQTT-Gerät in HA</label>`;
+    const btn = n.state === 'pending' ? `<button onclick="nodeAct('${n.fp}','approve')">freigeben</button><br><button class="small" onclick="nodeDel('${n.fp}')">löschen</button>`
+      : n.state === 'approved' ? `<button class="small" onclick="if(confirm('Knoten ${esc(n.name)} sperren? Der Tunnel wird getrennt.')) nodeAct('${n.fp}','revoke')">sperren</button>`
+      : `<button onclick="nodeAct('${n.fp}','approve')">wieder freigeben</button><br><button class="small" onclick="nodeDel('${n.fp}')">löschen</button>`;
+    const vram = f.vram_total_mib ? (f.vram_total_mib / 1024).toFixed(1) + ' GiB' : '';
+    const base = n.learned && n.learned.baseline_gib != null ? `${n.learned.baseline_gib} GiB gelernt <span class="muted">(${n.learned.samples || 0} Proben)</span>` : '<span class="muted">noch nichts gelernt</span>';
+    tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(n.name)}</b><div class="muted" title="${n.fp}">${n.fp.slice(0, 16)}…${n.connected ? ' · verbunden' : ''}</div></td>
+      <td>${st}<div class="muted">seit ${esc((n.first_seen || '').replace('T', ' '))}${n.remote ? ' · ' + esc(n.remote) : ''}</div></td>
+      <td>${esc(f.hostname || '')}<div class="muted">${esc([f.manufacturer, f.model].filter(Boolean).join(' '))}<br>${esc(f.os || '')}/${esc(f.arch || '')} · Agent ${esc(f.agent_version || '?')} · Ollama ${esc(f.ollama_version || '?')}</div></td>
+      <td>${esc(f.gpu || '–')}<div class="muted">${vram}</div></td><td>${esc(f.mac || '–')}<div class="muted">${esc(f.local_ip || '')}</div></td>
+      <td>${base}${p.foreign_vram_baseline_gib != null ? `<div class="muted">Policy ${p.foreign_vram_baseline_gib} GiB</div>` : ''}</td>
+      <td>${pol}</td><td>${btn}</td></tr>`);
+  }
+}
+async function nodeAct(fp, action) { try { await api(`/admin/nodes/${fp}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (e) { alert(e.message); } await refresh(); }
+async function nodePolicy(fp, pol) { try { await api(`/admin/nodes/${fp}/policy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pol) }); } catch (e) { alert(e.message); } await refresh(); }
+async function nodeDel(fp) { if (!confirm('Registereintrag löschen?')) return; try { await api(`/admin/nodes/${fp}`, { method: 'DELETE' }); } catch (e) { alert(e.message); } await refresh(); }
+
+let TICK = 0;
+async function refresh() { STATE = await api('/admin/state'); await loadMetrics(); sampleLive(); renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderOps(); renderDecisions();
+  if (!dirty && (++TICK % 5 === 0)) { CFG = await api('/admin/config'); renderModels(); } }   // Konfiguration aendert sich selten: alle 15 s statt 3 s
+async function load() { CFG = await api('/admin/config'); STATE = await api('/admin/state'); await loadMetrics(); sampleLive(); dirty = false; renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderModels(); renderRoles(); renderSettings(); renderClients(); renderOps(); renderDecisions(); $('#msg').textContent = ''; }
+// Rollen-Editor setzt nur `dirty`; Tab-Punkt daraus ableiten (Einstellungen/Katalog pflegen ihre Punkte selbst)
+$('#roles').addEventListener('change', () => { rolesDirty = true; markDirty(); });
+$('#roles').addEventListener('click', e => { if (e.target.tagName === 'BUTTON') { rolesDirty = true; setTimeout(markDirty, 0); } });
+$('#exposeConcrete').addEventListener('change', () => { rolesDirty = true; markDirty(); });
+showTab(location.hash.slice(1) || (() => { try { return localStorage.getItem('skirnir.tab'); } catch { return null; } })() || 'uebersicht');
+load(); setInterval(() => refresh().catch(() => {}), 3000);
+</script>
+</body>
+</html>
