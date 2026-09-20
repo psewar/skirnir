@@ -1,213 +1,217 @@
-# Skirnir – rollen- und zustandsbewusster Router für Ollama
+# Skirnir – a role- and state-aware router for Ollama
+
+**English** · [Deutsch](README.de.md)
 
 <img src="design/skirnir-logo.png" alt="Skirnir" width="120" align="right">
 
-Skirnir steht vor einer oder mehreren Ollama-Installationen auf GPU-Rechnern und verhält sich gegenüber seinen Clients wie
-**ein** Ollama-Server. Clients fragen nicht nach einem konkreten Modell, sondern nach einer **Rolle** (`standard:latest`,
-`gross:latest`, `code:latest` …); der Router wählt pro Anfrage Knoten, Modell und Kontextgrösse – nach dem, was gerade
-geladen ist, ob die GPU von einem Spiel belegt wird, wie viel VRAM frei ist, wie schnell und wie fehlerfrei ein Modell auf
-einem Knoten zuletzt war. Die Ollama-API bleibt unverändert, dazu kommt eine OpenAI-kompatible Schnittstelle unter `/v1`.
+Skirnir sits in front of one or more Ollama installations on GPU machines and looks to its clients like **a single** Ollama
+server. Clients do not ask for a specific model but for a **role** (`standard:latest`, `gross:latest`, `code:latest` …; role
+names are yours to choose, the example configuration uses German ones, `gross` = large). For each request the router picks
+node, model and context size based on what is loaded right now, whether the GPU is occupied by a game, how much VRAM is free,
+and how fast and how error-free a model was on a node recently. The Ollama API stays unchanged, plus there is an
+OpenAI-compatible interface under `/v1`.
 
-Gebaut für ein Homelab: Home Assistant, Node-RED und lokale Agenten-Frameworks als Clients, Windows-Gaming-PCs als GPU-Knoten,
-die nicht rund um die Uhr laufen und nicht nur der KI gehören. Der Name: Skirnir ist in der nordischen Mythologie Freyrs Bote,
-der in fremde Reiche reitet, dort verhandelt und mit der Antwort zurückkehrt.
+Built for a homelab: Home Assistant, Node-RED and local agent frameworks as clients, Windows gaming PCs as GPU nodes that are
+not running around the clock and do not belong to the AI alone. The name: in Norse mythology Skirnir is Freyr's messenger, who
+rides into foreign realms, negotiates there and returns with the answer.
 
-**Stand:** Version 0.1.0, seit September 2026 in einem Homelab im Dauerbetrieb, ein Entwickler. Keine Releases, keine
-Stabilitätszusagen, Dokumentation auf Deutsch. Wer es nachbaut, sollte Python, systemd und Ollama kennen.
+**Status:** version 0.1.0 (first release), in continuous operation in one homelab since September 2026, one developer. No
+stability guarantees; this README exists in English and German, the sub-READMEs (agent, decision engine) are in German. If you
+want to run it, you should know Python, systemd and Ollama.
 
-## Was Skirnir kann
+## What Skirnir does
 
-- **Rollen statt Modellnamen.** Eine Rolle ist eine Rangliste von Stufen (`Modell @ num_ctx`, optional `busy_ok`). Der Router
-  nimmt die beste Stufe, die ein Knoten jetzt bedienen kann; ein schon geladenes Modell gewinnt („warm zuerst“).
-- **Mehrere GPU-Knoten**, Windows oder Linux, angebunden über einen kleinen **Agenten** (Go), der einen ausgehenden Tunnel zum
-  Router hält. Kein offener Port am Knoten, kein Zertifikat, keine feste IP. Wake-on-LAN für schlafende Knoten.
-- **Busy-Erkennung.** Belegt ein Spiel die GPU (fremdes VRAM, Auslastung), laufen dort nur noch `busy_ok`-Stufen; grosse Modelle
-  werden entladen und nach dem Spielen wieder vorgewärmt.
-- **Scheduler** mit Score (warm, Last, VRAM, Tempo, Fehlerrate), Circuit Breaker je Knoten und **Admission Control** mit
-  Prioritäten und Deadline im Router statt in Ollamas eigener Schlange.
-- **Der Client beschreibt, der Router entscheidet:** ein optionaler `routing`-Block im Request nennt Pflicht-Fähigkeiten
-  (`tools`, `vision`, `thinking`, `structured` …), Mindestkontext, Priorität, Sitzung, Datenklasse.
-- **Auto-Rolle** `auto:latest`: eine Kette lokaler Entscheidungs-Engines (Embedding-Modell auf CPU, kleines LLM, TF-IDF, Regeln)
-  wählt die Rolle aus dem Text der Anfrage. Gemessen 93 bis 98 % Treffer.
-- **Cloud als Stufe.** OpenAI- und Anthropic-Modelle können als letzte (oder erste) Stufe in Rollen liegen, mit Datenklassen,
-  Credential-Scan, Monatsbudget in CHF und Egress-Allowlist. Standardmässig geht nichts in die Cloud.
-- **Client-Identitäten** auf dem Inferenz-Port (Bearer, Basic, Quell-IP), Rollen- und Modellsperren, Rate Limit, Audit-Log.
-- **Beobachtbar:** Prometheus-Endpunkt, Nutzung je Tag und Client, Entscheidungsprotokoll, Home-Assistant-Gerät per MQTT-Discovery,
-  Web-UI mit Live-Grafiken, Katalog, Rollen-Editor, Probierfeld und Lasttest.
-- **Betriebsfest:** Config-Schema mit Vorschlägen bei Tippfehlern, Idempotency-Key, Canary- und Shadow-Stufen je Rolle,
-  Deploy-Manifest mit SHA-256, Ollama-Versionen und Modell-Digests je Knoten.
-- **TLS überall**, ein Prozess, ein Event-Loop, keine Datenbank. Abhängigkeiten: `aiohttp`, `pyyaml`, `cryptography`,
-  optional `paho-mqtt` und `uvloop`.
+- **Roles instead of model names.** A role is a ranked list of tiers (`model @ num_ctx`, optionally `busy_ok`). The router takes
+  the best tier a node can serve right now; an already loaded model wins ("warm first").
+- **Multiple GPU nodes**, Windows or Linux, connected through a small **agent** (Go) that keeps an outbound tunnel to the router.
+  No open port on the node, no certificate, no fixed IP. Wake-on-LAN for sleeping nodes.
+- **Busy detection.** If a game occupies the GPU (foreign VRAM, utilisation), only `busy_ok` tiers run there; large models are
+  unloaded and prewarmed again after the game.
+- **Scheduler** with a score (warm, load, VRAM, speed, error rate), a circuit breaker per node and **admission control** with
+  priorities and deadlines in the router instead of in Ollama's own queue.
+- **The client describes, the router decides:** an optional `routing` block in the request names required capabilities
+  (`tools`, `vision`, `thinking`, `structured` …), minimum context, priority, session, data class.
+- **Auto role** `auto:latest`: a chain of local decision engines (embedding model on CPU, small LLM, TF-IDF, rules) picks the role
+  from the text of the request. Measured 93 to 98 % accuracy.
+- **Cloud as a tier.** OpenAI and Anthropic models can sit as the last (or first) tier of a role, with data classes, credential
+  scan, monthly budget in CHF and an egress allowlist. By default nothing goes to the cloud.
+- **Client identities** on the inference port (Bearer, Basic, source IP), role and model locks, rate limit, audit log.
+- **Observable:** Prometheus endpoint, usage per day and client, decision log, Home Assistant device via MQTT discovery, web UI
+  with live charts, catalogue, role editor, playground and load test.
+- **Operations-ready:** config schema with suggestions on typos, idempotency key, canary and shadow tiers per role, deploy manifest
+  with SHA-256, Ollama versions and model digests per node.
+- **TLS everywhere**, one process, one event loop, no database. Dependencies: `aiohttp`, `pyyaml`, `cryptography`, optionally
+  `paho-mqtt` and `uvloop`.
 
-## Architektur
+## Architecture
 
 ```
-  Clients: Home Assistant · Node-RED · OpenAI-kompatible Werkzeuge · Agenten-Frameworks
-      │  https :11434   Ollama-API (/api/*) und OpenAI-API (/v1/*), Client-Identität
+  Clients: Home Assistant · Node-RED · OpenAI-compatible tools · agent frameworks
+      │  https :11434   Ollama API (/api/*) and OpenAI API (/v1/*), client identity
       ▼
- ┌────────────────────────── Skirnir (Debian-Container, Python 3.11, aiohttp) ──────────────────────────┐
- │  Rollen & Stufen · Scheduler · Admission · Decision Engine · Cloud-Stufen · Metriken · Usage · Audit │
- │  Web-UI und /admin/*  https :11435 (Basic Auth)              MQTT-Discovery ─────▶ Home Assistant     │
+ ┌────────────────────────── Skirnir (Debian container, Python 3.11, aiohttp) ─────────────────────────┐
+ │  Roles & tiers · Scheduler · Admission · Decision engine · Cloud tiers · Metrics · Usage · Audit    │
+ │  Web UI and /admin/*  https :11435 (Basic Auth)              MQTT discovery ─────▶ Home Assistant   │
  └───────────────▲──────────────────────────────────▲──────────────────────────────────────────────────┘
-                 │ wss /v1/tunnel (Agent → Router,   │ https
-                 │ Ed25519-Schlüssel, Multiplex)      │
+                 │ wss /v1/tunnel (agent → router,   │ https
+                 │ Ed25519 key, multiplexed)         │
    ┌─────────────┴──────────────┐         ┌──────────┴───────────┐
-   │ GPU-Knoten (Windows/Linux) │  …      │ Cloud-Anbieter       │
+   │ GPU node (Windows/Linux)   │  …      │ Cloud providers      │
    │ Agent (Go) ◀▶ Ollama       │         │ OpenAI · Anthropic   │
    └────────────────────────────┘         └──────────────────────┘
 ```
 
-Der Router pollt jeden Knoten alle 5 s (`/api/tags`, `/api/ps`), der Agent meldet alle 2 s GPU-Auslastung und VRAM. Aus beidem
-entsteht je Knoten der Zustand `offline` / `free` / `busy`. Alle Ollama-Aufrufe des Routers laufen durch den Tunnel des Agenten;
-Ollama selbst bleibt auf `localhost`.
+The router polls every node every 5 s (`/api/tags`, `/api/ps`); the agent reports GPU utilisation and VRAM every 2 s. From both
+the router derives the per-node state `offline` / `free` / `busy`. All Ollama calls made by the router go through the agent's
+tunnel; Ollama itself stays on `localhost`.
 
-## Schnittstellen
+## Interfaces
 
-| Port | Was | Wer |
+| Port | What | Who |
 |---|---|---|
-| **11434** | Ollama-API: `GET /api/tags`, `/api/ps`, `/api/version`, `POST /api/show`; Inferenz `POST /api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings` (Streaming wird durchgereicht, `model` in der Antwort trägt den Rollennamen). `/api/pull`, `push`, `create`, `copy`, `delete` → 403. TLS mit dem eigenen Zertifikat (`api_tls`). | Clients |
-| **11434 `/v1`** | OpenAI-kompatibel: `GET /v1/models`, `POST /v1/chat/completions` (SSE-Streaming, `tools`, `response_format`), `/v1/completions`, `/v1/embeddings`. Der Router übersetzt selbst nach `/api/chat`, damit Rollen, Kontextstufen und `keep_alive` gelten – Ollamas eigenes `/v1` kennt weder `num_ctx` noch `keep_alive`. | OpenAI-Clients |
-| **11435** | Web-UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/nodes`, `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2-Hashes in der Konfiguration, geprüftes Paar 10 min gecacht). | Browser, Skripte, Prometheus |
-| **11435 `/v1/tunnel`** | WebSocket vom Agenten: Anmeldung mit Ed25519-Signatur auf eine Challenge, Heartbeat, Konfigurationspaket, alle Ollama-Aufrufe als multiplexte Streams (REQ/RESP/DATA/END/ERR/CANCEL). | Agent → Router |
-| MQTT 8883 | Discovery und Zustände für Home Assistant (TLS, Passwort aus `secrets.env`). | Router → Broker |
+| **11434** | Ollama API: `GET /api/tags`, `/api/ps`, `/api/version`, `POST /api/show`; inference `POST /api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings` (streaming is passed through, `model` in the response carries the role name). `/api/pull`, `push`, `create`, `copy`, `delete` → 403. TLS with the router's own certificate (`api_tls`). | Clients |
+| **11434 `/v1`** | OpenAI-compatible: `GET /v1/models`, `POST /v1/chat/completions` (SSE streaming, `tools`, `response_format`), `/v1/completions`, `/v1/embeddings`. The router translates to `/api/chat` itself so that roles, context tiers and `keep_alive` apply – Ollama's own `/v1` knows neither `num_ctx` nor `keep_alive`. | OpenAI clients |
+| **11435** | Web UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/nodes`, `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2 hashes in the configuration, a verified pair is cached for 10 min). | Browser, scripts, Prometheus |
+| **11435 `/v1/tunnel`** | WebSocket from the agent: login with an Ed25519 signature over a challenge, heartbeat, configuration package, all Ollama calls as multiplexed streams (REQ/RESP/DATA/END/ERR/CANCEL). | Agent → router |
+| MQTT 8883 | Discovery and states for Home Assistant (TLS, password from `secrets.env`). | Router → broker |
 
-Anfragen dürfen 600 s dauern (`request_timeout_s`). Bricht der Client ab, schliesst der Router die Upstream-Antwort, der Tunnel
-schickt CANCEL, der Agent beendet die Ollama-Anfrage.
+Requests may take up to 600 s (`request_timeout_s`). If the client disconnects, the router closes the upstream response, the tunnel
+sends CANCEL and the agent terminates the Ollama request.
 
-## Rollen und Stufen
+## Roles and tiers
 
 ```yaml
 roles:
   standard:
     exposed_as: standard:latest
-    priority: normal                      # interactive | normal | batch (Admission)
+    priority: normal                      # interactive | normal | batch (admission)
     tiers:
       - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
       - { model: qwen3.6:35b-a3b, num_ctx: 32768 }
-      - { model: gemma4:12b,      num_ctx: 65536 }            # Ausweichstufe auf dem zweiten Knoten
-      - { model: granite4.2:8b,   num_ctx: 32768, busy_ok: true }   # darf auf einer spielenden GPU laufen
+      - { model: gemma4:12b,      num_ctx: 65536 }            # fallback tier on the second node
+      - { model: granite4.2:8b,   num_ctx: 32768, busy_ok: true }   # may run on a GPU that is gaming
   assist:
     priority: interactive
     tiers: [...]
 ```
 
-- **Rangliste = Qualitätsobergrenze und Kaltstart-Reihenfolge.** Ist ein Listenmodell auf irgendeinem Knoten schon geladen,
-  gewinnt es (unter mehreren warmen das ranghöchste). Global `modes.warm_first`, je Rolle `latency_first`.
-- **Kontextleiter.** Dasselbe Modell mit kleinerem `num_ctx` ist die nächste Stufe, wenn der Kontext nicht ins VRAM passt.
-  Passt-Prüfung: `VRAM-Bedarf = Gewichte + Kontext-Kosten × num_ctx/1000 + 0,8 GiB`. Gewichte und Kontext-Kosten je Modell
-  stehen im Katalog (`models:`), gemessen per UI-Knopf **Messen** (lädt bei 8k und 32k, liest `/api/ps`) oder geschätzt.
-- **Busy.** Ein Knoten ist `busy`, wenn fremdes VRAM (belegt − Ollama − Desktop-Grundverbrauch) über der Schwelle liegt oder die
-  GPU ohne Router-Anfragen ausgelastet ist. Dann laufen nur `busy_ok`-Stufen; nicht-`busy_ok`-Modelle werden alle 30 s entladen.
-  Der Desktop-Grundverbrauch wird je Knoten gelernt (Median der Stundenmittel bei ruhiger GPU) und durch einen Policy-Wert gedeckelt.
-- **Prewarm.** Nach dem Online-Gehen und nach `busy → free` lädt der Router die Rang-1-Modelle der Rollen wieder vor, so viele
-  zusammen ins VRAM passen. Eine **Residenz-Regel** holt ein verdrängtes Rang-1-Modell zurück, wenn der Verdränger 5 min nicht
-  mehr gefragt wurde – sonst bliebe „warm zuerst“ dauerhaft auf der Ausweichstufe hängen.
-- **Konkrete Modelle** (`qwen3-coder:30b`) sind weiter direkt aufrufbar (`expose_concrete_models`) und gehen 1:1 an einen Knoten,
-  der sie hat; sonst 404 wie bei Ollama.
-- **Canary** (`roles.<r>.canary: {model, num_ctx, percent}`) leitet einen Anteil des Verkehrs auf einen Kandidaten, auch kalt.
-  **Shadow** (`roles.<r>.shadow`) wiederholt einen Anteil der Anfragen nach der Antwort ohne Stream gegen ein zweites Modell auf
-  einem freien Knoten; der Client merkt nichts, Tempo und Fehlerrate landen in der Statistik.
+- **Ranking = quality ceiling and cold-start order.** If a listed model is already loaded on any node, it wins (among several warm
+  ones, the highest ranked). Globally `modes.warm_first`, per role `latency_first`.
+- **Context ladder.** The same model with a smaller `num_ctx` is the next tier when the context does not fit into VRAM.
+  Fit check: `VRAM need = weights + context cost × num_ctx/1000 + 0.8 GiB`. Weights and context cost per model live in the
+  catalogue (`models:`), measured with the UI button **Measure** (loads at 8k and 32k, reads `/api/ps`) or estimated.
+- **Busy.** A node is `busy` when foreign VRAM (used − Ollama − desktop baseline) exceeds the threshold or the GPU is loaded
+  without router requests. Then only `busy_ok` tiers run; non-`busy_ok` models are unloaded every 30 s. The desktop baseline is
+  learned per node (median of hourly means while the GPU is quiet) and capped by a policy value.
+- **Prewarm.** After coming online and after `busy → free` the router preloads the rank-1 models of the roles, as many as fit
+  into VRAM together. A **residency rule** brings back an evicted rank-1 model once the evictor has not been requested for
+  5 min – otherwise "warm first" would stay stuck on the fallback tier forever.
+- **Concrete models** (`qwen3-coder:30b`) remain directly callable (`expose_concrete_models`) and go 1:1 to a node that has
+  them; otherwise 404 as with Ollama.
+- **Canary** (`roles.<r>.canary: {model, num_ctx, percent}`) sends a share of the traffic to a candidate, even cold.
+  **Shadow** (`roles.<r>.shadow`) repeats a share of the requests after the response, without streaming, against a second model on
+  a free node; the client notices nothing, speed and error rate end up in the statistics.
 
-Rollen, Katalog und die meisten Laufzeit-Einstellungen sind in der UI editierbar; die UI schreibt eine Override-Datei
-`roles.yaml` neben die `config.yaml`, die Deploys überlebt. Ports, TLS, Basic-Auth, Identitäten, Anbieter-Endpunkte und
-Egress-Allowlist bleiben bewusst Deploy-Sache.
+Roles, catalogue and most runtime settings are editable in the UI; the UI writes an override file `roles.yaml` next to
+`config.yaml` that survives deploys. Ports, TLS, Basic Auth, identities, provider endpoints and the egress allowlist remain
+deploy matters on purpose.
 
-## Der Client beschreibt, der Router entscheidet
+## The client describes, the router decides
 
-Jeder Inferenz-Request darf einen `routing`-Block tragen. Ollama sieht ihn nie.
+Every inference request may carry a `routing` block. Ollama never sees it.
 
 ```json
 {"model": "standard:latest", "messages": [...],
  "routing": {"require": ["tools"], "prefer": ["thinking"], "min_context": 32768,
-             "priority": "interactive", "session_id": "unterhaltung-17",
+             "priority": "interactive", "session_id": "conversation-17",
              "data_class": "internal", "execution": "auto", "request_id": "ha-4711"}}
 ```
 
-| Feld | Wirkung |
+| Field | Effect |
 |---|---|
-| `require` | Pflicht-Fähigkeiten (`tools`, `vision`, `thinking`, `structured`, `embedding`, `insert`, `completion`). Stufen ohne sie fallen weg; kann keine Stufe der Rolle, kommt **400** mit Klartext. |
-| `prefer` | Wunsch: gibt es Stufen mit diesen Fähigkeiten, kommen nur sie in Frage, sonst wird der Wunsch ignoriert. |
-| `min_context` | Untergrenze für den Kontext der Stufe. |
-| `priority` | `interactive` < `normal` < `batch` für die Admission; sonst gilt die Rolle, gekappt durch das Client-Maximum. |
-| `deadline_ms` | maximale Wartezeit in der Warteschlange, danach 503 mit Klartext. |
-| `session_id` | Affinität: dieselbe Sitzung bleibt auf ihrem warmen Knoten (`session_affinity_ttl_s`, 30 min). |
-| `data_class`, `execution` | Datenklasse (`personal` < `internal` < `public`) und `auto` / `local` / `cloud` für die Cloud-Stufen (unten). |
-| `idempotency_key` | oder Header `Idempotency-Key`: Wiederholungen ohne Stream liefern dieselbe Antwort (`X-Skirnir-Idempotent-Replay: 1`). |
-| `request_id` | wird in Antwort, Header und Protokoll gespiegelt; sonst `X-Request-Id` oder vergeben (`skirnir-…`). |
+| `require` | Required capabilities (`tools`, `vision`, `thinking`, `structured`, `embedding`, `insert`, `completion`). Tiers without them are dropped; if no tier of the role can, the answer is **400** with a plain-text reason. |
+| `prefer` | Wish: if there are tiers with these capabilities, only they are considered, otherwise the wish is ignored. |
+| `min_context` | Lower bound for the tier's context. |
+| `priority` | `interactive` < `normal` < `batch` for admission; otherwise the role's priority applies, capped by the client maximum. |
+| `deadline_ms` | Maximum waiting time in the queue, then 503 with a plain-text reason. |
+| `session_id` | Affinity: the same session stays on its warm node (`session_affinity_ttl_s`, 30 min). |
+| `data_class`, `execution` | Data class (`personal` < `internal` < `public`) and `auto` / `local` / `cloud` for the cloud tiers (below). |
+| `idempotency_key` | or header `Idempotency-Key`: non-streaming repeats return the same response (`X-Skirnir-Idempotent-Replay: 1`). |
+| `request_id` | mirrored in response, header and log; otherwise `X-Request-Id` or generated (`skirnir-…`). |
 
-Auch ohne Block liest der Router den Request: `tools` → tools, Bilder → vision, `think: true` → thinking, `format` → structured,
-`suffix` → insert. Fähigkeiten stammen aus Ollamas `/api/show`, ergänzt um Katalog-Overrides (`models.<name>.capabilities:
-{structured: false}` für Modelle, die ein Schema mit HTTP 500 quittieren). Unbekannte Fähigkeiten blockieren nie.
+Even without the block the router reads the request: `tools` → tools, images → vision, `think: true` → thinking, `format` →
+structured, `suffix` → insert. Capabilities come from Ollama's `/api/show`, complemented by catalogue overrides
+(`models.<name>.capabilities: {structured: false}` for models that answer a schema with HTTP 500). Unknown capabilities never block.
 
-Die Antwort trägt immer die Header `X-Skirnir-Request-Id`, `-Node`, `-Model`, `-Tier`, `-Warm`. Der Block `routing` im Body
-(Knoten, Modell, Stufe, `reason`, `skipped` mit Grund je übersprungener Stufe, `candidates` mit Score, `queued_ms`, `decision`)
-kommt nur, wenn der Client selbst einen `routing`-Block geschickt hat – Altclients sehen einen unveränderten Body. Bei `/v1`
-steht er im `chat.completion` bzw. im letzten SSE-Chunk.
+The response always carries the headers `X-Skirnir-Request-Id`, `-Node`, `-Model`, `-Tier`, `-Warm`. The `routing` block in the
+body (node, model, tier, `reason`, `skipped` with a reason per skipped tier, `candidates` with score, `queued_ms`, `decision`) is
+only included if the client itself sent a `routing` block – legacy clients see an unchanged body. For `/v1` it is in the
+`chat.completion` or in the last SSE chunk.
 
-Grössenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_messages` 1000, Body 64 MiB.
+Size limits before the backend (413): `max_images` 16, `max_tools` 128, `max_messages` 1000, body 64 MiB.
 
-## Scheduler, Circuit Breaker, Admission
+## Scheduler, circuit breaker, admission
 
-- **Score** unter den Kandidaten einer Stufe: warm +100, je laufende Anfrage −10, voller Knoten −50, freies VRAM (Anteil) ×2,
-  Gewicht ×1, Tempo (EWMA tok/s / 100) ×2, Fehlerrate der letzten 20 Ergebnisse ×20, Breaker-Probe −5. Gewichte in
-  `scheduler.score`, UI-editierbar.
-- **Statistik je `model@node`:** Mittel der letzten 20 warmen Läufe und EWMA (α 0,3) für tok/s und Zeit bis zum ersten Token,
-  Ergebnisse ok / error / timeout / structured_error. Persistiert in `perf.json`.
-- **Circuit Breaker je Knoten:** drei Backend-Fehler in 60 s → `open` (30 s), dann `half_open` mit genau einer Probe. Ein
-  Neustart des Knotens setzt ihn zurück. Retry auf einen anderen Knoten bei Verbindungsfehler oder 5xx vor dem ersten Byte.
-- **Admission:** höchstens `max_inflight` gleichzeitige Anfragen je Knoten (Policy im Register, Vorgabe 2 – sollte
-  `OLLAMA_NUM_PARALLEL` des Knotens entsprechen). Weitere warten im Router; beim Freiwerden gewinnt der beste Rang aus
-  Prioritätsklasse und Alter (`aging_s` 30 s, damit Batch nicht verhungert). `max_queue` überschritten → 503 sofort.
+- **Score** among the candidates of a tier: warm +100, per running request −10, full node −50, free VRAM (share) ×2, weight ×1,
+  speed (EWMA tok/s / 100) ×2, error rate of the last 20 results ×20, breaker probe −5. Weights in `scheduler.score`, editable in
+  the UI.
+- **Statistics per `model@node`:** mean of the last 20 warm runs and EWMA (α 0.3) for tok/s and time to first token, results
+  ok / error / timeout / structured_error. Persisted in `perf.json`.
+- **Circuit breaker per node:** three backend errors in 60 s → `open` (30 s), then `half_open` with exactly one probe. A restart of
+  the node resets it. Retry on another node on connection error or 5xx before the first byte.
+- **Admission:** at most `max_inflight` concurrent requests per node (policy in the registry, default 2 – should match the node's
+  `OLLAMA_NUM_PARALLEL`). Further requests wait in the router; when a slot frees up, the best rank from priority class and age
+  wins (`aging_s` 30 s so that batch does not starve). `max_queue` exceeded → 503 immediately.
 
-## Auto-Rolle: die Decision Engine
+## Auto role: the decision engine
 
-Ein Client, der nicht weiss, welche Rolle passt, fragt `auto:latest`. Eine Kette von Engines wählt eine der konfigurierten
-Rollen; unsicher (kleiner Abstand Platz 1/2, hohe Entropie, geringe Wahrscheinlichkeit) heisst: nächste Engine, am Ende `default`.
-Entwurf: [design/decision-engine.md](design/decision-engine.md), Messreihe: [decision-eval/README.md](decision-eval/README.md).
+A client that does not know which role fits asks `auto:latest`. A chain of engines picks one of the configured roles; uncertain
+(small gap between rank 1 and 2, high entropy, low probability) means: next engine, at the end `default`.
+Design: [design/decision-engine.md](design/decision-engine.md) (German), measurements: [decision-eval/README.md](decision-eval/README.md) (German).
 
-| Engine | Was | Top-1 auf 132 ungesehenen Testfällen | Latenz | Wo |
+| Engine | What | Top-1 on 132 unseen test cases | Latency | Where |
 |---|---|---|---|---|
-| `embed` | `multilingual-e5-small` als ONNX int8 (113 MB) + Softmax-Kopf, eigener Container ([decision-embed/](decision-embed/)) | **0,932** | 10–19 ms | CPU, 4 Kerne, 456 MiB |
-| `local_llm` | kleines Modell über den Router selbst mit erzwungenem JSON-Schema | **0,977** | ~200 ms warm | GPU-Knoten |
-| `tfidf` | Zeichen-n-Gramme + Softmax-Regression, 570 KB JSON im Prozess ([decision-eval/train_tfidf.py](decision-eval/train_tfidf.py)) | 0,848 | < 1 ms | im Router |
-| `rules` | Stichwörter, deterministisch, Kette-Ende | 0,523 | 0,1 ms | im Router |
-| `jevlike` | [Jevlike](https://github.com/vinnylarouge/jevlike)-Adapter ([decision-jevlike/](decision-jevlike/)); gebaut, gemessen, für feste Rollen nicht lohnend | 0,750 | 15 ms | eigener Dienst |
+| `embed` | `multilingual-e5-small` as ONNX int8 (113 MB) + softmax head, own container ([decision-embed/](decision-embed/)) | **0.932** | 10–19 ms | CPU, 4 cores, 456 MiB |
+| `local_llm` | small model through the router itself with an enforced JSON schema | **0.977** | ~200 ms warm | GPU node |
+| `tfidf` | character n-grams + softmax regression, 570 KB JSON in-process ([decision-eval/train_tfidf.py](decision-eval/train_tfidf.py)) | 0.848 | < 1 ms | in the router |
+| `rules` | keywords, deterministic, end of chain | 0.523 | 0.1 ms | in the router |
+| `jevlike` | [Jevlike](https://github.com/vinnylarouge/jevlike) adapter ([decision-jevlike/](decision-jevlike/)); built, measured, not worth it for fixed roles | 0.750 | 15 ms | own service |
 
-Empfohlene Kette `[embed, local_llm, tfidf, rules]`: embed entscheidet in unter 20 ms, bei Unsicherheit (~6 % der Fälle) fragt
-der Router das LLM, fällt der GPU-Knoten aus, greifen tfidf und rules. Routing-Genauigkeit der Kette 0,947; rein auf CPU
-(`[embed, tfidf, rules]`) 0,909.
+Recommended chain `[embed, local_llm, tfidf, rules]`: embed decides in under 20 ms, when uncertain (~6 % of cases) the router asks
+the LLM, and if the GPU node is down, tfidf and rules take over. Routing accuracy of the chain 0.947; CPU only
+(`[embed, tfidf, rules]`) 0.909.
 
 ```yaml
 decision_engine:
   enabled: true
-  role: auto                                   # erscheint als auto:latest in /api/tags
+  role: auto                                   # appears as auto:latest in /api/tags
   options: [standard, gross, assist, code]
   default: standard
   chain: [embed, local_llm, tfidf, rules]
   policy: { min_top_probability: 0.5, min_margin: 0.2, max_entropy_ratio: 0.75 }
   tfidf: { model_path: /etc/ollama-router/decision-tfidf.json }
   embed: { endpoint: http://127.0.0.1:8082, timeout_s: 2 }
-  local_llm: { model: "assist:latest", timeout_s: 20, descriptions: { code: "Programmieren, Skripte, Fehlersuche", ... } }
+  local_llm: { model: "assist:latest", timeout_s: 20, descriptions: { code: "programming, scripts, debugging", ... } }
   capture: { enabled: false, path: /var/lib/ollama-router/decisions.jsonl, clients: [], anonymize: true }
 ```
 
-Das Ergebnis steht in `routing.decision` (Verteilung, Engine, Latenz, Unsicherheitsgründe, Fallback-Spur), in den Metriken
-`skirnir_decision_*` und im Entscheidungsprotokoll. `POST /admin/decide` fragt eine Engine direkt, `GET /admin/decision` zeigt
-Kette, Policy und Gesundheit. **Capture** schreibt Trainingsdaten (JSONL) nur für Clients im Opt-in, anonymisiert (Schlüssel,
-E-Mail, IP, URL, lange Zahlen) und mit Gruppen-Hash; echte Rollenwahlen der Clients (`client`) bleiben von Engine-Pseudolabels
-(`engine`) getrennt. Der Embedding-Kopf trainiert daraus in Sekunden neu; das Embedding-Modell bleibt.
+The result is in `routing.decision` (distribution, engine, latency, uncertainty reasons, fallback trace), in the metrics
+`skirnir_decision_*` and in the decision log. `POST /admin/decide` queries one engine directly, `GET /admin/decision` shows chain,
+policy and health. **Capture** writes training data (JSONL) only for opted-in clients, anonymised (keys, e-mail, IP, URL, long
+numbers) and with a group hash; the clients' real role choices (`client`) stay separate from engine pseudo-labels (`engine`).
+The embedding head retrains from that in seconds; the embedding model stays.
 
-## Client-Identitäten auf dem Inferenz-Port
+## Client identities on the inference port
 
-`router.client_auth` kennt die Clients und führt sie in zwei Phasen ein: `mode: observe` bedient alles, zählt Unbekannte und
-schreibt sie ins Audit-Log; `mode: enforce` antwortet ohne gültige Identität mit 401 (Ollama- oder OpenAI-Fehlerformat).
-`/` und `/api/version` bleiben frei. `locked: true` verhindert, dass der Modus über UI oder API geändert wird.
+`router.client_auth` knows the clients and introduces them in two phases: `mode: observe` serves everything, counts unknowns and
+writes them to the audit log; `mode: enforce` answers without a valid identity with 401 (Ollama or OpenAI error format).
+`/` and `/api/version` stay open. `locked: true` prevents the mode from being changed via UI or API.
 
-Drei Wege, in dieser Reihenfolge: `Authorization: Bearer <token>` (so schickt die HA-Ollama-Integration ihren API-Key, OpenAI-
-Clients ebenso), `Authorization: Basic <client>:<token>` und **Quell-IP** für Clients, die keinen Header senden können
-(z. B. `node-red-contrib-ollama`, das seinen Key nur an ollama.com schickt). Ein falsches Token fällt nicht auf die IP zurück,
-es zählt als `bad_token`. Tokens sind 256 Bit Zufall, gespeichert wird nur ihr **sha256** – die Prüfung läuft bei jeder Anfrage,
-PBKDF2 wäre hier Selbstsabotage.
+Three ways, in this order: `Authorization: Bearer <token>` (this is how the Home Assistant Ollama integration sends its API key,
+OpenAI clients likewise), `Authorization: Basic <client>:<token>` and **source IP** for clients that cannot send a header
+(e.g. `node-red-contrib-ollama`, which only sends its key to ollama.com). A wrong token does not fall back to the IP, it counts as
+`bad_token`. Tokens are 256 bits of randomness, only their **sha256** is stored – the check runs on every request, PBKDF2 would be
+self-sabotage here.
 
 ```yaml
 client_auth:
@@ -220,39 +224,39 @@ client_auth:
     batch-jobs:     { token_sha256: "…", roles: ["gross"], models: false, max_priority: batch, cloud: false, data_class: internal }
 ```
 
-Je Client: `roles`, `models` (konkrete Modellnamen erlaubt?), `requests_per_minute` (429), `max_priority`, `cloud`, `data_class`.
-Verstösse geben 403 und landen im Audit-Log (`auth_denied`, `bad_token`, `forbidden`, `rate_limited` – nie Prompts, nie Tokens).
-Clients lassen sich auch in der UI anlegen; der Router erzeugt das Secret, zeigt den Klartext genau einmal und speichert den Hash
-in `roles.yaml`. Der Knopf „Ausprobieren“ nutzt die interne Identität `skirnir-ui`, die nur von localhost gilt.
+Per client: `roles`, `models` (concrete model names allowed?), `requests_per_minute` (429), `max_priority`, `cloud`, `data_class`.
+Violations return 403 and go to the audit log (`auth_denied`, `bad_token`, `forbidden`, `rate_limited` – never prompts, never
+tokens). Clients can also be created in the UI; the router generates the secret, shows the plain text exactly once and stores the
+hash in `roles.yaml`. The **Try** button uses the internal identity `skirnir-ui`, which is only valid from localhost.
 
-## Cloud als Stufe in Rollen
+## Cloud as a tier in roles
 
-Cloud-Anbieter sind **Modelle im Katalog** (`"openai:gpt-5-mini": {cloud: openai, provider_model: gpt-5-mini, price_chf_per_m: {...}}`)
-und liegen als Stufe in genau den Rollen, die es dürfen. Konkrete Cloud-Modellnamen sind nicht direkt aufrufbar (404), nur über
-Rollen. Ein kaltes lokales Modell gewinnt vor der Cloud. Drei Fälle, in denen die Cloud zum Zug kommt: kein lokaler Knoten kann
-(alle spielen oder aus), eine Fähigkeit fehlt lokal, oder der Client verlangt es (`routing.execution: cloud`).
+Cloud providers are **models in the catalogue** (`"openai:gpt-5-mini": {cloud: openai, provider_model: gpt-5-mini, price_chf_per_m: {...}}`)
+and sit as a tier in exactly those roles that are allowed to use them. Concrete cloud model names are not directly callable
+(404), only via roles. A cold local model wins over the cloud. Three cases in which the cloud gets its turn: no local node can
+(all gaming or off), a capability is missing locally, or the client demands it (`routing.execution: cloud`).
 
-Schranken (`router.cloud`):
+Limits (`router.cloud`):
 
-- **Datenklassen als Deklaration**, kein Inhaltsklassifikator: `routing.data_class`, sonst `clients.<c>.data_class`, sonst
-  `default_data_class` (**personal**). Cloud nur bis `max_cloud_data_class` (**internal**). Folge: wer nichts deklariert, geht nie
-  in die Cloud.
-- **Credential-Scan** (`block`): Prompts mit erkennbaren Schlüsseln (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
-  gehen nicht in die Cloud; lokal laufen sie normal.
-- **Budget** je Anbieter und Monat in CHF; erschöpft = Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem.
-  Kosten je Anfrage in Usage und Metriken.
-- **Egress-Allowlist** für `base_url` (+ `egress_allow`), Schlüssel nur aus `secrets.env`, nie im Log; Circuit Breaker wie bei
-  Knoten; Schattenläufe gehen nie in die Cloud.
+- **Data classes as a declaration**, not a content classifier: `routing.data_class`, else `clients.<c>.data_class`, else
+  `default_data_class` (**personal**). Cloud only up to `max_cloud_data_class` (**internal**). Consequence: whoever declares nothing
+  never goes to the cloud.
+- **Credential scan** (`block`): prompts with recognisable keys (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
+  do not go to the cloud; locally they run normally.
+- **Budget** per provider and month in CHF; exhausted = the provider drops out as a tier, from `warn_at_percent` on a Home
+  Assistant problem is raised. Cost per request in usage and metrics.
+- **Egress allowlist** for `base_url` (+ `egress_allow`), keys only from `secrets.env`, never in the log; circuit breaker as
+  with nodes; shadow runs never go to the cloud.
 
-Adapter: `openai` (auch für OpenAI-kompatible Endpunkte) und `anthropic` (Messages-API). Beide übersetzen in das Ollama-Format,
-danach gelten dieselben Wege wie bei Knoten.
+Adapters: `openai` (also for OpenAI-compatible endpoints) and `anthropic` (Messages API). Both translate into the Ollama format,
+after which the same paths as for nodes apply.
 
 ## Observability
 
-`GET /metrics` liefert Prometheus-Text ohne `prometheus_client`, Präfix `skirnir_`: `requests_total{role,node,model,client,via,outcome}`,
-`tokens_total{kind,…}`, Histogramme `request_duration_seconds`, `ttft_seconds`, `queue_wait_seconds`, `events_total{event,node}`,
-je Knoten `node_up`, `node_state`, `node_inflight`, `node_gpu_util_percent`, `node_vram_*_gib`, `node_breaker`, je Modell
-`model_loaded_gib`, `perf_gen_tps`, `perf_error_rate`, dazu `decision_*`, `cloud_*`, `usage_today_*`, `info`.
+`GET /metrics` returns Prometheus text without `prometheus_client`, prefix `skirnir_`: `requests_total{role,node,model,client,via,outcome}`,
+`tokens_total{kind,…}`, histograms `request_duration_seconds`, `ttft_seconds`, `queue_wait_seconds`, `events_total{event,node}`,
+per node `node_up`, `node_state`, `node_inflight`, `node_gpu_util_percent`, `node_vram_*_gib`, `node_breaker`, per model
+`model_loaded_gib`, `perf_gen_tps`, `perf_error_rate`, plus `decision_*`, `cloud_*`, `usage_today_*`, `info`.
 
 ```yaml
 scrape_configs:
@@ -263,167 +267,164 @@ scrape_configs:
     static_configs: [{ targets: ["router.example.net:11435"] }]
 ```
 
-`usage.json` führt 90 Tage lang je Tag und Client Anfragen, Tokens, Fehler und Cloud-Kosten (`GET /admin/usage`). Das
-Entscheidungsprotokoll (`/admin/state`) hält die letzten Routen und Ereignisse (busy/free, WOL, Breaker, Warteschlange, Shadow,
-Decision). `/admin/state` zeigt ausserdem `build` (Deploy-Manifest) und `supply_chain` (Ollama-Version und Modell-Digests je Knoten).
+`usage.json` keeps requests, tokens, errors and cloud costs per day and client for 90 days (`GET /admin/usage`). The decision
+log (`/admin/state`) holds the most recent routes and events (busy/free, WOL, breaker, queue, shadow, decision). `/admin/state`
+also shows `build` (deploy manifest) and `supply_chain` (Ollama version and model digests per node).
 
-## Web-UI
+## Web UI
 
-![Übersicht der Web-UI mit Live-Grafiken und Knotentabelle](design/ui-uebersicht.png)
+![Overview page of the web UI with live charts and node table](design/ui-uebersicht.png)
 
-*Übersicht in der lokalen Entwicklungsumgebung (`test/dev_env.py`) mit zwei Fake-Knoten und synthetischem Verkehr.*
+*Overview in the local development environment (`test/dev_env.py`) with two fake nodes and synthetic traffic. The UI itself is in German.*
 
-Eine Seite ([router/ui.html](router/ui.html)), ohne externe Bibliotheken, fünf Tabs:
+One page ([router/ui.html](router/ui.html)), no external libraries, five tabs:
 
-- **Übersicht:** Knoten mit Zustand, Breaker, GPU, VRAM, Last und geladenen Modellen; Cloud-Anbieter mit Budgetbalken;
-  registrierte Agenten (Freigabe, Policy); Betriebskacheln; letzte Entscheidungen; **Live-Grafiken** (Canvas aus `/metrics`):
-  Anfragen/min, Tokens/s, GPU und VRAM je Knoten, Tage-Verlauf, Latenz-Histogramm, Anteile nach Knoten/Rolle/Client, effektiv
-  genutzte Modelle.
-- **Rollen:** Stufen-Editor mit Priorität, Canary, Shadow; **Ausprobieren** (Rolle oder Modell, num_ctx, execution, Datenklasse,
-  Priorität, think) mit Knoten, Stufe, Grund, übersprungenen Stufen, Dauer aufgeteilt in Warteschlange / Modell / Router; **Lasttest**
-  (n Anfragen mit Parallelität c, dazu Sonden mit `interactive`).
-- **Clients:** Karten je Client, Secret erzeugen und rotieren, Quell-IPs, Rollen, Limits.
-- **Modellkatalog:** Gewichte, Kontext-Kosten, VRAM-Bedarf, Tempo, Fähigkeiten, Messen und Benchmark; Cloud-Modelle mit Preisen.
-- **Einstellungen:** alles, was der Router zur Laufzeit liest (Allowlist in [settings.py](router/ollama_router/settings.py)),
-  mit config.yaml-Wert, Markierung geänderter Werte und Rücksetzen.
+- **Overview:** nodes with state, breaker, GPU, VRAM, load and loaded models; cloud providers with budget bars; registered
+  agents (approval, policy); operations tiles; recent decisions; **live charts** (canvas from `/metrics`): requests/min,
+  tokens/s, GPU and VRAM per node, daily history, latency histogram, shares by node/role/client, effectively used models.
+- **Roles:** tier editor with priority, canary, shadow; **Try** (role or model, num_ctx, execution, data class, priority, think)
+  with node, tier, reason, skipped tiers, duration split into queue / model / router; **load test** (n requests with concurrency c,
+  plus probes with `interactive`).
+- **Clients:** one card per client, generate and rotate secrets, source IPs, roles, limits.
+- **Model catalogue:** weights, context cost, VRAM need, speed, capabilities, measure and benchmark; cloud models with prices.
+- **Settings:** everything the router reads at runtime (allowlist in [settings.py](router/ollama_router/settings.py)), with the
+  config.yaml value, changed values marked, and reset.
 
-Lokal ansehen ohne echte Knoten: `python test/dev_env.py` startet Fake-Knoten, Fake-Cloud, Fake-Agent und den Router ohne TLS
-und Login auf `http://127.0.0.1:21435/`.
+Look at it locally without real nodes: `python test/dev_env.py` starts fake nodes, fake cloud, fake agent and the router without
+TLS and login at `http://127.0.0.1:21435/`.
 
 ## Home Assistant
 
-Der Router meldet sich per MQTT-Discovery als Gerät **Skirnir** an: Sensoren für Knoten online/belegt, verfügbare Modelle,
-bereite Rollen (Attribut: welcher Knoten und welches Modell jetzt gewählt würde), Anfragen und Tokens heute, Cloud-Kosten
-im Monat, letzte Zuweisung, je Knoten Zustand / GPU-Auslastung / freies VRAM, ein `binary_sensor` **Problem** mit Attribut
-`problems` (kein Knoten online, Rolle nicht bedienbar, Agent schweigt, Budget-Warnung) und ein Sensor **Knoten wartet auf
-Freigabe** für neue Agenten. Last-Will `ollama-router/status=offline`; fehlende Messwerte sind `unavailable`, nicht `unknown`.
-Knoten-Entitäten werden nachgeführt: gesperrte oder gelöschte Knoten verschwinden aus HA, auch wenn sie während eines
-Router-Neustarts verschwanden. Die HA-Ollama-Integration spricht den Router direkt (`https://router.example.net:11434`, API-Key =
-Client-Token); Modell = Rolle.
+The router registers via MQTT discovery as the device **Skirnir**: sensors for nodes online/busy, available models, ready roles
+(attribute: which node and model would be chosen right now), requests and tokens today, cloud costs this month, last assignment,
+per node state / GPU utilisation / free VRAM, a `binary_sensor` **Problem** with attribute `problems` (no node online, role not
+servable, agent silent, budget warning) and a sensor **Node awaiting approval** for new agents. Last will
+`ollama-router/status=offline`; missing readings are `unavailable`, not `unknown`. Node entities are kept in sync: blocked or
+deleted nodes disappear from Home Assistant, even if they vanished during a router restart. The Home Assistant Ollama integration
+talks to the router directly (`https://router.example.net:11434`, API key = client token); model = role.
 
-## GPU-Knoten: der Agent
+## GPU nodes: the agent
 
-[agent-go/](agent-go/) enthält den Agenten als Windows-Dienst bzw. Linux-Binary (Go, eigenes README). Er
+[agent-go/](agent-go/) contains the agent as a Windows service or Linux binary (Go, own README in German). It
 
-- baut den Tunnel zum Router (`wss://…:11435/v1/tunnel`) und hält ihn mit Backoff; ein Router-Neustart kostet 1–2 s,
-- weist sich mit einem beim ersten Start erzeugten **Ed25519-Schlüssel** aus (Windows: DPAPI-geschützt); unbekannte Schlüssel
-  warten im Router auf Freigabe (UI, HA-Sensor),
-- meldet alle 2 s GPU-Auslastung und VRAM (NVML direkt, Rückfall `nvidia-smi`), Hostname, MAC, Versionen,
-- bekommt nach der Freigabe sein **Konfigurationspaket** durch den Tunnel (Heartbeat-Takt, optional MQTT-Zugang) und braucht keine
-  eigenen Secrets,
-- kann **Ollama als Kind-Prozess** führen (`children:` in seiner Konfiguration), damit ein Knoten nach dem Reboot ohne Anmeldung
-  bereit ist, und optional weitere Dienste beaufsichtigen,
-- stellt optional einen TLS-Proxy vor Ollama (`ollama_proxy`, Port 11443, Zertifikat per Fingerprint gepinnt) für Router, die
-  ohne Tunnel direkt zugreifen sollen.
+- builds the tunnel to the router (`wss://…:11435/v1/tunnel`) and keeps it up with backoff; a router restart costs 1–2 s,
+- identifies itself with an **Ed25519 key** generated on first start (Windows: DPAPI-protected); unknown keys wait in the router
+  for approval (UI, Home Assistant sensor),
+- reports GPU utilisation and VRAM every 2 s (NVML directly, fallback `nvidia-smi`), hostname, MAC, versions,
+- receives its **configuration package** through the tunnel after approval (heartbeat interval, optional MQTT access) and needs no
+  secrets of its own,
+- can run **Ollama as a child process** (`children:` in its configuration) so that a node is ready after a reboot without anyone
+  logging in, and can optionally supervise further services,
+- optionally provides a TLS proxy in front of Ollama (`ollama_proxy`, port 11443, certificate pinned by fingerprint) for routers
+  that should access it directly without the tunnel.
 
-Ein neuer GPU-Rechner braucht: Ollama mit Modellen, das Agent-Binary, eine Konfiguration mit `router.url` (Vorlage
-[agent-go/config.example.yaml](agent-go/config.example.yaml)), `Install-Service.ps1` als Administrator, dann die Freigabe in der
-Router-UI (Wake-on-LAN, Gewicht, MQTT-Gerät). Kein Token, keine Firewall-Regel, kein Zertifikat, keine IP von Hand.
+A new GPU machine needs: Ollama with models, the agent binary, a configuration with `router.url` (template
+[agent-go/config.example.yaml](agent-go/config.example.yaml)), `Install-Service.ps1` as administrator, then approval in the router
+UI (Wake-on-LAN, weight, MQTT device). No token, no firewall rule, no certificate, no IP by hand.
 
-## Installation des Routers
+## Installing the router
 
-Voraussetzungen: Debian 12 (oder vergleichbar) mit Python 3.11, Pakete `python3-aiohttp`, `python3-yaml`, `python3-cryptography`;
-`python3-paho-mqtt` für Home Assistant, `python3-uvloop` optional (unter Windows läuft der Router mit dem Standard-Event-Loop).
-Ein TLS-Zertifikat für den Hostnamen des Routers (z. B. Let's Encrypt), auf den die Clients zugreifen.
+Requirements: Debian 12 (or comparable) with Python 3.11, packages `python3-aiohttp`, `python3-yaml`, `python3-cryptography`;
+`python3-paho-mqtt` for Home Assistant, `python3-uvloop` optional (on Windows the router runs with the default event loop).
+A TLS certificate for the router's hostname (e.g. Let's Encrypt) that the clients connect to.
 
-1. `router/` nach `/opt/ollama-router/` kopieren (mit dem Paket `ollama_router/`).
-2. [router/config.example.yaml](router/config.example.yaml) nach `/etc/ollama-router/config.yaml` (0600) und anpassen:
-   `public_url`, Zertifikatspfade, Rollen, Katalog, Clients. Passwort-Hashes für die UI erzeugt
-   `python3 router.py --hash '<passwort>'`; Client-Hashes sind `sha256` des Tokens.
-3. Prüfen: `python3 router.py --check /etc/ollama-router/config.yaml` – meldet unbekannte Schlüssel mit Vorschlag.
-4. systemd-Einheiten aus `router/` nach `/etc/systemd/system/`: `ollama-router.service` (läuft mit `ProtectSystem=strict`,
-   schreibt nur `/etc/ollama-router` und sein Log-Verzeichnis), optional `ollama-router-cert.path` (Neustart bei erneuertem
-   Zertifikat) und `ollama-router-secrets.*` (siehe 5). `systemctl enable --now ollama-router`.
-5. Secrets: der Router liest `/etc/ollama-router/secrets.env` (`MQTT_PASSWORD`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). Die Datei
-   kann von Hand gepflegt werden oder von `render-env.sh` aus einem Secret-Store gerendert werden (Universal-Auth-API)
-   (Zugangsdaten in `/etc/ollama-router/render-env.conf`, Vorlage [router/render-env.conf.example](router/render-env.conf.example);
-   täglicher Timer startet den Router bei geändertem Secret neu).
-6. Für die Auto-Rolle: `decision-tfidf.json` nach `/etc/ollama-router/` und den Embedding-Container aus `decision-embed/` starten
-   (`compose.yaml`, bindet nur `127.0.0.1:8082`). Beides ist optional; ohne sie bleibt `decision_engine.enabled: false`.
-7. Agenten installieren und in der UI freigeben.
+1. Copy `router/` to `/opt/ollama-router/` (including the package `ollama_router/`).
+2. Copy [router/config.example.yaml](router/config.example.yaml) to `/etc/ollama-router/config.yaml` (0600) and adapt:
+   `public_url`, certificate paths, roles, catalogue, clients. Password hashes for the UI are generated with
+   `python3 router.py --hash '<password>'`; client hashes are the `sha256` of the token.
+3. Check: `python3 router.py --check /etc/ollama-router/config.yaml` – reports unknown keys with a suggestion.
+4. systemd units from `router/` to `/etc/systemd/system/`: `ollama-router.service` (runs with `ProtectSystem=strict`, writes only
+   `/etc/ollama-router` and its log directory), optionally `ollama-router-cert.path` (restart on renewed certificate) and
+   `ollama-router-secrets.*` (see 5). `systemctl enable --now ollama-router`.
+5. Secrets: the router reads `/etc/ollama-router/secrets.env` (`MQTT_PASSWORD`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). The file
+   can be maintained by hand or rendered by `render-env.sh` from a secret store (universal-auth API) (credentials in
+   `/etc/ollama-router/render-env.conf`, template [router/render-env.conf.example](router/render-env.conf.example); a daily timer
+   restarts the router when a secret changed).
+6. For the auto role: `decision-tfidf.json` to `/etc/ollama-router/` and start the embedding container from `decision-embed/`
+   (`compose.yaml`, binds only `127.0.0.1:8082`). Both are optional; without them `decision_engine.enabled` stays `false`.
+7. Install agents and approve them in the UI.
 
-**Ausrollen von einer Arbeitsstation** (LXC): [deploy/deploy.py](deploy/deploy.py) kopiert Code, Konfiguration und
-Einheiten per SFTP auf den LXC-Host, von dort per Datei-Push in den Container (Vorlagen `CT_EXEC`/`CT_PUSH`, Standard LXD), prüft die Konfiguration vor und nach dem
-Push und startet den Dienst nur bei bestandener Prüfung neu. Alles Standortspezifische (Host, Container-Nummer, Produktiv-
-`config.yaml`, Secret-Store-Zugang) liest es aus einem **Ops-Ordner ausserhalb des Repos**, siehe [deploy/ops_env.py](deploy/ops_env.py).
-So kann das Repo öffentlich sein, ohne dass Hashes, IPs oder Hostnamen darin landen. Wer kein LXC-Host hat, kopiert von Hand
-oder passt die zwei Vorlagen `CT_EXEC`/`CT_PUSH` in `deploy.env` an.
+**Deploying from a workstation** (LXC): [deploy/deploy.py](deploy/deploy.py) copies code, configuration and units via SFTP to
+the LXC host, from there via file push into the container (templates `CT_EXEC`/`CT_PUSH`, default LXD), checks the
+configuration before and after the push and restarts the service only if the check passes. Everything site-specific (host,
+container number, production `config.yaml`, secret store access) is read from an **ops folder outside the repo**, see
+[deploy/ops_env.py](deploy/ops_env.py). That way the repo can be public without hashes, IPs or hostnames ending up in it. If you
+have no LXC host, copy by hand or adapt the two templates `CT_EXEC`/`CT_PUSH` in `deploy.env`.
 
-## Entwicklung und Tests
+## Development and tests
 
 ```bash
-python test/run_tests.py          # 232 End-to-End-Prüfungen, ~3 min: zwei Fake-Ollama-Knoten, Fake-Agent durch den Tunnel,
-                                  # Fake-Cloud (OpenAI und Anthropic), Fake-Decision-Dienst, selbstsigniertes TLS, Client-Auth,
-                                  # Admission, Breaker, Canary/Shadow, Idempotency, Cloud-Schranken, UI-Config-Runden
-python test/dev_env.py            # dieselbe Umgebung zum Klicken, ohne TLS/Login
-python test/perf_run.py           # Messstand: CPU je Anfrage, py-spy-Profil (test/perf_profile_report.py)
-ruff check .                      # Lint (ruff.toml: F, E9, B904, B905)
+python test/run_tests.py          # 232 end-to-end checks, ~3 min: two fake Ollama nodes, fake agent through the tunnel,
+                                  # fake cloud (OpenAI and Anthropic), fake decision service, self-signed TLS, client auth,
+                                  # admission, breaker, canary/shadow, idempotency, cloud limits, UI config round trips
+python test/dev_env.py            # the same environment for clicking around, without TLS/login
+python test/perf_run.py           # test bench: CPU per request, py-spy profile (test/perf_profile_report.py)
+ruff check .                      # lint (ruff.toml: F, E9, B904, B905)
 ```
 
-Gemessen ist der Router I/O-gebunden: rund 0,6 ms CPU je weitergeleiteter Anfrage im Messstand, etwa 10 ms je `/api/chat` in
-Produktion gegenüber 200–300 ms im Modell. Ein Prozess mit einem Event-Loop reicht, weil die GPU-Knoten 2–4 Anfragen/s liefern
-und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
+Measured, the router is I/O-bound: around 0.6 ms CPU per forwarded request on the test bench, about 10 ms per `/api/chat` in
+production versus 200–300 ms in the model. One process with one event loop is enough because the GPU nodes deliver 2–4
+requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 
-## Repo-Layout
+## Repo layout
 
-| Pfad | Inhalt |
+| Path | Content |
 |---|---|
-| `router/router.py`, `router/ollama_router/` | Dienst: `app`, `config` (Schema), `proxy` (Ollama-API), `openai_api`, `request` (routing-Block), `scheduler`, `admission`, `nodes`, `poll` (Zustandsautomat, Prewarm), `registry` (Agenten-Register), `tunnel`, `auth`, `cloud`, `decision/` (Engines), `metrics`, `perf`, `ops` (Idempotency, Canary, Shadow, Manifest), `ha` (MQTT), `admin`, `settings` (UI-Allowlist), `toolcall_rescue` (Tool-Calls, die Ollamas Parser als Text verliert, werden zurückgeholt), `wol` |
-| `router/ui.html`, `router/skirnir.png`, `router/favicon.png` | Web-UI und Logo |
-| `router/config.example.yaml`, `router/*.service`, `*.timer`, `*.path`, `render-env.sh`, `render-env.conf.example` | Beispielkonfiguration, systemd-Einheiten, Secrets-Renderer |
-| `router/decision-tfidf.json` | trainiertes TF-IDF-Modell der Auto-Rolle |
-| `agent-go/` | Agent für die GPU-Knoten (Go 1.27, Windows-Dienst / Linux-Binary), eigenes README |
-| `agent/` | Vorgänger des Agenten als PowerShell-Task; nur noch Rückfallweg |
-| `decision-eval/` | Datensatz-Generator (136 Vorlagen, 1282 Beispiele, Gruppen-Split), Trainer für TF-IDF und Jevlike, Auswertung (Top-1, Kalibrierung, Ketten), Ergebnisse |
-| `decision-embed/` | Stufe 2 der Auto-Rolle: ONNX-Export, Kopf-Training, Dienst, Container |
-| `decision-jevlike/` | Jevlike-Dienst (Prototyp, gemessen, nicht produktiv) |
+| `router/router.py`, `router/ollama_router/` | Service: `app`, `config` (schema), `proxy` (Ollama API), `openai_api`, `request` (routing block), `scheduler`, `admission`, `nodes`, `poll` (state machine, prewarm), `registry` (agent registry), `tunnel`, `auth`, `cloud`, `decision/` (engines), `metrics`, `perf`, `ops` (idempotency, canary, shadow, manifest), `ha` (MQTT), `admin`, `settings` (UI allowlist), `toolcall_rescue` (tool calls that Ollama's parser loses as text are recovered), `wol` |
+| `router/ui.html`, `router/skirnir.png`, `router/favicon.png` | Web UI and logo |
+| `router/config.example.yaml`, `router/*.service`, `*.timer`, `*.path`, `render-env.sh`, `render-env.conf.example` | Example configuration, systemd units, secrets renderer |
+| `router/decision-tfidf.json` | trained TF-IDF model of the auto role |
+| `agent-go/` | Agent for the GPU nodes (Go 1.27, Windows service / Linux binary), own README |
+| `agent/` | Predecessor of the agent as a PowerShell task; fallback path only |
+| `decision-eval/` | Dataset generator (136 templates, 1282 examples, group split), trainers for TF-IDF and Jevlike, evaluation (top-1, calibration, chains), results |
+| `decision-embed/` | Stage 2 of the auto role: ONNX export, head training, service, container |
+| `decision-jevlike/` | Jevlike service (prototype, measured, not in production) |
 | `deploy/` | `deploy.py`, `ops_env.py` |
-| `design/` | Entwürfe: `routing-algorithm.md`, `roadmap.md` (Ausbaustufen und Entscheidungen), `decision-engine.md`; Logos (mit einem Bildmodell erzeugt, Metadaten entfernt) |
-| `test/` | Testsuite, Fakes, Dev-Umgebung, Messstand |
-| `tools/split_router.py` | einmaliges Werkzeug, das die frühere Einzeldatei über den Syntaxbaum in das Paket zerlegte |
+| `design/` | Design notes: `routing-algorithm.md`, `roadmap.md` (stages and decisions), `decision-engine.md`; logos (generated with an image model, metadata removed) |
+| `test/` | Test suite, fakes, dev environment, test bench |
+| `tools/split_router.py` | one-off tool that split the former single file into the package via the syntax tree |
 
-## Sicherheitsmodell, kurz
+## Security model, in short
 
-- Alle Strecken TLS: Inferenz- und Admin-Port mit dem eigenen Zertifikat, Tunnel über WSS mit Ed25519-Challenge je Agent,
-  MQTT über 8883. Ollama selbst hört nur auf localhost.
-- Zwei Vertrauensstufen: der Inferenz-Port kennt Clients (Token-Hash oder IP), der Admin-Port verlangt Basic Auth mit PBKDF2.
-- Was die Vertrauensbasis verschiebt (Ports, TLS, Identitäten, Anbieter-Endpunkte, Egress, `client_auth.mode` bei `locked`),
-  ist nicht über UI oder API änderbar, nur über die Konfigurationsdatei.
-- Secrets liegen in `secrets.env` (0600), erscheinen nie in Logs oder `/admin/state`; der Router hat keinen Schreibzugriff auf den
-  Secret-Store.
-- Prompts gehen nur mit deklarierter Datenklasse in die Cloud und nie mit erkennbaren Schlüsseln darin.
-- Offen: der Dienst läuft als root (ein eigener Benutzer braucht Rechte auf Konfiguration, Log und Zertifikat).
+- All links TLS: inference and admin port with the router's own certificate, tunnel over WSS with an Ed25519 challenge per agent,
+  MQTT over 8883. Ollama itself listens on localhost only.
+- Two trust levels: the inference port knows clients (token hash or IP), the admin port requires Basic Auth with PBKDF2.
+- Whatever shifts the trust base (ports, TLS, identities, provider endpoints, egress, `client_auth.mode` when `locked`) cannot be
+  changed via UI or API, only via the configuration file.
+- Secrets live in `secrets.env` (0600), never appear in logs or `/admin/state`; the router has no write access to the secret store.
+- Prompts go to the cloud only with a declared data class and never with recognisable keys in them.
+- Open: the service runs as root (a dedicated user needs rights on configuration, log and certificate).
 
-## Messwerte als Anhaltspunkt
+## Measurements as a reference
 
-VRAM-Bedarf nach der Formel oben, gemessen auf einer RTX 5090 (31,8 GiB, KV-Cache f16, Ollama 0.33/0.34); Tempo aus dem
-UI-Benchmark (200 Token, temperature 0, Median aus zwei Läufen, Kontext 8k).
+VRAM need according to the formula above, measured on an RTX 5090 (31.8 GiB, KV cache f16, Ollama 0.33/0.34); speed from the
+UI benchmark (200 tokens, temperature 0, median of two runs, context 8k).
 
-| Modell | Gewichte GiB | Kontext-Kosten MiB/1k | VRAM @8k / @32k / @64k GiB | gen tok/s | prompt tok/s | Fähigkeiten |
+| Model | Weights GiB | Context cost MiB/1k | VRAM @8k / @32k / @64k GiB | gen tok/s | prompt tok/s | Capabilities |
 |---|---|---|---|---|---|---|
-| qwen3.6:35b-a3b | 20,6 | 1 | 21,4 / 21,4 / 21,5 | 254 | 1219 | vision, tools, thinking |
-| qwen3-coder:30b | 17,3 | 98 | 18,9 / 21,2 / 24,2 | 285 | 5964 | tools |
-| glm-4.7-flash | 17,7 | 50 | 18,9 / 20,1 / 21,7 | 224 | 10689 | tools, thinking |
-| granite4.2:30b | 16,8 | 248 | 19,5 / 25,3 / 33,1 ✗ | 76 | 3478 | tools, thinking |
-| gemma4:26b | 16,1 | 12 | 17,0 / 17,3 / 17,7 | 233 | 1822 | vision, tools, thinking |
-| gpt-oss:20b | 12,0 | 2 | 12,8 / 12,8 / 12,9 | 270 | 6712 | tools, thinking (kein `structured`) |
-| gemma4:12b (RTX 4080) | 7,8 | 2 | 8,6 / 8,6 / 8,7 | 71 | 1277 | vision, tools, thinking |
-| granite4.2:8b | 5,0 | 162 | 7,0 / 10,8 / 15,9 | 213 | 7919 | tools, thinking |
+| qwen3.6:35b-a3b | 20.6 | 1 | 21.4 / 21.4 / 21.5 | 254 | 1219 | vision, tools, thinking |
+| qwen3-coder:30b | 17.3 | 98 | 18.9 / 21.2 / 24.2 | 285 | 5964 | tools |
+| glm-4.7-flash | 17.7 | 50 | 18.9 / 20.1 / 21.7 | 224 | 10689 | tools, thinking |
+| granite4.2:30b | 16.8 | 248 | 19.5 / 25.3 / 33.1 ✗ | 76 | 3478 | tools, thinking |
+| gemma4:26b | 16.1 | 12 | 17.0 / 17.3 / 17.7 | 233 | 1822 | vision, tools, thinking |
+| gpt-oss:20b | 12.0 | 2 | 12.8 / 12.8 / 12.9 | 270 | 6712 | tools, thinking (no `structured`) |
+| gemma4:12b (RTX 4080) | 7.8 | 2 | 8.6 / 8.6 / 8.7 | 71 | 1277 | vision, tools, thinking |
+| granite4.2:8b | 5.0 | 162 | 7.0 / 10.8 / 15.9 | 213 | 7919 | tools, thinking |
 
-Modelle mit hybrider Attention (qwen3.6, gemma4, gpt-oss) kosten pro Kontext-Token praktisch kein VRAM; granite und die
-Coder-Modelle zahlen spürbar. Thinking-Modelle erzeugen ohne `think: false` unsichtbare Denk-Token – die Antwortdauer ist dann
-kein Mass für das Tempo. Neu messen, wenn Ollama, Treiber oder KV-Cache-Typ wechseln.
+Models with hybrid attention (qwen3.6, gemma4, gpt-oss) cost practically no VRAM per context token; granite and the coder models
+pay noticeably. Thinking models produce invisible reasoning tokens unless `think: false` is set – the response time is then no
+measure of speed. Re-measure when Ollama, driver or KV cache type change.
 
-## Grenzen und Nicht-Ziele
+## Limits and non-goals
 
-- Ein Router-Prozess, kein Cluster: geteilter Zustand (Warteschlange, Breaker, Register) liegt im Speicher und in JSON-Dateien.
-- Kein Inhaltsklassifikator für Datenklassen, kein Modell-Signing über Ollamas Digests hinaus, kein OpenTelemetry.
-- Die Busy-Erkennung kennt unter Windows kein prozessgenaues VRAM (WDDM liefert `N/A`); sie rechnet mit Summen und gelernten
-  Baselines und hat dafür Nachlauf- und Anspruchs-Mechanik gegen Phantomwerte.
-- `/v1/embeddings` braucht ein Embedding-Modell auf dem Knoten; Chat-Modelle antworten dort mit 501, das reicht der Router durch.
-- Die Deploy-Skripte setzen LXC voraus.
+- One router process, not a cluster: shared state (queue, breaker, registry) lives in memory and in JSON files.
+- No content classifier for data classes, no model signing beyond Ollama's digests, no OpenTelemetry.
+- Busy detection on Windows has no per-process VRAM (WDDM reports `N/A`); it works with totals and learned baselines and has
+  hold-off and claim mechanics against phantom values in return.
+- `/v1/embeddings` needs an embedding model on the node; chat models answer with 501 there, which the router passes through.
+- The deploy scripts assume LXC.
 
-## Lizenz
+## License
 
-[MIT](LICENSE). Die Modelle, die Skirnir verteilt, und die eingebundenen Fremdprojekte (Jevlike, multilingual-e5-small,
-Ollama) haben ihre eigenen Lizenzen.
+[MIT](LICENSE). The models Skirnir distributes and the third-party projects involved (Jevlike, multilingual-e5-small, Ollama)
+have their own licenses.
