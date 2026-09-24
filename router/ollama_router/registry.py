@@ -134,6 +134,8 @@ def node_spec_from_entry(e):
     for k in ("busy_gpu_util_pct", "busy_foreign_gib"):   # Busy-Schwellen je Knoten (leer = global)
         if pol.get(k) is not None:
             spec[k] = float(pol[k])
+    if pol.get("gpu_guard") is not None:   # Policy: GPU-Schutz-Status dieses Knotens beachten (False z. B. fuer Karten ohne 12V-2x6)
+        spec["gpu_guard"] = bool(pol["gpu_guard"])
     if facts.get("gpu"):
         spec["gpu"] = facts["gpu"]
     return spec
@@ -335,7 +337,7 @@ async def handle_node_action(request):
         body = await request.json() if request.can_read_body else {}
     except Exception:  # noqa: BLE001
         body = {}
-    pol = {k: body.get(k) for k in ("wol", "weight", "mqtt", "foreign_vram_baseline_gib", "mac", "max_inflight", "busy_gpu_util_pct", "busy_foreign_gib") if k in body}
+    pol = {k: body.get(k) for k in ("wol", "weight", "mqtt", "foreign_vram_baseline_gib", "mac", "max_inflight", "busy_gpu_util_pct", "busy_foreign_gib", "gpu_guard") if k in body}
     for k, lo, hi in (("busy_gpu_util_pct", 1, 100), ("busy_foreign_gib", 0.1, 64)):
         if pol.get(k) is not None:
             try:

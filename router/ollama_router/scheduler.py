@@ -70,6 +70,9 @@ def score(node, model):
     s -= w["inflight"] * node.inflight
     if node.inflight >= node.effective_max_inflight():
         s -= w["saturated"]
+    gg = state.CFG.gpu_guard   # GPU-Schutz: Knoten in Hochlast/Stufe 2 weichen einem zweiten Knoten, der die Stufe tragen kann
+    if gg["enabled"] and getattr(node, "guard_policy", False) and node.guard_state() in ("hochlast", "gedrosselt"):   # CloudTarget hat keinen Guard
+        s -= gg["score_penalty"]
     if node.vram_total_gib and node.vram_free_gib is not None:
         s += w["vram_free"] * (node.vram_free_gib / node.vram_total_gib)
     s += w["weight"] * node.weight

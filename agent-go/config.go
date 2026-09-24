@@ -25,7 +25,8 @@ type Config struct {
 	Install     InstallCfg
 	OllamaProxy ProxyCfg  `yaml:"ollama_proxy"`
 	Tunnel      TunnelCfg `yaml:"tunnel"`
-	GPUZ        GPUZCfg   `yaml:"gpuz"` // GPU-Z-Sensoren als Zusatzquelle (Windows), Standard an
+	GPUZ        GPUZCfg   `yaml:"gpuz"`      // GPU-Z-Sensoren als Zusatzquelle (Windows), Standard an
+	GPUGuard    GuardCfg  `yaml:"gpu_guard"` // GPU-Schutz: Power-Limit, Hochlast-Stufe, Warnungen (guard.go), Standard an
 	Identity    struct {
 		Dir string `yaml:"dir"`
 	} `yaml:"identity"`

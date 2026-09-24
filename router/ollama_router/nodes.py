@@ -79,6 +79,8 @@ class Node:
         self.hb_ts = 0.0
         self.gpu_util = None
         self.sensors = None   # Zusatzsensoren aus dem Heartbeat (Agent >= 0.6.0), dict oder None
+        self.guard = None     # GPU-Schutz laut Agent (>= 0.7.0): state, limit_w, target_w, problem, grund, warnungen
+        self.guard_ts = 0.0
         self.vram_free_gib = None
         self.vram_used_gib = None
         self.vram_total_reported_gib = None
@@ -110,6 +112,7 @@ class Node:
         # geladen. None = globale Werte aus modes.busy_enter.
         self.busy_util_pct = float(spec["busy_gpu_util_pct"]) if spec.get("busy_gpu_util_pct") is not None else None
         self.busy_foreign_pol = float(spec["busy_foreign_gib"]) if spec.get("busy_foreign_gib") is not None else None
+        self.guard_policy = bool(spec.get("gpu_guard", True))   # Policy je Knoten: Router beachtet den GPU-Schutz-Status (Deckel, Score, HA)
         self.foreign_frozen = 0.0     # fremdes VRAM beim Start eines Ladevorgangs (siehe announce_load / foreign_vram_gib)
         self.ollama_version = None    # Stufe 6: Supply Chain (aus /api/version, alle 5 min)
         self.version_ts = 0.0
@@ -273,6 +276,7 @@ class Node:
         self.max_inflight = int(spec["max_inflight"]) if spec.get("max_inflight") else None
         self.busy_util_pct = float(spec["busy_gpu_util_pct"]) if spec.get("busy_gpu_util_pct") is not None else None
         self.busy_foreign_pol = float(spec["busy_foreign_gib"]) if spec.get("busy_foreign_gib") is not None else None
+        self.guard_policy = bool(spec.get("gpu_guard", True))   # Policy je Knoten: Router beachtet den GPU-Schutz-Status (Deckel, Score, HA)
 
     def busy_util_threshold(self):
         return self.busy_util_pct if self.busy_util_pct is not None else state.CFG.busy_util
@@ -282,7 +286,28 @@ class Node:
 
     # --- Stufe 3: Circuit Breaker / Admission ---
     def effective_max_inflight(self):
-        return self.max_inflight or state.CFG.admission["max_inflight_default"]
+        base = self.max_inflight or state.CFG.admission["max_inflight_default"]
+        g = state.CFG.gpu_guard
+        if not g["enabled"] or not self.guard_policy:
+            return base
+        gs = self.guard_state()
+        if gs == "gedrosselt" or (gs is None and g["require_fresh_status"]):
+            return min(base, g["throttled_max_inflight"])
+        return base
+
+    def guard_state(self, now=None):
+        """Zustand des GPU-Schutzes laut Agent; None = kein oder veralteter Status (aelter als 30 s)."""
+        if not self.guard or not self.guard_ts or (now or time.time()) - self.guard_ts > 30:
+            return None
+        return self.guard.get("state")
+
+    def guard_view(self, now=None):
+        """Fuer /admin/state, HA und UI: Status plus Policy und Frische."""
+        g = self.guard or {}
+        return {"state": self.guard_state(now), "reported": g.get("state"), "limit_w": g.get("limit_w"), "target_w": g.get("target_w"),
+                "default_limit_w": g.get("default_limit_w"), "problem": bool(g.get("problem")), "grund": g.get("grund"),
+                "warnungen": g.get("warnungen") or [], "quelle": g.get("quelle"), "hochlast_s": g.get("hochlast_s"),
+                "policy": self.guard_policy, "router_enabled": state.CFG.gpu_guard["enabled"]}
 
     def breaker_allows(self, now):
         if self.breaker == "closed":
@@ -330,6 +355,6 @@ class Node:
             "vram_used_gib": self.vram_used_gib, "vram_total_gib": self.vram_total_gib, "foreign_vram_gib": round(self.foreign_vram_gib(), 2),
             "heartbeat_age_s": round(now - self.hb_ts, 1) if self.hb_ts else None,
             "wol": self.wol, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,
-            "gpu": self.gpu, "sensors": self.sensors, "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
+            "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
             "breaker": self.breaker, "max_inflight": self.effective_max_inflight(),
         }

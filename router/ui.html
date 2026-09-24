@@ -259,9 +259,12 @@ function renderNodes() {
     const gpu = n.gpu_known ? `${n.gpu_util} %` : '<span class="muted">kein Agent</span>';
     const vram = n.gpu_known ? `${(n.vram_free_gib ?? 0).toFixed(1)} GiB / ${n.foreign_vram_gib} GiB` : '–';
     const brk = n.breaker && n.breaker !== 'closed' ? ` <span class="badge ${n.breaker}" title="Circuit Breaker">${esc(n.breaker)}</span>` : '';
+    const gg = n.gpu_guard || {};
+    const grd = gg.state && gg.state !== 'normal' ? ` <span class="badge ${gg.problem ? 'open' : 'half_open'}" title="GPU-Schutz: ${esc(gg.grund || (gg.warnungen || []).join(', ') || gg.state)}${gg.limit_w ? ` · Limit ${gg.limit_w} W` : ''}">GPU-Schutz ${esc(gg.state)}</span>`
+      : gg.state === 'normal' && gg.limit_w ? ` <span class="muted" title="GPU-Schutz normal, Ziel ${gg.target_w ?? '?'} W">🛡 ${gg.limit_w} W</span>` : '';
     const last = `${n.inflight} / ${n.max_inflight ?? '?'}${waiting[name] ? ` · <span class="warn">${waiting[name]} wartend</span>` : ''}`;
     tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(name)}</b><div class="muted">${esc(n.gpu || '')} ${n.wol ? '· WOL' : ''}</div></td>
-      <td><span class="state ${n.state}">${n.state}</span>${brk}<div class="muted">${esc(n.busy_reason || '')}</div></td>
+      <td><span class="state ${n.state}">${n.state}</span>${brk}${grd}<div class="muted">${esc(n.busy_reason || '')}</div></td>
       <td>${gpu}</td><td>${vram}</td><td>${last}</td>
       <td>${Object.entries(n.loaded).map(([m, g]) => `<div class="loaded">${esc(m)} <span class="muted">${g} GiB</span></div>`).join('') || '<span class="muted">–</span>'}</td>
       <td>${models}</td></tr>`);
@@ -697,6 +700,7 @@ function renderDecisions() {
     if (d.event === 'no_node') return `<div class="bad">${t} <b>${esc(d.role)}</b> → kein Knoten verfügbar</div>`;
     if (d.event === 'unsatisfiable') return `<div class="bad">${t} <b>${esc(d.role)}</b> → keine Stufe kann: ${esc(d.reasons || '')}</div>`;
     if (d.event === 'breaker') return `<div class="${d.state === 'closed' ? 'ok' : 'bad'}">${t} Breaker ${esc(d.node)} → ${esc(d.state)} ${esc(d.reason || '')}</div>`;
+    if (d.event === 'gpu_guard') return `<div class="${d.problem ? 'bad' : (d.state === 'normal' ? 'ok' : 'warn')}">${t} GPU-Schutz ${esc(d.node)} → ${esc(d.state)}${d.limit_w ? ` (${d.limit_w} W)` : ''} ${esc(d.reason || '')}</div>`;
     if (d.event === 'queued') return `<div class="warn">${t} Warteschlange: <b>${esc(d.role)}</b> (${esc(d.priority)}) wartet auf ${esc(d.node)} (${d.inflight} aktiv)</div>`;
     if (d.event === 'admission_timeout') return `<div class="bad">${t} Deadline: <b>${esc(d.role)}</b> (${esc(d.priority)}) nach ${d.waited_ms} ms abgewiesen</div>`;
     if (d.event === 'shadow') return `<div class="muted">${t} 🌒 Shadow <b>${esc(d.role)}</b> → ${esc(d.model)} auf ${esc(d.node || '–')}: ${esc(d.status)}${d.ms ? ' · ' + d.ms + ' ms' : ''}</div>`;
@@ -806,6 +810,7 @@ async function renderRegistry() {
       <label title="gleichzeitige Anfragen (Admission); leer = Default aus der Konfiguration; sollte OLLAMA_NUM_PARALLEL des Rechners entsprechen">gleichzeitig <input type="number" min="1" max="32" value="${p.max_inflight ?? ''}" placeholder="def" style="width:48px" onchange="nodePolicy('${n.fp}', {max_inflight: this.value ? +this.value : null})"></label><br>
       <label title="busy ab dieser GPU-Auslastung in % (mit >= 1 GiB fremdem VRAM); leer = global (Einstellungen › Busy-Erkennung)">busy ab GPU <input type="number" min="1" max="100" value="${p.busy_gpu_util_pct ?? ''}" placeholder="glob" style="width:48px" onchange="nodePolicy('${n.fp}', {busy_gpu_util_pct: this.value ? +this.value : null})"> %</label><br>
       <label title="busy ab so viel fremdem VRAM über der Baseline in GiB; leer = global. Kleine Karten brauchen kleinere Werte: auf 16 GiB neben 8 GiB Ollama bleibt einem Spiel nie 6 GiB">busy ab fremd <input type="number" min="0.1" max="64" step="0.5" value="${p.busy_foreign_gib ?? ''}" placeholder="glob" style="width:48px" onchange="nodePolicy('${n.fp}', {busy_foreign_gib: this.value ? +this.value : null})"> GiB</label><br>
+      <label title="Router beachtet den GPU-Schutz-Status dieses Agenten: Deckel 1 in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA. Aus z. B. für Karten ohne 12V-2x6-Stecker; der Agent setzt sein Power-Limit trotzdem"><input type="checkbox" ${p.gpu_guard === false ? '' : 'checked'} onchange="nodePolicy('${n.fp}', {gpu_guard: this.checked})"> GPU-Schutz beachten</label><br>
       <label><input type="checkbox" ${p.mqtt === false ? '' : 'checked'} onchange="nodePolicy('${n.fp}', {mqtt: this.checked})"> MQTT-Gerät in HA</label>`;
     const btn = n.state === 'pending' ? `<button onclick="nodeAct('${n.fp}','approve')">freigeben</button><br><button class="small" onclick="nodeDel('${n.fp}')">löschen</button>`
       : n.state === 'approved' ? `<button class="small" onclick="if(confirm('Knoten ${esc(n.name)} sperren? Der Tunnel wird getrennt.')) nodeAct('${n.fp}','revoke')">sperren</button>`

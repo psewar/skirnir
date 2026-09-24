@@ -21,6 +21,7 @@ type Heartbeat struct {
 	log   *Logger
 	http  *http.Client
 	tlsFP string // Fingerprint der Ollama-Vorschaltstelle (leer = kein Proxy)
+	guard *Guard // GPU-Schutz: Status geht mit jedem Heartbeat (0.7.0)
 
 	mu         sync.Mutex
 	state      string // Antwort des Routers: free | busy | pending | ""
@@ -29,12 +30,14 @@ type Heartbeat struct {
 	lastErr    string
 	failures   int
 	sent       int
+	guardAck   *bool
 }
 
 type hbResponse struct {
 	State      string `json:"state"`
 	BusyReason string `json:"busy_reason"`
 	Error      string `json:"error"`
+	GuardAck   *bool  `json:"gpu_guard_ack,omitempty"` // Router-Policy fuer den GPU-Schutz dieses Knotens (nil = Router kennt es nicht)
 }
 
 func newHeartbeat(cfg RouterCfg, node string, gpu *GPU, log *Logger) *Heartbeat {
@@ -58,6 +61,9 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	if s.Sensors != nil { // 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z - der Router legt den Block in den Knotenzustand
 		p["sensors"] = s.Sensors
 	}
+	if h.guard != nil { // 0.7.0: Zustand des GPU-Schutzes
+		p["gpu_guard"] = h.guard.Status()
+	}
 	return p, nil
 }
 
@@ -72,6 +78,7 @@ func (h *Heartbeat) ack(r hbResponse) {
 	h.mu.Lock()
 	changed := r.State != h.state
 	h.state, h.busyReason, h.lastOK, h.lastErr, h.failures = r.State, r.BusyReason, time.Now(), "", 0
+	h.guardAck = r.GuardAck
 	h.mu.Unlock()
 	if changed {
 		h.log.Infof("heartbeat: router sieht uns als '%s' %s", r.State, r.BusyReason)
@@ -140,12 +147,13 @@ type HeartbeatStatus struct {
 	Failures   int    `json:"failures"`
 	Sent       int    `json:"sent"`
 	OK         bool   `json:"ok"`
+	GuardAck   *bool  `json:"gpu_guard_ack,omitempty"`
 }
 
 func (h *Heartbeat) Status() HeartbeatStatus {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	st := HeartbeatStatus{State: h.state, BusyReason: h.busyReason, LastError: h.lastErr, Failures: h.failures, Sent: h.sent}
+	st := HeartbeatStatus{State: h.state, BusyReason: h.busyReason, LastError: h.lastErr, Failures: h.failures, Sent: h.sent, GuardAck: h.guardAck}
 	if !h.lastOK.IsZero() {
 		st.LastOK = h.lastOK.Format(time.RFC3339)
 		st.OK = time.Since(h.lastOK) < 30*time.Second

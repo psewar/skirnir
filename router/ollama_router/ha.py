@@ -51,7 +51,7 @@ def ha_snapshot(now=None):
         nodes[n.name] = {"state": n.state, "busy_reason": n.busy_reason, "gpu": n.gpu, "gpu_util": n.gpu_util if n.gpu_known(now) else None,
                          "vram_free_gib": round(n.vram_free_gib, 2) if (n.gpu_known(now) and n.vram_free_gib is not None) else None,
                          "vram_total_gib": n.vram_total_gib, "loaded": sorted(n.loaded), "models": sorted(n.models),
-                         "inflight": n.inflight, "agent": bool(n.gpu_known(now))}
+                         "inflight": n.inflight, "agent": bool(n.gpu_known(now)), "gpu_guard": n.guard_view(now)}
     pending = [e["name"] for e in (state.REG.nodes.values() if state.REG else []) if e.get("state") == "pending"]
     problems = []
     if not online:
@@ -74,6 +74,14 @@ def ha_snapshot(now=None):
     for n in online:
         if n.hb_ts and now - n.hb_ts > state.CFG.agent_missing_s:
             problems.append(f"Knoten {n.name}: kein Agent-Heartbeat seit {int((now - n.hb_ts) // 60)} min")
+    # GPU-Schutz (Agent >= 0.7.0): unverfuegbar (Limit nicht setzbar), abgewaehlt (Betreiber-Entscheid: zaehlt als Problem),
+    # Spannungs-/Temperatur-/Hardware-Warnung. Nur wenn der Router den Status dieses Knotens beachten soll.
+    if state.CFG.gpu_guard["enabled"]:
+        for n in online:
+            g = n.guard or {}
+            if n.guard_policy and g.get("problem") and n.guard_state(now) is not None:
+                reason = g.get("grund") or ", ".join(g.get("warnungen") or []) or "?"
+                problems.append(f"Knoten {n.name}: GPU-Schutz {g.get('state')} ({reason})")
     from . import cloud
     problems += cloud.budget_problems()   # Stufe 5: Budgetwarnung/-erschoepfung als HA-Problem
     cloud_view = cloud.budget_view()

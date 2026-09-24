@@ -93,6 +93,14 @@ func main() {
 			b, _ := json.MarshalIndent(s.Sensors, "", "  ")
 			fmt.Printf("sensoren (gpuz=%v):\n%s\n", s.Sensors.GPUZ, b)
 		}
+		// GPU-Schutz, Trockenlauf: was der Guard mit den Standardwerten setzen WUERDE (setzt nichts)
+		if lim := g.PowerLimits(); !lim.OK {
+			fmt.Printf("gpu-guard: Limits nicht lesbar (%s) -> Zustand unverfuegbar\n", lim.Err)
+		} else {
+			dauer, stufe2 := newGuardEngine(GuardCfg{}, nil).targets(lim)
+			fmt.Printf("gpu-guard (Trockenlauf, Standardwerte): Limit aktuell %.0f W, Standard %.0f W, erlaubt %.0f-%.0f W -> Dauerlimit %.0f W (80 %%), Stufe 2 %.0f W (70 %%)\n",
+				lim.Cur, lim.Def, lim.Min, lim.Max, dauer, stufe2)
+		}
 		return
 	}
 	if verb == "gpuz-relay" { // Anmeldesitzung -> Dienst (gpuz_windows.go); Konfiguration nur fuer den Health-Port
@@ -152,7 +160,7 @@ func main() {
 			verr = fmt.Errorf("mqtt-clear braucht eine lokale mqtt-Konfiguration (host, password)")
 			break
 		}
-		m := newMQTT(cfg.MQTT, cfg.SecretStore, cfg.Node, log, nil, nil, nil)
+		m := newMQTT(cfg.MQTT, cfg.SecretStore, cfg.Node, log, nil, nil, nil, nil)
 		verr = m.clearDiscovery(context.Background())
 		if verr == nil {
 			fmt.Printf("Discovery fuer %s geloescht\n", cfg.MQTT.DeviceID)

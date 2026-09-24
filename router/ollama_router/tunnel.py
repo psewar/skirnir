@@ -175,7 +175,7 @@ class Tunnel:
             if self.approved and self.node is not None:
                 try:
                     poll.apply_heartbeat(self.node, json.loads(payload), time.time())
-                    ack = {"state": self.node.state, "busy_reason": self.node.busy_reason}
+                    ack = poll.hb_ack(self.node)
                 except Exception as e:  # noqa: BLE001
                     ack = {"state": "", "error": str(e)}
             else:

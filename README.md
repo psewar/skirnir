@@ -319,7 +319,13 @@ talks to the router directly (`https://router.example.net:11434`, API key = clie
 - can run **Ollama as a child process** (`children:` in its configuration) so that a node is ready after a reboot without anyone
   logging in, and can optionally supervise further services,
 - optionally provides a TLS proxy in front of Ollama (`ollama_proxy`, port 11443, certificate pinned by fingerprint) for routers
-  that should access it directly without the tunnel.
+  that should access it directly without the tunnel,
+- **guards the GPU** (agent 0.7.0, [design/gpu-guard.md](design/gpu-guard.md), German): sets a power limit of 80 % of the
+  card's default (RTX 5090: 460 W), drops to 70 % after 10 minutes of sustained full load, re-applies after driver resets,
+  never raises above the default, and warns on 16-pin voltage sag, memory temperature and hardware throttling. On by
+  default; opting out (`gpu_guard.enabled: false`) is deliberate and therefore reported as a problem. The router caps a
+  throttled node to one request, penalises it in the score and forwards problems to Home Assistant (`modes.gpu_guard`,
+  per-node policy in the agent registry).
 
 A new GPU machine needs: Ollama with models, the agent binary, a configuration with `router.url` (template
 [agent-go/config.example.yaml](agent-go/config.example.yaml)), `Install-Service.ps1` as administrator, then approval in the router

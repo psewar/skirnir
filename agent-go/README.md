@@ -74,6 +74,54 @@ Nebeneffekt: ohne STT-Kind entfaellt auch der Portversuch auf 10300 in jedem Zyk
 Anlass war ein zweiter Knoten: dort standen `STT-Dienst` und `Alias-Modell strukturfaehig` dauerhaft `off`,
 weil beides nur auf dem ersten Knoten existiert. Tests dazu in `mqtt_test.go` (`go test ./...`).
 
+## GPU-Schutz (0.7.0)
+
+Hintergrund und Abwaegung: [design/gpu-guard.md](../design/gpu-guard.md). Der 12V-2x6-Stecker einer RTX 5090 fuehrt bei
+575 W rund 48 A ohne Einzelpin-Messung; Software sieht einen schlechten Kontakt nicht, kann aber den Gesamtstrom senken,
+Dauer-Vollast begrenzen und frueh warnen. Der Agent tut genau das (`guard.go`, reine Zustandsfunktion, Tests in
+`guard_test.go` mit Karten-Attrappe):
+
+| Zustand | Bedeutung |
+|---|---|
+| `normal` | Dauerlimit gesetzt (Standard 80 % des Standardlimits, 5090: 460 W) |
+| `hochlast` | Leistung >= 90 % des aktiven Limits seit der halben Frist (300 s) - Vorwarnung |
+| `gedrosselt` | 600 s ununterbrochen am Limit -> Stufe 2 (70 %, 5090: 403 W) fuer 300 s |
+| `erholung` | zurueck auf das Dauerlimit, 60 s lang gemeldet |
+| `unverfuegbar` | Limit nicht lesbar oder nicht setzbar (kein NVML, keine Berechtigung, Linux ohne root) - nur Beobachtung, **Problem** |
+| `aus` | `gpu_guard.enabled: false` - kein Limit; zaehlt auf Wunsch des Betreibers als **Problem**, damit eine vergessene Abwahl auffaellt |
+
+Regeln: der Guard **senkt nur** (ein Fremdtool, das tiefer stellt, bleibt), hebt nur von einem selbst gesetzten Wert
+(Stufe 2 -> Dauerlimit) und geht **nie ueber das Standardlimit**; jedes Ziel ist auf [Min-Limit, Standardlimit]
+geklemmt. Das Limit ist fluechtig (Treiber-Neustart) und wird alle `reapply_s` (30 s) geprueft. Steht es dreimal
+hintereinander wieder hoeher, meldet er `fremdeingriff`. Warnungen unabhaengig vom Limit: `spannung_niedrig` (16-Pin
+unter Last < 11,6 V oder > 0,35 V unter der gelernten Leerlauf-Referenz, 30 s Bestand; nur mit GPU-Z), `temperatur_hoch`
+(Speicher >= 95 °C, Hot Spot >= 100 °C), `hw_drossel` (NVML meldet hw_slowdown/hw_thermal/hw_power_brake).
+
+```yaml
+gpu_guard:                    # alles optional; fehlende Werte = Standard
+  enabled: true               # false = ausdruecklich abgewaehlt (Problem in HA und Router)
+  power_limit_pct: 80         # Dauerlimit in % des Standardlimits; power_limit_w: 450 waere die absolute Form
+  reapply_s: 30
+  high_load_pct: 90
+  high_load_s: 600
+  stage2_pct: 70
+  recovery_s: 300
+  voltage_warn_v: 11.6
+  voltage_drop_v: 0.35
+  voltage_hold_s: 30
+  voltage_load_w: 300         # Spannung zaehlt erst ab dieser 16-Pin-Leistung
+  mem_temp_warn_c: 95
+  hotspot_warn_c: 100
+```
+
+Sichtbar: Heartbeat-Block `gpu_guard` (Zustand, Quelle, Leistung, 16-Pin, Limits, Ziel, Throttle, Warnungen), `/health`,
+HA-Entitaeten `GPU-Schutz` (Zustand mit Attributen), `GPU-Schutz Problem`, `GPU-Schutz Ziel-Limit` und das Ereignis
+`GPU-Schutz Ereignis` (Topic `<device>/gpu_guard`). Die Heartbeat-Antwort des Routers traegt `gpu_guard_ack`: ob der
+Router den Status dieses Knotens beachtet (Deckel 1 in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA); Attribut
+`router_beachtet` in HA. Trockenlauf ohne Setzen: `ollama-router-agent.exe gpu` zeigt Limits und Ziele.
+Setzen braucht Adminrechte auf die GPU (NVML rc 4 = verweigert): der Windows-Dienst hat sie, unter Linux braucht
+`nvidia-smi -pl` root.
+
 ## Sensoren (0.6.0)
 
 Bis 0.5.x kannte der Heartbeat nur GPU-Auslastung und VRAM. Seit 0.6.0 liest der Agent zusaetzlich (`sensors.go`):

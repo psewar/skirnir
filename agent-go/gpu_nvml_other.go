@@ -16,4 +16,8 @@ func (d *nvmlDev) sample() (int, int, int, int, int, error) {
 
 func (d *nvmlDev) extra(*GPUSensors) {}
 
+func (d *nvmlDev) limits() guardLimits { return guardLimits{Err: "NVML nicht verfuegbar"} }
+
+func (d *nvmlDev) setLimit(float64) error { return errors.New("NVML nicht verfuegbar") }
+
 func (d *nvmlDev) close() {}

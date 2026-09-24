@@ -319,7 +319,13 @@ Client-Token); Modell = Rolle.
 - kann **Ollama als Kind-Prozess** führen (`children:` in seiner Konfiguration), damit ein Knoten nach dem Reboot ohne Anmeldung
   bereit ist, und optional weitere Dienste beaufsichtigen,
 - stellt optional einen TLS-Proxy vor Ollama (`ollama_proxy`, Port 11443, Zertifikat per Fingerprint gepinnt) für Router, die
-  ohne Tunnel direkt zugreifen sollen.
+  ohne Tunnel direkt zugreifen sollen,
+- **schützt die GPU** (Agent 0.7.0, [design/gpu-guard.md](design/gpu-guard.md)): setzt ein Power-Limit von 80 % des
+  Standardlimits (RTX 5090: 460 W), geht nach 10 Minuten Dauer-Vollast für 5 Minuten auf 70 %, setzt nach Treiber-Resets
+  nach, hebt nie über den Standard und warnt bei Spannungsabfall am 16-Pin-Stecker, Speichertemperatur und
+  Hardware-Drosselung. Standard an; die Abwahl (`gpu_guard.enabled: false`) ist eine Entscheidung und wird deshalb als
+  Problem gemeldet. Der Router deckelt einen gedrosselten Knoten auf eine Anfrage, zieht Score ab und reicht Probleme an
+  Home Assistant (`modes.gpu_guard`, Policy je Knoten im Agenten-Register).
 
 Ein neuer GPU-Rechner braucht: Ollama mit Modellen, das Agent-Binary, eine Konfiguration mit `router.url` (Vorlage
 [agent-go/config.example.yaml](agent-go/config.example.yaml)), `Install-Service.ps1` als Administrator, dann die Freigabe in der

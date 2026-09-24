@@ -24,6 +24,7 @@ type App struct {
 	mqCancel context.CancelFunc
 	mqCfg    *MQTTCfg
 	prov     *Provision
+	guard    *Guard // GPU-Schutz (guard.go)
 	rootCtx  context.Context
 }
 
@@ -41,6 +42,8 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	}
 	a := &App{cfg: cfg, log: log, gpu: gpu, sup: sup, started: time.Now()}
 	a.hb = newHeartbeat(cfg.Router, cfg.Node, gpu, log)
+	a.guard = newGuard(cfg.GPUGuard, gpu, log)
+	a.hb.guard = a.guard
 	if cfg.OllamaProxy.on() {
 		if a.proxy, err = newOllamaProxy(cfg.OllamaProxy, cfg.Router.Token, cfg.Node, log); err != nil {
 			return nil, err
@@ -104,7 +107,7 @@ func (a *App) startMQTT(cfg *MQTTCfg) {
 		return
 	}
 	ctx, cancel := context.WithCancel(a.rootCtx)
-	a.mq = newMQTT(*cfg, a.cfg.SecretStore, a.cfg.Node, a.log, a.gpu, a.hb, a.sup)
+	a.mq = newMQTT(*cfg, a.cfg.SecretStore, a.cfg.Node, a.log, a.gpu, a.hb, a.sup, a.guard)
 	a.mqCancel, a.mqCfg = cancel, cfg
 	go a.mq.Run(ctx)
 }
@@ -163,6 +166,7 @@ func (a *App) Run(ctx context.Context) error {
 		run("heartbeat", a.hb.Run) // alter HTTP-Weg
 	}
 	run("supervisor", a.sup.Run)
+	run("gpu-guard", a.guard.Run)
 	run("health", (&HealthServer{app: a}).Run)
 	if a.proxy != nil {
 		run("ollama-proxy", a.proxy.Run)

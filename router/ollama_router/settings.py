@@ -67,6 +67,12 @@ _e("modes.breaker.failures", "int", "Fehler bis open", "", G, 3, min=1, max=100)
 _e("modes.breaker.window_s", "float", "Fenster s", "Fehler zaehlen innerhalb dieses Fensters", G, 60, min=1, max=86400)
 _e("modes.breaker.open_s", "float", "offen s", "so lange ist der Knoten kein Kandidat, dann eine Probe", G, 30, min=1, max=86400)
 
+G = "GPU-Schutz"
+_e("modes.gpu_guard.enabled", "bool", "Status beachten", "aus = der Router ignoriert den GPU-Schutz-Status aller Knoten (kein Deckel, kein Score-Abzug, kein HA-Problem); der Agent setzt sein Limit trotzdem", G, True)
+_e("modes.gpu_guard.throttled_max_inflight", "int", "Deckel in Stufe 2", "gleichzeitige Anfragen auf einem Knoten, dessen Agent 'gedrosselt' meldet", G, 1, min=1, max=32)
+_e("modes.gpu_guard.score_penalty", "float", "Score-Abzug Hochlast", "bei hochlast/gedrosselt; voller Knoten = 50", G, 40, min=0, max=1000)
+_e("modes.gpu_guard.require_fresh_status", "bool", "ohne Status deckeln", "Knoten ohne frischen Schutzstatus (Agent < 0.7.0 oder schweigt) wie gedrosselt behandeln", G, False)
+
 G = "Busy-Erkennung"
 _e("modes.busy_enter.gpu_util_pct", "float", "GPU-Auslastung %", "ab hier gilt der Rechner als beschaeftigt (Spiel) ...", G, 40, min=0, max=100)
 _e("modes.busy_enter.sustain_s", "float", "... anhaltend s", "", G, 10, min=0, max=3600)

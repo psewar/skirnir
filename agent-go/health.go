@@ -89,6 +89,7 @@ type Snapshot struct {
 	GPU       *GPUSample            `json:"gpu"`
 	GPUError  string                `json:"gpu_error,omitempty"`
 	GPUZRelay string                `json:"gpuz_relay_age,omitempty"` // Alter der letzten Relay-Werte (leer = nie)
+	Guard     GuardStatus           `json:"gpu_guard"`
 	Heartbeat HeartbeatStatus       `json:"heartbeat"`
 	MQTT      *MQTTStatus           `json:"mqtt,omitempty"`
 	Proxy     *ProxyStatus          `json:"ollama_proxy,omitempty"`
@@ -103,6 +104,7 @@ func (a *App) snapshot() Snapshot {
 	if _, err := a.gpu.Last(); err != nil {
 		s.GPUError = err.Error()
 	}
+	s.Guard = a.guard.Status()
 	if age := a.gpu.RelayAge(); age > 0 {
 		s.GPUZRelay = age.Round(time.Second).String()
 	}

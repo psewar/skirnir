@@ -149,6 +149,11 @@ modes:
     failures: 3             #   binnen window_s ist der Knoten open_s lang kein Kandidat; danach eine Probe (half_open),
     window_s: 60            #   Erfolg = closed, Fehler = wieder open. Ein Neustart des Knotens (offline -> online) setzt zurueck.
     open_s: 30
+  gpu_guard:                  # Router-Seite des GPU-Schutzes (Agent >= 0.7.0 setzt das Power-Limit selbst)
+    enabled: true             # Status beachten: Deckel in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA
+    throttled_max_inflight: 1
+    score_penalty: 40
+    require_fresh_status: false   # true = Knoten ohne frischen Schutzstatus wie gedrosselt behandeln (kostet Parallelitaet bei Agent-Ausfall)
   admission:                # Admission Control: hoechstens max_inflight Anfragen je Knoten (Policy im Register, sonst Default);
     max_inflight_default: 2 #   weitere warten IM ROUTER mit Prioritaet (routing.priority bzw. roles.<r>.priority: interactive <
     aging_s: 30             #   normal < batch, Client-Kappung ueber client_auth.clients.<c>.max_priority). Alterung: je aging_s

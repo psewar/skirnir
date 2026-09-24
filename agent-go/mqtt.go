@@ -26,6 +26,7 @@ type MQTTModule struct {
 	gpu           *GPU
 	hb            *Heartbeat
 	sup           *Supervisor
+	guard         *Guard // GPU-Schutz (guard.go), nil in Tests/Verben
 	http          *http.Client
 
 	mu        sync.Mutex
@@ -79,6 +80,13 @@ var sensorDefs = []sensorDef{
 	{"sensor", "gpu_pin16_voltage_v", "GPU 16-Pin Spannung", "gpu_pin16_voltage_v", "mdi:power-plug-outline", map[string]any{"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement", "suggested_display_precision": 2}},
 	{"sensor", "gpu_perfcap", "GPU PerfCap", "gpu_perfcap", "mdi:car-brake-alert", map[string]any{"entity_category": "diagnostic"}},
 	{"sensor", "cpu_temp_c", "CPU Temperatur", "cpu_temp_c", "mdi:thermometer", tempExtra},
+	// GPU-Schutz (0.7.0, guard.go): Zustand mit Attributen, Problem-Sensor, Ereignisse auf <device>/gpu_guard
+	{"sensor", "gpu_guard_state", "GPU-Schutz", "gpu_guard_state", "mdi:shield-half-full",
+		map[string]any{"json_attributes_template": "{{ value_json.gpu_guard_details | tojson }}"}},
+	{"binary_sensor", "gpu_guard_problem", "GPU-Schutz Problem", "gpu_guard_problem", "mdi:shield-alert", map[string]any{"device_class": "problem"}},
+	{"sensor", "gpu_guard_target_w", "GPU-Schutz Ziel-Limit", "gpu_guard_target_w", "mdi:shield-check", map[string]any{"unit_of_measurement": "W", "device_class": "power", "entity_category": "diagnostic"}},
+	{"event", "gpu_guard", "GPU-Schutz Ereignis", "", "mdi:shield-alert",
+		map[string]any{"event_types": []string{guardEvHochlast, guardEvGedrosselt, guardEvErholung, guardEvLimitGesetzt, guardEvLimitVerweigert, guardEvFremdeingriff, guardEvSpannung, guardEvTemperatur, guardEvHwDrossel, guardEvAbgewaehlt}}},
 }
 
 var (
@@ -109,8 +117,8 @@ var sensorGroup = map[string]string{
 	"cpu_temp_c":            "gpuz",
 }
 
-func newMQTT(cfg MQTTCfg, secretStore SecretStoreCfg, node string, log *Logger, gpu *GPU, hb *Heartbeat, sup *Supervisor) *MQTTModule {
-	return &MQTTModule{cfg: cfg, secretStore: secretStore, node: node, log: log, gpu: gpu, hb: hb, sup: sup,
+func newMQTT(cfg MQTTCfg, secretStore SecretStoreCfg, node string, log *Logger, gpu *GPU, hb *Heartbeat, sup *Supervisor, guard *Guard) *MQTTModule {
+	return &MQTTModule{cfg: cfg, secretStore: secretStore, node: node, log: log, gpu: gpu, hb: hb, sup: sup, guard: guard,
 		http:      &http.Client{Timeout: 8 * time.Second},
 		applies:   map[string]bool{},
 		announced: map[string]bool{}}
@@ -147,6 +155,7 @@ func (m *MQTTModule) broker() string {
 func (m *MQTTModule) availTopic() string { return m.cfg.DeviceID + "/status" }
 func (m *MQTTModule) stateTopic() string { return m.cfg.DeviceID + "/state" }
 func (m *MQTTModule) eventTopic() string { return m.cfg.DeviceID + "/kuerzung" }
+func (m *MQTTModule) guardTopic() string { return m.cfg.DeviceID + "/gpu_guard" }
 
 func (m *MQTTModule) password(ctx context.Context) (string, error) {
 	if m.cfg.Password != "" {
@@ -209,8 +218,17 @@ func (m *MQTTModule) Run(ctx context.Context) {
 	if m.sup != nil {
 		kuerzung = m.sup.kuerzungen.neu
 	}
+	var guardEv <-chan guardEvent
+	if m.guard != nil {
+		guardEv = m.guard.events
+	}
 	for {
 		select {
+		case e := <-guardEv: // GPU-Schutz-Ereignis sofort melden, Zustand gleich mit
+			if c.IsConnected() {
+				m.publishGuardEvent(c, e)
+				m.publishState(ctx, c)
+			}
 		case e := <-kuerzung:
 			// sofort melden statt bis zum naechsten Intervall zu warten; ohne Verbindung verfaellt die Meldung,
 			// der Zaehler im naechsten State stimmt trotzdem
@@ -312,6 +330,9 @@ func (m *MQTTModule) discoveryPayload(s sensorDef, dev map[string]any) []byte {
 	if s.comp == "event" { // HA liest event_type direkt aus dem JSON-Payload des Ereignis-Topics
 		delete(cfg, "value_template")
 		cfg["state_topic"] = m.eventTopic()
+		if s.objID == "gpu_guard" {
+			cfg["state_topic"] = m.guardTopic()
+		}
 	}
 	if _, ok := cfg["json_attributes_template"]; ok {
 		cfg["json_attributes_topic"] = m.stateTopic()
@@ -385,6 +406,7 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 	}
 	m.kuerzungState(st)
 	m.sensorState(st)
+	m.guardState(st)
 	hs := m.hb.Status()
 	if hs.OK {
 		st["router_heartbeat"] = "ON"
@@ -463,6 +485,29 @@ func (m *MQTTModule) sensorState(st map[string]any) {
 	if sens.hasGPUZ() {
 		m.setApplies("gpuz", true)
 	}
+}
+
+// guardState: Zustand des GPU-Schutzes fuer den regulaeren State (Attribute: Quelle, Limits, Warnungen, letztes Ereignis).
+func (m *MQTTModule) guardState(st map[string]any) {
+	g := m.guard.Status()
+	st["gpu_guard_state"] = g.State
+	st["gpu_guard_problem"] = map[bool]string{true: "ON", false: "OFF"}[g.Problem]
+	st["gpu_guard_target_w"] = fval(g.TargetW)
+	d := map[string]any{"quelle": g.Source, "grund": g.Reason, "warnungen": g.Warnings, "hochlast_s": g.HighLoadS,
+		"limit_w": fval(g.LimitW), "default_limit_w": fval(g.DefaultLimitW), "target_w": fval(g.TargetW),
+		"pin16_w": fval(g.Pin16W), "pin16_v": fval(g.Pin16V), "pin16_ref_v": fval(g.Pin16RefV), "throttle": g.Throttle}
+	if e, n := m.guard.LastEvent(); e != nil {
+		d["letztes_ereignis"], d["letztes_ereignis_zeit"], d["ereignisse"] = e.Type+": "+e.Msg, e.At.Format(time.RFC3339), n
+	}
+	if hs := m.hb.Status(); hs.GuardAck != nil {
+		d["router_beachtet"] = *hs.GuardAck
+	}
+	st["gpu_guard_details"] = d
+}
+
+func (m *MQTTModule) publishGuardEvent(c paho.Client, e guardEvent) {
+	b, _ := json.Marshal(map[string]any{"event_type": e.Type, "msg": e.Msg, "limit_w": e.LimitW, "zeit": e.At.Format(time.RFC3339)})
+	c.Publish(m.guardTopic(), 1, false, b)
 }
 
 func (m *MQTTModule) publishState(ctx context.Context, c paho.Client) {

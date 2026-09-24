@@ -55,7 +55,7 @@ func testModule(t *testing.T) *MQTTModule {
 	// Windows loescht keine offene Datei: ohne Schliessen scheitert das Aufraeumen von TempDir.
 	t.Cleanup(func() { log.file.Close() })
 	return newMQTT(MQTTCfg{DeviceID: "testknoten", DeviceName: "Testknoten", DiscoveryPrefix: "homeassistant"},
-		SecretStoreCfg{}, "testknoten", log, nil, nil, nil)
+		SecretStoreCfg{}, "testknoten", log, nil, nil, nil, nil)
 }
 
 func TestSyncDiscoveryOhneGruppen(t *testing.T) {

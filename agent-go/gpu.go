@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -238,6 +239,56 @@ func (g *GPU) addGPUZ(s *GPUSensors) {
 	if r != nil && time.Since(at) < 15*time.Second {
 		s.mergeGPUZ(r)
 	}
+}
+
+// PowerLimits liest aktuelles, Standard-, Min- und Max-Limit (Watt): per NVML, sonst per nvidia-smi.
+func (g *GPU) PowerLimits() guardLimits {
+	if g.nvml != nil {
+		return g.nvml.limits()
+	}
+	if g.smi == "" || g.smi == "nvml" {
+		return guardLimits{Err: "kein nvidia-smi"}
+	}
+	cctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, g.smi, "--query-gpu=power.limit,power.default_limit,power.min_limit,power.max_limit", "--format=csv,noheader,nounits")
+	hideWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return guardLimits{Err: "nvidia-smi: " + err.Error()}
+	}
+	f := strings.Split(strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0]), ",")
+	if len(f) < 4 {
+		return guardLimits{Err: "nvidia-smi: unerwartete Limit-Ausgabe"}
+	}
+	var v [4]float64
+	for i := range v {
+		x, err := strconv.ParseFloat(strings.Trim(f[i], "[] "), 64)
+		if err != nil {
+			return guardLimits{Err: "Power-Limit von nvidia-smi nicht lesbar (" + strings.TrimSpace(f[i]) + ")"}
+		}
+		v[i] = x
+	}
+	return guardLimits{Cur: v[0], Def: v[1], Min: v[2], Max: v[3], OK: true}
+}
+
+// SetPowerLimit setzt das Power-Limit (Watt): NVML (Admin) oder `nvidia-smi -pl` (root). Der Guard klemmt den Wert
+// vorher auf [Min, Standard]; hier wird nichts mehr geprueft.
+func (g *GPU) SetPowerLimit(w float64) error {
+	if g.nvml != nil {
+		return g.nvml.setLimit(w)
+	}
+	if g.smi == "" || g.smi == "nvml" {
+		return fmt.Errorf("kein nvidia-smi")
+	}
+	cctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, g.smi, "-pl", strconv.Itoa(int(math.Round(w))))
+	hideWindow(cmd)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("nvidia-smi -pl: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (g *GPU) setErr(err error) { g.mu.Lock(); g.err = err; g.mu.Unlock() }

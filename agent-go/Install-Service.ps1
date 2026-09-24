@@ -27,6 +27,15 @@ function Remove-OpenOllamaRules {
     if ($r) { $r | Remove-NetFirewallRule; Write-Host "      $(@($r).Count) offene Ollama-Firewallregel(n) 'ollama.exe' entfernt" }
     Get-NetFirewallRule -DisplayName 'Ollama 11434 - *' | ForEach-Object { Write-Host "      bleibt: $($_.DisplayName)" }
 }
+function Stop-GpuzRelay {
+    # Das Relay laeuft aus derselben Binary (Aufgabe in der Anmeldesitzung) und haelt sie offen - vor dem Ersetzen beenden.
+    $tn = 'OllamaRouterAgent-GpuzRelay'
+    if (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue }
+    Get-CimInstance Win32_Process -Filter "Name = 'ollama-router-agent.exe'" | Where-Object { $_.CommandLine -like '*gpuz-relay*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; Write-Host "      Relay-Prozess $($_.ProcessId) beendet" }
+    Start-Sleep -Seconds 1
+}
+
 function Install-GpuzRelayTask {
     # GPU-Z-Sensoren (0.6.0): GPU-Z legt sein Shared-Memory-Objekt in der Anmeldesitzung an, mit einer DACL fuer SYSTEM,
     # Administratoren und die eigene Sitzung. Das virtuelle Dienstkonto darf es nicht lesen -> eine Aufgabe "bei Anmeldung"
@@ -64,7 +73,7 @@ if (Get-Service OllamaRouterAgent -ErrorAction SilentlyContinue) {
     Write-Host '      Dienst existiert schon -> stoppen, Binary ersetzen, starten (Update-Pfad)'
     Stop-Service OllamaRouterAgent -ErrorAction SilentlyContinue   # nicht ueber die alte Binary stoppen: die kennt die neue Config evtl. nicht
     (Get-Service OllamaRouterAgent).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
-    Start-Sleep -Seconds 1
+    Stop-GpuzRelay
     Copy-Item $src $exe -Force
     & $exe apply-rules --config $cfg
     & $exe start --config $cfg
@@ -75,6 +84,7 @@ if (Get-Service OllamaRouterAgent -ErrorAction SilentlyContinue) {
     if ($RemoveOllamaLanRules) { Remove-OllamaLanRules }
     exit 0
 }
+Stop-GpuzRelay
 Copy-Item $src $exe -Force
 & $exe version
 

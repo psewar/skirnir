@@ -48,6 +48,9 @@ type nvmlDev struct {
 	defLimit *windows.LazyProc
 	fan      *windows.LazyProc
 	throttle *windows.LazyProc
+	// gpu_guard (0.7.0)
+	limitCon *windows.LazyProc // nvmlDeviceGetPowerManagementLimitConstraints
+	limitSet *windows.LazyProc // nvmlDeviceSetPowerManagementLimit (braucht Admin)
 	handle   uintptr
 	mu       sync.Mutex
 	gpuName  string
@@ -85,6 +88,8 @@ func openNVML() (*nvmlDev, error) {
 	d.defLimit = optProc(d.dll, "nvmlDeviceGetPowerManagementDefaultLimit")
 	d.fan = optProc(d.dll, "nvmlDeviceGetFanSpeed")
 	d.throttle = optProc(d.dll, "nvmlDeviceGetCurrentClocksEventReasons", "nvmlDeviceGetCurrentClocksThrottleReasons")
+	d.limitCon = optProc(d.dll, "nvmlDeviceGetPowerManagementLimitConstraints")
+	d.limitSet = optProc(d.dll, "nvmlDeviceSetPowerManagementLimit")
 	for _, p := range []*windows.LazyProc{d.init, d.shutdown, d.byIndex, d.util, d.memInfo, d.name} {
 		if err := p.Find(); err != nil {
 			return nil, err
@@ -170,6 +175,46 @@ func (d *nvmlDev) extra(s *GPUSensors) {
 			s.ThrottleMask, s.ThrottleReasons = &mask, decodeThrottle(mask)
 		}
 	}
+}
+
+// limits: aktuelles, Standard-, Min-, Max-Limit in Watt (fuer den Guard).
+func (d *nvmlDev) limits() guardLimits {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.limit == nil || d.defLimit == nil {
+		return guardLimits{Err: "NVML ohne Power-Limit-Funktionen"}
+	}
+	var cur, def, lo, hi uint32
+	if rc, _, _ := d.limit.Call(d.handle, uintptr(unsafe.Pointer(&cur))); rc != 0 {
+		return guardLimits{Err: nvmlErr("GetPowerManagementLimit", rc).Error()}
+	}
+	if rc, _, _ := d.defLimit.Call(d.handle, uintptr(unsafe.Pointer(&def))); rc != 0 {
+		return guardLimits{Err: nvmlErr("GetPowerManagementDefaultLimit", rc).Error()}
+	}
+	l := guardLimits{Cur: float64(cur) / 1000, Def: float64(def) / 1000, OK: true}
+	if d.limitCon != nil {
+		if rc, _, _ := d.limitCon.Call(d.handle, uintptr(unsafe.Pointer(&lo)), uintptr(unsafe.Pointer(&hi))); rc == 0 {
+			l.Min, l.Max = float64(lo)/1000, float64(hi)/1000
+		}
+	}
+	return l
+}
+
+// setLimit setzt das Power-Limit (Watt). NVML rc 4 = NVML_ERROR_NO_PERMISSION (kein Admin).
+func (d *nvmlDev) setLimit(w float64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.limitSet == nil {
+		return fmt.Errorf("NVML ohne SetPowerManagementLimit")
+	}
+	rc, _, _ := d.limitSet.Call(d.handle, uintptr(uint32(math.Round(w*1000))))
+	if rc == 4 {
+		return fmt.Errorf("NVML SetPowerManagementLimit: keine Berechtigung (rc 4) - der Dienst braucht Adminrechte auf die GPU")
+	}
+	if rc != 0 {
+		return nvmlErr("SetPowerManagementLimit", rc)
+	}
+	return nil
 }
 
 func (d *nvmlDev) close() {

@@ -51,6 +51,10 @@ tunnel:
 # gpuz:                                         # GPU-Z-Sensoren (Windows) als Zusatzquelle, Standard an: laeuft GPU-Z,
 #   enabled: false                              #   kommen Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung dazu
 
+# gpu_guard:                                    # GPU-Schutz (12V-2x6-Stecker): Power-Limit 80 % des Standards, Stufe 2 bei
+#   enabled: false                              #   Dauer-Vollast, Spannungs-/Temperaturwarnung. Standard AN; false = abgewaehlt
+#   power_limit_pct: 80                         #   (zaehlt als Problem in HA). Alle Schluessel: agent-go/README.md, Abschnitt GPU-Schutz
+
 # identity:
 #   dir: /var/lib/ollama-router-agent           # Linux; Windows-Standard: C:\ProgramData\ollama-router-agent\identity
 # logging:

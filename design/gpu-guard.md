@@ -1,5 +1,12 @@
 # GPU-Schutz (12V-2x6) – Entwurf v0.1 (2026-09-24)
 
+> **Stand 2026-09-24, abends: umgesetzt** in Agent 0.7.0 (`agent-go/guard.go`, Tests `guard_test.go`) und Router 0.1.2
+> (`modes.gpu_guard`, Policy `gpu_guard` je Knoten, HA-Probleme, Metriken, UI-Badge). Entscheide des Betreibers: Default
+> 80 %, die Abwahl zählt als HA-Problem (abweichend von Abschnitt 4), `require_fresh_status` Standard aus. Konfigschlüssel
+> im Agenten heissen englisch und flach (`power_limit_pct`, `high_load_s`, `stage2_pct`, `recovery_s`, `voltage_warn_v`, …,
+> siehe `agent-go/README.md`). Noch offen: Messwoche und Lasttest (Abschnitt 5, Tests 5 und 6) – die Schwellen sind weiter
+> Annahmen. Der Router-Teil zu `routing.reason`/`skipped` ist nicht gebaut (Deckel wirkt über `max_inflight`).
+
 Anlass: Berichte über verschmorte 12VHPWR/12V-2x6-Stecker an RTX-5090-Karten nach längerer Zeit unter hohem Strom.
 Dieses Dokument prüft, was Router und Agent dagegen tun können, und schlägt einen Schutz vor, der **standardmässig an**
 ist und ausdrücklich abgewählt werden muss. Bezug: `agent-go/` (`gpu.go`, `gpu_nvml_windows.go`, `heartbeat.go`,

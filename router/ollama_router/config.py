@@ -69,6 +69,7 @@ SCHEMA = {
         "prewarm": {"on_free": None, "free_delay_s": None, "on_online": None, "online_delay_s": None, "residency_idle_s": None, "residency_check_s": None},
         "score": None, "breaker": {"failures": None, "window_s": None, "open_s": None},
         "admission": {"max_inflight_default": None, "aging_s": None, "max_wait_s": None, "max_queue": None},
+        "gpu_guard": {"enabled": None, "throttled_max_inflight": None, "score_penalty": None, "require_fresh_status": None},
     },
     "models": {"*": {"weights_gib": None, "kv_gib_per_1k": None, "capabilities": None, "source": None, "note": None, "measured_at": None,
                      "measured_on": None, "vram_gib_8k": None, "vram_gib_32k": None, "partial_offload": None,
@@ -306,6 +307,13 @@ class Config:
         ad = m.get("admission") or {}
         self.admission = {"max_inflight_default": int(ad.get("max_inflight_default", 2)), "aging_s": float(ad.get("aging_s", 30)),
                           "max_wait_s": float(ad.get("max_wait_s", 120)), "max_queue": int(ad.get("max_queue", 64))}
+        # GPU-Schutz (design/gpu-guard.md): der Agent setzt das Power-Limit, der Router reagiert auf dessen Status -
+        # Stufe 2 (gedrosselt) deckelt die Parallelitaet, Hochlast kostet Score, Probleme (unverfuegbar, abgewaehlt,
+        # Spannung, Temperatur) gehen an HA. require_fresh_status: ohne frischen Status ebenfalls deckeln (kostet
+        # Parallelitaet bei jedem Agent-Ausfall, darum Standard aus).
+        gg = m.get("gpu_guard") or {}
+        self.gpu_guard = {"enabled": bool(gg.get("enabled", True)), "throttled_max_inflight": int(gg.get("throttled_max_inflight", 1)),
+                          "score_penalty": float(gg.get("score_penalty", 40)), "require_fresh_status": bool(gg.get("require_fresh_status", False))}
 
         self.models = c.get("models", {})
         for mname, spec in self.models.items():

@@ -77,9 +77,9 @@ def route(since=None):
     return Decision(ds[-1] if ds else {})
 
 
-def hb(node, util, used, free, total=32607):
+def hb(node, util, used, free, total=32607, **extra):
     return http(C + f"/v1/heartbeat/{node}", {"gpu_util_pct": util, "vram_total_mib": total, "vram_used_mib": used,
-                                             "vram_free_mib": free}, headers={"X-Router-Token": "testtoken"})
+                                             "vram_free_mib": free, **extra}, headers={"X-Router-Token": "testtoken"})
 
 
 def state():
@@ -198,6 +198,26 @@ def main():
         # Fremd-VRAM-Transiente (Modellwechsel): ein einzelner Ausreisser darf nicht busy machen
         hb("big", 5, 30000, 2600); time.sleep(0.6); hb("big", 5, 26600, 6000)
         check("einzelner Fremd-VRAM-Ausreisser bleibt free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["busy_reason"])
+        # GPU-Schutz (Agent >= 0.7.0): Status im Heartbeat -> Deckel, HA-Problem, Ereignis; kein Einfluss auf free/busy
+        base_cap = state()["nodes"]["big"]["max_inflight"]
+        st, txt = hb("big", 5, 26600, 6000, gpu_guard={"state": "gedrosselt", "limit_w": 403, "target_w": 403, "default_limit_w": 575, "problem": False, "quelle": "nvml"})
+        n = state()["nodes"]["big"]
+        check("GPU-Schutz gedrosselt -> Deckel 1 gleichzeitig, free bleibt", n["max_inflight"] == 1 and n["gpu_guard"]["state"] == "gedrosselt" and n["state"] == "free", str(n.get("gpu_guard")))
+        check("Heartbeat-Antwort traegt gpu_guard_ack", st == 200 and json.loads(txt).get("gpu_guard_ack") is True, txt[:120])
+        hb("big", 5, 26600, 6000, gpu_guard={"state": "unverfuegbar", "problem": True, "grund": "Limit nicht setzbar: keine Berechtigung (rc 4)"})
+        ha_s = json.loads(http(C + "/admin/ha")[1])
+        check("GPU-Schutz unverfuegbar -> HA-Problem, Deckel wieder normal", any("GPU-Schutz unverfuegbar" in p for p in ha_s["problems"]) and state()["nodes"]["big"]["max_inflight"] == base_cap, str(ha_s["problems"]))
+        hb("big", 5, 26600, 6000, gpu_guard={"state": "aus", "problem": True, "grund": "abgewaehlt"})
+        ha_s = json.loads(http(C + "/admin/ha")[1])
+        check("GPU-Schutz abgewaehlt -> HA-Problem (Betreiber-Entscheid)", any("abgewaehlt" in p for p in ha_s["problems"]), str(ha_s["problems"]))
+        hb("big", 5, 26600, 6000, gpu_guard={"state": "normal", "limit_w": 460, "target_w": 460, "problem": False, "quelle": "nvml+gpuz"})
+        ha_s = json.loads(http(C + "/admin/ha")[1])
+        check("GPU-Schutz normal -> kein Problem, Deckel normal, HA-Knoten traegt Limit", not any("GPU-Schutz" in p for p in ha_s["problems"]) and state()["nodes"]["big"]["max_inflight"] == base_cap and ha_s["nodes"]["big"]["gpu_guard"]["limit_w"] == 460, str(ha_s["nodes"]["big"].get("gpu_guard")))
+        evs = [d for d in state()["decisions"] if d.get("event") == "gpu_guard"]
+        check("gpu_guard-Ereignisse im Entscheidungsprotokoll (je Zustandswechsel)", len(evs) >= 4 and evs[-1]["state"] == "normal", str([e["state"] for e in evs]))
+        m_txt = http(C + "/metrics")[1]
+        m_txt = m_txt.decode() if isinstance(m_txt, bytes) else str(m_txt)
+        check("Metrik skirnir_node_gpu_guard", 'skirnir_node_gpu_guard{node="big",state="normal"} 1' in m_txt, "")
         st, txt = chat("assist:latest")
         d = route()
         check("assist: warmes Modell (tier0 geladen) gewinnt", d["tier"] == 0 and d["warm"] is True, str(d))

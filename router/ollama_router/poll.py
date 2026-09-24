@@ -296,7 +296,13 @@ async def handle_heartbeat(request):
     except Exception:  # noqa: BLE001
         return web.json_response({"error": "invalid json"}, status=400)
     apply_heartbeat(node, b, time.time())
-    return web.json_response({"state": node.state, "busy_reason": node.busy_reason})
+    return web.json_response(hb_ack(node))
+
+
+def hb_ack(node):
+    """Antwort auf einen Heartbeat (HTTP und Tunnel): Urteil des Routers plus ob er den GPU-Schutz dieses Knotens beachtet."""
+    return {"state": node.state, "busy_reason": node.busy_reason,
+            "gpu_guard_ack": bool(state.CFG.gpu_guard["enabled"] and node.guard_policy)}
 
 
 def apply_heartbeat(node, b, now):
@@ -318,6 +324,17 @@ def apply_heartbeat(node, b, now):
     node.ollama_proc_gib = op / 1024 if op is not None else None
     sens = b.get("sensors")   # Agent >= 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z-Werte (unveraendert durchgereicht)
     node.sensors = sens if isinstance(sens, dict) else None
+    g = b.get("gpu_guard")     # Agent >= 0.7.0: GPU-Schutz (Power-Limit, Hochlast-Stufe, Warnungen) - nur Flag neben dem Zustand
+    if isinstance(g, dict):
+        prev = node.guard or {}
+        node.guard, node.guard_ts = g, now
+        if g.get("state") != prev.get("state") or bool(g.get("problem")) != bool(prev.get("problem")):
+            reason = g.get("grund") or ", ".join(g.get("warnungen") or [])
+            log.info("node %s: GPU-Schutz %s%s%s", node.name, g.get("state"), f" ({reason})" if reason else "",
+                     f" Limit {g.get('limit_w')} W" if g.get("limit_w") is not None else "")
+            state.remember({"event": "gpu_guard", "node": node.name, "state": g.get("state"), "limit_w": g.get("limit_w"),
+                            "problem": bool(g.get("problem")), "reason": reason})
+            state.MQTT_DIRTY.append(True)
     if node.vram_total_reported_gib and not node.vram_total_gib:
         node.vram_total_gib = node.vram_total_reported_gib
     # Baseline nur lernen, wenn Ollama nichts im VRAM haelt und keine Anfrage laeuft: dann ist "belegt" der reine
