@@ -32,6 +32,9 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.GPUZ.on() {
+		gpu.enableGPUZ(log)
+	}
 	sup, err := newSupervisor(cfg.Children, cfg.Logging, log)
 	if err != nil {
 		return nil, err

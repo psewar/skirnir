@@ -316,6 +316,8 @@ def apply_heartbeat(node, b, now):
     node.vram_free_gib = free / 1024 if free is not None else None
     op = b.get("ollama_proc_mib")
     node.ollama_proc_gib = op / 1024 if op is not None else None
+    sens = b.get("sensors")   # Agent >= 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z-Werte (unveraendert durchgereicht)
+    node.sensors = sens if isinstance(sens, dict) else None
     if node.vram_total_reported_gib and not node.vram_total_gib:
         node.vram_total_gib = node.vram_total_reported_gib
     # Baseline nur lernen, wenn Ollama nichts im VRAM haelt und keine Anfrage laeuft: dann ist "belegt" der reine

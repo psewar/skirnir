@@ -310,7 +310,10 @@ Client-Token); Modell = Rolle.
 - baut den Tunnel zum Router (`wss://…:11435/v1/tunnel`) und hält ihn mit Backoff; ein Router-Neustart kostet 1–2 s,
 - weist sich mit einem beim ersten Start erzeugten **Ed25519-Schlüssel** aus (Windows: DPAPI-geschützt); unbekannte Schlüssel
   warten im Router auf Freigabe (UI, HA-Sensor),
-- meldet alle 2 s GPU-Auslastung und VRAM (NVML direkt, Rückfall `nvidia-smi`), Hostname, MAC, Versionen,
+- meldet alle 2 s GPU-Auslastung und VRAM (NVML direkt, Rückfall `nvidia-smi`), Hostname, MAC, Versionen; seit Agent
+  0.6.0 auch Temperatur, Leistung und Power-Limit, Lüfter, Drosselgründe und, wenn auf einem Windows-Knoten GPU-Z läuft,
+  Speichertemperatur, Hot Spot, GPU-Spannung sowie Leistung und Spannung am 16-Pin-Stecker (alles im Knotenzustand des
+  Routers und als Home-Assistant-Sensoren),
 - bekommt nach der Freigabe sein **Konfigurationspaket** durch den Tunnel (Heartbeat-Takt, optional MQTT-Zugang) und braucht keine
   eigenen Secrets,
 - kann **Ollama als Kind-Prozess** führen (`children:` in seiner Konfiguration), damit ein Knoten nach dem Reboot ohne Anmeldung

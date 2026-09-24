@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
-// HealthServer: GET /health (JSON-Gesamtbild), GET /healthz (200/503), POST /restart-child?name=stt.
+// HealthServer: GET /health (JSON-Gesamtbild), GET /healthz (200/503), POST /restart-child?name=stt,
+// POST /gpuz (GPU-Z-Sensoren vom Relay aus der Anmeldesitzung, nur von localhost).
 // Nur auf localhost; dient Debugging, dem status-Verb und einem etwaigen externen Watchdog.
 type HealthServer struct {
 	app *App
@@ -40,6 +43,32 @@ func (h *HealthServer) Run(ctx context.Context) {
 			w.Write([]byte("kein laufendes Kind mit diesem Namen\n"))
 		}
 	})
+	mux.HandleFunc("/gpuz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(405)
+			return
+		}
+		host := r.RemoteAddr
+		if i := strings.LastIndex(host, ":"); i > 0 {
+			host = host[:i]
+		}
+		if host != "127.0.0.1" && host != "[::1]" {
+			w.WriteHeader(403)
+			return
+		}
+		var s GPUSensors
+		if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&s); err != nil {
+			w.WriteHeader(400)
+			w.Write([]byte("json: " + err.Error() + "\n"))
+			return
+		}
+		if !h.app.gpu.SetRelayed(&s) {
+			w.WriteHeader(409)
+			w.Write([]byte("gpuz.enabled: false\n"))
+			return
+		}
+		w.Write([]byte("ok\n"))
+	})
 	srv := &http.Server{Addr: h.app.cfg.Health.Listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -59,6 +88,7 @@ type Snapshot struct {
 	Uptime    string                `json:"uptime"`
 	GPU       *GPUSample            `json:"gpu"`
 	GPUError  string                `json:"gpu_error,omitempty"`
+	GPUZRelay string                `json:"gpuz_relay_age,omitempty"` // Alter der letzten Relay-Werte (leer = nie)
 	Heartbeat HeartbeatStatus       `json:"heartbeat"`
 	MQTT      *MQTTStatus           `json:"mqtt,omitempty"`
 	Proxy     *ProxyStatus          `json:"ollama_proxy,omitempty"`
@@ -72,6 +102,9 @@ func (a *App) snapshot() Snapshot {
 	s.GPU, _ = a.gpu.Last()
 	if _, err := a.gpu.Last(); err != nil {
 		s.GPUError = err.Error()
+	}
+	if age := a.gpu.RelayAge(); age > 0 {
+		s.GPUZRelay = age.Round(time.Second).String()
 	}
 	s.MQTT = a.mqStatus()
 	if a.id != nil {

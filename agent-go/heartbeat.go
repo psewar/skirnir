@@ -55,6 +55,9 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	if h.tlsFP != "" {
 		p["ollama_tls_sha256"] = h.tlsFP
 	}
+	if s.Sensors != nil { // 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z - der Router legt den Block in den Knotenzustand
+		p["sensors"] = s.Sensors
+	}
 	return p, nil
 }
 

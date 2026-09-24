@@ -49,6 +49,7 @@ ollama-router-agent.exe status                  Dienstzustand + /health
 ollama-router-agent.exe start|stop|restart      ohne UAC (Installer setzt das Steuerrecht fuer <user>)
 ollama-router-agent.exe install|uninstall       Admin
 ollama-router-agent.exe check-config | mqtt-clear | version
+ollama-router-agent.exe gpu                     Messquelle und alle Sensoren einmal ausgeben (auch GPU-Z, falls es laeuft)
 ```
 
 `/health` auf `127.0.0.1:10398`: GPU, Heartbeat (Router-Urteil), MQTT, Kinder. `POST /restart-child?name=stt` startet ein Kind neu.
@@ -72,6 +73,33 @@ Nebeneffekt: ohne STT-Kind entfaellt auch der Portversuch auf 10300 in jedem Zyk
 
 Anlass war ein zweiter Knoten: dort standen `STT-Dienst` und `Alias-Modell strukturfaehig` dauerhaft `off`,
 weil beides nur auf dem ersten Knoten existiert. Tests dazu in `mqtt_test.go` (`go test ./...`).
+
+## Sensoren (0.6.0)
+
+Bis 0.5.x kannte der Heartbeat nur GPU-Auslastung und VRAM. Seit 0.6.0 liest der Agent zusaetzlich (`sensors.go`):
+
+| Quelle | Werte | Bedingung |
+|---|---|---|
+| NVML (Windows) bzw. `nvidia-smi` (Linux, Rueckfall) | Temperatur, Leistung, wirksames und Standard-Power-Limit, Luefter, Speichercontroller-Last, Drosselgruende (`clocks_event_reasons`-Bitmaske, dekodiert: `sw_power_cap`, `hw_thermal`, ...) | immer, auch als Dienst ohne Anmeldung; jeder Wert einzeln optional |
+| GPU-Z Shared Memory (`GPUZShMem`, nur Windows) | Speichertemperatur, Hot Spot, GPU-Spannung, 16-Pin-Leistung und -Spannung, Board Power, PerfCap-Grund, CPU-Temperatur | GPU-Z laeuft (Tray reicht); `gpuz.enabled: false` schaltet den Leser ab |
+
+Der Block `sensors` haengt an jedem Heartbeat und am `/health`-GPU-Sample; der Router legt ihn unveraendert in den
+Knotenzustand (`/admin/state` -> `nodes.<n>.sensors`). Das MQTT-Geraet macht daraus HA-Sensoren in zwei Gruppen:
+`gpu` (NVML-Werte) und `gpuz`. Beide Gruppen entstehen, sobald einmal Werte da waren, und bleiben dann - wird GPU-Z
+geschlossen, stehen die Entitaeten auf *unbekannt* statt zu verschwinden und beim naechsten Start wiederzukommen.
+
+GPU-Z legt sein Objekt in der Anmeldesitzung des Benutzers an (`\Sessions\<n>\BaseNamedObjects\GPUZShMem`), ohne
+`Global\`, mit einer DACL fuer SYSTEM, Administratoren und die eigene Anmeldesitzung (GPU-Z laeuft erhoeht). Der Dienst
+versucht zuerst, es ueber den vollen NT-Pfad zu oeffnen (`NtOpenSection`, `gpuz_windows.go`) - das gelingt als LocalSystem.
+Mit dem empfohlenen virtuellen Dienstkonto `NT SERVICE\OllamaRouterAgent` ist der Zugriff verweigert; dafuer gibt es das
+**Relay**: `Install-Service.ps1` legt die Aufgabe `OllamaRouterAgent-GpuzRelay` an (bei Anmeldung, Gruppe Benutzer, ohne
+Adminrechte, versteckt, `conhost --headless`), die `ollama-router-agent.exe gpuz-relay` startet. Das Relay liest den Block
+in der Anmeldesitzung und schickt die Whitelist alle 2 s per `POST /gpuz` an den Health-Port (nur localhost); der Dienst
+nimmt die Werte 15 s lang als frisch. Ohne GPU-Z wartet das Relay still (Versuch alle 30 s). `-SkipGpuzRelay` legt die
+Aufgabe nicht an bzw. entfernt sie; `gpuz.enabled: false` im Dienst lehnt Relay-Werte mit 409 ab.
+Steht `lastUpdate` 15 s still, gilt der Block als veraltet und wird losgelassen; alle 30 s wird neu probiert. Von den
+statischen GPU-Z-Daten (Karte, BIOS, Monitor samt Seriennummer) wird nichts uebernommen - nur die Sensor-Whitelist in
+`gpuz_parse.go`. Tests: `gpuz_test.go` (synthetischer Block, NaN, PerfCap-Bits, kein statischer Wert im MQTT-Zustand).
 
 ## Kuerzungsmeldung (0.5.3)
 

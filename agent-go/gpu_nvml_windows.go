@@ -6,9 +6,13 @@ package main
 // Grund (2026-09-11, Performance-Runde): der Heartbeat startete alle 2 s nvidia-smi.exe - 25 ms CPU je Start,
 // 43 200 Prozessstarts am Tag, ~1,2 % eines Kerns dauerhaft. Ein NVML-Aufruf kostet Mikrosekunden.
 // nvidia-smi bleibt als Rueckfallweg (gpu.go), falls die DLL fehlt oder ein Aufruf scheitert.
+//
+// Seit 0.6.0 zusaetzlich (jeder Aufruf optional, fehlt er im Treiber, bleibt der Wert weg): Temperatur, Leistung,
+// wirksames und Standard-Power-Limit, Luefter, Drosselgruende (Clocks-Event-Reasons-Bitmaske).
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"unsafe"
 
@@ -37,12 +41,30 @@ type nvmlDev struct {
 	memInfo  *windows.LazyProc
 	memInfo2 *windows.LazyProc // nvmlDeviceGetMemoryInfo_v2, kann fehlen
 	name     *windows.LazyProc
+	// optional (0.6.0)
+	temp     *windows.LazyProc
+	power    *windows.LazyProc
+	limit    *windows.LazyProc
+	defLimit *windows.LazyProc
+	fan      *windows.LazyProc
+	throttle *windows.LazyProc
 	handle   uintptr
 	mu       sync.Mutex
 	gpuName  string
 }
 
 func nvmlErr(what string, rc uintptr) error { return fmt.Errorf("NVML %s: Rueckgabe %d", what, rc) }
+
+// optProc: Prozedur, die fehlen darf (aeltere Treiber) -> nil.
+func optProc(dll *windows.LazyDLL, names ...string) *windows.LazyProc {
+	for _, n := range names {
+		p := dll.NewProc(n)
+		if p.Find() == nil {
+			return p
+		}
+	}
+	return nil
+}
 
 // openNVML initialisiert NVML einmal und holt das Handle der ersten GPU. Fehler = Rueckfall auf nvidia-smi.
 func openNVML() (*nvmlDev, error) {
@@ -55,11 +77,14 @@ func openNVML() (*nvmlDev, error) {
 	d.byIndex = d.dll.NewProc("nvmlDeviceGetHandleByIndex_v2")
 	d.util = d.dll.NewProc("nvmlDeviceGetUtilizationRates")
 	d.memInfo = d.dll.NewProc("nvmlDeviceGetMemoryInfo")
-	d.memInfo2 = d.dll.NewProc("nvmlDeviceGetMemoryInfo_v2")
-	if d.memInfo2.Find() != nil {
-		d.memInfo2 = nil
-	}
+	d.memInfo2 = optProc(d.dll, "nvmlDeviceGetMemoryInfo_v2")
 	d.name = d.dll.NewProc("nvmlDeviceGetName")
+	d.temp = optProc(d.dll, "nvmlDeviceGetTemperature")
+	d.power = optProc(d.dll, "nvmlDeviceGetPowerUsage")
+	d.limit = optProc(d.dll, "nvmlDeviceGetEnforcedPowerLimit", "nvmlDeviceGetPowerManagementLimit")
+	d.defLimit = optProc(d.dll, "nvmlDeviceGetPowerManagementDefaultLimit")
+	d.fan = optProc(d.dll, "nvmlDeviceGetFanSpeed")
+	d.throttle = optProc(d.dll, "nvmlDeviceGetCurrentClocksEventReasons", "nvmlDeviceGetCurrentClocksThrottleReasons")
 	for _, p := range []*windows.LazyProc{d.init, d.shutdown, d.byIndex, d.util, d.memInfo, d.name} {
 		if err := p.Find(); err != nil {
 			return nil, err
@@ -83,27 +108,68 @@ func openNVML() (*nvmlDev, error) {
 	return d, nil
 }
 
-// sample liest Auslastung und Speicher; Werte wie nvidia-smi --query-gpu (MiB, Prozent).
-func (d *nvmlDev) sample() (util int, totalMiB, usedMiB, freeMiB int, err error) {
+// sample liest Auslastung (GPU und Speichercontroller) und Speicher; Werte wie nvidia-smi --query-gpu (MiB, Prozent).
+func (d *nvmlDev) sample() (util, memUtil int, totalMiB, usedMiB, freeMiB int, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var u nvmlUtil
 	if rc, _, _ := d.util.Call(d.handle, uintptr(unsafe.Pointer(&u))); rc != 0 {
-		return 0, 0, 0, 0, nvmlErr("GetUtilizationRates", rc)
+		return 0, 0, 0, 0, 0, nvmlErr("GetUtilizationRates", rc)
 	}
 	const mib = 1024 * 1024
 	if d.memInfo2 != nil {
 		m2 := nvmlMem2{Version: uint32(unsafe.Sizeof(nvmlMem2{})) | 2<<24}
 		if rc, _, _ := d.memInfo2.Call(d.handle, uintptr(unsafe.Pointer(&m2))); rc == 0 {
-			return int(u.GPU), int(m2.Total / mib), int(m2.Used / mib), int(m2.Free / mib), nil
+			return int(u.GPU), int(u.Memory), int(m2.Total / mib), int(m2.Used / mib), int(m2.Free / mib), nil
 		}
 		d.memInfo2 = nil // dieser Treiber kann v2 nicht -> ab jetzt v1
 	}
 	var m nvmlMem
 	if rc, _, _ := d.memInfo.Call(d.handle, uintptr(unsafe.Pointer(&m))); rc != 0 {
-		return 0, 0, 0, 0, nvmlErr("GetMemoryInfo", rc)
+		return 0, 0, 0, 0, 0, nvmlErr("GetMemoryInfo", rc)
 	}
-	return int(u.GPU), int(m.Total / mib), int(m.Used / mib), int(m.Free / mib), nil
+	return int(u.GPU), int(u.Memory), int(m.Total / mib), int(m.Used / mib), int(m.Free / mib), nil
+}
+
+func mw(v uint32) *float64 { return fptr(math.Round(float64(v)/100) / 10) } // Milliwatt -> Watt, 1 Nachkommastelle
+
+// extra fuellt die optionalen Sensoren. Ein Aufruf, den der Treiber ablehnt (z. B. Luefter bei passiven Karten),
+// laesst nur seinen Wert weg; nichts davon ist ein Fehler des Samples.
+func (d *nvmlDev) extra(s *GPUSensors) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var v32 uint32
+	if d.temp != nil {
+		if rc, _, _ := d.temp.Call(d.handle, 0 /* NVML_TEMPERATURE_GPU */, uintptr(unsafe.Pointer(&v32))); rc == 0 {
+			s.TempC = iptr(int(v32))
+		}
+	}
+	if d.power != nil {
+		if rc, _, _ := d.power.Call(d.handle, uintptr(unsafe.Pointer(&v32))); rc == 0 {
+			s.PowerW = mw(v32)
+		}
+	}
+	if d.limit != nil {
+		if rc, _, _ := d.limit.Call(d.handle, uintptr(unsafe.Pointer(&v32))); rc == 0 {
+			s.PowerLimitW = mw(v32)
+		}
+	}
+	if d.defLimit != nil {
+		if rc, _, _ := d.defLimit.Call(d.handle, uintptr(unsafe.Pointer(&v32))); rc == 0 {
+			s.PowerLimitDefW = mw(v32)
+		}
+	}
+	if d.fan != nil {
+		if rc, _, _ := d.fan.Call(d.handle, uintptr(unsafe.Pointer(&v32))); rc == 0 {
+			s.FanPct = iptr(int(v32))
+		}
+	}
+	if d.throttle != nil {
+		var mask uint64
+		if rc, _, _ := d.throttle.Call(d.handle, uintptr(unsafe.Pointer(&mask))); rc == 0 {
+			s.ThrottleMask, s.ThrottleReasons = &mask, decodeThrottle(mask)
+		}
+	}
 }
 
 func (d *nvmlDev) close() {

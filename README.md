@@ -310,7 +310,10 @@ talks to the router directly (`https://router.example.net:11434`, API key = clie
 - builds the tunnel to the router (`wss://…:11435/v1/tunnel`) and keeps it up with backoff; a router restart costs 1–2 s,
 - identifies itself with an **Ed25519 key** generated on first start (Windows: DPAPI-protected); unknown keys wait in the router
   for approval (UI, Home Assistant sensor),
-- reports GPU utilisation and VRAM every 2 s (NVML directly, fallback `nvidia-smi`), hostname, MAC, versions,
+- reports GPU utilisation and VRAM every 2 s (NVML directly, fallback `nvidia-smi`), hostname, MAC, versions; since
+  agent 0.6.0 also temperature, power draw and limit, fan, throttle reasons, and, if GPU-Z is running on a Windows node,
+  memory temperature, hot spot, GPU voltage and 16-pin connector power and voltage (all forwarded to the router state and
+  as Home Assistant sensors),
 - receives its **configuration package** through the tunnel after approval (heartbeat interval, optional MQTT access) and needs no
   secrets of its own,
 - can run **Ollama as a child process** (`children:` in its configuration) so that a node is ready after a reboot without anyone

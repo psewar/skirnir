@@ -1,6 +1,6 @@
 // ollama-router-agent: Agent fuer GPU-Knoten des Ollama-Routers (Windows-Dienst, auf Linux im Vordergrund/systemd).
 // Tunnel zum Router mit Schluessel-Identitaet, Heartbeat, MQTT-Geraet fuer Home Assistant, Aufsicht ueber lokale KI-Dienste.
-// Verben: install | uninstall | apply-rules | start | stop | restart | status | run | identity | check-config | mqtt-clear | gpu | version
+// Verben: install | uninstall | apply-rules | start | stop | restart | status | run | identity | check-config | mqtt-clear | gpu | gpuz-relay | version
 package main
 
 import (
@@ -31,6 +31,8 @@ func usage() {
   identity      Fingerprint und Public Key dieses Agenten zeigen (zum Abgleich mit der Router-UI)
   check-config  Konfiguration laden und pruefen
   mqtt-clear    retained Discovery-Configs dieses Geraets loeschen (Testgeraete aufraeumen)
+  gpu           Messquelle (NVML/nvidia-smi) und alle Sensoren einmal ausgeben, GPU-Z eingeschlossen
+  gpuz-relay    GPU-Z-Sensoren aus der Anmeldesitzung an den Dienst reichen (Windows; Aufgabe bei Anmeldung)
   version
 
   Standard-Config: %s
@@ -76,6 +78,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "gpu: %v\n", err)
 			os.Exit(1)
 		}
+		g.enableGPUZ(nil)
 		t0 := time.Now()
 		var s *GPUSample
 		for i := 0; i < 20; i++ {
@@ -86,6 +89,21 @@ func main() {
 		}
 		fmt.Printf("quelle=%s name=%q util=%d%% vram=%d/%d MiB frei=%d MiB  dauer=%.2f ms je Messung (20 Messungen)\n",
 			g.Source(), s.Name, s.UtilPct, s.UsedMiB, s.TotalMiB, s.FreeMiB, float64(time.Since(t0).Microseconds())/1000/20)
+		if s.Sensors != nil {
+			b, _ := json.MarshalIndent(s.Sensors, "", "  ")
+			fmt.Printf("sensoren (gpuz=%v):\n%s\n", s.Sensors.GPUZ, b)
+		}
+		return
+	}
+	if verb == "gpuz-relay" { // Anmeldesitzung -> Dienst (gpuz_windows.go); Konfiguration nur fuer den Health-Port
+		listen := "127.0.0.1:10398"
+		if cfg, err := loadConfig(cfgPath); err == nil {
+			listen = cfg.Health.Listen
+		}
+		if err := runGPUZRelay(listen); err != nil {
+			fmt.Fprintf(os.Stderr, "gpuz-relay: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 	cfg, err := loadConfig(cfgPath)

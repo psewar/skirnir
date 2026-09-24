@@ -7,6 +7,7 @@
 # Rueckbau: ollama-router-agent.exe uninstall; dann agent\Install-Task.ps1 (und ggf. die eigenen Installer der entfernten Tasks).
 param([switch]$RemoveOpenOllamaRules,   # entfernt die Installer-Regeln 'ollama.exe' (Quelle: Any) - Ollama nur noch via TLS-Proxy/Router
       [switch]$RemoveOllamaLanRules,    # entfernt 'Ollama 11434 - ha-host/nodered-host': seit dem Tunnel gibt es keinen Direktzugriff mehr (2026-09-09)
+      [switch]$SkipGpuzRelay,           # keine Aufgabe fuer das GPU-Z-Relay anlegen (bzw. eine vorhandene entfernen)
       [string[]]$LegacyTasks = @('OllamaRouterAgent'))   # alte Dauerlauf-Tasks, die der Dienst ersetzt (standortspezifische Namen hier anhaengen)
 $ErrorActionPreference = 'Stop'
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators')) {
@@ -26,6 +27,31 @@ function Remove-OpenOllamaRules {
     if ($r) { $r | Remove-NetFirewallRule; Write-Host "      $(@($r).Count) offene Ollama-Firewallregel(n) 'ollama.exe' entfernt" }
     Get-NetFirewallRule -DisplayName 'Ollama 11434 - *' | ForEach-Object { Write-Host "      bleibt: $($_.DisplayName)" }
 }
+function Install-GpuzRelayTask {
+    # GPU-Z-Sensoren (0.6.0): GPU-Z legt sein Shared-Memory-Objekt in der Anmeldesitzung an, mit einer DACL fuer SYSTEM,
+    # Administratoren und die eigene Sitzung. Das virtuelle Dienstkonto darf es nicht lesen -> eine Aufgabe "bei Anmeldung"
+    # (Gruppe Benutzer, ohne Adminrechte, versteckt, conhost --headless gegen ein Terminalfenster) reicht die Werte per
+    # localhost an den Dienst. Ohne GPU-Z wartet das Relay still. Abschalten: Aufgabe entfernen oder gpuz.enabled: false.
+    $tn = 'OllamaRouterAgent-GpuzRelay'
+    if ($SkipGpuzRelay) {
+        if (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -TaskName $tn -Confirm:$false
+            Write-Host "      Aufgabe $tn entfernt (-SkipGpuzRelay)"
+        }
+        return
+    }
+    $action   = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument "--headless `"$exe`" gpuz-relay --config `"$cfg`""
+    $trigger  = New-ScheduledTaskTrigger -AtLogOn
+    $settings = New-ScheduledTaskSettingsSet -Hidden -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval ([TimeSpan]::FromMinutes(1)) `
+                -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    $principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited   # Benutzer, interaktiv, keine Adminrechte
+    Register-ScheduledTask -TaskName $tn -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+    Get-CimInstance Win32_Process -Filter "Name = 'ollama-router-agent.exe'" | Where-Object { $_.CommandLine -like '*gpuz-relay*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-ScheduledTask -TaskName $tn
+    Write-Host "      Aufgabe $tn (GPU-Z-Relay bei Anmeldung) angelegt und gestartet"
+}
 $src    = Join-Path $PSScriptRoot 'dist\ollama-router-agent.exe'
 $dstDir = 'C:\Program Files\ollama-router-agent'
 $exe    = Join-Path $dstDir 'ollama-router-agent.exe'
@@ -44,6 +70,7 @@ if (Get-Service OllamaRouterAgent -ErrorAction SilentlyContinue) {
     & $exe start --config $cfg
     Start-Sleep -Seconds 6
     & $exe status --config $cfg
+    Install-GpuzRelayTask
     if ($RemoveOpenOllamaRules) { Remove-OpenOllamaRules }
     if ($RemoveOllamaLanRules) { Remove-OllamaLanRules }
     exit 0
@@ -73,6 +100,7 @@ Start-Sleep -Seconds 8
 
 Write-Host "[4/4] Zustand" -ForegroundColor Cyan
 & $exe status --config $cfg
+Install-GpuzRelayTask
 if ($RemoveOpenOllamaRules) { Remove-OpenOllamaRules }
 if ($RemoveOllamaLanRules) { Remove-OllamaLanRules }
 Write-Host "`nFertig. Logs: C:\ProgramData\ollama-router-agent\logs\  (agent.log, stt.log)" -ForegroundColor Green

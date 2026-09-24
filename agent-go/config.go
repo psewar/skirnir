@@ -25,6 +25,7 @@ type Config struct {
 	Install     InstallCfg
 	OllamaProxy ProxyCfg  `yaml:"ollama_proxy"`
 	Tunnel      TunnelCfg `yaml:"tunnel"`
+	GPUZ        GPUZCfg   `yaml:"gpuz"` // GPU-Z-Sensoren als Zusatzquelle (Windows), Standard an
 	Identity    struct {
 		Dir string `yaml:"dir"`
 	} `yaml:"identity"`
@@ -37,6 +38,14 @@ type TunnelCfg struct {
 }
 
 func (t *TunnelCfg) on() bool { return t.Enabled == nil || *t.Enabled }
+
+// GPUZCfg: GPU-Z-Shared-Memory als Zusatzquelle (Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung). Standard an;
+// laeuft GPU-Z nicht, passiert nichts. `enabled: false` schaltet den Leser ganz ab.
+type GPUZCfg struct {
+	Enabled *bool `yaml:"enabled"`
+}
+
+func (g *GPUZCfg) on() bool { return g.Enabled == nil || *g.Enabled }
 
 // ProxyCfg: TLS-Vorschaltstelle vor dem lokalen Ollama (Opt-in, Alternative ohne Tunnel).
 type ProxyCfg struct {

@@ -48,6 +48,9 @@ tunnel:
   enabled: true
   upstream: http://127.0.0.1:11434              # lokales Ollama
 
+# gpuz:                                         # GPU-Z-Sensoren (Windows) als Zusatzquelle, Standard an: laeuft GPU-Z,
+#   enabled: false                              #   kommen Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung dazu
+
 # identity:
 #   dir: /var/lib/ollama-router-agent           # Linux; Windows-Standard: C:\ProgramData\ollama-router-agent\identity
 # logging:

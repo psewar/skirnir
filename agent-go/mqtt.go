@@ -66,7 +66,25 @@ var sensorDefs = []sensorDef{
 		map[string]any{"device_class": "timestamp", "json_attributes_template": "{{ value_json.kuerzung_details | tojson }}"}},
 	{"event", "ollama_kuerzung", "Ollama Kürzung", "", "mdi:content-cut",
 		map[string]any{"event_types": []string{kuerzungEingabe, kuerzungKontextVoll}}},
+	// Sensoren (0.6.0). Gruppe "gpu": NVML bzw. nvidia-smi; Gruppe "gpuz": nur wo GPU-Z einmal gesehen wurde.
+	{"sensor", "gpu_temp_c", "GPU Temperatur", "gpu_temp_c", "mdi:thermometer", tempExtra},
+	{"sensor", "gpu_power_w", "GPU Leistung", "gpu_power_w", "mdi:flash", powerExtra},
+	{"sensor", "gpu_power_limit_w", "GPU Power-Limit", "gpu_power_limit_w", "mdi:flash-alert", map[string]any{"unit_of_measurement": "W", "device_class": "power", "entity_category": "diagnostic"}},
+	{"sensor", "gpu_fan_pct", "GPU Lüfter", "gpu_fan_pct", "mdi:fan", map[string]any{"unit_of_measurement": "%", "state_class": "measurement"}},
+	{"sensor", "gpu_throttle", "GPU Drosselung", "gpu_throttle", "mdi:speedometer-slow", map[string]any{"entity_category": "diagnostic"}},
+	{"sensor", "gpu_mem_temp_c", "GPU Speicher-Temperatur", "gpu_mem_temp_c", "mdi:thermometer-lines", tempExtra},
+	{"sensor", "gpu_hotspot_c", "GPU Hot Spot", "gpu_hotspot_c", "mdi:thermometer-high", tempExtra},
+	{"sensor", "gpu_voltage_v", "GPU Spannung", "gpu_voltage_v", "mdi:sine-wave", map[string]any{"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement", "suggested_display_precision": 3}},
+	{"sensor", "gpu_pin16_power_w", "GPU 16-Pin Leistung", "gpu_pin16_power_w", "mdi:power-plug", powerExtra},
+	{"sensor", "gpu_pin16_voltage_v", "GPU 16-Pin Spannung", "gpu_pin16_voltage_v", "mdi:power-plug-outline", map[string]any{"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement", "suggested_display_precision": 2}},
+	{"sensor", "gpu_perfcap", "GPU PerfCap", "gpu_perfcap", "mdi:car-brake-alert", map[string]any{"entity_category": "diagnostic"}},
+	{"sensor", "cpu_temp_c", "CPU Temperatur", "cpu_temp_c", "mdi:thermometer", tempExtra},
 }
+
+var (
+	tempExtra  = map[string]any{"unit_of_measurement": "°C", "device_class": "temperature", "state_class": "measurement"}
+	powerExtra = map[string]any{"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}
+)
 
 // Entitaeten, die es nicht auf jedem Knoten gibt: objID -> Gruppe. Eine Gruppe wird nur angelegt, wenn sie auf
 // diesem Rechner etwas bedeutet - sonst haengen auf fremden Knoten Sensoren im HA, die ewig OFF stehen.
@@ -77,6 +95,18 @@ var sensorGroup = map[string]string{
 	"stt":                   "stt",
 	"alias_model_structure": "alias",
 	"alias_model":           "alias",
+	"gpu_temp_c":            "gpu",
+	"gpu_power_w":           "gpu",
+	"gpu_power_limit_w":     "gpu",
+	"gpu_fan_pct":           "gpu",
+	"gpu_throttle":          "gpu",
+	"gpu_mem_temp_c":        "gpuz",
+	"gpu_hotspot_c":         "gpuz",
+	"gpu_voltage_v":         "gpuz",
+	"gpu_pin16_power_w":     "gpuz",
+	"gpu_pin16_voltage_v":   "gpuz",
+	"gpu_perfcap":           "gpuz",
+	"cpu_temp_c":            "gpuz",
 }
 
 func newMQTT(cfg MQTTCfg, secretStore SecretStoreCfg, node string, log *Logger, gpu *GPU, hb *Heartbeat, sup *Supervisor) *MQTTModule {
@@ -354,6 +384,7 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 		"agent_version": version, "router_heartbeat": "OFF",
 	}
 	m.kuerzungState(st)
+	m.sensorState(st)
 	hs := m.hb.Status()
 	if hs.OK {
 		st["router_heartbeat"] = "ON"
@@ -413,6 +444,25 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 		st["stt"] = "ON"
 	}
 	return st
+}
+
+// sensorState: Zusatzsensoren aus dem letzten GPU-Sample. Die Gruppen "gpu" und "gpuz" werden angelegt, sobald sie
+// einmal Werte hatten, und danach nicht mehr entfernt - schliesst jemand GPU-Z, zeigen die Entitaeten "unbekannt"
+// (null) statt zu verschwinden und beim naechsten Start wieder aufzutauchen.
+func (m *MQTTModule) sensorState(st map[string]any) {
+	var sens *GPUSensors
+	if m.gpu != nil {
+		if smp, _ := m.gpu.Last(); smp != nil {
+			sens = smp.Sensors
+		}
+	}
+	sens.mqttState(st)
+	if sens.hasNVML() {
+		m.setApplies("gpu", true)
+	}
+	if sens.hasGPUZ() {
+		m.setApplies("gpuz", true)
+	}
 }
 
 func (m *MQTTModule) publishState(ctx context.Context, c paho.Client) {
