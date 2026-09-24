@@ -119,8 +119,9 @@ HA-Entitaeten `GPU-Schutz` (Zustand mit Attributen), `GPU-Schutz Problem`, `GPU-
 `GPU-Schutz Ereignis` (Topic `<device>/gpu_guard`). Die Heartbeat-Antwort des Routers traegt `gpu_guard_ack`: ob der
 Router den Status dieses Knotens beachtet (Deckel 1 in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA); Attribut
 `router_beachtet` in HA. Trockenlauf ohne Setzen: `ollama-router-agent.exe gpu` zeigt Limits und Ziele.
-Setzen braucht Adminrechte auf die GPU (NVML rc 4 = verweigert): der Windows-Dienst hat sie, unter Linux braucht
-`nvidia-smi -pl` root.
+Setzen braucht Adminrechte auf die GPU (NVML rc 4 = verweigert): als **LocalSystem** (`install.account: ''`) hat der
+Dienst sie, das virtuelle Dienstkonto `NT SERVICE\...` nicht (gemessen 2026-09-24: rc 4, Guard `unverfuegbar`). Wer beim
+virtuellen Konto bleibt, hat Beobachtung und Warnungen, aber kein Limit. Unter Linux braucht `nvidia-smi -pl` root.
 
 ## Sensoren (0.6.0)
 
@@ -139,7 +140,7 @@ geschlossen, stehen die Entitaeten auf *unbekannt* statt zu verschwinden und bei
 GPU-Z legt sein Objekt in der Anmeldesitzung des Benutzers an (`\Sessions\<n>\BaseNamedObjects\GPUZShMem`), ohne
 `Global\`, mit einer DACL fuer SYSTEM, Administratoren und die eigene Anmeldesitzung (GPU-Z laeuft erhoeht). Der Dienst
 versucht zuerst, es ueber den vollen NT-Pfad zu oeffnen (`NtOpenSection`, `gpuz_windows.go`) - das gelingt als LocalSystem.
-Mit dem empfohlenen virtuellen Dienstkonto `NT SERVICE\OllamaRouterAgent` ist der Zugriff verweigert; dafuer gibt es das
+Mit dem virtuellen Dienstkonto (Standard bis 0.6.0; seit dem GPU-Schutz ist LocalSystem der Normalfall) `NT SERVICE\OllamaRouterAgent` ist der Zugriff verweigert; dafuer gibt es das
 **Relay**: `Install-Service.ps1` legt die Aufgabe `OllamaRouterAgent-GpuzRelay` an (bei Anmeldung, Gruppe Benutzer, ohne
 Adminrechte, versteckt, `conhost --headless`), die `ollama-router-agent.exe gpuz-relay` startet. Das Relay liest den Block
 in der Anmeldesitzung und schickt die Whitelist alle 2 s per `POST /gpuz` an den Health-Port (nur localhost); der Dienst

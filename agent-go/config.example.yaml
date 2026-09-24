@@ -95,7 +95,7 @@ tunnel:
 install:                                        # nur Windows (Install-Service.ps1 / install / apply-rules)
   service_name: OllamaRouterAgent
   display_name: Ollama Router Agent
-  account: 'NT SERVICE\OllamaRouterAgent'       # virtuelles Dienstkonto ohne Passwort; '' = LocalSystem
+  account: 'NT SERVICE\OllamaRouterAgent'       # '' = LocalSystem (noetig fuer den GPU-Schutz: Power-Limit setzen); virtuelles Konto = kein Limit, nur Beobachtung
   allow_control_users:
     - 'RECHNERNAME\benutzer'                    # darf den Dienst ohne Admin starten/stoppen (services.msc oder 'restart')
   # grant_read: []                              # zusaetzliche Lesepfade fuer das Dienstkonto (z. B. Python fuer Kinder)
