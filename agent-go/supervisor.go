@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-// Supervisor startet und ueberwacht Kindprozesse (heute: Wyoming-STT). Windows: alle Kinder haengen an einem
-// Job-Objekt mit KILL_ON_JOB_CLOSE - stirbt der Dienst, sterben sie mit. Linux: eigene Prozessgruppe.
+// Supervisor startet und ueberwacht Kindprozesse (Ollama, Wyoming-STT). Windows: alle Kinder haengen an einem
+// Job-Objekt mit KILL_ON_JOB_CLOSE - stirbt der Dienst, sterben sie mit - und jedes Kind zusaetzlich an einem
+// eigenen Unter-Job (procTree), damit ein Neustart auch seine Enkel beendet. Linux: eigene Prozessgruppe.
 type Supervisor struct {
 	specs []ChildSpec
 	logc  LogCfg
@@ -19,6 +20,8 @@ type Supervisor struct {
 
 	mu       sync.Mutex
 	children map[string]*childState
+
+	kuerzungen *Kuerzungen // stille Kuerzungen im Ollama-Log (kuerzung.go)
 }
 
 type childState struct {
@@ -40,7 +43,8 @@ func newSupervisor(specs []ChildSpec, logc LogCfg, log *Logger) (*Supervisor, er
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{specs: specs, logc: logc, log: log, group: g, children: map[string]*childState{}}
+	s := &Supervisor{specs: specs, logc: logc, log: log, group: g, children: map[string]*childState{},
+		kuerzungen: newKuerzungen()}
 	for _, sp := range specs {
 		s.children[sp.Name] = &childState{spec: sp}
 	}
@@ -63,6 +67,12 @@ func (s *Supervisor) Run(ctx context.Context) {
 func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 	st := s.children[sp.Name]
 	out := newChildWriter(s.logc, sp.Name)
+	name := sp.Name
+	out.onLine = func(z string) {
+		if s.kuerzungen.pruefe(name, z) {
+			s.log.Warnf("supervisor: %s hat einen Prompt gekuerzt: %s", name, z)
+		}
+	}
 	attempt := 0
 	for {
 		start := time.Now()
@@ -105,12 +115,15 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 	if err := cmd.Start(); err != nil {
 		return fmt.Sprintf("Start fehlgeschlagen: %v", err), err
 	}
-	if err := s.group.add(cmd.Process.Pid); err != nil {
+	tree, err := s.group.track(cmd.Process.Pid)
+	if err != nil {
 		s.log.Warnf("supervisor: %s: Prozessgruppe: %v", sp.Name, err)
 	}
+	// Handle am Ende freigeben; unter Windows beendet das (KILL_ON_JOB_CLOSE) auch, was noch uebrig ist.
+	defer tree.release()
 	s.mu.Lock()
 	st.Running, st.Healthy, st.PID, st.Since, st.NextStart = true, sp.HealthTCPPort == 0, cmd.Process.Pid, time.Now(), time.Time{}
-	st.kill = func() { killChild(cmd) }
+	st.kill = func() { stopChild(cmd, tree) }
 	s.mu.Unlock()
 	s.log.Infof("supervisor: %s gestartet (PID %d): %s %v", sp.Name, cmd.Process.Pid, sp.Cmd, sp.Args)
 
@@ -129,10 +142,11 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 	for {
 		select {
 		case <-ctx.Done():
-			killChild(cmd)
+			stopChild(cmd, tree)
 			<-done
 			return "Dienst-Stopp", nil
 		case err := <-done:
+			s.reapTree(sp.Name, tree)
 			if err != nil {
 				return fmt.Sprintf("Exit: %v", err), err
 			}
@@ -156,11 +170,31 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 			misses++
 			if misses >= 3 {
 				s.log.Warnf("supervisor: %s: Port %d seit %d Pruefungen zu, Prozess wird neu gestartet", sp.Name, sp.HealthTCPPort, misses)
-				killChild(cmd)
+				stopChild(cmd, tree)
 				<-done
 				return "ungesund (Port zu)", fmt.Errorf("health check failed")
 			}
 		}
+	}
+}
+
+// stopChild beendet das Kind samt allem, was es gestartet hat (Ollama -> llama-server). Der direkte Kill
+// danach greift, falls das Kind nicht im Baum haengt (track gescheitert) - dann wie frueher nur der Hauptprozess.
+func stopChild(cmd *exec.Cmd, t *procTree) {
+	t.kill()
+	killChild(cmd)
+}
+
+// reapTree raeumt nach einem Kind auf, das von selbst geendet hat: stuerzt Ollama ab, lebt sein
+// Modellprozess sonst weiter und haelt den Grafikspeicher fest, ohne dass ihn jemand wieder freigibt.
+func (s *Supervisor) reapTree(name string, t *procTree) {
+	n := t.alive()
+	if n == 0 {
+		return
+	}
+	t.kill()
+	if n > 0 {
+		s.log.Warnf("supervisor: %s: %d verwaiste(r) Prozess(e) im Prozessbaum beendet", name, n)
 	}
 }
 

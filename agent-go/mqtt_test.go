@@ -52,6 +52,8 @@ func testModule(t *testing.T) *MQTTModule {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows loescht keine offene Datei: ohne Schliessen scheitert das Aufraeumen von TempDir.
+	t.Cleanup(func() { log.file.Close() })
 	return newMQTT(MQTTCfg{DeviceID: "testknoten", DeviceName: "Testknoten", DiscoveryPrefix: "homeassistant"},
 		SecretStoreCfg{}, "testknoten", log, nil, nil, nil)
 }
@@ -122,5 +124,55 @@ func TestSyncDiscoveryNurEinmalUndNachtraeglich(t *testing.T) {
 	}
 	if p, _ := c.last("stt"); p != "" {
 		t.Fatal("stt haette geloescht bleiben muessen")
+	}
+}
+
+// Kuerzungsmeldung (kuerzung.go): Discovery des Ereignisses und des Zeitsensors, Ereignis-Payload, State-Felder.
+func TestKuerzungDiscovery(t *testing.T) {
+	m, c := testModule(t), &fakeClient{}
+	m.syncDiscovery(c)
+	ev, ok := c.last("ollama_kuerzung")
+	if !ok || ev == "" {
+		t.Fatal("Ereignis-Entitaet nicht angelegt")
+	}
+	for _, soll := range []string{`"state_topic":"testknoten/kuerzung"`, `"event_types":["eingabe_gekuerzt","kontext_voll"]`} {
+		if !strings.Contains(ev, soll) {
+			t.Fatalf("Ereignis-Config ohne %s: %s", soll, ev)
+		}
+	}
+	if strings.Contains(ev, "value_template") {
+		t.Fatalf("Ereignis darf kein value_template haben (HA liest event_type direkt): %s", ev)
+	}
+	ts, _ := c.last("ollama_letzte_kuerzung")
+	for _, soll := range []string{`"device_class":"timestamp"`, `"json_attributes_topic":"testknoten/state"`} {
+		if !strings.Contains(ts, soll) {
+			t.Fatalf("Zeitsensor ohne %s: %s", soll, ts)
+		}
+	}
+	if z, _ := c.last("ollama_kuerzungen"); !strings.Contains(z, `"state_class":"total_increasing"`) {
+		t.Fatalf("Zaehler ohne total_increasing: %s", z)
+	}
+}
+
+func TestKuerzungEreignisUndState(t *testing.T) {
+	m, c := testModule(t), &fakeClient{}
+	m.sup = &Supervisor{kuerzungen: newKuerzungen()}
+	st := map[string]any{}
+	m.kuerzungState(st)
+	if st["ollama_kuerzungen"] != 0 || st["ollama_letzte_kuerzung"] != "None" {
+		t.Fatalf("ohne Kuerzung: %v", st)
+	}
+	m.sup.kuerzungen.pruefe("ollama", zeileEingabe)
+	e := <-m.sup.kuerzungen.neu
+	m.publishKuerzung(c, e)
+	p := c.pubs[len(c.pubs)-1]
+	if p.topic != "testknoten/kuerzung" || !strings.Contains(p.payload, `"event_type":"eingabe_gekuerzt"`) ||
+		!strings.Contains(p.payload, `"prompt":65536`) {
+		t.Fatalf("Ereignis falsch: %s %s", p.topic, p.payload)
+	}
+	m.kuerzungState(st)
+	d, _ := st["kuerzung_details"].(map[string]any)
+	if st["ollama_kuerzungen"] != 1 || st["ollama_letzte_kuerzung"] == "None" || d["limit"] != 32770 || d["art"] != kuerzungEingabe {
+		t.Fatalf("State nach Kuerzung: %v", st)
 	}
 }

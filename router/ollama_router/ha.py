@@ -90,6 +90,7 @@ def ha_snapshot(now=None):
         **{k: v for k, v in _usage_today_fields().items()},
         "last_route": (f"{last['role']} -> {last['node']} {last['model']} (tier {last['tier']}, ctx {last['ctx']})" if last else "-"),
         "last_route_ts": last["ts"] if last else None,
+        "kuerzungen": state.KUERZUNGEN["anzahl"], "letzte_kuerzung": state.KUERZUNGEN["letzte"],
         "nodes": nodes, "version": VERSION, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
@@ -285,6 +286,12 @@ class HAPublisher:
             json_attributes_topic=st, json_attributes_template="{{ {'errors_today': value_json.errors_today} | tojson }}")
         ent("sensor", "last_route", "Letzte Zuweisung", value_template="{{ value_json.last_route }}", icon="mdi:routes",
             json_attributes_topic=st, json_attributes_template="{{ {'ts': value_json.last_route_ts} | tojson }}")
+        # Stille Kuerzungen (kontextpruefung.py): Zaehler seit Routerstart + Ereignis je bestaetigter Kuerzung
+        ent("sensor", "kuerzungen", "Gekürzte Anfragen", value_template="{{ value_json.kuerzungen }}", icon="mdi:content-cut",
+            state_class="total_increasing", json_attributes_topic=st,
+            json_attributes_template="{{ {'letzte': value_json.letzte_kuerzung} | tojson }}")
+        ent("event", "kuerzung", "Anfrage gekürzt", state_topic=f"{self.base}/kuerzung", event_types=["kontext_gekuerzt"],
+            icon="mdi:content-cut")
         self.sync_node_discovery()
 
     def publish_state(self):
@@ -306,6 +313,13 @@ class HAPublisher:
                     self.sweep_orphans()
                 except Exception as e:  # noqa: BLE001
                     log.warning("MQTT sweep: %s", e)
+            if state.MQTT_EVENTS and self.client and self.connected:
+                events, state.MQTT_EVENTS[:] = list(state.MQTT_EVENTS), []
+                for e in events:
+                    try:
+                        self.client.publish(f"{self.base}/kuerzung", json.dumps(e), qos=1, retain=False)
+                    except Exception as ex:  # noqa: BLE001
+                        log.warning("MQTT Ereignis: %s", ex)
             if state.MQTT_DIRTY or time.time() - last >= self.interval:
                 state.MQTT_DIRTY.clear()
                 try:

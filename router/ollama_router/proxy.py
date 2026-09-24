@@ -12,7 +12,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import admission, auth, cloud, decision, metrics, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
+from . import admission, auth, cloud, decision, kontextpruefung, metrics, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, parse_keep_alive, read_json
 
@@ -281,6 +281,8 @@ class _Relay:
         # gemessen verliert qwen3-coder:30b so 80 % seiner Calls oberhalb ~12k Token. Siehe toolcall_rescue.
         self.rescue = state.CFG.toolcall_rescue and toolcall_rescue.aktiv_fuer(self.out)
         self.is_cloud = getattr(node, "is_cloud", False)
+        # Passt die Anfrage in num_ctx? Ollama kuerzt sonst still; bestaetigt wird nach der Antwort (kontextpruefung)
+        self.geschaetzt = kontextpruefung.vorher(self.out, self.ctx, self.is_cloud)
         self.warm = node.is_loaded(self.model)
         self.t0 = time.time()
         self.outcome = None          # Stufe 3: ok | error | timeout | structured_error (perf_outcome + Breaker)
@@ -339,6 +341,9 @@ class _Relay:
         elapsed = time.time() - self.t0
         metrics.observe_request(self.info, self.outcome or "aborted", elapsed, self.ttft_s, self.ptoks, self.ctoks,
                                 self.req.queued_ms / 1000.0, cost)
+        if self.geschaetzt and self.outcome == "ok":
+            kontextpruefung.nachher(self.geschaetzt, self.ptoks, self.ctx,
+                                    {**(self.info or {}), "path": self.path, "request_id": self.req.request_id})
         admission.release(node)   # Stufe 3: Platz frei -> bestplatzierten Wartenden wecken
         log.info("done %s node=%s %.1fs%s", self.role["name"], node.name, elapsed, f" {cost:.4f} CHF" if cost else "")
         if not self.warm and not self.is_cloud:
