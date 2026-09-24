@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -26,27 +27,118 @@ func childProcAttr() *syscall.SysProcAttr {
 // childGroup: Job-Objekt mit KILL_ON_JOB_CLOSE - stirbt der Dienst, sterben die Kinder mit.
 type childGroup struct{ job windows.Handle }
 
-func newChildGroup() (*childGroup, error) {
+func newKillOnCloseJob() (windows.Handle, error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("CreateJobObject: %w", err)
+		return 0, fmt.Errorf("CreateJobObject: %w", err)
 	}
 	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
 	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
 	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
 		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
-		return nil, fmt.Errorf("SetInformationJobObject: %w", err)
+		windows.CloseHandle(job)
+		return 0, fmt.Errorf("SetInformationJobObject: %w", err)
+	}
+	return job, nil
+}
+
+func newChildGroup() (*childGroup, error) {
+	job, err := newKillOnCloseJob()
+	if err != nil {
+		return nil, err
 	}
 	return &childGroup{job: job}, nil
 }
 
-func (g *childGroup) add(pid int) error {
+// procTree ist ein eigenes Job-Objekt je Kind, verschachtelt unter dem Dienst-Job. Alles, was das Kind
+// startet, landet automatisch mit darin - auch Prozesse, die erst spaeter entstehen.
+//
+// Warum: killChild beendete unter Windows nur den Hauptprozess. Ollama startet sein Modell aber als eigenen
+// Prozess (llama-server). Am 2026-09-23 startete der Supervisor Ollama nach gescheiterten
+// Gesundheitspruefungen neu - der Modellprozess ueberlebte als Waise mit 23,5 GiB Grafikspeicher, das neue
+// Ollama kannte ihn nicht, der Router zaehlte ihn als fremdes VRAM und hielt den Knoten stundenlang "busy".
+// Das Dienst-Job-Objekt raeumt nur auf, wenn der ganze Dienst stirbt; dieses hier bei jedem Neustart.
+type procTree struct {
+	mu  sync.Mutex
+	job windows.Handle
+}
+
+// track haengt das Kind an das Dienst-Job-Objekt und an ein eigenes, darunter verschachteltes Job-Objekt.
+// Reihenfolge: erst der Dienst-Job, dann der leere Kind-Job - so wird er zum Unter-Job (Windows 8+).
+// Scheitert nur der Kind-Job, bleibt der alte Schutz (Dienst-Job) bestehen; der Fehler wird gemeldet.
+func (g *childGroup) track(pid int) (*procTree, error) {
 	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(pid))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer windows.CloseHandle(h)
-	return windows.AssignProcessToJobObject(g.job, h)
+	if err := windows.AssignProcessToJobObject(g.job, h); err != nil {
+		return nil, fmt.Errorf("Dienst-Job: %w", err)
+	}
+	job, err := newKillOnCloseJob()
+	if err != nil {
+		return nil, err
+	}
+	if err := windows.AssignProcessToJobObject(job, h); err != nil {
+		windows.CloseHandle(job)
+		return nil, fmt.Errorf("Kind-Job: %w", err)
+	}
+	return &procTree{job: job}, nil
+}
+
+// jobAccounting entspricht JOBOBJECT_BASIC_ACCOUNTING_INFORMATION (in x/sys/windows v0.35 nicht definiert).
+type jobAccounting struct {
+	TotalUserTime             int64
+	TotalKernelTime           int64
+	ThisPeriodTotalUserTime   int64
+	ThisPeriodTotalKernelTime int64
+	TotalPageFaultCount       uint32
+	TotalProcesses            uint32
+	ActiveProcesses           uint32
+	TotalTerminatedProcesses  uint32
+}
+
+// alive: wie viele Prozesse im Job des Kindes noch leben (-1, wenn nicht ermittelbar).
+func (t *procTree) alive() int {
+	if t == nil {
+		return -1
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.job == 0 {
+		return -1
+	}
+	var info jobAccounting
+	if err := windows.QueryInformationJobObject(t.job, windows.JobObjectBasicAccountingInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), nil); err != nil {
+		return -1
+	}
+	return int(info.ActiveProcesses)
+}
+
+// kill beendet alle Prozesse im Job des Kindes - auch Enkel, deren Eltern schon tot sind.
+func (t *procTree) kill() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.job != 0 {
+		_ = windows.TerminateJobObject(t.job, 1)
+	}
+}
+
+// release gibt das Handle frei. KILL_ON_JOB_CLOSE: was dann noch lebt, stirbt dabei ebenfalls.
+func (t *procTree) release() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.job != 0 {
+		windows.CloseHandle(t.job)
+		t.job = 0
+	}
 }
 
 func killChild(cmd *exec.Cmd) { _ = cmd.Process.Kill() }

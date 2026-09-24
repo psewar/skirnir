@@ -73,6 +73,24 @@ Nebeneffekt: ohne STT-Kind entfaellt auch der Portversuch auf 10300 in jedem Zyk
 Anlass war ein zweiter Knoten: dort standen `STT-Dienst` und `Alias-Modell strukturfaehig` dauerhaft `off`,
 weil beides nur auf dem ersten Knoten existiert. Tests dazu in `mqtt_test.go` (`go test ./...`).
 
+## Kuerzungsmeldung (0.5.3)
+
+Ollama kuerzt zu lange Prompts **still**: der Client bekommt eine normale Antwort, nur fehlt ihm ein Teil des
+Verlaufs. Die einzige Spur steht in Ollamas eigenem Log. Der Agent liest die Zeilen mit, die der Supervisor ohnehin
+ins Kind-Log schreibt (`kuerzung.go`), und erkennt zwei Muster:
+
+| Art (`event_type`) | Log-Zeile | Bedeutung |
+|---|---|---|
+| `eingabe_gekuerzt` | `msg="truncating input prompt" limit=... prompt=... new=...` | Prompt vor der Verarbeitung abgeschnitten |
+| `kontext_voll` | `stop processing: n_tokens = N, truncated = 1` | Kontextfenster lief waehrend der Verarbeitung voll |
+
+In HA erscheinen drei Entitaeten: `Ollama Kürzungen` (Zaehler seit Dienststart, `total_increasing`),
+`Ollama letzte Kürzung` (Zeitstempel, Details als Attribute) und das Ereignis `Ollama Kürzung` fuer Automationen
+(Topic `<device_id>/kuerzung`, nicht retained, sofort bei der Kuerzung statt im Melde-Intervall). Die Zeile landet
+zusaetzlich als Warnung im `agent.log`. Gegenprobe: `SKIRNIR_OLLAMA_LOGS=<logordner>` und der Test
+`TestEchteOllamaLogs` zaehlt die Treffer in vorhandenen Logs (PSEWAR-2026 bis 2026-09-24: 1 + 7 in 449 487 Zeilen,
+kein Treffer in den 5 132 Normalzeilen `truncated = 0`).
+
 ## Betrieb
 
 - Logs: `C:\ProgramData\ollama-router-agent\logs\agent.log`, `stt.log` und `ollama.log` (rotiert, 10 × 5 MB); Start/Stopp auch im

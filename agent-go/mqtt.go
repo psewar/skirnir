@@ -59,6 +59,13 @@ var sensorDefs = []sensorDef{
 	// neu: Sicht des Dienstes selbst
 	{"sensor", "agent_version", "Agent Version", "agent_version", "mdi:package-variant", map[string]any{"entity_category": "diagnostic"}},
 	{"binary_sensor", "router_heartbeat", "Router-Heartbeat", "router_heartbeat", "mdi:heart-pulse", map[string]any{"entity_category": "diagnostic"}},
+	// Stille Kuerzungen im Ollama-Log (kuerzung.go): Zaehler seit Dienststart, Zeitpunkt + Details der letzten,
+	// und ein Ereignis je Kuerzung fuer Automationen (Topic <device>/kuerzung, nicht retained).
+	{"sensor", "ollama_kuerzungen", "Ollama Kürzungen", "ollama_kuerzungen", "mdi:content-cut", map[string]any{"state_class": "total_increasing"}},
+	{"sensor", "ollama_letzte_kuerzung", "Ollama letzte Kürzung", "ollama_letzte_kuerzung", "mdi:clock-alert-outline",
+		map[string]any{"device_class": "timestamp", "json_attributes_template": "{{ value_json.kuerzung_details | tojson }}"}},
+	{"event", "ollama_kuerzung", "Ollama Kürzung", "", "mdi:content-cut",
+		map[string]any{"event_types": []string{kuerzungEingabe, kuerzungKontextVoll}}},
 }
 
 // Entitaeten, die es nicht auf jedem Knoten gibt: objID -> Gruppe. Eine Gruppe wird nur angelegt, wenn sie auf
@@ -109,6 +116,7 @@ func (m *MQTTModule) broker() string {
 
 func (m *MQTTModule) availTopic() string { return m.cfg.DeviceID + "/status" }
 func (m *MQTTModule) stateTopic() string { return m.cfg.DeviceID + "/state" }
+func (m *MQTTModule) eventTopic() string { return m.cfg.DeviceID + "/kuerzung" }
 
 func (m *MQTTModule) password(ctx context.Context) (string, error) {
 	if m.cfg.Password != "" {
@@ -167,8 +175,19 @@ func (m *MQTTModule) Run(ctx context.Context) {
 	}
 	tick := time.NewTicker(time.Duration(m.cfg.IntervalS * float64(time.Second)))
 	defer tick.Stop()
+	var kuerzung <-chan Kuerzung
+	if m.sup != nil {
+		kuerzung = m.sup.kuerzungen.neu
+	}
 	for {
 		select {
+		case e := <-kuerzung:
+			// sofort melden statt bis zum naechsten Intervall zu warten; ohne Verbindung verfaellt die Meldung,
+			// der Zaehler im naechsten State stimmt trotzdem
+			if c.IsConnected() {
+				m.publishKuerzung(c, e)
+				m.publishState(ctx, c)
+			}
 		case <-ctx.Done():
 			// sauberes Offline statt LWT-Warterei
 			if c.IsConnected() {
@@ -260,8 +279,48 @@ func (m *MQTTModule) discoveryPayload(s sensorDef, dev map[string]any) []byte {
 	if s.comp == "binary_sensor" {
 		cfg["payload_on"], cfg["payload_off"] = "ON", "OFF"
 	}
+	if s.comp == "event" { // HA liest event_type direkt aus dem JSON-Payload des Ereignis-Topics
+		delete(cfg, "value_template")
+		cfg["state_topic"] = m.eventTopic()
+	}
+	if _, ok := cfg["json_attributes_template"]; ok {
+		cfg["json_attributes_topic"] = m.stateTopic()
+	}
 	b, _ := json.Marshal(cfg)
 	return b
+}
+
+// publishKuerzung schickt ein HA-Ereignis je Kuerzung (event_type + Details als Attribute).
+func (m *MQTTModule) publishKuerzung(c paho.Client, e Kuerzung) {
+	p := map[string]any{"event_type": e.Art, "kind": e.Kind, "zeit": e.Zeit.Format(time.RFC3339)}
+	if e.Art == kuerzungEingabe {
+		p["limit"], p["prompt"], p["neu"] = e.Limit, e.Prompt, e.Neu
+	} else {
+		p["n_tokens"] = e.NTokens
+	}
+	b, _ := json.Marshal(p)
+	c.Publish(m.eventTopic(), 1, false, b)
+}
+
+// kuerzungState: Zaehler und letzte Kuerzung fuer den regulaeren State. "None" = HA setzt den Zeitsensor auf unbekannt.
+func (m *MQTTModule) kuerzungState(st map[string]any) {
+	st["ollama_kuerzungen"], st["ollama_letzte_kuerzung"] = 0, "None"
+	if m.sup == nil {
+		return
+	}
+	anzahl, l := m.sup.kuerzungen.Stand()
+	st["ollama_kuerzungen"] = anzahl[kuerzungEingabe] + anzahl[kuerzungKontextVoll]
+	d := map[string]any{kuerzungEingabe: anzahl[kuerzungEingabe], kuerzungKontextVoll: anzahl[kuerzungKontextVoll]}
+	if l != nil {
+		st["ollama_letzte_kuerzung"] = l.Zeit.Format(time.RFC3339)
+		d["art"], d["kind"] = l.Art, l.Kind
+		if l.Art == kuerzungEingabe {
+			d["limit"], d["prompt"], d["neu"] = l.Limit, l.Prompt, l.Neu
+		} else {
+			d["n_tokens"] = l.NTokens
+		}
+	}
+	st["kuerzung_details"] = d
 }
 
 // clearDiscovery loescht die retained Discovery-Configs (Verb mqtt-clear, z. B. fuer Test-Geraete).
@@ -294,6 +353,7 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 		"ollama_loaded": 0, "vram_used_mb": 0, "ollama_loaded_names": "-", "ollama": "OFF", "stt": "OFF",
 		"agent_version": version, "router_heartbeat": "OFF",
 	}
+	m.kuerzungState(st)
 	hs := m.hb.Status()
 	if hs.OK {
 		st["router_heartbeat"] = "ON"

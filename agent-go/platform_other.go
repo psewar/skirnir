@@ -22,7 +22,30 @@ type childGroup struct{}
 
 func newChildGroup() (*childGroup, error) { return &childGroup{}, nil }
 
-func (g *childGroup) add(pid int) error { return nil }
+// procTree: auf Linux ist die Prozessgruppe des Kindes (Setpgid) der Baum. Sie bleibt bestehen, solange ein
+// Mitglied lebt - auch wenn der Hauptprozess schon beendet ist. Gegenstueck zum Job-Objekt unter Windows.
+type procTree struct{ pgid int }
+
+func (g *childGroup) track(pid int) (*procTree, error) { return &procTree{pgid: pid}, nil }
+
+// alive: auf Linux ohne Zaehlung (-1 = unbekannt); kill(-pgid, 0) sagt nur "mindestens einer lebt".
+func (t *procTree) alive() int {
+	if t == nil || t.pgid <= 0 {
+		return -1
+	}
+	if err := syscall.Kill(-t.pgid, 0); err != nil {
+		return 0
+	}
+	return -1
+}
+
+func (t *procTree) kill() {
+	if t != nil && t.pgid > 0 {
+		_ = syscall.Kill(-t.pgid, syscall.SIGKILL)
+	}
+}
+
+func (t *procTree) release() {}
 
 // killChild beendet die ganze Prozessgruppe des Kindes (Setpgid oben).
 func killChild(cmd *exec.Cmd) {

@@ -51,8 +51,9 @@ func (l *Logger) Debugf(format string, a ...any) {
 // childWriter ist das Ziel fuer stdout/stderr eines Kindprozesses: eigene rotierte Datei,
 // jede Zeile mit Zeitstempel, damit man Absturzzeitpunkte findet.
 type childWriter struct {
-	lj  *lumberjack.Logger
-	buf []byte
+	lj     *lumberjack.Logger
+	buf    []byte
+	onLine func(line string) // optional: jede vollstaendige Zeile (ohne Zeitstempel), z. B. fuer den Kuerzungswaechter
 }
 
 func newChildWriter(cfg LogCfg, name string) *childWriter {
@@ -72,6 +73,9 @@ func (w *childWriter) Write(p []byte) (int, error) {
 			line = line[:len(line)-1]
 		}
 		fmt.Fprintf(w.lj, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), line)
+		if w.onLine != nil {
+			w.onLine(string(line))
+		}
 		w.buf = w.buf[i+1:]
 	}
 	if len(w.buf) > 64*1024 { // eine endlose Zeile nicht im Speicher sammeln
