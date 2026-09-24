@@ -12,6 +12,10 @@ services:
     volumes:
       - /opt/skirnir-embed/models:/models:ro
     mem_limit: 768m
+    # Kein Swap fuer den Container: ohne memswap_limit erlaubt Docker zusaetzlich so viel Swap wie mem_limit.
+    # Unter Speicherdruck des Hosts lagerte der Kernel dann das selten genutzte Modell aus (gemessen 388 MB),
+    # und die erste Entscheidung nach einer Pause dauerte 725 ms statt ~6 ms.
+    memswap_limit: 768m
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=3).status == 200 else 1)"]
       interval: 30s
