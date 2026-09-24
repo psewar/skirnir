@@ -15,6 +15,8 @@ HA_PUB = None
 CFG = None
 NODES = {}
 MQTT_DIRTY = []   # nicht-leer = sofort publizieren
+MQTT_EVENTS = []  # HA-Ereignisse, die ha.py beim naechsten Durchlauf einmal verschickt (nicht retained)
+KUERZUNGEN = {"anzahl": 0, "letzte": None}   # bestaetigte stille Kuerzungen seit Routerstart (kontextpruefung.py)
 MEASURING = {}    # model -> {"node", "step", "started", "error"} waehrend einer laufenden Messung
 PERF = {}         # "model@node" -> Leistungsdaten (passiv aus echten Anfragen + aktiver Benchmark), persistiert in perf.json
 PERF_DIRTY = [0.0]
@@ -42,7 +44,7 @@ INTERNAL_CLIENT = "skirnir-ui"
 def remember(entry):
     entry["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     entry["t"] = time.time()
-    if entry.get("event") in ("busy", "free", "wol", "no_node"):
+    if entry.get("event") in ("busy", "free", "wol", "no_node", "kontext_gekuerzt"):
         MQTT_DIRTY.append(True)
     DECISIONS.append(entry)
     del DECISIONS[:-200]
