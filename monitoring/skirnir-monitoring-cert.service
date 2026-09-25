@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart Grafana after a certificate renewal (triggered by skirnir-monitoring-cert.path)
+
+[Service]
+Type=oneshot
+# kurz warten, bis der ACME-Client auch den Schluessel geschrieben hat (crt und key werden nacheinander geschrieben)
+ExecStart=/bin/sh -c 'sleep 20; docker restart skirnir-grafana'

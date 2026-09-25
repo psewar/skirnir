@@ -273,7 +273,8 @@ scrape_configs:
 `usage.json` keeps requests, tokens, errors and cloud costs per day and client for 90 days (`GET /admin/usage`). The counters
 and histograms behind `/metrics` persist in `metrics.json` next to the configuration (written a minute after a change and at
 shutdown), so a deploy no longer resets them; the UI labels them 'total' since the recording began. For history over days
-and weeks point a Prometheus at `/metrics` (scrape config above); the router is not a time-series database. The decision
+and weeks point a Prometheus at `/metrics` (scrape config above); the router is not a time-series database. [monitoring/](monitoring/)
+ships exactly that: Prometheus with 90 days of retention and a Grafana dashboard as two containers on the router host. The decision
 log (`/admin/state`, last 2000 entries, persisted in `events.jsonl` next to the configuration so it survives restarts; `?decisions=N` selects how many are returned, default 50) holds the most recent routes and events (busy/free, WOL, breaker, queue, shadow, decision). `/admin/state`
 also shows `build` (deploy manifest) and `supply_chain` (Ollama version and model digests per node).
 
@@ -409,6 +410,7 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 | `design/` | Design notes: `routing-algorithm.md`, `roadmap.md` (stages and decisions), `decision-engine.md`; logos (generated with an image model, metadata removed) |
 | `test/` | Test suite, fakes, dev environment, test bench |
 | `tools/` | measurement scripts for the GPU guard (load test, stage-2 night run) |
+| `monitoring/` | Prometheus + Grafana next to the router (compose, scrape config, provisioned dashboard, secret renderer, `deploy_ct.py`), own README |
 | `.github/workflows/ci.yml`, `CHANGELOG.md`, `SECURITY.md` | CI (lint, Go vet/test, Windows cross-build, self-tests; the end-to-end suite nightly), release history, vulnerability reporting |
 
 ### Two names, on purpose

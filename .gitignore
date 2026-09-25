@@ -47,3 +47,10 @@ router/render-env.conf
 deploy/*_backup*.json
 deploy/client_auth_baseline.json
 decision-eval/*.log
+
+# Monitoring-Stack (monitoring/deploy_ct.py rendert/erzeugt das auf dem Router-Host)
+monitoring/.env
+monitoring/secrets/
+monitoring/prometheus.yml
+monitoring/prometheus-data/
+monitoring/grafana-data/

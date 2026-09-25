@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily secret refresh for Skirnir monitoring
+
+[Timer]
+OnCalendar=*-*-* 04:40:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

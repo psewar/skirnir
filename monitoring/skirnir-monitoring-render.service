@@ -1,0 +1,8 @@
+[Unit]
+Description=Skirnir monitoring: render secrets from the secret store (Prometheus metrics account, Grafana admin)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/skirnir-monitoring/render-monitoring.sh --restart

@@ -272,7 +272,8 @@ scrape_configs:
 und Histogramme hinter `/metrics` liegen persistent in `metrics.json` neben der Konfiguration (geschrieben eine Minute nach einer
 Änderung und beim Stopp), ein Deploy setzt sie also nicht mehr auf null; die UI nennt sie „gesamt“ seit Beginn der Aufzeichnung.
 Für Verläufe über Tage und Wochen gehört ein Prometheus vor `/metrics` (Scrape-Konfiguration oben); der Router ist keine
-Zeitreihendatenbank. Das
+Zeitreihendatenbank. Genau das liefert [monitoring/](monitoring/): Prometheus mit 90 Tagen Verlauf und ein Grafana-Dashboard als zwei
+Container auf dem Router-Host. Das
 Entscheidungsprotokoll (`/admin/state`, 2000 Einträge, persistiert in `events.jsonl` neben der Konfiguration und damit über Neustarts hinweg; `?decisions=N` wählt die gelieferte Menge, Standard 50) hält die letzten Routen und Ereignisse (busy/free, WOL, Breaker, Warteschlange, Shadow,
 Decision). `/admin/state` zeigt ausserdem `build` (Deploy-Manifest) und `supply_chain` (Ollama-Version und Modell-Digests je Knoten).
 
@@ -411,6 +412,7 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 | `design/` | Entwürfe: `routing-algorithm.md`, `roadmap.md` (Ausbaustufen und Entscheidungen), `decision-engine.md`; Logos (mit einem Bildmodell erzeugt, Metadaten entfernt) |
 | `test/` | Testsuite, Fakes, Dev-Umgebung, Messstand |
 | `tools/` | Messskripte für den GPU-Schutz (Lasttest, Nachtlauf Stufe 2) |
+| `monitoring/` | Prometheus + Grafana neben dem Router (Compose, Scrape-Konfiguration, provisioniertes Dashboard, Secret-Renderer, `deploy_ct.py`), eigene README |
 | `.github/workflows/ci.yml`, `CHANGELOG.md`, `SECURITY.md` | CI (Lint, Go vet/test, Windows-Cross-Build, Selbsttests; die End-to-End-Suite nächtlich), Release-Historie, Meldeweg für Sicherheitslücken |
 
 ### Zwei Namen, mit Absicht

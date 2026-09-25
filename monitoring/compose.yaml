@@ -1,0 +1,67 @@
+# Prometheus + Grafana neben dem Router (Docker Compose). Prometheus fragt /metrics des Routers ab und haelt 90 Tage
+# Verlauf; Grafana zeigt das Dashboard "Skirnir" (provisioniert) ueber HTTPS mit dem Zertifikat des Router-Hosts.
+#   Prometheus: nur 127.0.0.1:9090 (Grafana und lokale Abfragen)
+#   Grafana:    https://<host>:3000, Konto admin (Passwort aus dem Secret-Store, render-monitoring.sh)
+# Rollout: deploy_ct.py (rendert prometheus.yml aus prometheus.yml.tmpl, legt Secrets ab, startet den Stack).
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: skirnir-prometheus
+    restart: unless-stopped
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+      - --web.listen-address=0.0.0.0:9090
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./secrets/metrics.pass:/etc/prometheus/metrics.pass:ro
+      - ./prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # der Router lauscht auf dem Host; TLS-Name kommt aus tls_config.server_name
+    mem_limit: 512m
+    memswap_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    container_name: skirnir-grafana
+    restart: unless-stopped
+    user: "${GRAFANA_UID:-472}"     # deploy_ct.py setzt die UID des Zertifikatseigentuemers, damit der Schluessel lesbar ist
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SERVER_PROTOCOL: https
+      GF_SERVER_CERT_FILE: /certs/server.crt
+      GF_SERVER_CERT_KEY: /certs/server.key
+      GF_SERVER_ROOT_URL: "https://${GRAFANA_HOST:-localhost}:3000/"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - ./grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./secrets/grafana_admin:/run/secrets/grafana_admin:ro
+      - ${CERT_DIR:-./certs}:/certs:ro
+    mem_limit: 384m
+    memswap_limit: 384m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--no-check-certificate", "-O", "/dev/null", "https://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

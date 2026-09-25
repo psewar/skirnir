@@ -1,0 +1,9 @@
+[Unit]
+Description=Restart Grafana when the TLS certificate is renewed (same certificate as the router)
+
+[Path]
+PathChanged=__CERT_DIR__/server.crt
+Unit=skirnir-monitoring-cert.service
+
+[Install]
+WantedBy=multi-user.target
