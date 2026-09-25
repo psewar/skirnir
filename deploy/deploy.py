@@ -172,10 +172,14 @@ def deploy_agent(c, dist_dir=None):
             print("fehlt, uebersprungen:", path)
             continue
         if os_name == "windows" and sys.platform == "win32":
-            v = subprocess.run([path, "version"], capture_output=True, text=True).stdout.strip()
-            if version and v != version:
+            try:
+                v = subprocess.run([path, "version"], capture_output=True, text=True).stdout.strip()
+            except OSError as e:   # Application Control blockiert eine frisch gebaute, unsignierte Exe (2026-09-26) -> --version <v>
+                print(f"Hinweis: {name} laesst sich hier nicht starten ({e.__class__.__name__}) - Version aus --version")
+                v = None
+            if v and version and v != version:
                 print(f"Abbruch: Versionen unterschiedlich ({version} vs {v})"); sys.exit(2)
-            version = v
+            version = v or version
         data = open(path, "rb").read()
         files.append({"name": f"skirnir-agent-{{v}}-{os_name}-{arch}" + (".exe" if os_name == "windows" else ""),
                       "os": os_name, "arch": arch, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "_src": path})
