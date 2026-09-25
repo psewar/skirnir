@@ -53,7 +53,7 @@
   nav.tabs button .dot { color:var(--warn); margin-left:4px; }
   main section[data-tab] { display:none; } main[data-active="uebersicht"] section[data-tab="uebersicht"], main[data-active="rollen"] section[data-tab="rollen"],
   main[data-active="katalog"] section[data-tab="katalog"], main[data-active="einstellungen"] section[data-tab="einstellungen"],
-  main[data-active="clients"] section[data-tab="clients"] { display:block; }
+  main[data-active="clients"] section[data-tab="clients"], main[data-active="agenten"] section[data-tab="agenten"] { display:block; }
   .settings { display:grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap:12px; }
   .srow { display:grid; grid-template-columns: 1fr 150px 26px; gap:6px; align-items:center; padding:3px 0; border-bottom:1px dashed var(--line); font-size:13px; }
   .srow:last-child { border-bottom:none; } .srow .lbl { color:var(--fg); } .srow .base { color:var(--muted); font-size:11px; }
@@ -83,6 +83,7 @@
 </header>
 <nav class="tabs" id="tabs">
   <button data-tab="uebersicht" onclick="showTab('uebersicht')">Übersicht</button>
+  <button data-tab="agenten" onclick="showTab('agenten')">Agenten<span class="dot" hidden>●</span></button>
   <button data-tab="rollen" onclick="showTab('rollen')">Rollen<span class="dot" hidden>●</span></button>
   <button data-tab="clients" onclick="showTab('clients')">Clients<span class="dot" hidden>●</span></button>
   <button data-tab="katalog" onclick="showTab('katalog')">Modellkatalog<span class="dot" hidden>●</span></button>
@@ -116,7 +117,10 @@
     <table id="nodes"><thead><tr><th>Knoten</th><th>Zustand</th><th>GPU</th><th>VRAM frei / fremd</th><th title="laufende Anfragen / Admission-Grenze · wartende">Last</th><th>Geladen</th><th>Modelle (grün = geladen)</th></tr></thead><tbody></tbody></table>
     <h2 style="margin-top:14px">Cloud-Anbieter <span class="muted" style="font-weight:normal">– Modelle im Katalog (<span class="cloudc">☁</span>), Stufe nur in Rollen, die es erlauben; Datenklasse, Credential-Scan und Budget begrenzen (README „Cloud")</span></h2>
     <table id="cloud"><thead><tr><th>Anbieter</th><th>Status</th><th>Modelle</th><th>Ausgaben Monat / Budget</th><th>Breaker</th><th>Region · Datenklasse max.</th></tr></thead><tbody></tbody></table>
-    <h2 style="margin-top:14px">Registrierte Agenten <span class="muted" style="font-weight:normal">– jeder Agent meldet sich mit seinem Schlüssel; neue warten hier auf Freigabe. Fakten (GPU, VRAM, MAC) kommen vom Agenten, Policy (WOL, Gewicht, MQTT, gleichzeitige Anfragen) setzt du hier</span></h2>
+  </section>
+
+  <section class="wide" data-tab="agenten">
+    <h2>Registrierte Agenten <span class="muted" style="font-weight:normal">– jeder Agent meldet sich mit seinem Schlüssel; neue warten hier auf Freigabe. Fakten (GPU, VRAM, MAC) kommen vom Agenten, Policy (WOL, Gewicht, MQTT, gleichzeitige Anfragen) setzt du hier</span></h2>
     <div class="muted" id="agentUpdate" style="margin:4px 0 6px"></div>
     <table id="registry"><thead><tr><th>Knoten</th><th>Status</th><th>Rechner</th><th>GPU / VRAM</th><th>MAC (WOL)</th><th title="Desktop-Grundverbrauch ohne Ollama: gelernter Median; Policy-Wert überschreibt">Baseline</th><th>Policy</th><th></th></tr></thead><tbody></tbody></table>
   </section>
@@ -230,6 +234,7 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "HA spricht": "HA talks to",
   "· Rollen erscheinen dort als": "· roles appear there as",
   "Übersicht": "Overview",
+  "Agenten": "Agents",
   "Rollen": "Roles",
   "Modellkatalog": "Model catalog",
   "Einstellungen": "Settings",
@@ -553,7 +558,7 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const isCloud = m => !!((CFG && CFG.models[m]) || {}).cloud;
 const fmtChf = v => (v ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + ' CHF';
 
-const TABS = ['uebersicht', 'rollen', 'clients', 'katalog', 'einstellungen'];
+const TABS = ['uebersicht', 'agenten', 'rollen', 'clients', 'katalog', 'einstellungen'];
 const NEW_TOKENS = {};   // Client -> einmalig gezeigtes Secret (nur im Browser-Speicher dieser Seite)
 const isClientPath = p => p.startsWith('router.client_auth.clients.');
 function showTab(name) {
@@ -1158,6 +1163,7 @@ async function renderRegistry() {
     $('#agentUpdate').innerHTML = m ? `${t('Agent-Update hinterlegt')}: <b>${esc(m.version)}</b> (${(m.files || []).map(f => esc(f.os + '/' + f.arch)).join(', ')}${au.signed ? ', ' + t('signiert') : `, <span class="bad">${t('unsigniert')}</span>`})`
       + ` · Rollout ${t(au.enabled ? 'an' : 'aus')}${au.canary ? ' · ' + t('Kanarienvogel {c}, danach {h} h warten', { c: `<b>${esc(au.canary)}</b>`, h: au.canary_clean_h }) : ' · ' + t('kein Kanarienvogel')}`
       : t('kein Agent-Update hinterlegt (deploy.py --agent legt Binaries und Manifest auf den Router)'); } catch (e) {}
+  $('nav.tabs button[data-tab=agenten] .dot').hidden = !r.nodes.some(n => n.state === 'pending');   // Punkt am Tab: jemand wartet auf Freigabe
   const tb = $('#registry tbody'); tb.innerHTML = '';
   if (!r.nodes.length) { tb.innerHTML = `<tr><td colspan="8" class="muted">${t('noch kein Agent registriert')}</td></tr>`; return; }
   for (const n of r.nodes) {

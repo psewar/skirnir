@@ -278,13 +278,14 @@ also shows `build` (deploy manifest) and `supply_chain` (Ollama version and mode
 
 ![Overview page of the web UI with live charts and node table](design/ui-uebersicht.png)
 
-*Overview in the local development environment (`test/dev_env.py`) with two fake nodes and synthetic traffic. The UI itself is in German.*
+*Overview in the local development environment (`test/dev_env.py`) with two fake nodes and synthetic traffic. The UI is available in English and German (toggle in the header).*
 
-One page ([router/ui.html](router/ui.html)), no external libraries, five tabs:
+One page ([router/ui.html](router/ui.html)), no external libraries, six tabs:
 
-- **Overview:** nodes with state, breaker, GPU, VRAM, load and loaded models; cloud providers with budget bars; registered
-  agents (approval, policy); operations tiles; recent decisions; **live charts** (canvas from `/metrics`): requests/min,
+- **Overview:** nodes with state, breaker, GPU, VRAM, load and loaded models; cloud providers with budget bars; operations tiles; recent decisions; **live charts** (canvas from `/metrics`): requests/min,
   tokens/s, GPU and VRAM per node, daily history, latency histogram, shares by node/role/client, effectively used models.
+- **Agents:** registered agents with facts, approval, per-node policy (WOL, weight, busy thresholds, GPU guard, MQTT,
+  auto-update), the staged agent version and the update state; a dot on the tab while an agent waits for approval.
 - **Roles:** tier editor with priority, canary, shadow; **Try** (role or model, num_ctx, execution, data class, priority, think)
   with node, tier, reason, skipped tiers, duration split into queue / model / router; **load test** (n requests with concurrency c,
   plus probes with `interactive`).

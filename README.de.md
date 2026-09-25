@@ -278,12 +278,14 @@ Decision). `/admin/state` zeigt ausserdem `build` (Deploy-Manifest) und `supply_
 
 *Übersicht in der lokalen Entwicklungsumgebung (`test/dev_env.py`) mit zwei Fake-Knoten und synthetischem Verkehr.*
 
-Eine Seite ([router/ui.html](router/ui.html)), ohne externe Bibliotheken, fünf Tabs:
+Eine Seite ([router/ui.html](router/ui.html)), ohne externe Bibliotheken, sechs Tabs:
 
 - **Übersicht:** Knoten mit Zustand, Breaker, GPU, VRAM, Last und geladenen Modellen; Cloud-Anbieter mit Budgetbalken;
-  registrierte Agenten (Freigabe, Policy); Betriebskacheln; letzte Entscheidungen; **Live-Grafiken** (Canvas aus `/metrics`):
+  Betriebskacheln; letzte Entscheidungen; **Live-Grafiken** (Canvas aus `/metrics`):
   Anfragen/min, Tokens/s, GPU und VRAM je Knoten, Tage-Verlauf, Latenz-Histogramm, Anteile nach Knoten/Rolle/Client, effektiv
   genutzte Modelle.
+- **Agenten:** registrierte Agenten mit Fakten, Freigabe, Policy je Knoten (WOL, Gewicht, Busy-Schwellen, GPU-Schutz, MQTT,
+  Auto-Update), hinterlegte Agent-Version und Update-Stand; Punkt am Tab, solange ein Agent auf Freigabe wartet.
 - **Rollen:** Stufen-Editor mit Priorität, Canary, Shadow; **Ausprobieren** (Rolle oder Modell, num_ctx, execution, Datenklasse,
   Priorität, think) mit Knoten, Stufe, Grund, übersprungenen Stufen, Dauer aufgeteilt in Warteschlange / Modell / Router; **Lasttest**
   (n Anfragen mit Parallelität c, dazu Sonden mit `interactive`).
