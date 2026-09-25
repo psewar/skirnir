@@ -264,6 +264,43 @@ darf das Limit nie über den Standard heben. Testreihenfolge vom Ungefährlichen
 7. **Reboot-Probe**: Knoten neu starten, nach dem Dienststart im Log `Limit … gesetzt` und in HA `gpu_power_limit_w`
    = Ziel innerhalb von `reapply_s` + Startzeit prüfen.
 
+## 5a. Messergebnisse 2026-09-25 (Test 6, Lasttest mit Limit)
+
+Aufbau: `tools/guard_loadtest.py` (erhöht, `nvidia-smi -pl` je Stufe, Guard auf 100 % geparkt), je Stufe zwei Prefill-Anfragen
+mit ~18k Token frischem Text, zwei parallele Generierungen (~700 Token), dann Prefill und Generierung parallel; dazu
+`/health` des Agenten jede Sekunde (Board Power NVML, 16-Pin GPU-Z, Throttle-Bits). RTX 5090, Treiber 616.56, Ollama 0.11,
+Leerlauf-Referenz 12,05 V. Die Stufe 500 W nur beim MoE-Modell.
+
+| Modell | Limit W | Prefill tok/s | Gen tok/s (2 parallel) | Prefill neben Gen | Board max W | 16-Pin max W | 16-Pin unter Last V | `sw_power_cap` Proben |
+|---|---|---|---|---|---|---|---|---|
+| qwen3.6:35b-a3b (MoE, 3B aktiv) | 575 | 6535 | 179 | 6536 | 322 | 329 | 11,94 | 0/28 |
+| | 500 | 6380 | 178 | 6504 | 333 | 324 | 11,93 | 0/25 |
+| | 460 | 6160 | 178 | 6312 | 310 | 298 | – (<300 W) | 2/26 |
+| | 400 | 6052 | 170 | 6172 | 304 | 299 | – | 8/25 |
+| gemma4:26b (dicht) | 575 | 12794 | 190 | 10735 | 469 | **543** | 11,88 (min 11,81) | 4/16 |
+| | 460 | 12655 | 186 | 9646 | 446 | 459 | 11,87 | 4/15 |
+| | 400 | 12218 | 183 | 9440 | 346 | 430 | 11,88 | 6/16 |
+
+Befunde:
+- **Das MoE-Modell erreicht das Limit nie**: 330 W Spitze bei 575 W erlaubt. Für die Rollen auf qwen3.6:35b-a3b (die meisten)
+  ist das 80-%-Limit im Alltag wirkungslos und kostenlos; erst bei 400 W greift `sw_power_cap` gelegentlich (8 von 25 Proben),
+  Tempo –7 % Prefill, –5 % Generierung.
+- **Das dichte Modell bringt die Karte ans Limit**: 543 W am 16-Pin bei 575 W (Board-Mittel 469 W). Genau dieser Fall ist
+  der Grund für den Schutz. Bei 460 W kostet es **–1 % Prefill, –2 % Generierung, –10 % Prefill neben laufender
+  Generierung**; bei 400 W –4 % / –4 % / –12 %. Die Annahme „wenige Prozent“ hält für Einzelanfragen, unter Parallelität
+  ist es ein Zehntel.
+- **Spannung**: Abfall gegen die Leerlauf-Referenz 0,17 V bei 330 W, **0,24 V bei 543 W** (min 11,81 V). Kabelweg gesund;
+  die Warnschwelle 0,35 V hat ~0,1 V Reserve, 11,6 V absolut ~0,2 V. Beide Schwellen bleiben wie vorgeschlagen.
+- **Instrument**: `sw_power_cap` erscheint nur, wenn das Limit wirklich bindet (0 Proben beim MoE bei 575/500 W) – der
+  Hebel ist damit als wirksam belegt. Grenzen der Messung: 1-s-Abtastung über den Agenten (2-s-NVML, 1-s-GPU-Z) glättet
+  Spitzen; 16-Pin-Werte können über der Board-Power liegen, weil beide Quellen nicht zeitgleich abgetastet werden. Die
+  Anfragen dauern 2–9 s – Dauerlast im Sinne der Stufe 2 (600 s) wurde nicht erzeugt, dafür bräuchte es einen Nachtlauf.
+- Temperaturen unkritisch: Speicher max 58 °C, Hot Spot max 72 °C.
+
+Entscheidung: Default 80 % bleibt. Stufe 2 (70 %) kostet bei dichten Modellen ~4 %/12 %, ist also als Erholungsstufe
+tragbar. Test 5 (Messwoche) läuft passiv über die HA-Historie der Sensoren `GPU Leistung`, `GPU 16-Pin Leistung`,
+`GPU 16-Pin Spannung`, `GPU-Schutz` – auszuwerten nach einer Woche Betrieb.
+
 ## 6. Offene Fragen und Grenzen
 
 - **Rechte des Dienstkontos**: Darf `NT SERVICE\OllamaRouterAgent` das Limit setzen? Falls nicht, bleibt LocalSystem
