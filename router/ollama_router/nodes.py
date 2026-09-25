@@ -26,7 +26,7 @@ def nreq(node, method, path, **kw):
             raise NodeNotReady(f"{node.name}: TLS-Fingerprint unbekannt, warte auf Heartbeat")
         kw["ssl"] = node.ssl
         h = dict(kw.get("headers") or {})
-        if state.CFG.heartbeat_token:
+        if state.CFG.heartbeat_token:   # Router-Token der TLS-Vorschaltstelle des Agenten (ollama_proxy, router.token)
             h["X-Router-Token"] = state.CFG.heartbeat_token
         kw["headers"] = h
     return state.SESSION.request(method, node.url + path, **kw)

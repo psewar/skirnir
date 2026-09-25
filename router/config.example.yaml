@@ -14,6 +14,8 @@ router:
                                   # provisioniert und gilt bei deren naechster Verbindung (also nach dem Deploy)
   offline_after_misses: 3
   heartbeat_stale_s: 10
+  # heartbeat_token: ...          # nur fuer Knoten mit TLS-Vorschaltstelle (X-Router-Token) und die Heartbeat-Einspeisung
+                                  # POST /v1/heartbeat/<node> (Tests, Diagnose); registrierte Agenten brauchen keinen Token
   agent_missing_problem_s: 300  # Agent hat schon gemeldet und schweigt seit 5 min -> HA-Problem (Alarm-Automation)
   expose_concrete_models: true   # konkrete Modellnamen werden 1:1 geroutet (404 wenn kein Knoten sie hat); Rollen = nach Zweck
   request_timeout_s: 600

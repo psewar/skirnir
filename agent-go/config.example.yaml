@@ -44,9 +44,7 @@
 
 router:
   url: https://router.example.net:11435     # einzige Pflichtangabe
-  # token: ...                              # nur ohne Tunnel (HTTP-Heartbeat) und fuer die TLS-Vorschaltstelle ollama_proxy
-  # interval_s: 3                           # HTTP-Heartbeat; mit Tunnel provisioniert der Router das Intervall
-  # timeout_s: 5
+  # token: ...                              # nur fuer die TLS-Vorschaltstelle ollama_proxy (X-Router-Token)
 
 # ollama_proxy:                                 # TLS-Vorschaltstelle vor Ollama (Alternative ohne Tunnel; braucht router.token)
 #   enabled: true
@@ -55,9 +53,8 @@ router:
 #   cert_dir: C:\ProgramData\ollama-router-agent\tls
 #   require_token: true                         #   false = ohne X-Router-Token (nur in abgeschottetem Netz)
 
-tunnel:
-  enabled: true
-  upstream: http://127.0.0.1:11434              # lokales Ollama
+tunnel:                                         # ausgehende Verbindung zum Router (einziger Weg seit 0.9.1)
+  upstream: http://127.0.0.1:11434              # lokales Ollama, das der Router durch den Tunnel aufruft
 
 # gpuz:                                         # GPU-Z-Sensoren (Windows) als Zusatzquelle, Standard an: laeuft GPU-Z,
 #   enabled: false                              #   kommen Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung dazu

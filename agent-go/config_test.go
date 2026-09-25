@@ -42,11 +42,11 @@ func TestConfigSecretStoreDomainPflicht(t *testing.T) {
 	if _, err := loadConfig(writeCfg(t, body+"  domain: https://secrets.example.net\n")); err != nil {
 		t.Fatalf("mit domain abgelehnt: %v", err)
 	}
-	// alter Blockname `mimir:` bleibt lesbar
+	// der alte Blockname `mimir:` wird seit 0.9.1 nicht mehr gelesen: die Config muss klar scheitern, nicht still laufen
 	legacy := "router:\n  url: https://r.example.net\nmqtt:\n  host: mqtt.example.net\n  password_secret: MQTT_PASSWORD\n" +
 		"mimir:\n  domain: https://secrets.example.net\n  project_id: p\n  client_id: c\n  client_secret: s\n"
-	if c, err := loadConfig(writeCfg(t, legacy)); err != nil || c.SecretStore.ProjectID != "p" {
-		t.Fatalf("Legacy-Block mimir: %v", err)
+	if _, err := loadConfig(writeCfg(t, legacy)); err == nil || !strings.Contains(err.Error(), "secret_store") {
+		t.Fatalf("alter Block mimir: still akzeptiert oder falsche Meldung: %v", err)
 	}
 }
 

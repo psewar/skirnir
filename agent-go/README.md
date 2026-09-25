@@ -27,8 +27,8 @@ Schlüssel als 0600-Datei, `run` per systemd). `build.sh` baut Windows, `GOOS=li
 
 ## Tunnel (0.3.0, Normalweg)
 
-`tunnel.enabled: true` (Standard): ausgehende WebSocket-Verbindung zum Router (`/v1/tunnel`, Anmeldung mit der
-Ed25519-Identitaet per Challenge, kein Token), der
+Ausgehende WebSocket-Verbindung zum Router (`/v1/tunnel`, Anmeldung mit der Ed25519-Identitaet per Challenge, kein Token),
+seit 0.9.1 der einzige Weg (der HTTP-Heartbeat mit `router.token` und `tunnel.enabled` sind entfernt); der
 Router ruft Ollama hindurch auf (`tunnel.upstream`, Standard `http://127.0.0.1:11434`). Keine eingehende Firewall-Regel, kein
 Zertifikat, keine feste IP; Reconnect mit Backoff 1-30 s; `/health` zeigt `tunnel`. Ein neuer Rechner braucht nur die Binary,
 die Config (node, router.url; optional secret_store fuer ein MQTT-Passwort aus dem Secret-Store) und `Install-Service.ps1`.

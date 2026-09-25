@@ -18,7 +18,6 @@ type Config struct {
 	Router      RouterCfg
 	MQTT        MQTTCfg                 // optional: lokale Ueberschreibung (Host gesetzt) oder enabled: false
 	SecretStore SecretStoreCfg          `yaml:"secret_store"` // optional: nur fuer mqtt.password_secret (Universal-Auth-API)
-	MimirLegacy SecretStoreCfg          `yaml:"mimir"`        // alter Name des Blocks; wird in applyDefaults uebernommen
 	Health      struct{ Listen string } `yaml:"health"`
 	Logging     LogCfg
 	Children    []ChildSpec `yaml:"children"`
@@ -34,13 +33,11 @@ type Config struct {
 	} `yaml:"identity"`
 }
 
-// TunnelCfg: ausgehende Dauerverbindung zum Router, durch die der Router Ollama aufruft (Standard an).
+// TunnelCfg: ausgehende Dauerverbindung zum Router, durch die der Router Ollama aufruft. Seit 0.9.1 der einzige Weg
+// (der HTTP-Heartbeat mit Token und `tunnel.enabled` sind weg).
 type TunnelCfg struct {
-	Enabled  *bool  `yaml:"enabled"`
 	Upstream string `yaml:"upstream"`
 }
-
-func (t *TunnelCfg) on() bool { return t.Enabled == nil || *t.Enabled }
 
 // GPUZCfg: GPU-Z-Shared-Memory als Zusatzquelle (Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung). Standard an;
 // laeuft GPU-Z nicht, passiert nichts. `enabled: false` schaltet den Leser ganz ab.
@@ -63,10 +60,8 @@ func (p *ProxyCfg) on() bool           { return p.Enabled != nil && *p.Enabled }
 func (p *ProxyCfg) requireToken() bool { return p.RequireToken == nil || *p.RequireToken }
 
 type RouterCfg struct {
-	URL       string  `yaml:"url"`
-	Token     string  `yaml:"token"` // nur noch fuer den alten HTTP-Heartbeat / TLS-Proxy
-	IntervalS float64 `yaml:"interval_s"`
-	TimeoutS  float64 `yaml:"timeout_s"`
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"` // nur fuer die TLS-Vorschaltstelle (ollama_proxy: X-Router-Token)
 }
 
 // MQTTCfg wird sowohl lokal (YAML) als auch vom Router provisioniert (JSON) gelesen.
@@ -178,17 +173,8 @@ func (c *Config) applyDefaults() {
 	if c.Identity.Dir == "" {
 		c.Identity.Dir = filepath.Join(base, "identity")
 	}
-	if c.Router.IntervalS <= 0 {
-		c.Router.IntervalS = 3
-	}
-	if c.Router.TimeoutS <= 0 {
-		c.Router.TimeoutS = 5
-	}
 	if c.MQTT.Host != "" {
 		mqttDefaults(&c.MQTT, c.Node)
-	}
-	if c.SecretStore == (SecretStoreCfg{}) { // alter Blockname `mimir:` weiter lesbar
-		c.SecretStore = c.MimirLegacy
 	}
 	if c.SecretStore.Environment == "" {
 		c.SecretStore.Environment = "prod"
@@ -276,9 +262,6 @@ func (c *Config) validate() error {
 	}
 	if c.Router.URL == "" {
 		return fmt.Errorf("router.url fehlt")
-	}
-	if !c.Tunnel.on() && c.Router.Token == "" {
-		return fmt.Errorf("ohne Tunnel braucht der HTTP-Heartbeat router.token")
 	}
 	if c.MQTT.on() && c.MQTT.Host != "" { // lokale MQTT-Config nur pruefen, wenn gesetzt (sonst provisioniert der Router)
 		if c.MQTT.Password == "" && c.MQTT.PasswordSecret == "" {

@@ -282,9 +282,11 @@ async def tick_loop():
 
 
 async def handle_heartbeat(request):
-    """Alter HTTP-Heartbeat mit Token (Agenten vor 0.4.0); ohne konfigurierten Token abgeschaltet."""
+    """Heartbeat-Einspeisung mit Token: GPU-Fakten fuer einen bekannten Knoten setzen, wie es der Agent durch den Tunnel tut.
+    Kein Agentenweg mehr (der HTTP-Heartbeat des Agenten ist seit 0.9.1 weg), sondern Hebel fuer Tests und Diagnose;
+    ohne router.heartbeat_token abgeschaltet."""
     if not state.CFG.heartbeat_token:
-        return web.json_response({"error": "Token-Heartbeat abgeschaltet, Agent >= 0.4.0 nutzt den Tunnel"}, status=410)
+        return web.json_response({"error": "Heartbeat-Einspeisung abgeschaltet (router.heartbeat_token nicht gesetzt)"}, status=410)
     if request.headers.get("X-Router-Token") != state.CFG.heartbeat_token:
         return web.json_response({"error": "bad token"}, status=401)
     name = request.match_info["node"]

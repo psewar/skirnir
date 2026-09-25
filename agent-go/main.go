@@ -122,7 +122,7 @@ func main() {
 	var verr error
 	switch verb {
 	case "check-config":
-		fmt.Printf("ok: node=%s router=%s tunnel=%v mqtt-lokal=%v kinder=%d identity=%s dienst=%s konto=%s\n", cfg.Node, cfg.Router.URL, cfg.Tunnel.on(),
+		fmt.Printf("ok: node=%s router=%s upstream=%s mqtt-lokal=%v kinder=%d identity=%s dienst=%s konto=%s\n", cfg.Node, cfg.Router.URL, cfg.Tunnel.Upstream,
 			cfg.MQTT.Host != "", len(cfg.Children), cfg.Identity.Dir, cfg.Install.ServiceName, firstNonEmpty(cfg.Install.Account, "LocalSystem"))
 	case "identity":
 		log, _ := newLogger(cfg.Logging, "agent", false)

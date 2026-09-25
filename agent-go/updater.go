@@ -229,6 +229,16 @@ func (u *Updater) run(o UpdateOrder) error {
 		os.Remove(newPath)
 		return fmt.Errorf("neue Binary meldet %q statt %s (%v)", strings.TrimSpace(string(out)), o.Version, err)
 	}
+	// ... und sie muss die vorhandene Konfiguration annehmen: sonst startet der getauschte Dienst im Kreis, statt dass der
+	// Auftrag sauber als failed endet (z. B. nach entfernten Konfig-Schluesseln, 0.9.1: tunnel.enabled, mimir:)
+	if u.cfgPath != "" {
+		chk := exec.Command(newPath, "check-config", "--config", u.cfgPath)
+		hideWindow(chk)
+		if out, err := chk.CombinedOutput(); err != nil {
+			os.Remove(newPath)
+			return fmt.Errorf("neue Binary lehnt die Konfiguration ab: %s", strings.TrimSpace(string(out)))
+		}
+	}
 	// Tausch: laufende Datei umbenennen (geht unter Windows und Linux), neue an ihren Platz; bei Fehler zurueck
 	old := exe + ".old"
 	if err := os.Remove(old); err != nil && !os.IsNotExist(err) {

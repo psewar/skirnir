@@ -36,8 +36,7 @@ def build_apps():
     ctl = web.Application(middlewares=[auth.basic_auth_middleware])
     ctl.router.add_get("/", admin.handle_ui)
     ctl.router.add_get(r"/{name:(skirnir\.png|favicon\.png|favicon\.ico)}", admin.handle_asset)
-    ctl.router.add_post("/v1/heartbeat/{node}", poll.handle_heartbeat)
-    ctl.router.add_get("/v1/tunnel/{node}", registry.handle_tunnel)
+    ctl.router.add_post("/v1/heartbeat/{node}", poll.handle_heartbeat)   # Heartbeat-Einspeisung mit heartbeat_token (Tests, Diagnose)
     ctl.router.add_get("/v1/tunnel", registry.handle_tunnel_v2)
     ctl.router.add_get("/v1/agent/binary/{name}", agentupdate.handle_binary)   # Download mit Einmal-Token aus dem Update-Auftrag
     ctl.router.add_get("/admin/agent-update", agentupdate.handle_manifest)
