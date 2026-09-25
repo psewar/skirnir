@@ -32,7 +32,47 @@ def nreq(node, method, path, **kw):
     return state.SESSION.request(method, node.url + path, **kw)
 
 
-class Node:
+class Breaker:
+    """Circuit Breaker je Ziel (Stufe 3): closed -> open nach `failures` Fehlern im Fenster -> nach open_s half_open mit genau
+    einer Probe. Gemeinsam fuer Node und CloudTarget (beide tragen name, inflight, breaker, breaker_fails, breaker_until)."""
+
+    def breaker_would_allow(self, now):
+        """Reine Sicht ohne Zustandswechsel (HA-Bild, /metrics): darf jetzt eine Anfrage hin?"""
+        if self.breaker == "closed":
+            return True
+        if self.breaker == "open" and now < self.breaker_until:
+            return False
+        return self.inflight == 0
+
+    def breaker_allows(self, now):
+        if self.breaker == "open" and now >= self.breaker_until:
+            self.breaker = "half_open"
+            log.info("%s: Breaker half_open - eine Probe", self.name)
+            state.remember({"event": "breaker", "node": self.name, "state": "half_open"})
+        return self.breaker_would_allow(now)
+
+    def breaker_fail(self, now, why):
+        cfg = state.CFG.breaker
+        self.breaker_fails = [t for t in self.breaker_fails if now - t <= cfg["window_s"]] + [now]
+        if self.breaker == "half_open" or len(self.breaker_fails) >= cfg["failures"]:
+            self.breaker, self.breaker_until, self.breaker_fails = "open", now + cfg["open_s"], []
+            log.warning("%s: Breaker OPEN fuer %.0fs (%s)", self.name, cfg["open_s"], why)
+            state.remember({"event": "breaker", "node": self.name, "state": "open", "reason": why})
+
+    def breaker_ok(self):
+        if self.breaker != "closed":
+            self.breaker = "closed"
+            log.info("%s: Breaker closed (Probe erfolgreich)", self.name)
+            state.remember({"event": "breaker", "node": self.name, "state": "closed"})
+        self.breaker_fails = []
+
+    def breaker_reset(self):
+        self.breaker, self.breaker_fails, self.breaker_until = "closed", [], 0.0
+
+
+class Node(Breaker):
+    is_cloud = False   # CloudTarget (cloud.py) sagt True; Proxy/Ops unterscheiden daran, kein getattr mehr noetig
+
     def set_fingerprint(self, hexfp):
         fp = hexfp.lower().removeprefix("sha256:").replace(":", "").strip()
         if len(fp) != 64:
@@ -250,7 +290,7 @@ class Node:
         # Eimer im alten Format (nur eine Zahl = Stundenminimum) verwerfen statt umrechnen: sie entstanden OHNE
         # den Ruhe-Filter, es stecken also Spielstunden darin. Auf gpu-desktop waeren das 19 von 23 Stunden bei
         # 18,2 GiB gewesen - der Median daraus waere schlechter als alles, was wir ersetzen wollen.
-        for k, v in [(k, v) for k, v in buckets.items() if not isinstance(v, dict)]:
+        for k, _v in [(k, v) for k, v in buckets.items() if not isinstance(v, dict)]:
             del buckets[k]
         b = buckets.get(str(hour)) or {"n": 0, "sum": 0.0, "min": 1e9}
         buckets[str(hour)] = {"n": b["n"] + 1, "sum": round(b["sum"] + sample, 3), "min": round(min(b["min"], sample), 3)}
@@ -310,34 +350,15 @@ class Node:
                 "warnungen": g.get("warnungen") or [], "quelle": g.get("quelle"), "hochlast_s": g.get("hochlast_s"),
                 "policy": self.guard_policy, "router_enabled": state.CFG.gpu_guard["enabled"]}
 
-    def breaker_allows(self, now):
-        if self.breaker == "closed":
-            return True
-        if self.breaker == "open":
-            if now < self.breaker_until:
-                return False
-            self.breaker = "half_open"
-            log.info("node %s: Breaker half_open - eine Probe", self.name)
-            state.remember({"event": "breaker", "node": self.name, "state": "half_open"})
-        return self.inflight == 0   # half_open: genau eine Probe, solange nichts anderes laeuft
-
-    def breaker_fail(self, now, why):
-        cfg = state.CFG.breaker
-        self.breaker_fails = [t for t in self.breaker_fails if now - t <= cfg["window_s"]] + [now]
-        if self.breaker == "half_open" or len(self.breaker_fails) >= cfg["failures"]:
-            self.breaker, self.breaker_until, self.breaker_fails = "open", now + cfg["open_s"], []
-            log.warning("node %s: Breaker OPEN fuer %.0fs (%s)", self.name, cfg["open_s"], why)
-            state.remember({"event": "breaker", "node": self.name, "state": "open", "reason": why})
-
-    def breaker_ok(self):
-        if self.breaker != "closed":
-            self.breaker = "closed"
-            log.info("node %s: Breaker closed (Probe erfolgreich)", self.name)
-            state.remember({"event": "breaker", "node": self.name, "state": "closed"})
-        self.breaker_fails = []
-
-    def breaker_reset(self):
-        self.breaker, self.breaker_fails, self.breaker_until = "closed", [], 0.0
+    def go_offline(self, why):
+        """Knoten aus dem Routing nehmen: Zustand, geladene Modelle, Ladeansprueche und VRAM-Nachlauf zuruecksetzen.
+        Eine Stelle fuer Poll-Fehler, Tunnelabriss und Sperre (vorher vier Kopien mit leicht verschiedenem Umfang)."""
+        if self.state != "offline":
+            log.warning("node %s -> offline (%s)", self.name, why)
+        self.state, self.hot_since, self.calm_since = "offline", None, None
+        self.loaded, self.loaded_digest, self.loaded_ctx, self.loading = {}, {}, {}, {}
+        self.vram_last_gib, self.vram_hold_gib, self.vram_hold_until = 0.0, 0.0, 0.0   # offline: Nachlauf ist gegenstandslos
+        state.MQTT_DIRTY.append(True)
 
     def budget_gib(self, now, model):
         """Was Ollama auf diesem Knoten belegen darf: freies VRAM + alles, was Ollama selbst hält (wird bei Bedarf

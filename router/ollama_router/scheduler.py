@@ -30,13 +30,15 @@ def resolve_tiers(name, body):
     return None, None
 
 
-def candidates_for(tier, client_ctx, now, exclude=()):
+def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
+    """Kandidaten einer Stufe. mutate=False ist die reine Sicht (HA-Bild, /metrics): kein Breaker wechselt nach half_open."""
     ctx = min(client_ctx, tier["num_ctx"]) if client_ctx else tier["num_ctx"]
     need = None
     out = []
+    allows = (lambda n: n.breaker_allows(now)) if mutate else (lambda n: n.breaker_would_allow(now))
     if tier.get("cloud"):   # Stufe 5: der Anbieter ist der einzige "Knoten" dieser Stufe (Schranken prueft request.tier_blocked)
         t = cloud.target_for(tier)
-        if t is not None and t.name not in exclude and t.breaker_allows(now):
+        if t is not None and t.name not in exclude and allows(t):
             out.append(t)
         return ctx, 0.0, out
     for n in state.NODES.values():
@@ -46,7 +48,7 @@ def candidates_for(tier, client_ctx, now, exclude=()):
             continue
         if n.state == "busy" and not tier["busy_ok"]:
             continue
-        if not n.breaker_allows(now):   # Stufe 3: Knoten mit offenem Breaker bleiben aussen vor (half_open: eine Probe)
+        if not allows(n):   # Stufe 3: Knoten mit offenem Breaker bleiben aussen vor (half_open: eine Probe)
             continue
         need = state.CFG.need_gib(tier["model"], ctx, n)
         lc = n.loaded_context(tier["model"])
@@ -73,7 +75,7 @@ def score(node, model):
     if node.inflight >= node.effective_max_inflight():
         s -= w["saturated"]
     gg = state.CFG.gpu_guard   # GPU-Schutz: Knoten in Hochlast/Stufe 2 weichen einem zweiten Knoten, der die Stufe tragen kann
-    if gg["enabled"] and getattr(node, "guard_policy", False) and node.guard_state() in ("hochlast", "gedrosselt"):   # CloudTarget hat keinen Guard
+    if gg["enabled"] and node.guard_policy and node.guard_state() in ("hochlast", "gedrosselt"):   # CloudTarget: guard_policy False
         s -= gg["score_penalty"]
     if node.vram_total_gib and node.vram_free_gib is not None:
         s += w["vram_free"] * (node.vram_free_gib / node.vram_total_gib)
@@ -106,13 +108,13 @@ def loading_for(tiers, now, exclude=()):
                 continue
             if n.state == "busy" and not t["busy_ok"]:
                 continue
-            for m, (gib, deadline) in n.loading.items():
+            for m, (_gib, deadline) in n.loading.items():
                 if now < deadline and not n.is_loaded(m):
                     return n, m
     return None
 
 
-def choose(role, tiers, client_ctx, now, exclude=(), req=None):
+def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
     """Liefert (tier_index, tier, ctx, node) oder None. `req` (request.Routing) filtert Stufen nach Anforderungen,
     bevorzugt Stufen mit gewuenschten Faehigkeiten und haelt eine Session auf ihrem warmen Knoten."""
     per_tier = []
@@ -124,12 +126,12 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None):
             if why:
                 req.skipped.append({"tier": i, "model": t["model"], "ctx": t["num_ctx"], "reason": why})
                 continue
-        ctx, need, cands = candidates_for(t, client_ctx, now, exclude)
+        ctx, need, cands = candidates_for(t, client_ctx, now, exclude, mutate)
         per_tier.append((i, t, ctx, need, cands))
     if req is not None and req.canary:
         # Stufe 6: ausgeloste Canary-Stufe bekommt den Verkehr auch kalt - sonst saehe ein Kandidatenmodell neben einem
         # warmen Hauptmodell nie eine Anfrage. Kann kein Knoten sie bedienen, geht es normal weiter.
-        for i, t, ctx, need, cands in per_tier:
+        for i, t, ctx, _need, cands in per_tier:
             if t.get("canary") and cands:
                 req.reason = "canary"
                 return i, t, ctx, rank(cands, t["model"], req)[0]
@@ -140,7 +142,7 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None):
     if req is not None and req.session_id:
         aff = request_mod.affinity(req.session_id)
         if aff:
-            for i, t, ctx, need, cands in per_tier:
+            for i, t, ctx, _need, cands in per_tier:
                 if t["model"] != aff["model"]:
                     continue
                 n = next((c for c in cands if c.name == aff["node"]), None)
@@ -150,7 +152,7 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None):
                     return i, t, ctx, n
     if role.get("latency_first"):
         local_cands_seen = False
-        for i, t, ctx, need, cands in per_tier:
+        for i, t, ctx, _need, cands in per_tier:
             if t.get("cloud"):
                 # Stufe 5: eine Cloud-Stufe hat keine Ladezeit, ist aber nie "warm". Sie gilt als warm, solange keine
                 # lokale Stufe VOR ihr Kandidaten hat - so gewinnt ein kaltes lokales Modell weiter vor der Cloud (Geld),
@@ -167,7 +169,7 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None):
                 if req is not None:
                     req.reason = "warm-first"
                 return i, t, ctx, rank(warm, t["model"], req)[0]
-    for i, t, ctx, need, cands in per_tier:
+    for i, t, ctx, _need, cands in per_tier:
         if cands:
             if req is not None:
                 req.reason = "rank"
@@ -184,7 +186,7 @@ def wakeable_for(tiers):
     return None
 
 
-def any_online_node_with(model, prefer_loaded=True):
+def any_online_node_with(model):
     ns = [n for n in state.NODES.values() if n.state != "offline" and model in n.models]
     if not ns:
         return None

@@ -7,7 +7,7 @@ import time
 from aiohttp import web
 
 from . import proxy, state
-from .common import openai_error
+from .common import openai_error, parse_tool_args
 
 
 def oa_id(prefix):
@@ -66,13 +66,7 @@ def oa_messages_to_native(msgs):
             tcs = []
             for tc in m["tool_calls"]:
                 fn = (tc or {}).get("function") or {}
-                args = fn.get("arguments", {})
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args) if args.strip() else {}
-                    except ValueError:
-                        args = {"_raw": args}
-                tcs.append({"function": {"name": fn.get("name", ""), "arguments": args}})
+                tcs.append({"function": {"name": fn.get("name", ""), "arguments": parse_tool_args(fn.get("arguments", {}))}})
             n["tool_calls"] = tcs
         if m.get("role") == "tool" and m.get("name"):
             n["tool_name"] = m["name"]

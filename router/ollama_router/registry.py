@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover
     Ed25519PublicKey = None
 
 from . import agentupdate, nodes, state, tunnel
-from .common import VERSION, log, normalize_mac, safe_node_name
+from .common import VERSION, log, normalize_mac, read_env_value, safe_node_name
 
 
 class NodeRegistry:
@@ -93,14 +93,9 @@ class NodeRegistry:
 
 def read_mqtt_password(m):
     """MQTT-Passwort wie der HAPublisher: roh aus der Secrets-Datei, sonst Umgebung/Config."""
-    pw = None
-    pf = m.get("password_file")
-    if pf and os.path.exists(pf):
-        key = m.get("password_env", "MQTT_PASSWORD")
-        for line in open(pf, encoding="utf-8"):
-            if line.startswith(key + "="):
-                pw = line.split("=", 1)[1].rstrip("\r\n")
-    return pw or os.environ.get(m.get("password_env", "MQTT_PASSWORD")) or m.get("password") or ""
+    key = m.get("password_env", "MQTT_PASSWORD")
+    pw = read_env_value(m["password_file"], key) if m.get("password_file") else None
+    return pw or os.environ.get(key) or m.get("password") or ""
 
 
 def provision_bundle(e):
@@ -213,8 +208,7 @@ async def revoke_node(fp):
             tun = node.tunnel
         if e["name"] not in state.CFG.nodes:     # rein dynamischer Knoten: raus aus dem Routing
             node.tunnel = None
-            node.state, node.hot_since, node.calm_since = "offline", None, None
-            node.loaded, node.loaded_digest, node.loaded_ctx = {}, {}, {}
+            node.go_offline("gesperrt")
             del state.NODES[e["name"]]
         else:
             node.tunnel, node.fp, node.reg = None, None, None
@@ -306,10 +300,7 @@ async def handle_tunnel_v2(request):
             log.warning("node %s: Tunnel getrennt", node.name)
             state.remember({"event": "tunnel", "node": node.name, "state": "down"})
             if not node.url and node.state != "offline":
-                node.state, node.hot_since, node.calm_since = "offline", None, None
-                node.loaded, node.loaded_digest, node.loaded_ctx = {}, {}, {}
-                state.MQTT_DIRTY.append(True)
-                log.warning("node %s -> offline (Tunnel weg)", node.name)
+                node.go_offline("Tunnel weg")
     return ws
 
 

@@ -1,6 +1,7 @@
 """Der gemeinsame Laufzeitzustand des Routers. Immer als `state.X` ansprechen - CFG, SESSION, REG und
 HA_PUB werden beim Start neu gebunden, ein `from .state import CFG` saehe den alten Wert."""
 
+import asyncio
 import time
 
 
@@ -15,6 +16,7 @@ HA_PUB = None
 CFG = None
 NODES = {}
 MQTT_DIRTY = []   # nicht-leer = sofort publizieren
+TASKS = set()     # Hintergrund-Tasks (spawn): der Loop haelt nur schwache Referenzen, ein unreferenzierter Task kann vor dem Ende eingesammelt werden
 MQTT_EVENTS = []  # HA-Ereignisse, die ha.py beim naechsten Durchlauf einmal verschickt (nicht retained)
 KUERZUNGEN = {"anzahl": 0, "letzte": None}   # bestaetigte stille Kuerzungen seit Routerstart (kontextpruefung.py)
 MEASURING = {}    # model -> {"node", "step", "started", "error"} waehrend einer laufenden Messung
@@ -43,6 +45,14 @@ CLIENT_STATS = {"clients": {}, "unauth": {}}
 # Speicher, gilt nur von localhost. Ohne das lief der Knopf im enforce-Modus auf 401 (Betreiber, 2026-09-10). Name: skirnir-ui.
 INTERNAL_TOKEN = None
 INTERNAL_CLIENT = "skirnir-ui"
+
+
+def spawn(coro):
+    """asyncio.create_task mit Halter: Referenz in TASKS bis zum Ende (RUF006, Python-Doku zu create_task)."""
+    t = asyncio.get_running_loop().create_task(coro)
+    TASKS.add(t)
+    t.add_done_callback(TASKS.discard)
+    return t
 
 
 def decisions_path():

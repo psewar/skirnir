@@ -127,7 +127,7 @@ async def main():
                             if m.get("state") == "approved":
                                 await send(ws, lock, HB, 0, json.dumps({"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}).encode())
                             if m.get("t") == "update":
-                                asyncio.create_task(do_update(ws, session, lock, m, sslctx))
+                                asyncio.create_task(do_update(ws, session, lock, m, sslctx))  # noqa: RUF006
                             continue
                         if msg.type != aiohttp.WSMsgType.BINARY:
                             continue

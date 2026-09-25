@@ -139,7 +139,7 @@ def main():
             try:
                 reg = json.loads(http(C + "/admin/nodes")[1])
                 if any(n["name"] == "big" for n in reg["nodes"]): break
-            except Exception: pass
+            except Exception: pass  # noqa: BLE001
         big = next((n for n in (reg or {"nodes": []})["nodes"] if n["name"] == "big"), None)
         check("Agent-Schluessel registriert -> wartet auf Freigabe", big is not None and big["state"] == "pending" and big["connected"], str(big and {k: big[k] for k in ("state", "connected")}))
         check("Fakten vom Agenten uebernommen (GPU, VRAM, MAC)", big and big["facts"].get("gpu") == "Fake RTX 5090" and big["facts"].get("vram_total_mib") == 32563 and big["facts"].get("mac") == "00:11:22:33:44:55", str(big and big["facts"]))
@@ -1262,7 +1262,7 @@ def main():
                 p.terminate()
         for p in procs:
             try: p.wait(timeout=5)
-            except Exception: p.kill()
+            except Exception: p.kill()  # noqa: BLE001
     rlog.seek(0)
     tail = rlog.read().splitlines()[-12:]
     print("\n--- router.log (tail) ---"); print("\n".join(tail))

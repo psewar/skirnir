@@ -14,8 +14,7 @@ Pfade mit `*` gelten je Eintrag (Cloud-Anbieter, Client) - nur fuer Namen, die c
 import ipaddress
 import re
 
-DATA_CLASSES_DEFAULT = ["public", "internal", "personal", "secret"]
-PRIORITIES = ("interactive", "normal", "batch")
+from .common import DATA_CLASSES_DEFAULT, PRIORITIES  # noqa: E402
 SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open")
 
 # typ: int | float | bool | str | choice | list | iplist | keep_alive | tristate

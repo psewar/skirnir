@@ -12,9 +12,9 @@ import asyncio
 import time
 
 from . import state
-from .common import log
+from .common import PRIORITIES as _PRIORITY_ORDER, log
 
-PRIORITIES = {"interactive": 0, "normal": 1, "batch": 2}
+PRIORITIES = {p: i for i, p in enumerate(_PRIORITY_ORDER)}   # Klasse -> Rang (common.PRIORITIES ist die Reihenfolge)
 WAITING = []   # [{node, prio, t_enq, fut, request_id, role}]
 RECHECK_S = 2.0
 

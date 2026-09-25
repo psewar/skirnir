@@ -1,7 +1,7 @@
 import json, time, urllib.request, statistics
 body = json.dumps({"context": "Schalte das Licht im Wohnzimmer an und dimm es auf 40 Prozent", "options": ["standard", "gross", "assist", "code"]}).encode()
 lat = []
-for i in range(60):
+for _i in range(60):
     t0 = time.perf_counter()
     r = urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8082/decide", data=body, headers={"Content-Type": "application/json"}), timeout=10)
     d = json.loads(r.read()); lat.append((time.perf_counter() - t0) * 1000)

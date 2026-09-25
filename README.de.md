@@ -407,6 +407,16 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 | `tools/` | Messskripte für den GPU-Schutz (Lasttest, Nachtlauf Stufe 2) |
 | `.github/workflows/ci.yml`, `CHANGELOG.md`, `SECURITY.md` | CI (Lint, Go vet/test, Windows-Cross-Build, Selbsttests; die End-to-End-Suite nächtlich), Release-Historie, Meldeweg für Sicherheitslücken |
 
+### Zwei Namen, mit Absicht
+
+**Skirnir** ist der Produktname: Repository, Home-Assistant-Gerät, die `skirnir_*`-Metriken, die `X-Skirnir-*`-Header, die
+Container-Images. **`ollama-router`** ist der eingefrorene technische Name darunter: das Python-Paket `ollama_router`, die
+systemd-Units und Pfade (`/opt/ollama-router`, `/etc/ollama-router`), das MQTT-Basisthema und die Discovery-IDs, der
+Windows-Dienst `OllamaRouterAgent` mit virtuellem Konto, Aufgabe und `ProgramData`-Ordner, die Agent-Binary und die
+Namen der Release-Dateien. Eine Umbenennung würde jeden installierten Knoten und jede Entitätshistorie in Home Assistant
+brechen, und eine Dienstumbenennung lässt sich nicht über das Selbst-Update ausrollen. Die technischen Namen bleiben also;
+neue Funktionen tragen den Namen Skirnir überall dort, wo ein Mensch ihn sieht.
+
 ## Sicherheitsmodell, kurz
 
 - Alle Strecken TLS: Inferenz- und Admin-Port mit dem eigenen Zertifikat, Tunnel über WSS mit Ed25519-Challenge je Agent,

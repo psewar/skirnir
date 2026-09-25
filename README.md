@@ -407,6 +407,16 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 | `tools/` | measurement scripts for the GPU guard (load test, stage-2 night run) |
 | `.github/workflows/ci.yml`, `CHANGELOG.md`, `SECURITY.md` | CI (lint, Go vet/test, Windows cross-build, self-tests; the end-to-end suite nightly), release history, vulnerability reporting |
 
+### Two names, on purpose
+
+**Skirnir** is the product name: the repository, the Home Assistant device, the `skirnir_*` metrics, the `X-Skirnir-*`
+headers, the container images. **`ollama-router`** is the frozen technical name underneath: the Python package
+`ollama_router`, the systemd units and paths (`/opt/ollama-router`, `/etc/ollama-router`), the MQTT base topic and discovery
+ids, the Windows service `OllamaRouterAgent` with its virtual account, scheduled task and `ProgramData` folder, and the
+agent binary and release asset names. Renaming those would break every installed node and every Home Assistant entity
+history, and a service rename cannot travel through the self-update. So the technical names stay as they are; new
+features use the Skirnir name where a user sees it.
+
 ## Security model, in short
 
 - All links TLS: inference and admin port with the router's own certificate, tunnel over WSS with an Ed25519 challenge per agent,

@@ -1,5 +1,6 @@
 """Konstanten, Logger und reine Helfer ohne Zustand. Werden per Name importiert."""
 
+import json
 import logging
 import re
 
@@ -11,6 +12,34 @@ GIB = 2 ** 30
 log = logging.getLogger("router")
 
 PROXY_METHODS = ("POST",)
+PRIORITIES = ("interactive", "normal", "batch")              # Stufe 3: Prioritaetsklassen; die Reihenfolge ist die Rangfolge (admission)
+DATA_CLASSES_DEFAULT = ["public", "internal", "personal", "secret"]   # Stufe 5: Datenklassen, wenn router.cloud.data_classes fehlt
+
+
+def read_env_value(path, key, strip_quotes=False):
+    """KEY=VALUE roh aus einer Datei (kein systemd-EnvironmentFile-Parsing: Sonderzeichen wie \\ oder " bleiben erhalten).
+    None, wenn Datei oder Schluessel fehlen. strip_quotes entfernt umschliessende Anfuehrungszeichen (Cloud-Schluessel)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith(key + "="):
+                    v = line.split("=", 1)[1].rstrip("\r\n")
+                    return v.strip().strip('"').strip("'") if strip_quotes else v
+    except FileNotFoundError:
+        return None
+    return None
+
+
+def parse_tool_args(args):
+    """Tool-Argumente eines Modells: JSON-Text -> Objekt, leer -> {}, unparsbar -> {"_raw": text}; Objekte gehen 1:1 durch."""
+    if not isinstance(args, str):
+        return {} if args is None else args
+    if not args.strip():
+        return {}
+    try:
+        return json.loads(args)
+    except ValueError:
+        return {"_raw": args}
 
 _MAC_RE = re.compile(r"[0-9A-Fa-f]{2}([:-]?)(?:[0-9A-Fa-f]{2}\1){4}[0-9A-Fa-f]{2}")
 
@@ -36,11 +65,6 @@ async def read_json(request):
         return await request.json()
     except Exception:  # noqa: BLE001 - aiohttp wirft je nach Fall JSONDecodeError, UnicodeDecodeError oder ClientError
         return None
-
-
-def parse_keep_alive(v):
-    """Ollama akzeptiert Zahl (Sekunden, -1) oder Dauer-String ('5m'). Wir reichen 1:1 durch."""
-    return v
 
 
 def safe_node_name(name):

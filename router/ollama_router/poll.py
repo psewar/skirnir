@@ -19,14 +19,7 @@ async def poll_node(node):
     except (ClientError, asyncio.TimeoutError, OSError, ValueError) as e:
         node.misses += 1
         if node.misses >= state.CFG.offline_after and node.state != "offline":
-            log.warning("node %s -> offline (%s)", node.name, type(e).__name__)
-            node.state, node.hot_since, node.calm_since = "offline", None, None
-            state.MQTT_DIRTY.append(True)
-            node.loaded = {}
-            node.loaded_digest = {}
-            node.loaded_ctx = {}
-            node.vram_last_gib, node.vram_hold_gib, node.vram_hold_until = 0.0, 0.0, 0.0   # offline: Nachlauf ist gegenstandslos
-            node.loading = {}
+            node.go_offline(type(e).__name__)
         return
     node.misses = 0
     node.polled_ok = time.time()
@@ -55,14 +48,14 @@ async def poll_node(node):
         node.breaker_reset()   # Stufe 3: alte Fehler eines abgestuerzten Knotens zaehlen nach dem Neustart nicht mehr
         state.MQTT_DIRTY.append(True)
         if state.CFG.prewarm_on_online:
-            asyncio.create_task(prewarm(node, state.CFG.prewarm_online_delay, "online"))
+            state.spawn(prewarm(node, state.CFG.prewarm_online_delay, "online"))
     for m in node.models:
         if m not in state.CAPS:
             state.CAPS[m] = None   # in Arbeit, kein Doppel-Fetch
-            asyncio.create_task(fetch_caps(node, m))
+            state.spawn(fetch_caps(node, m))
     if time.time() - node.version_ts > 300:
         node.version_ts = time.time()
-        asyncio.create_task(fetch_version(node))
+        state.spawn(fetch_version(node))
     now = time.time()
     node.note_loaded_changed(now)
     evaluate(node, now)
@@ -73,7 +66,7 @@ async def poll_node(node):
         if big:
             node.last_busy_unload = now
             log.info("node %s busy, aber %s geladen -> entlade", node.name, ", ".join(big))
-            asyncio.create_task(unload_big_models(node))
+            state.spawn(unload_big_models(node))
 
 
 async def fetch_version(node):
@@ -124,7 +117,7 @@ def evaluate(node, now):
                      node.gpu_util, node.foreign_vram_gib())
             state.remember({"event": "busy", "node": node.name, "reason": node.busy_reason})
             if state.CFG.unload_on_busy:
-                asyncio.create_task(unload_big_models(node))
+                state.spawn(unload_big_models(node))
     elif node.state == "busy":
         node.calm_since = node.calm_since or now
         if (now - node.calm_since) >= state.CFG.busy_exit_s:
@@ -132,7 +125,7 @@ def evaluate(node, now):
             log.info("node %s -> free (calm)", node.name)
             state.remember({"event": "free", "node": node.name})
             if state.CFG.prewarm_on_free:
-                asyncio.create_task(prewarm(node, state.CFG.prewarm_free_delay, "free"))
+                state.spawn(prewarm(node, state.CFG.prewarm_free_delay, "free"))
 
 
 async def unload_big_models(node):
@@ -259,7 +252,7 @@ def residency_check(node, now):
         return
     log.info("node %s: Rang-1 %s verdraengt durch %s, seit >%ds ungenutzt -> vorwaermen", node.name,
              ", ".join(m for m, _ in missing), ", ".join(displacers), int(cfg.residency_idle_s))
-    asyncio.create_task(prewarm(node, 0, "residency"))
+    state.spawn(prewarm(node, 0, "residency"))
 
 
 async def tick_loop():

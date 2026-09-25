@@ -26,7 +26,7 @@ import time
 from aiohttp import ClientTimeout, web
 
 from . import admission, metrics, nodes, perf, scheduler, state
-from .common import log, parse_keep_alive
+from .common import log
 
 IDEM = {}            # key -> {"t", "fut", "status", "body", "content_type", "headers"}
 IDEM_MAX = 500
@@ -123,7 +123,7 @@ def maybe_shadow(role, body, primary_node, req):
         return
     if SHADOW_BUSY[0]:
         return
-    asyncio.create_task(run_shadow(role, s, dict(body), primary_node, req.request_id))
+    state.spawn(run_shadow(role, s, dict(body), primary_node, req.request_id))
 
 
 async def run_shadow(role, s, body, primary_node, request_id):
@@ -139,7 +139,7 @@ async def run_shadow(role, s, body, primary_node, request_id):
                             "request_id": request_id})
             return
         node = scheduler.rank(cands, s["model"])[0]
-        if getattr(node, "is_cloud", False):   # Schattenlaeufe kosten in der Cloud Geld - bewusst nicht
+        if node.is_cloud:   # Schattenlaeufe kosten in der Cloud Geld - bewusst nicht
             state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": node.name, "status": "cloud uebersprungen", "request_id": request_id})
             return
         out = dict(body)
@@ -147,7 +147,7 @@ async def run_shadow(role, s, body, primary_node, request_id):
         out["model"] = s["model"]
         out["stream"] = False
         out["options"] = {**(out.get("options") or {}), "num_ctx": ctx}
-        out["keep_alive"] = parse_keep_alive(state.CFG.keep_alive.get(node.state, "5m"))
+        out["keep_alive"] = state.CFG.keep_alive.get(node.state, "5m")
         path = "/api/generate" if "prompt" in out and "messages" not in out else "/api/chat"
         node.inflight += 1
         node.inflight_models[s["model"]] += 1

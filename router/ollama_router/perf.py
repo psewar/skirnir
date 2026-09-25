@@ -146,18 +146,34 @@ async def bench_model(model, node):
         state.BENCHING[model].update(step="fehler", error=str(ex))
     finally:
         node.inflight -= 1
-        rank1 = {r["tiers"][0]["model"] for r in state.CFG.roles.values()}
-        if not any(node.same_blob(model, m) for m in rank1):
-            try:
-                async with nodes.nreq(node, "post", "/api/generate", json={"model": model, "keep_alive": 0}, timeout=ClientTimeout(total=60)) as r:
-                    await r.read()
-            except Exception:  # noqa: BLE001
-                pass
-        await poll.poll_node(node)
-        if state.CFG.prewarm_on_free:
-            asyncio.create_task(poll.prewarm(node, 0, "bench"))
-        await asyncio.sleep(2)
+        await _release_node(node, model, "bench")
         state.BENCHING.pop(model, None)
+
+
+def _free_node_for(model, node_name=None, prefer_loaded=False):
+    """Freier Knoten ohne laufende Anfragen, der das Modell hat: groesste Karte zuerst (Benchmark: geladenes Modell zuerst)."""
+    cands = [n for n in state.NODES.values() if n.state == "free" and n.inflight == 0 and model in n.models]
+    if node_name:
+        cands = [n for n in cands if n.name == node_name]
+    if not cands:
+        return None
+    key = (lambda n: (not n.is_loaded(model), -n.vram_total_gib, n.name)) if prefer_loaded else (lambda n: (-n.vram_total_gib, n.name))
+    return sorted(cands, key=key)[0]
+
+
+async def _release_node(node, model, why):
+    """Nach Messung oder Benchmark: Messobjekt entladen (ausser es ist ein Rang-1-Modell), Poll, Rang-1 wieder vorwaermen."""
+    rank1 = {r["tiers"][0]["model"] for r in state.CFG.roles.values()}
+    if not any(node.same_blob(model, m) for m in rank1):
+        try:
+            async with nodes.nreq(node, "post", "/api/generate", json={"model": model, "keep_alive": 0}, timeout=ClientTimeout(total=60)) as r:
+                await r.read()
+        except Exception:  # noqa: BLE001
+            pass
+    await poll.poll_node(node)
+    if state.CFG.prewarm_on_free:
+        state.spawn(poll.prewarm(node, 0, why))
+    await asyncio.sleep(2)
 
 
 async def handle_bench(request):
@@ -170,13 +186,10 @@ async def handle_bench(request):
         return web.json_response({"error": "model fehlt"}, status=400)
     if state.BENCHING or state.MEASURING:
         return web.json_response({"error": "es laeuft schon eine Messung/ein Benchmark, bitte warten"}, status=409)
-    cands = [n for n in state.NODES.values() if n.state == "free" and n.inflight == 0 and model in n.models]
-    if b.get("node"):
-        cands = [n for n in cands if n.name == b["node"]]
-    if not cands:
+    node = _free_node_for(model, b.get("node"), prefer_loaded=True)
+    if node is None:
         return web.json_response({"error": f"kein freier Knoten ohne laufende Anfragen hat {model}"}, status=409)
-    node = sorted(cands, key=lambda n: (not n.is_loaded(model), -n.vram_total_gib, n.name))[0]
-    asyncio.create_task(bench_model(model, node))
+    state.spawn(bench_model(model, node))
     return web.json_response({"started": True, "node": node.name, "model": model})
 
 
@@ -223,18 +236,7 @@ async def measure_model(model, node):
     finally:
         node.inflight -= 1
         node.finish_load(model)
-        # Messobjekt entladen (ausser es ist ohnehin ein Rang-1-Modell), dann Rang-1 wieder vorwaermen
-        rank1 = {r["tiers"][0]["model"] for r in state.CFG.roles.values()}
-        if not any(node.same_blob(model, m) for m in rank1):
-            try:
-                async with nodes.nreq(node, "post", "/api/generate", json={"model": model, "keep_alive": 0}, timeout=ClientTimeout(total=60)) as r:
-                    await r.read()
-            except Exception:  # noqa: BLE001
-                pass
-        await poll.poll_node(node)
-        if state.CFG.prewarm_on_free:
-            asyncio.create_task(poll.prewarm(node, 0, "measure"))
-        await asyncio.sleep(2)
+        await _release_node(node, model, "measure")
         state.MEASURING.pop(model, None)
 
 
@@ -250,11 +252,8 @@ async def handle_measure(request):
         return web.json_response({"error": f"{model} wird gerade gemessen"}, status=409)
     if len(state.MEASURING) >= 1:
         return web.json_response({"error": "es laeuft schon eine Messung, bitte warten"}, status=409)
-    cands = [n for n in state.NODES.values() if n.state == "free" and n.inflight == 0 and model in n.models]
-    if b.get("node"):
-        cands = [n for n in cands if n.name == b["node"]]
-    if not cands:
+    node = _free_node_for(model, b.get("node"))
+    if node is None:
         return web.json_response({"error": f"kein freier Knoten ohne laufende Anfragen hat {model}"}, status=409)
-    node = sorted(cands, key=lambda n: (-n.vram_total_gib, n.name))[0]
-    asyncio.create_task(measure_model(model, node))
+    state.spawn(measure_model(model, node))
     return web.json_response({"started": True, "node": node.name, "model": model})

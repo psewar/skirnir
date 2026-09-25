@@ -23,6 +23,7 @@ import secrets
 import time
 
 from . import cloud, state
+from .common import DATA_CLASSES_DEFAULT, PRIORITIES
 
 KNOWN_CAPS = ("completion", "tools", "vision", "thinking", "structured", "embedding", "insert")
 # Ollama meldet diese nicht als Faehigkeit; sie gelten, solange der Katalog nichts anderes sagt
@@ -30,7 +31,6 @@ DEFAULT_TRUE = {"structured", "completion"}
 ROUTING_KEYS = {"require", "prefer", "min_context", "session_id", "request_id", "priority", "deadline_ms", "idempotency_key",
                 "execution", "data_class"}
 EXECUTIONS = ("auto", "local", "cloud")   # Stufe 5: auto = Rollenreihenfolge, local = Opt-out, cloud = Cloud-Stufen zuerst
-PRIORITIES = ("interactive", "normal", "batch")   # Stufe 3; Rangfolge in admission.PRIORITIES
 MAX_ID_LEN = 128
 REQUEST_ID_BYTES = 6   # "skirnir-" + 12 Hex-Zeichen: eindeutig genug fuer Log und Entscheidungsprotokoll, kurz genug zum Abtippen
 
@@ -215,7 +215,7 @@ def parse(body, path, headers=None):
             r.execution = ex
         dc = rb.get("data_class")
         if dc is not None:
-            classes = state.CFG.cloud.get("data_classes") or cloud.DEFAULT_CLASSES
+            classes = state.CFG.cloud.get("data_classes") or DATA_CLASSES_DEFAULT
             if dc not in classes:
                 raise ValueError(f"routing.data_class must be one of {', '.join(classes)}")
             r.data_class = dc

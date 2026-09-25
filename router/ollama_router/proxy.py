@@ -14,7 +14,7 @@ from aiohttp import ClientError, ClientTimeout, web
 
 from . import admission, auth, cloud, decision, kontextpruefung, metrics, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
 from . import request as request_mod
-from .common import VERSION, GIB, log, ollama_error, parse_keep_alive, read_json
+from .common import VERSION, GIB, log, ollama_error, read_json
 
 STREAM_PATHS = ("/api/chat", "/api/generate")   # nur hier streamt Ollama zeilenweise NDJSON
 CONNECT_TIMEOUT_S = 5                            # Verbindungsaufbau zum Knoten; die Antwort darf request_timeout_s dauern
@@ -292,7 +292,7 @@ def _backend_body(body, role, tier, ctx, node):
         if ctx:
             opts["num_ctx"] = ctx
     out["options"] = opts
-    out["keep_alive"] = parse_keep_alive(state.CFG.keep_alive.get(node.state, "5m"))
+    out["keep_alive"] = state.CFG.keep_alive.get(node.state, "5m")   # Zahl (Sekunden, -1) oder Dauer wie 5m - Ollama nimmt beides
     return out, ctx
 
 
@@ -313,7 +313,7 @@ class _Relay:
         # Ollama beschraenkt den tools-Pfad nicht und verwirft einen missglueckten Aufruf still;
         # gemessen verliert qwen3-coder:30b so 80 % seiner Calls oberhalb ~12k Token. Siehe toolcall_rescue.
         self.rescue = state.CFG.toolcall_rescue and toolcall_rescue.aktiv_fuer(self.out)
-        self.is_cloud = getattr(node, "is_cloud", False)
+        self.is_cloud = node.is_cloud
         # Passt die Anfrage in num_ctx? Ollama kuerzt sonst still; bestaetigt wird nach der Antwort (kontextpruefung)
         self.geschaetzt = kontextpruefung.vorher(self.out, self.ctx, self.is_cloud)
         self.warm = node.is_loaded(self.model)
@@ -382,7 +382,7 @@ class _Relay:
         if not self.warm and not self.is_cloud:
             # frisch geladenes Modell sofort registrieren, nicht erst beim naechsten 5-s-Poll:
             # sonst gilt die naechste Anfrage bis zu 5 s lang faelschlich als Kaltstart
-            asyncio.create_task(poll.poll_node(node))
+            state.spawn(poll.poll_node(node))
 
     def _fail(self, outcome, breaker_reason):
         """Fehler vor dem ersten Byte: Breaker zaehlt, Aufrufer nimmt den naechsten Kandidaten."""

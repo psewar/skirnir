@@ -249,7 +249,7 @@ def main():
         FILES.append(("manifest.json", "/etc/ollama-router/manifest.json", "0644"))
         run(c, f"mkdir -p /tmp/ollama-router/ollama_router {_TMPDIRS}")
         sftp = c.open_sftp()
-        for local, remote, _ in FILES:
+        for local, _remote, _ in FILES:
             sftp.put(_local(local), f"/tmp/ollama-router/{_staged(local)}")
         sftp.close()
         rc, out, err = run(c, ct_exec(f"mkdir -p /opt/ollama-router/ollama_router /etc/ollama-router {_MKDIRS}"))

@@ -28,9 +28,9 @@ from collections import Counter
 from aiohttp import ClientTimeout
 
 from . import state
-from .common import log
+from .common import DATA_CLASSES_DEFAULT, log, parse_tool_args, read_env_value
+from .nodes import Breaker
 
-DEFAULT_CLASSES = ["public", "internal", "personal", "secret"]
 DEFAULT_HOSTS = {"api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com"}
 SECRET_PATTERNS = [
     ("openai/anthropic key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")),
@@ -43,10 +43,11 @@ SECRET_PATTERNS = [
 ]
 
 
-class CloudTarget:
+class CloudTarget(Breaker):
     """Ein Cloud-Anbieter in der Rolle eines Knotens: dieselben Methoden, die Scheduler/Proxy an einem Node nutzen."""
 
     is_cloud = True
+    guard_policy = False   # kein GPU-Schutz in der Cloud (scheduler.score fragt nicht weiter)
 
     def __init__(self, provider, spec):
         self.provider = provider
@@ -93,30 +94,6 @@ class CloudTarget:
     def effective_max_inflight(self):
         return int(self.spec.get("max_inflight", 8))
 
-    def breaker_allows(self, now):
-        if self.breaker == "closed":
-            return True
-        if self.breaker == "open":
-            if now < self.breaker_until:
-                return False
-            self.breaker = "half_open"
-            state.remember({"event": "breaker", "node": self.name, "state": "half_open"})
-        return self.inflight == 0
-
-    def breaker_fail(self, now, why):
-        cfg = state.CFG.breaker
-        self.breaker_fails = [t for t in self.breaker_fails if now - t <= cfg["window_s"]] + [now]
-        if self.breaker == "half_open" or len(self.breaker_fails) >= cfg["failures"]:
-            self.breaker, self.breaker_until, self.breaker_fails = "open", now + cfg["open_s"], []
-            log.warning("%s: Breaker OPEN fuer %.0fs (%s)", self.name, cfg["open_s"], why)
-            state.remember({"event": "breaker", "node": self.name, "state": "open", "reason": why})
-
-    def breaker_ok(self):
-        if self.breaker != "closed":
-            self.breaker = "closed"
-            state.remember({"event": "breaker", "node": self.name, "state": "closed"})
-        self.breaker_fails = []
-
     def snapshot(self):
         spend = spend_month(self.provider)
         budget = float(self.spec.get("budget_month_chf") or 0)
@@ -155,16 +132,10 @@ def _load_key(spec):
     path = spec.get("secrets_file")
     if path:
         try:
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith(env + "="):
-                        v = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        if v:
-                            return v, path
-        except FileNotFoundError:
-            pass
-        except Exception as e:  # noqa: BLE001
+            v = read_env_value(path, env, strip_quotes=True)
+            if v:
+                return v, path
+        except OSError as e:
             log.warning("secrets_file %s: %s", path, e)
     return None, None
 
@@ -174,7 +145,7 @@ def target_for(tier):
 
 
 def class_index(name):
-    classes = state.CFG.cloud.get("data_classes") or DEFAULT_CLASSES
+    classes = state.CFG.cloud.get("data_classes") or DATA_CLASSES_DEFAULT
     return classes.index(name) if name in classes else len(classes)
 
 
@@ -319,7 +290,7 @@ def _oa_messages(body, path):
             o["content"] = content
         if role == "assistant" and m.get("tool_calls"):
             tcs = []
-            for i, tc in enumerate(m["tool_calls"]):
+            for _i, tc in enumerate(m["tool_calls"]):
                 fn = (tc or {}).get("function") or {}
                 cid = tc.get("id") or f"call_{len(call_ids) + 1}"
                 call_ids.append(cid)
@@ -372,13 +343,7 @@ def _oa_tool_calls_to_native(tcs):
     out = []
     for tc in tcs or []:
         fn = (tc or {}).get("function") or {}
-        args = fn.get("arguments", "{}")
-        if isinstance(args, str):
-            try:
-                args = json.loads(args) if args.strip() else {}
-            except ValueError:
-                args = {"_raw": args}
-        out.append({"id": tc.get("id"), "function": {"name": fn.get("name", ""), "arguments": args}})
+        out.append({"id": (tc or {}).get("id"), "function": {"name": fn.get("name", ""), "arguments": parse_tool_args(fn.get("arguments", "{}"))}})
     return out
 
 
@@ -428,17 +393,11 @@ def _an_body(body, path, model_id, stream):
             for img in m.get("images") or []:
                 parts.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": img}})
             if role == "assistant":
-                for i, tc in enumerate(m.get("tool_calls") or []):
+                for _i, tc in enumerate(m.get("tool_calls") or []):
                     fn = (tc or {}).get("function") or {}
                     cid = tc.get("id") or f"toolu_{len(pending_ids) + 1}"
                     pending_ids.append(cid)
-                    args = fn.get("arguments", {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except ValueError:
-                            args = {"_raw": args}
-                    parts.append({"type": "tool_use", "id": cid, "name": fn.get("name", ""), "input": args})
+                    parts.append({"type": "tool_use", "id": cid, "name": fn.get("name", ""), "input": parse_tool_args(fn.get("arguments", {}))})
             if not parts:
                 parts = [{"type": "text", "text": " "}]
             if msgs and msgs[-1]["role"] == role:   # Anthropic verlangt abwechselnde Rollen
@@ -581,11 +540,7 @@ async def run(target, path, body, model, stream):
                         info["c_tok"] = int((ev.get("usage") or {}).get("output_tokens") or info["c_tok"])
                 tcs = []
                 for idx, tb in tool_blocks.items():
-                    try:
-                        args = json.loads(tool_args.get(idx) or "{}")
-                    except ValueError:
-                        args = {"_raw": tool_args.get(idx)}
-                    tcs.append({"id": tb["id"], "function": {"name": tb["name"], "arguments": args}})
+                    tcs.append({"id": tb["id"], "function": {"name": tb["name"], "arguments": parse_tool_args(tool_args.get(idx) or "{}")}})
             else:
                 partial = {}
                 async for ev in _sse(r):
@@ -607,11 +562,7 @@ async def run(target, path, body, model, stream):
                 tcs = []
                 for idx in sorted(partial):
                     p = partial[idx]
-                    try:
-                        args = json.loads(p["args"]) if p["args"].strip() else {}
-                    except ValueError:
-                        args = {"_raw": p["args"]}
-                    tcs.append({"id": p["id"], "function": {"name": p["name"], "arguments": args}})
+                    tcs.append({"id": p["id"], "function": {"name": p["name"], "arguments": parse_tool_args(p["args"])}})
         yield _native_done(model, path, "", tcs, info["finish"], info["p_tok"], info["c_tok"], t0)
 
     return info, gen()

@@ -187,8 +187,8 @@ def render():
     gauge("skirnir_admission_waiting", "wartende Anfragen je Knoten", [({"node": k}, v) for k, v in adm["by_node"].items()] or [({}, 0)])
     gauge("skirnir_sessions", "aktive Session-Affinitaeten", [({}, len(state.SESSIONS))])
     rows = []
-    for exposed, role in state.CFG.roles.items():
-        pick = scheduler.choose(role, role["tiers"], None, now)
+    for _exposed, role in state.CFG.roles.items():
+        pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # Sicht: /metrics wechselt keinen Breaker
         rows.append(({"role": role["name"]}, 1 if pick else 0))
     gauge("skirnir_role_ready", "1 = Rolle koennte jetzt bedient werden", rows)
     gauge("skirnir_perf_gen_tps", "EWMA Generier-Tempo tok/s je Modell@Knoten",

@@ -9,9 +9,13 @@ import yaml
 
 from . import state
 from . import settings as settings_mod
-from .common import GIB
+from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES
 
-PRIORITIES = ("interactive", "normal", "batch")   # Stufe 3: Prioritaetsklassen (siehe admission.py)
+
+def _d(path):
+    """Laufzeit-Default eines Schluessels aus settings.EDITABLE - eine Quelle fuer Parser, UI und Anzeige der Basiswerte."""
+    return settings_mod.EDITABLE[path]["default"]
+
 
 # Performance (2026-09-11): yaml.safe_load ist der reine Python-Parser (config.yaml 15,6 ms auf Router-CT), der libyaml-Loader
 # braucht 1,5 ms. Dazu ein Cache nach Dateizeit: /admin/config las config.yaml und roles.yaml je zweimal pro Aufruf (~86 ms),
@@ -168,37 +172,61 @@ class Config:
                 raise ValueError(f"Konfiguration: Abschnitt {sect} fehlt")
         self.raw = c
         r = c["router"]
+        self._parse_router(r)
+        self._parse_client_auth(r.get("client_auth") or {})
+        self._parse_cloud(r.get("cloud") or {})
+        self.mqtt = c.get("mqtt") or None   # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
+        self._parse_wol(r.get("wol") or {})
+        self._parse_modes(c["modes"])
+        self._parse_models(c.get("models") or {})
+        self.nodes = c["nodes"]
+        self._parse_roles(c["roles"])
+        self.busy_ok_models = {t["model"] for r in self.roles.values() for t in r["tiers"] if t["busy_ok"]}
+        self.decision = self._parse_decision(c.get("decision_engine") or {})
+
+    def _parse_router(self, r):
         self.listen = r.get("listen", "0.0.0.0:11434")
         self.control_listen = r.get("control_listen", "0.0.0.0:11435")
-        self.poll_s = float(r.get("ollama_poll_s", 5))
-        self.offline_after = int(r.get("offline_after_misses", 3))
-        self.hb_interval_s = float(r.get("heartbeat_interval_s", 3))   # Takt, in dem Agenten GPU-Werte melden (wird provisioniert)
-        self.hb_stale_s = float(r.get("heartbeat_stale_s", 10))
+        self.poll_s = float(r.get("ollama_poll_s", _d("router.ollama_poll_s")))
+        self.offline_after = int(r.get("offline_after_misses", _d("router.offline_after_misses")))
+        self.hb_interval_s = float(r.get("heartbeat_interval_s", _d("router.heartbeat_interval_s")))   # Takt der Agenten (wird provisioniert)
+        self.hb_stale_s = float(r.get("heartbeat_stale_s", _d("router.heartbeat_stale_s")))
         if self.hb_stale_s < 2 * self.hb_interval_s:   # sonst gilt ein Knoten zwischen zwei Meldungen als "GPU unbekannt"
             self.hb_stale_s = 2 * self.hb_interval_s + 1
-        self.agent_missing_s = float(r.get("agent_missing_problem_s", 300))   # Agent war da und schweigt so lange -> HA-Problem
+        self.agent_missing_s = float(r.get("agent_missing_problem_s", _d("router.agent_missing_problem_s")))   # Agent war da und schweigt -> HA-Problem
         self.expose_concrete = bool(r.get("expose_concrete_models", False))
-        self.request_timeout_s = float(r.get("request_timeout_s", 600))
+        self.request_timeout_s = float(r.get("request_timeout_s", _d("router.request_timeout_s")))
         self.heartbeat_token = r.get("heartbeat_token") or ""
         self.api_tls = bool(r.get("api_tls", False))   # 11434 ebenfalls TLS (Zertifikat aus control_tls)
         # Im Text gestrandete Tool-Calls zurueckholen (siehe toolcall_rescue). Standard an:
         # die Stufe greift nur, wenn Ollama selbst nichts geparst hat, und laesst sonst alles unberuehrt.
-        self.toolcall_rescue = bool(r.get("toolcall_rescue", True))
+        self.toolcall_rescue = bool(r.get("toolcall_rescue", _d("router.toolcall_rescue")))
         # OpenAI-kompatible Schnittstelle /v1 (Node-RED-MCP, andere OpenAI-Clients). Der Router uebersetzt selbst nach
         # /api/chat, weil Ollamas eigenes /v1 kein num_ctx/keep_alive kennt (Modell wuerde mit Default-Kontext neu laden).
         oa = r.get("openai") or {}
         self.openai_enabled = bool(oa.get("enabled", True))
         # think, wenn der Client nichts sagt: false = Antwort ohne unsichtbares Nachdenken (wie HAs AI-Tasks);
         # true = Modell-Default; null = Feld nicht setzen (Ollama entscheidet)
-        self.openai_default_think = oa.get("default_think", False)
+        self.openai_default_think = oa.get("default_think", _d("router.openai.default_think"))
         # Basic Auth für UI + /admin/*: {user: "pbkdf2:<iter>:<salt_hex>:<hash_hex>"}; leer = offen (nur Tests)
         self.control_users = dict((r.get("control_auth") or {}).get("users") or {})
+        # TLS für den Control-Port: {cert: <fullchain.pem>, key: <key.pem>}; fehlt der Block -> Klartext (nur Tests)
+        tls = r.get("control_tls") or {}
+        self.control_tls = (tls.get("cert"), tls.get("key")) if tls.get("cert") and tls.get("key") else None
+        self.public_url = r.get("public_url", "")
+        # Stufe 1: Request-Groessenlimits (413 vor dem Backend) und Verfall der Session-Affinitaet
+        lim = r.get("limits") or {}
+        self.limits = {k: int(lim.get(k, _d(f"router.limits.{k}"))) for k in ("max_images", "max_tools", "max_messages")}
+        self.session_ttl_s = float(r.get("session_affinity_ttl_s", _d("router.session_affinity_ttl_s")))
+        self.idempotency_ttl_s = float(r.get("idempotency_ttl_s", _d("router.idempotency_ttl_s")))   # Stufe 6: Wiederholungen mit Idempotency-Key
+
+    def _parse_client_auth(self, ca):
         # Client-Authentifizierung auf dem API-Port 11434 (Stufe 2, design/roadmap.md). mode: observe = alles bedienen,
         # Unbekannte zaehlen und ins Audit-Log; enforce = 401 ohne gueltige Identitaet. clients: {name: {token_sha256,
         # ip: [..], roles: [..]|["*"], models: bool, requests_per_minute}}. Kein clients-Block = Port offen wie bisher.
-        ca = r.get("client_auth") or {}
-        if ca.get("mode", "observe") not in ("observe", "enforce"):
-            raise ValueError(f"client_auth.mode muss observe oder enforce sein, nicht {ca.get('mode')!r}")
+        mode = ca.get("mode", _d("router.client_auth.mode"))
+        if mode not in ("observe", "enforce"):
+            raise ValueError(f"client_auth.mode muss observe oder enforce sein, nicht {mode!r}")
         clients = {}
         for name, spec in (ca.get("clients") or {}).items():
             spec = dict(spec or {})
@@ -217,27 +245,19 @@ class Config:
         # locked (Audit 2026-09-16): true = der Modus ist NUR ueber config.yaml + Deploy aenderbar; UI-Einstellung und
         # POST /admin/client_auth werden abgelehnt (403/400 + Audit-Eintrag). Ein kompromittiertes UI-Konto kann die
         # Client-Auth dann nicht mehr per Klick auf observe stellen.
-        self.client_auth = {"mode": ca.get("mode", "observe"), "clients": clients, "locked": bool(ca.get("locked", False)),
+        self.client_auth = {"mode": mode, "clients": clients, "locked": bool(ca.get("locked", False)),
                             "audit_log": ca.get("audit_log", "/var/log/ollama-router/audit.jsonl")}
-        # TLS für den Control-Port: {cert: <fullchain.pem>, key: <key.pem>}; fehlt der Block -> Klartext (nur Tests)
-        tls = r.get("control_tls") or {}
-        self.control_tls = (tls.get("cert"), tls.get("key")) if tls.get("cert") and tls.get("key") else None
-        self.public_url = r.get("public_url", "")
-        # Stufe 1: Request-Groessenlimits (413 vor dem Backend) und Verfall der Session-Affinitaet
-        lim = r.get("limits") or {}
-        self.limits = {"max_images": int(lim.get("max_images", 16)), "max_tools": int(lim.get("max_tools", 128)),
-                       "max_messages": int(lim.get("max_messages", 1000))}
-        self.session_ttl_s = float(r.get("session_affinity_ttl_s", 1800))
-        self.idempotency_ttl_s = float(r.get("idempotency_ttl_s", 600))   # Stufe 6: Wiederholungen mit Idempotency-Key
+
+    def _parse_cloud(self, cl):
         # Stufe 5: Cloud-Anbieter als Stufen in Rollen (cloud.py). Kein Opt-in pro Client: die Rolle erlaubt, der Client kann
         # sich per routing.execution: local oder clients.<c>.cloud: false ausnehmen.
         from urllib.parse import urlparse
-        cl = r.get("cloud") or {}
-        classes = [str(x) for x in (cl.get("data_classes") or ["public", "internal", "personal", "secret"])]
-        for key, default in (("default_data_class", "personal"), ("max_cloud_data_class", "internal")):
-            if cl.get(key, default) not in classes:
+        classes = [str(x) for x in (cl.get("data_classes") or DATA_CLASSES_DEFAULT)]
+        for key in ("default_data_class", "max_cloud_data_class"):
+            if cl.get(key, _d(f"router.cloud.{key}")) not in classes:
                 raise ValueError(f"router.cloud.{key} muss eine der Datenklassen {classes} sein")
-        if cl.get("credential_scan", "block") not in ("block", "off"):
+        scan = cl.get("credential_scan", _d("router.cloud.credential_scan"))
+        if scan not in ("block", "off"):
             raise ValueError("router.cloud.credential_scan muss block oder off sein")
         allow = {"api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com"} | {str(h) for h in (cl.get("egress_allow") or [])}
         providers = {}
@@ -254,74 +274,78 @@ class Config:
                 raise ValueError(f"router.cloud.providers.{pname}.max_data_class muss eine der Datenklassen {classes} sein")
             spec["enabled"] = bool(spec.get("enabled", True))
             providers[str(pname)] = spec
-        self.cloud = {"enabled": bool(cl.get("enabled", False)), "data_classes": classes,
-                      "default_data_class": cl.get("default_data_class", "personal"), "max_cloud_data_class": cl.get("max_cloud_data_class", "internal"),
-                      "credential_scan": cl.get("credential_scan", "block"), "egress_allow": sorted(allow), "providers": providers}
+        self.cloud = {"enabled": bool(cl.get("enabled", _d("router.cloud.enabled"))), "data_classes": classes,
+                      "default_data_class": cl.get("default_data_class", _d("router.cloud.default_data_class")),
+                      "max_cloud_data_class": cl.get("max_cloud_data_class", _d("router.cloud.max_cloud_data_class")),
+                      "credential_scan": scan, "egress_allow": sorted(allow), "providers": providers}
         for cname, cspec in self.client_auth["clients"].items():
             if cspec.get("data_class") is not None and cspec["data_class"] not in classes:
                 raise ValueError(f"client_auth.clients.{cname}.data_class muss eine der Datenklassen {classes} sein")
-        # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
-        self.mqtt = c.get("mqtt") or None
-        w = r.get("wol", {})
-        self.wol_wait_s = float(w.get("wait_up_s", 90))
-        self.wol_retry_s = float(w.get("retry_interval_s", 20))
-        self.wol_cooldown_s = float(w.get("cooldown_s", 300))
+
+    def _parse_wol(self, w):
+        self.wol_wait_s = float(w.get("wait_up_s", _d("router.wol.wait_up_s")))
+        self.wol_retry_s = float(w.get("retry_interval_s", _d("router.wol.retry_interval_s")))
+        self.wol_cooldown_s = float(w.get("cooldown_s", _d("router.wol.cooldown_s")))
         self.wol_broadcasts = list(w.get("broadcast_addresses", ["255.255.255.255"]))
 
-        m = c["modes"]
-        be = m["busy_enter"]
-        self.busy_util = float(be.get("gpu_util_pct", 40))
-        self.busy_sustain = float(be.get("sustain_s", 10))
-        self.busy_foreign_gib = float(be.get("or_foreign_vram_gib", 2.0))
-        self.foreign_sustain = float(be.get("foreign_sustain_s", 15))
-        self.util_requires_foreign_gib = float(be.get("util_requires_foreign_gib", 1.0))
-        self.busy_exit_s = float(m.get("busy_exit", {}).get("below_for_s", 30))
-        self.reserve = {k: float(v) for k, v in m.get("vram_reserve_gib", {"free": 1.0, "busy": 2.0}).items()}
-        self.keep_alive = m.get("keep_alive", {"free": -1, "busy": "5m"})
-        self.unload_on_busy = bool(m.get("unload_on_busy", True))
-        self.unload_on_busy_interval_s = float(m.get("unload_on_busy_interval_s", 30))   # Mindestabstand des Sicherheitsnetzes
-        self.vram_settle_s = float(m.get("vram_settle_s", 8))   # Nachlauf, bis nvidia-smi einen Unload nachvollzogen hat
-        self.overhead_gib = float(m.get("fit_overhead_gib", 0.8))
+    def _parse_modes(self, m):
+        be = m.get("busy_enter") or {}
+        self.busy_util = float(be.get("gpu_util_pct", _d("modes.busy_enter.gpu_util_pct")))
+        self.busy_sustain = float(be.get("sustain_s", _d("modes.busy_enter.sustain_s")))
+        self.busy_foreign_gib = float(be.get("or_foreign_vram_gib", _d("modes.busy_enter.or_foreign_vram_gib")))
+        self.foreign_sustain = float(be.get("foreign_sustain_s", _d("modes.busy_enter.foreign_sustain_s")))
+        self.util_requires_foreign_gib = float(be.get("util_requires_foreign_gib", _d("modes.busy_enter.util_requires_foreign_gib")))
+        self.busy_exit_s = float((m.get("busy_exit") or {}).get("below_for_s", _d("modes.busy_exit.below_for_s")))
+        reserve = m.get("vram_reserve_gib") or {"free": _d("modes.vram_reserve_gib.free"), "busy": _d("modes.vram_reserve_gib.busy")}
+        self.reserve = {k: float(v) for k, v in reserve.items()}
+        self.keep_alive = m.get("keep_alive") or {"free": _d("modes.keep_alive.free"), "busy": _d("modes.keep_alive.busy")}
+        self.unload_on_busy = bool(m.get("unload_on_busy", _d("modes.unload_on_busy")))
+        self.unload_on_busy_interval_s = float(m.get("unload_on_busy_interval_s", _d("modes.unload_on_busy_interval_s")))   # Mindestabstand des Sicherheitsnetzes
+        self.vram_settle_s = float(m.get("vram_settle_s", _d("modes.vram_settle_s")))   # Nachlauf, bis nvidia-smi einen Unload nachvollzogen hat
+        self.overhead_gib = float(m.get("fit_overhead_gib", _d("modes.fit_overhead_gib")))
         # warm zuerst: ein bereits geladenes Modell aus der Tier-Liste schlaegt einen Kaltstart eines hoeheren Tiers
-        self.warm_first = bool(m.get("warm_first", True))
+        self.warm_first = bool(m.get("warm_first", _d("modes.warm_first")))
         # Vorwaermen der Rang-1-Modelle, damit die Liste nach busy nicht dauerhaft beim Kleinmodell haengen bleibt
         pw = m.get("prewarm") or {}
-        self.prewarm_on_free = bool(pw.get("on_free", True))
-        self.prewarm_on_online = bool(pw.get("on_online", True))
-        self.prewarm_free_delay = float(pw.get("free_delay_s", 20))
-        self.prewarm_online_delay = float(pw.get("online_delay_s", 0))
+        self.prewarm_on_free = bool(pw.get("on_free", _d("modes.prewarm.on_free")))
+        self.prewarm_on_online = bool(pw.get("on_online", _d("modes.prewarm.on_online")))
+        self.prewarm_free_delay = float(pw.get("free_delay_s", _d("modes.prewarm.free_delay_s")))
+        self.prewarm_online_delay = float(pw.get("online_delay_s", _d("modes.prewarm.online_delay_s")))
         # Residenz: hat ein konkret angefordertes Fremdmodell das Rang-1-Modell verdraengt und wird seit residency_idle_s
         # nicht mehr gebraucht, wird Rang-1 wieder vorgewaermt. Ohne das bleibt bei "warm zuerst" die Ausweichstufe auf
         # einem ANDEREN Knoten dauerhaft bevorzugt (2026-09-10: glm verdraengte qwen, alles lief auf gpu-laptop/gemma4:12b). 0 = aus.
-        self.residency_idle_s = float(pw.get("residency_idle_s", 300))
-        self.residency_check_s = float(pw.get("residency_check_s", 60))
+        self.residency_idle_s = float(pw.get("residency_idle_s", _d("modes.prewarm.residency_idle_s")))
+        self.residency_check_s = float(pw.get("residency_check_s", _d("modes.prewarm.residency_check_s")))
         # Stufe 3 Scheduler: gewichtbarer Score (scheduler.score), Circuit Breaker je Knoten, Admission Control
-        self.score = {"warm": 100.0, "inflight": 10.0, "saturated": 50.0, "vram_free": 2.0, "weight": 1.0, "speed": 2.0,
-                      "errors": 20.0, "half_open": 5.0}
+        self.score = {k: float(_d(f"modes.score.{k}")) for k in settings_mod.SCORE_KEYS}
         for k, v in (m.get("score") or {}).items():
             if k not in self.score:
                 raise ValueError(f"modes.score.{k}: unbekanntes Gewicht (bekannt: {', '.join(self.score)})")
             self.score[k] = float(v)
         br = m.get("breaker") or {}
-        self.breaker = {"failures": int(br.get("failures", 3)), "window_s": float(br.get("window_s", 60)),
-                        "open_s": float(br.get("open_s", 30))}
+        self.breaker = {"failures": int(br.get("failures", _d("modes.breaker.failures"))), "window_s": float(br.get("window_s", _d("modes.breaker.window_s"))),
+                        "open_s": float(br.get("open_s", _d("modes.breaker.open_s")))}
         ad = m.get("admission") or {}
-        self.admission = {"max_inflight_default": int(ad.get("max_inflight_default", 2)), "aging_s": float(ad.get("aging_s", 30)),
-                          "max_wait_s": float(ad.get("max_wait_s", 120)), "max_queue": int(ad.get("max_queue", 64))}
+        self.admission = {"max_inflight_default": int(ad.get("max_inflight_default", _d("modes.admission.max_inflight_default"))),
+                          "aging_s": float(ad.get("aging_s", _d("modes.admission.aging_s"))),
+                          "max_wait_s": float(ad.get("max_wait_s", _d("modes.admission.max_wait_s"))), "max_queue": int(ad.get("max_queue", _d("modes.admission.max_queue")))}
         # GPU-Schutz (design/gpu-guard.md): der Agent setzt das Power-Limit, der Router reagiert auf dessen Status -
         # Stufe 2 (gedrosselt) deckelt die Parallelitaet, Hochlast kostet Score, Probleme (unverfuegbar, abgewaehlt,
         # Spannung, Temperatur) gehen an HA. require_fresh_status: ohne frischen Status ebenfalls deckeln (kostet
         # Parallelitaet bei jedem Agent-Ausfall, darum Standard aus).
         gg = m.get("gpu_guard") or {}
+        self.gpu_guard = {"enabled": bool(gg.get("enabled", _d("modes.gpu_guard.enabled"))),
+                          "throttled_max_inflight": int(gg.get("throttled_max_inflight", _d("modes.gpu_guard.throttled_max_inflight"))),
+                          "score_penalty": float(gg.get("score_penalty", _d("modes.gpu_guard.score_penalty"))),
+                          "require_fresh_status": bool(gg.get("require_fresh_status", _d("modes.gpu_guard.require_fresh_status")))}
         # Agent-Update ueber den Router (agentupdate.py): Rollout-Schleife an/aus, Kanarienvogel-Knoten, Wartezeit, optionaler
         # oeffentlicher Betreiber-Schluessel zur Selbstpruefung des Manifests vor dem Versand.
         au = m.get("agent_update") or {}
-        self.agent_update = {"enabled": bool(au.get("enabled", True)), "canary": au.get("canary") or "",
-                             "canary_clean_h": float(au.get("canary_clean_h", 24)), "public_key": au.get("public_key") or ""}
-        self.gpu_guard = {"enabled": bool(gg.get("enabled", True)), "throttled_max_inflight": int(gg.get("throttled_max_inflight", 1)),
-                          "score_penalty": float(gg.get("score_penalty", 40)), "require_fresh_status": bool(gg.get("require_fresh_status", False))}
+        self.agent_update = {"enabled": bool(au.get("enabled", _d("modes.agent_update.enabled"))), "canary": au.get("canary") or "",
+                             "canary_clean_h": float(au.get("canary_clean_h", _d("modes.agent_update.canary_clean_h"))), "public_key": au.get("public_key") or ""}
 
-        self.models = c.get("models", {})
+    def _parse_models(self, models):
+        self.models = models
         for mname, spec in self.models.items():
             caps = (spec or {}).get("capabilities")
             if caps is not None and (not isinstance(caps, dict) or not all(isinstance(v, bool) for v in caps.values())):
@@ -331,9 +355,10 @@ class Config:
                     raise ValueError(f"models.{mname}.cloud: Anbieter {spec['cloud']} ist unter router.cloud.providers nicht konfiguriert")
             elif (spec or {}).get("weights_gib") is None:
                 raise ValueError(f"models.{mname}: weights_gib fehlt (lokales Modell) oder cloud: <anbieter> (Cloud-Modell)")
-        self.nodes = c["nodes"]
+
+    def _parse_roles(self, roles):
         self.roles = {}
-        for rname, r in c["roles"].items():
+        for rname, r in roles.items():
             exposed = r.get("exposed_as", f"{rname}:latest")
             tiers = []
             for t in r["tiers"]:
@@ -361,8 +386,6 @@ class Config:
                     role[kind] = {"model": spec["model"], "num_ctx": int(spec.get("num_ctx", tiers[0]["num_ctx"])), "percent": pct,
                                   "busy_ok": bool(spec.get("busy_ok", False))}
             self.roles[exposed] = role
-        self.busy_ok_models = {t["model"] for r in self.roles.values() for t in r["tiers"] if t["busy_ok"]}
-        self.decision = self._parse_decision(c.get("decision_engine") or {})
 
     def _parse_decision(self, de):
         """decision_engine pruefen: Optionen sind Rollen (Kurzname), die Auto-Rolle darf keine echte Rolle sein, die Kette

@@ -6,7 +6,7 @@ import time
 
 from aiohttp import ClientError
 
-from . import poll
+from . import poll, state
 from .common import log
 
 
@@ -88,9 +88,6 @@ class TunnelResponse:
         if not self.done:
             await self.tunnel.cancel(self.sid)
         self.tunnel.streams.pop(self.sid, None)
-
-    def release(self):
-        pass
 
 
 class TunnelRequest:
@@ -189,7 +186,7 @@ class Tunnel:
                     ack = {"state": "", "error": str(e)}
             else:
                 ack = {"state": "pending", "busy_reason": ""}
-            asyncio.create_task(self.send_quiet(tun_frame(TUN_HBACK, 0, json.dumps(ack).encode())))
+            state.spawn(self.send_quiet(tun_frame(TUN_HBACK, 0, json.dumps(ack).encode())))
             return
         r = self.streams.get(sid)
         if r is None:

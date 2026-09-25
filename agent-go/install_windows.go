@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -280,6 +279,6 @@ func waitState(s *mgr.Service, want svc.State, timeout time.Duration) error {
 
 func runQuiet(name string, args ...string) {
 	c := exec.Command(name, args...)
-	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	hideWindow(c)
 	_ = c.Run()
 }

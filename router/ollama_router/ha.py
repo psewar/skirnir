@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover
     mqtt = None
 
 from . import scheduler, state
-from .common import VERSION, log
+from .common import VERSION, log, read_env_value
 
 
 def _usage_today_fields():
@@ -35,8 +35,8 @@ def ha_snapshot(now=None):
     for n in online:
         models |= n.models
     roles = {}
-    for exposed, role in state.CFG.roles.items():
-        pick = scheduler.choose(role, role["tiers"], None, now)
+    for _exposed, role in state.CFG.roles.items():
+        pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # Sicht: kein Breaker-Wechsel aus dem HA-Bild
         if pick:
             i, tier, ctx, node = pick
             roles[role["name"]] = {"ready": True, "node": node.name, "model": tier["model"], "tier": i, "num_ctx": ctx,
@@ -60,7 +60,7 @@ def ha_snapshot(now=None):
     # Router-Problem, sondern gewollt (ein Spiel loeste sonst den Alarm "Rolle gross nicht bedienbar" aus).
     # Problem bleibt es, wenn kein online-Knoten die Rolle ueberhaupt bedienen koennte (Modell fehlt, VRAM zu klein).
     limited = []
-    for exposed, role in state.CFG.roles.items():
+    for _exposed, role in state.CFG.roles.items():
         r = roles[role["name"]]
         if r["ready"]:
             continue
@@ -130,15 +130,9 @@ class HAPublisher:
         if mqtt is None:
             log.warning("paho-mqtt fehlt -> keine HA-Anbindung")
             return
-        pw = None
-        pf = self.cfg.get("password_file")
-        if pf and os.path.exists(pf):
-            # KEY=VALUE roh lesen, ohne systemd-EnvironmentFile-Parsing (Sonderzeichen wie \ oder " bleiben erhalten)
-            key = self.cfg.get("password_env", "MQTT_PASSWORD")
-            for line in open(pf, encoding="utf-8"):
-                if line.startswith(key + "="):
-                    pw = line.split("=", 1)[1].rstrip("\r\n")
-        pw = pw or os.environ.get(self.cfg.get("password_env", "MQTT_PASSWORD")) or self.cfg.get("password")
+        key = self.cfg.get("password_env", "MQTT_PASSWORD")
+        pw = read_env_value(self.cfg["password_file"], key) if self.cfg.get("password_file") else None   # roh, wie registry.read_mqtt_password
+        pw = pw or os.environ.get(key) or self.cfg.get("password")
         c = mqtt.Client(client_id=self.cfg.get("client_id", "ollama-router"), clean_session=True)
         if self.cfg.get("username"):
             c.username_pw_set(self.cfg["username"], pw)
