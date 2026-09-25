@@ -152,7 +152,7 @@ class Tunnel:
             await self.send(tun_frame(TUN_REQ, sid, json.dumps(head).encode() + b"\n" + body))
         except Exception as e:  # noqa: BLE001
             self.streams.pop(sid, None)
-            raise ClientError(f"tunnel {self.name()}: senden fehlgeschlagen: {e}")
+            raise ClientError(f"tunnel {self.name()}: senden fehlgeschlagen: {e}") from e
         wait = (deadline - time.time()) if deadline else 600   # Antwortkopf kommt bei Ollama erst nach dem Modell-Load
         try:
             t, payload = await asyncio.wait_for(resp.q.get(), max(0.001, wait))

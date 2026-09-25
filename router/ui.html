@@ -210,7 +210,7 @@
     <div class="dec-ctl">
       <label>Umfang <select id="decN" onchange="setDecN(this.value)"><option>50</option><option>200</option><option>500</option><option>1000</option><option>2000</option></select></label>
       <label><input type="checkbox" id="decEventsOnly" onchange="renderDecisions()"> nur Ereignisse (ohne Routen)</label>
-      <label>Filter <input type="text" id="decFilter" placeholder="z. B. gpu_guard, busy, psewar" oninput="renderDecisions()"></label>
+      <label>Filter <input type="text" id="decFilter" placeholder="z. B. gpu_guard, busy, gpu-desktop" oninput="renderDecisions()"></label>
       <span class="muted" id="decCount"></span>
     </div>
     <div class="decisions" id="decisions"></div>
@@ -670,10 +670,10 @@ function renderLive() {
   bars('#ch-dur', les.length ? [...les.map(l => '≤' + l), '>' + les[les.length - 1]] : [], [{ v: per, c: PAL[3] }]);
   donut('#ch-node', groupBy('skirnir_requests_total', 'node')); donut('#ch-role', groupBy('skirnir_requests_total', 'role')); donut('#ch-client', groupBy('skirnir_requests_total', 'client'));
   hbars('#ch-tps', (METRICS?.skirnir_perf_gen_tps || []).filter(s => s.v > 0).sort((a, b) => b.v - a.v).slice(0, 8).map((s, i) => ({ label: `${s.l.model} @ ${s.l.node}`, v: s.v, c: col(i) })));
-  renderModels(last, col);
+  renderModelCharts(last, col);
 }
 // Effektiv genutzte Modelle: gestapelter Verlauf (Anfragen/min je Modell), Legende mit aktuellem Anteil, Donuts seit Start
-function renderModels(last, col) {
+function renderModelCharts(last, col) {   // hiess renderModels und verdeckte die Katalogtabelle (Review 2026-09-25)
   const active = Object.entries(LIVE.models).filter(([, a]) => a.some(v => v > 0)).sort((a, b) => (last(b[1]) || 0) - (last(a[1]) || 0) || b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0));
   const totalNow = active.reduce((a, [, v]) => a + (last(v) || 0), 0);
   $('#lv-models').innerHTML = active.length ? active.map(([m, v], i) => `<span style="color:${col(i)}">● ${esc(m)} <b>${totalNow ? Math.round(100 * (last(v) || 0) / totalNow) + ' %' : '–'}</b> <span class="muted">${fmtN(last(v) || 0)}/min</span></span>`).join('') : '<span class="muted">noch keine Anfragen im 30-s-Fenster</span>';
@@ -822,6 +822,8 @@ async function measure(m) {
   catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
 }
 async function renderRegistry() {
+  const reg = $('#registry');
+  if (document.activeElement && reg.contains(document.activeElement)) return;   // Eingabe in der Policy-Spalte nicht alle 3 s ueberschreiben
   let r; try { r = await api('/admin/nodes'); } catch (e) { return; }
   try { const au = await api('/admin/agent-update'); const m = au.manifest;
     $('#agentUpdate').innerHTML = m ? `Agent-Update hinterlegt: <b>${esc(m.version)}</b> (${(m.files || []).map(f => esc(f.os + '/' + f.arch)).join(', ')}${au.signed ? ', signiert' : ', <span class="bad">unsigniert</span>'})`
@@ -861,7 +863,7 @@ async function nodeUpdate(fp, v) { if (!confirm(`Agent auf ${v} aktualisieren? D
   try { const r = await api(`/admin/nodes/${fp}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); $('#msg').innerHTML = `<span class="ok">${esc(r.message)}</span>`; }
   catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } await refresh(); }
 async function nodeAct(fp, action) { try { await api(`/admin/nodes/${fp}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (e) { alert(e.message); } await refresh(); }
-async function nodePolicy(fp, pol) { try { await api(`/admin/nodes/${fp}/policy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pol) }); } catch (e) { alert(e.message); } await refresh(); }
+async function nodePolicy(fp, pol) { if (document.activeElement) document.activeElement.blur(); try { await api(`/admin/nodes/${fp}/policy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pol) }); } catch (e) { alert(e.message); } await refresh(); }
 async function nodeDel(fp) { if (!confirm('Registereintrag löschen?')) return; try { await api(`/admin/nodes/${fp}`, { method: 'DELETE' }); } catch (e) { alert(e.message); } await refresh(); }
 
 let TICK = 0;

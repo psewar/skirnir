@@ -5,7 +5,7 @@ import socket
 import time
 
 from . import poll, state
-from .common import log
+from .common import log, normalize_mac
 
 
 def send_magic_packet(mac):
@@ -27,9 +27,13 @@ async def wake(node):
         if now - node.last_wake < state.CFG.wol_cooldown_s:
             return False
         node.last_wake = now
-        log.info("WOL %s (%s)", node.name, node.mac)
+        mac = normalize_mac(node.mac)
+        if mac is None:   # aus Fakten oder alter Policy; sonst wuerde bytes.fromhex() hier als 500 beim Client landen
+            log.warning("WOL %s: keine gueltige MAC (%r)", node.name, node.mac)
+            return False
+        log.info("WOL %s (%s)", node.name, mac)
         state.remember({"event": "wol", "node": node.name})
-        send_magic_packet(node.mac)
+        send_magic_packet(mac)
         deadline = now + state.CFG.wol_wait_s
         last_send = now
         while time.time() < deadline:
@@ -39,7 +43,7 @@ async def wake(node):
                 log.info("node %s awake after %.0fs", node.name, time.time() - now)
                 return True
             if time.time() - last_send >= state.CFG.wol_retry_s:
-                send_magic_packet(node.mac)
+                send_magic_packet(mac)
                 last_send = time.time()
         log.warning("node %s did not wake within %.0fs", node.name, state.CFG.wol_wait_s)
         return False

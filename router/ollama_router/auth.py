@@ -1,5 +1,6 @@
 """Passwort-Hashes und Basic Auth fuer die Control-Plane; Client-Authentifizierung fuer den API-Port (Stufe 2)."""
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -201,23 +202,54 @@ def verify_password(password, stored):
 # Geprueft-Cache fuer Basic Auth (2026-09-11): PBKDF2 mit 200 000 Runden kostet ~200 ms CPU je Aufruf - im Event-Loop. Die UI
 # fragt je Tab alle 3 s vier Endpunkte ab, Firefox des Betreibers hielt 8 Verbindungen: der Router lag im Leerlauf bei 40-50 % CPU und
 # jede Anfrage (auch /api/chat ueber den Tunnel) wartete hinter den Hashes ("Router/Netz 2,6 s" beim Lasttest). Ein einmal
-# geprueftes Paar (Header + gespeicherter Hash) gilt BASIC_CACHE_S; Fehlversuche werden nie gecacht und bleiben langsam.
+# geprueftes Paar (Header + gespeicherter Hash) gilt BASIC_CACHE_S. Review 2026-09-25: das Hashing lief im Event-Loop und
+# Fehlversuche waren ungecacht - der Control-Port ist per public_url erreichbar, wenige falsche Anfragen pro Sekunde haetten
+# jede Inferenz gebremst. Jetzt: PBKDF2 in einem Thread, ein Fehlversuch (Header + Hash) gilt BASIC_FAIL_S als abgelehnt,
+# und nach BASIC_FAIL_MAX Fehlversuchen einer Quelladresse in BASIC_FAIL_S antwortet der Router 429 ohne zu hashen.
 BASIC_CACHE_S = 600
-_BASIC_OK = {}   # sha256(header|stored) -> Ablaufzeit
+BASIC_FAIL_S = 60
+BASIC_FAIL_MAX = 5
+_BASIC_OK = {}     # sha256(header|stored) -> Ablaufzeit
+_BASIC_FAIL = {}   # sha256(header|stored) -> Ablaufzeit
+_BASIC_SRC = {}    # Quelladresse -> deque(Zeitpunkte der Fehlversuche)
 
 
-def _basic_ok(auth, stored):
-    key = hashlib.sha256((auth + "|" + stored).encode("utf-8")).hexdigest()
+def _prune(cache, now, limit=256):
+    if len(cache) > limit:
+        for k in [k for k, v in cache.items() if v <= now]:
+            cache.pop(k, None)
+        if len(cache) > limit:
+            cache.clear()
+
+
+def _basic_cached(key):
+    """True/False aus dem Cache, None = muss gehasht werden."""
     now = time.time()
-    exp = _BASIC_OK.get(key)
-    if exp and exp > now:
+    if _BASIC_OK.get(key, 0) > now:
         return True
-    if len(_BASIC_OK) > 256:
-        for k in [k for k, v in _BASIC_OK.items() if v <= now]:
-            _BASIC_OK.pop(k, None)
-        if len(_BASIC_OK) > 256:
-            _BASIC_OK.clear()
+    if _BASIC_FAIL.get(key, 0) > now:
+        return False
+    _prune(_BASIC_OK, now)
+    _prune(_BASIC_FAIL, now)
     return None
+
+
+def _basic_note(key, ok):
+    (_BASIC_OK if ok else _BASIC_FAIL)[key] = time.time() + (BASIC_CACHE_S if ok else BASIC_FAIL_S)
+
+
+def _basic_fail_src(remote, note):
+    """Fehlversuche je Quelladresse; True = gebremst (429 ohne Hashing)."""
+    now = time.time()
+    q = _BASIC_SRC.setdefault(remote, deque())
+    while q and q[0] <= now - BASIC_FAIL_S:
+        q.popleft()
+    if note:
+        q.append(now)
+    if len(_BASIC_SRC) > 1000:
+        for k in [k for k, v in _BASIC_SRC.items() if not v or v[-1] <= now - BASIC_FAIL_S]:
+            _BASIC_SRC.pop(k, None)
+    return len(q) >= BASIC_FAIL_MAX
 
 
 @web.middleware
@@ -226,19 +258,25 @@ async def basic_auth_middleware(request, handler):
     if request.path.startswith("/v1/") or not state.CFG.control_users:
         return await handler(request)
     auth = request.headers.get("Authorization", "")
+    remote = request.remote or "?"
     ok = False
     if auth.startswith("Basic "):
         try:
             user, _, pw = base64.b64decode(auth[6:]).decode("utf-8").partition(":")
             stored = state.CFG.control_users.get(user)
             if stored:
-                ok = _basic_ok(auth, stored)
+                key = hashlib.sha256((auth + "|" + stored).encode("utf-8")).hexdigest()
+                ok = _basic_cached(key)
                 if ok is None:
-                    ok = verify_password(pw, stored)
-                    if ok:
-                        _BASIC_OK[hashlib.sha256((auth + "|" + stored).encode("utf-8")).hexdigest()] = time.time() + BASIC_CACHE_S
+                    if _basic_fail_src(remote, note=False):
+                        return web.json_response({"error": "too many failed logins, try again in a minute"}, status=429,
+                                                 headers={"Retry-After": str(BASIC_FAIL_S)})
+                    ok = await asyncio.to_thread(verify_password, pw, stored)   # PBKDF2 (~200 ms) nicht im Event-Loop
+                    _basic_note(key, ok)
         except Exception:  # noqa: BLE001
             ok = False
+        if not ok:
+            _basic_fail_src(remote, note=True)
     if not ok:
         return web.json_response({"error": "authentication required"}, status=401,
                                  headers={"WWW-Authenticate": 'Basic realm="ollama-router", charset="UTF-8"'})

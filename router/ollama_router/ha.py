@@ -124,6 +124,7 @@ class HAPublisher:
         self.seen = {"cfg": set(), "state": set()}   # beim Connect zurueckgespielte retained Themen
         self.seen_lock = threading.Lock()            # _on_message laeuft im Netzwerk-Thread von paho
         self.sweep_at = 0.0                          # Zeitpunkt fuer den Karteileichen-Abgleich
+        self.announce = False                        # nach (Re-)Connect: Discovery + online + Zustand, aus loop() heraus
 
     def start(self):
         if mqtt is None:
@@ -141,13 +142,11 @@ class HAPublisher:
         c = mqtt.Client(client_id=self.cfg.get("client_id", "ollama-router"), clean_session=True)
         if self.cfg.get("username"):
             c.username_pw_set(self.cfg["username"], pw)
-
-            if self.cfg.get("tls"):
-
-                c.tls_set()   # System-CA; Broker-Zertifikat = LE ha.example.net, deshalb host per Name
+        if self.cfg.get("tls"):
+            c.tls_set()   # System-CA; Broker-Zertifikat = LE ha.example.net, deshalb host per Name
         c.will_set(f"{self.base}/status", "offline", qos=1, retain=True)
         c.on_connect = self._on_connect
-        c.on_disconnect = lambda *a: log.warning("MQTT getrennt")
+        c.on_disconnect = self._on_disconnect
         c.reconnect_delay_set(2, 60)
         self.client = c
         try:
@@ -160,17 +159,22 @@ class HAPublisher:
         if rc != 0:
             log.error("MQTT connect rc=%s", rc)
             return
-        self.connected = True
         log.info("MQTT verbunden mit %s", self.cfg["host"])
         # Der Broker spielt die eigenen retained Themen zurueck; daraus erkennen wir Karteileichen (Knoten, die es
         # nicht mehr gibt) und raeumen sie in sweep_orphans() auf.
-        self.node_ents, self.seen = {}, {"cfg": set(), "state": set()}
+        with self.seen_lock:
+            self.seen = {"cfg": set(), "state": set()}
         client.on_message = self._on_message
         client.subscribe([(f"{self.prefix}/+/ollama_router/+/config", 1), (f"{self.base}/node/+", 1)])
         self.sweep_at = time.time() + 5
-        self.publish_discovery()
-        client.publish(f"{self.base}/status", "online", qos=1, retain=True)
-        self.publish_state()
+        # Dieser Callback laeuft im Netzwerk-Thread von paho. Discovery und Zustand brauchen den Scheduler und schreiben ins
+        # Entscheidungsprotokoll (Loop-Zustand) - deshalb nur merken, loop() publiziert (Review 2026-09-25).
+        self.announce = True
+        self.connected = True
+
+    def _on_disconnect(self, client, userdata, rc, *a):
+        self.connected = False
+        log.warning("MQTT getrennt (rc=%s)", rc)
 
     def _on_message(self, client, userdata, msg):
         """Nur mitschreiben, welche retained Themen es gibt - der Router hoert sonst auf nichts."""
@@ -317,6 +321,16 @@ class HAPublisher:
         last = 0.0
         while True:
             await asyncio.sleep(1)
+            if self.announce and self.client and self.connected:
+                self.announce = False
+                try:
+                    self.node_ents = {}
+                    self.publish_discovery()
+                    self.client.publish(f"{self.base}/status", "online", qos=1, retain=True)
+                    self.publish_state()
+                    last = time.time()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("MQTT Anmeldung: %s", e)
             if self.sweep_at and time.time() >= self.sweep_at:
                 self.sweep_at = 0.0
                 try:

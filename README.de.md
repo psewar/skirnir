@@ -14,7 +14,8 @@ Gebaut für ein Homelab: Home Assistant, Node-RED und lokale Agenten-Frameworks 
 die nicht rund um die Uhr laufen und nicht nur der KI gehören. Der Name: Skirnir ist in der nordischen Mythologie Freyrs Bote,
 der in fremde Reiche reitet, dort verhandelt und mit der Antwort zurückkehrt.
 
-**Stand:** Version 0.1.0 (erstes Release), seit September 2026 in einem Homelab im Dauerbetrieb, ein Entwickler. Keine
+**Stand:** Router 0.1.6, Agent 0.8.4 (siehe [Releases](https://github.com/psewar/skirnir/releases)), seit September 2026 in
+einem Homelab im Dauerbetrieb, ein Entwickler. Keine
 Stabilitätszusagen; diese README gibt es auf Englisch und Deutsch, die Unter-READMEs (Agent, Decision Engine) sind deutsch. Wer es nachbaut, sollte Python, systemd und Ollama kennen.
 
 ## Was Skirnir kann
@@ -370,7 +371,7 @@ oder passt die zwei Vorlagen `CT_EXEC`/`CT_PUSH` in `deploy.env` an.
 ## Entwicklung und Tests
 
 ```bash
-python test/run_tests.py          # 232 End-to-End-Prüfungen, ~3 min: zwei Fake-Ollama-Knoten, Fake-Agent durch den Tunnel,
+python test/run_tests.py          # rund 250 End-to-End-Prüfungen, ~3 min: zwei Fake-Ollama-Knoten, Fake-Agent durch den Tunnel,
                                   # Fake-Cloud (OpenAI und Anthropic), Fake-Decision-Dienst, selbstsigniertes TLS, Client-Auth,
                                   # Admission, Breaker, Canary/Shadow, Idempotency, Cloud-Schranken, UI-Config-Runden
 python test/dev_env.py            # dieselbe Umgebung zum Klicken, ohne TLS/Login

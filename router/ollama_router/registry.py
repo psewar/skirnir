@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover
     Ed25519PublicKey = None
 
 from . import agentupdate, nodes, state, tunnel
-from .common import VERSION, log, safe_node_name
+from .common import VERSION, log, normalize_mac, safe_node_name
 
 
 class NodeRegistry:
@@ -349,6 +349,10 @@ async def handle_node_action(request):
                 return web.json_response({"error": f"{k}: {pol[k]} liegt nicht zwischen {lo} und {hi}"}, status=400)
     if "weight" in pol and pol["weight"] is not None:
         pol["weight"] = int(pol["weight"])
+    if pol.get("mac") is not None:
+        pol["mac"] = normalize_mac(pol["mac"])
+        if pol["mac"] is None:
+            return web.json_response({"error": "mac: sechs Hex-Paare erwartet (aa:bb:cc:dd:ee:ff)"}, status=400)
     if pol.get("max_inflight") is not None:
         pol["max_inflight"] = int(pol["max_inflight"])
     if action == "approve":

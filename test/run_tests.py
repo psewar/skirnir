@@ -314,7 +314,7 @@ def main():
         # zweite Anfrage auf dasselbe Modell nicht mit 503 'no node' abgewiesen werden, sondern wartet auf das Laden.
         hb("big", 2, 26600, 6000)   # 5.9 GiB frei: ohne qwen in /api/ps reicht das Budget fuer gpt-oss (12.8) nicht -> frueher 503
         first = {}
-        th = threading.Thread(target=lambda: first.update(zip(("st", "txt"), chat("gpt-oss:20b", ctx=8192, slow_load=6))))
+        th = threading.Thread(target=lambda: first.update(zip(("st", "txt"), chat("gpt-oss:20b", ctx=8192, slow_load=6), strict=True)))
         th.start(); time.sleep(2.5)   # Poll hat die Verdraengung gesehen, gpt-oss noch nicht da
         st2, txt2 = chat("gpt-oss:20b", ctx=8192)
         th.join()
@@ -924,7 +924,11 @@ def main():
               and state()["nodes"]["big"]["busy_reason"] == "foreign_vram", f"{st} {raw.decode()[:80]} {state()['nodes']['big']['state']} foreign={state()['nodes']['big'].get('foreign_vram_gib')}")
         st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"busy_foreign_gib": 200})
         check("Busy-Schwelle ausserhalb des Bereichs -> 400", st == 400, raw.decode()[:80])
-        http(C + f"/admin/nodes/{fpb}/policy", {"busy_foreign_gib": None, "busy_gpu_util_pct": None})
+        st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"mac": "nicht-hex"})
+        check("Policy: ungueltige MAC -> 400 (frueher 500 beim Weckversuch)", st == 400 and "mac" in raw.decode(), raw.decode()[:80])
+        st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"mac": "AA-BB-CC-DD-EE-01", "busy_foreign_gib": None, "busy_gpu_util_pct": None})
+        check("Policy: MAC wird normalisiert", st == 200 and json.loads(raw)["policy"].get("mac") == "aa:bb:cc:dd:ee:01", raw.decode()[:80])
+        http(C + f"/admin/nodes/{fpb}/policy", {"mac": None})
         for _ in range(12):
             if state()["nodes"].get("big", {}).get("state") not in (None, "offline"):
                 break
@@ -985,6 +989,10 @@ def main():
         check("Klartext-HTTP auf dem TLS-Port wird abgewiesen", plain != "antwortet", plain)
         st, raw = http(C + "/admin/state", headers={"Authorization": "Basic " + base64.b64encode(b"tester:falsch").decode()}, auth=False)
         check("falsches Passwort -> 401", st == 401)
+        sts = [http(C + "/admin/state", headers={"Authorization": "Basic " + base64.b64encode(f"tester:falsch{i}".encode()).decode()}, auth=False)[0] for i in range(5)]
+        check("Login-Bremse: nach 5 Fehlversuchen einer Adresse in 60 s -> 429 ohne Hashing (Retry-After)", sts[:4] == [401] * 4 and sts[4] == 429 and LAST_HEADERS.get("Retry-After") == "60", str(sts))
+        st, raw = http(C + "/admin/state")
+        check("... geprueftes Passwort bleibt aus dem Cache erlaubt", st == 200, str(st))
         st, raw = http(C + "/admin/config", {"roles": {}}, method="PUT", auth=False)
         check("PUT ohne Login -> 401", st == 401)
         # UI + Konfig-API

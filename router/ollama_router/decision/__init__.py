@@ -41,6 +41,14 @@ def init():
     return DECIDER
 
 
+def ensure():
+    """Nach einem Konfig-Reload (UI-Schalter, SIGHUP): Engines bauen, wenn die Auto-Rolle jetzt an ist und noch keine
+    Instanz besteht. Eine bestehende Instanz bleibt (Kette/Endpunkte aendern sich nur mit Neustart), active() liest das Flag live."""
+    if DECIDER is None and state.CFG.decision.get("enabled"):
+        init()
+    return DECIDER
+
+
 def active():
     return DECIDER if (DECIDER and state.CFG.decision.get("enabled")) else None
 

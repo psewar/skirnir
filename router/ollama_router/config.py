@@ -449,8 +449,9 @@ def write_overrides(new):
         yaml.safe_dump(new, f, allow_unicode=True, sort_keys=False)
     os.replace(tmp, state.CFG.overrides_path)
     state.CFG.reload()
-    from . import cloud
+    from . import cloud, decision
     cloud.setup()
+    decision.ensure()
 
 
 def read_overrides():

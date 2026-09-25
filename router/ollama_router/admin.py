@@ -357,10 +357,10 @@ async def handle_try(request):
     if "think" in b:
         body["think"] = bool(b["think"])   # thinking-Modelle (glm, qwen3.6, gpt-oss, granite) denken sonst unsichtbar vor der Antwort
     rt = {k: v for k, v in (b.get("routing") or {}).items() if v not in (None, "", [])}   # UI: execution, data_class, priority, require
-    body["routing"] = {**rt, "request_id": f"ui-{int(time.time())}"}   # immer ein Block -> Routing-Info in der Antwort
+    rid = f"ui-{int(time.time() * 1000)}"
+    body["routing"] = {**rt, "request_id": rid}   # immer ein Block -> Routing-Info in der Antwort
     h, p = split_listen(state.CFG.listen)
     url = f"{'https' if state.CFG.api_tls else 'http'}://127.0.0.1:{p}/api/chat"   # Selbstaufruf; Zertifikat lautet auf den Hostnamen -> ssl=False
-    n_before = len(state.DECISIONS)
     t0 = time.time()
     hdrs = {"Authorization": "Bearer " + state.INTERNAL_TOKEN} if state.INTERNAL_TOKEN else {}   # eigene Identitaet skirnir-ui (enforce)
     try:
@@ -369,7 +369,8 @@ async def handle_try(request):
             status = r.status
     except Exception as e:  # noqa: BLE001
         return web.json_response({"status": 502, "answer": str(e), "seconds": round(time.time() - t0, 1)})
-    decision = next((d for d in state.DECISIONS[n_before:] if d["event"] == "route"), None)
+    # ueber die request_id, nicht per Index: der Ring ist nach dem Laden von events.jsonl voll, ein Slice ab len() waere leer
+    decision = next((d for d in reversed(state.DECISIONS) if d.get("event") == "route" and d.get("request_id") == rid), None)
     answer = data.get("error") if "error" in data else (data.get("message") or {}).get("content", "")
     thinking = (data.get("message") or {}).get("thinking") or "" if isinstance(data, dict) else ""
     return web.json_response({"status": status, "answer": answer, "seconds": round(time.time() - t0, 1),

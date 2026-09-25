@@ -122,6 +122,7 @@ async def main(cfg_path):
         try:
             state.CFG.reload()
             cloud.setup()
+            decision.ensure()
             log.info("config reloaded")
         except Exception as e:  # noqa: BLE001
             log.error("config reload failed, keeping old: %s", e)

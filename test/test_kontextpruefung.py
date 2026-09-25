@@ -57,7 +57,7 @@ check("/api/generate-Prompt zaehlt", (kp.vorher({"prompt": PROSA * 5000}, 65536)
 
 # --- nachher ---
 zuruecksetzen()
-info = {"role": "nacht", "model": "qwen3.6:35b-a3b", "node": "psewar-2026", "client": "agent-x", "path": "/api/chat", "request_id": "r1"}
+info = {"role": "nacht", "model": "qwen3.6:35b-a3b", "node": "gpu-desktop", "client": "agent-x", "path": "/api/chat", "request_id": "r1"}
 check("Schaetzung zu hoch, angekommen ~ geschaetzt: kein Alarm", kp.nachher(100_000, 95_000, 131072, info) is False)
 check("... und nichts gezaehlt", state.KUERZUNGEN["anzahl"] == 0 and not state.MQTT_EVENTS)
 check("angekommen deutlich weniger: bestaetigt", kp.nachher(160_000, 65_538, 131072, info) is True)

@@ -148,7 +148,7 @@ def spec_for(path):
     parts = path.split(".")
     for tpl, spec in EDITABLE.items():
         tp = tpl.split(".")
-        if len(tp) == len(parts) and all(a == "*" or a == b for a, b in zip(tp, parts)):
+        if len(tp) == len(parts) and all(a == "*" or a == b for a, b in zip(tp, parts, strict=True)):
             return spec
     return None
 
@@ -266,7 +266,7 @@ def spec_key(path):
     parts = path.split(".")
     for tpl in EDITABLE:
         tp = tpl.split(".")
-        if len(tp) == len(parts) and all(a == "*" or a == b for a, b in zip(tp, parts)):
+        if len(tp) == len(parts) and all(a == "*" or a == b for a, b in zip(tp, parts, strict=True)):
             return tpl
     return path
 
