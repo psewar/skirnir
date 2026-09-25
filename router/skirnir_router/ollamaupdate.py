@@ -272,6 +272,9 @@ async def order_update(fp, reason="ui", force=False):
     if not f:
         facts = e.get("facts") or {}
         return False, f"no Ollama archive known for {facts.get('os')}/{facts.get('arch')}" + ("" if LATEST["version"] else " (version check has not succeeded yet)")
+    av = (e.get("facts") or {}).get("agent_version")
+    if not agent_capable(av):
+        return False, f"agent {av} cannot update Ollama (needs agent 0.12.0 or newer)"
     cur = current_version(e)
     if cur == version and not force:
         return False, f"already running {version}"
@@ -293,6 +296,12 @@ async def order_update(fp, reason="ui", force=False):
     state.MQTT_DIRTY.append(True)
     log.info("node %s: Ollama-Update %s -> %s angestossen (%s, %s)", e["name"], cur, version, reason, f["name"])
     return True, f"Ollama update to {version} started"
+
+
+def agent_capable(agent_version):
+    """Versteht der Agent den Auftrag? Ab 0.12.0; eine Version ohne Zahlen (Testagent) gilt als faehig."""
+    t = _vt(agent_version)
+    return not t or t >= (0, 12)
 
 
 def in_window(cfg, now=None):
@@ -362,7 +371,7 @@ async def rollout_once(now=None):
             continue
         avail, f = available_for(e)
         cur = current_version(e)
-        if not f or not cur or _vt(avail) <= _vt(cur):
+        if not f or not cur or _vt(avail) <= _vt(cur) or not agent_capable((e.get("facts") or {}).get("agent_version")):
             continue
         u = e.get("ollama_update") or {}
         if u.get("version") == version and u.get("state") in RUNNING and now - (u.get("t") or 0) < STALL_S:
