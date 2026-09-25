@@ -231,7 +231,10 @@ func (u *Updater) run(o UpdateOrder) error {
 	}
 	// Tausch: laufende Datei umbenennen (geht unter Windows und Linux), neue an ihren Platz; bei Fehler zurueck
 	old := exe + ".old"
-	_ = os.Remove(old)
+	if err := os.Remove(old); err != nil && !os.IsNotExist(err) {
+		// .old vom letzten Update ist noch in Benutzung (gesehen 2026-09-25): unter einem anderen Namen parken statt scheitern
+		old = fmt.Sprintf("%s.old-%d", exe, time.Now().Unix())
+	}
 	if err := os.Rename(exe, old); err != nil {
 		os.Remove(newPath)
 		return fmt.Errorf("alte Binary umbenennen: %w", err)

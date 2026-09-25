@@ -3,8 +3,11 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -42,6 +45,14 @@ func restartSelf(exe, cfgPath string, log *Logger) {
 // afterSwap: das GPU-Z-Relay (Aufgabe in der Anmeldesitzung) laeuft noch aus der alten Binary - neu starten, damit es
 // die neue nutzt und die .old-Datei freigibt. Kein Fehler, wenn es die Aufgabe nicht gibt.
 func afterSwap(exe string, log *Logger) {
+	// `schtasks /End` beendet nicht zuverlaessig das Relay aus der alten Binary (gesehen 2026-09-25: das alte Relay lief
+	// weiter, hielt die .old-Datei und liess das naechste Update am Umbenennen scheitern). Darum alle anderen Prozesse
+	// dieser Binary beenden - das sind nur Relay-Instanzen und der schon fertige Neustart-Helfer.
+	kill := exec.Command("taskkill.exe", "/F", "/FI", "IMAGENAME eq "+filepath.Base(exe), "/FI", fmt.Sprintf("PID ne %d", os.Getpid()))
+	hideWindow(kill)
+	if out, err := kill.CombinedOutput(); err == nil {
+		log.Infof("update: alte Prozesse der Binary beendet: %s", strings.TrimSpace(strings.Split(string(out), "\n")[0]))
+	}
 	for _, args := range [][]string{{"/End", "/TN", gpuzRelayTaskName}, {"/Run", "/TN", gpuzRelayTaskName}} {
 		cmd := exec.Command("schtasks.exe", args...)
 		hideWindow(cmd)
