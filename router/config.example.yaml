@@ -156,6 +156,14 @@ modes:
     canary: ""                # Knotenname, der neue Versionen zuerst bekommt
     canary_clean_h: 24        # so lange muss er sie sauber fahren, bevor die anderen folgen
     # public_key: <base64>    # optional: Router prueft das Manifest vor dem Versand selbst
+  ollama_update:              # Ollama-Update ueber den Router (Agent >= 0.12.0, Ollama als Kind des Agenten)
+    enabled: true             # Versionspruefung + Rollout fuer Knoten mit Policy ollama_auto_update
+    window_start: "02:00"     # Nachtfenster (Ortszeit des Routers); leer = jederzeit
+    window_end: "05:00"
+    canary: ""                # leer = der Kanarienvogel des Agent-Updates
+    canary_clean_h: 24
+    check_interval_h: 6
+    release_url: https://api.github.com/repos/ollama/ollama/releases/latest
   gpu_guard:                  # Router-Seite des GPU-Schutzes (Agent >= 0.7.0 setzt das Power-Limit selbst)
     enabled: true             # Status beachten: Deckel in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA
     throttled_max_inflight: 1

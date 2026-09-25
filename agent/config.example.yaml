@@ -64,6 +64,10 @@ tunnel:                                         # ausgehende Verbindung zum Rout
 #   public_key: <base64 Ed25519>                #   ohne public_key lehnt der Agent jeden Auftrag ab
 #   enabled: false
 
+# ollama_update:                                # Ollama-Update ueber den Router (0.12.0; nur wenn Ollama ein Kind ist, s. children)
+#   enabled: false                              #   Standard an; der Agent laedt das Release-Archiv selbst von `source`
+#   source: https://github.com/ollama/ollama/releases/download/   # <source>v<version>/<datei> + sha256sum.txt (interner Spiegel moeglich)
+
 # gpu_guard:                                    # GPU-Schutz (12V-2x6-Stecker): Power-Limit 80 % des Standards, Stufe 2 bei
 #   enabled: false                              #   Dauer-Vollast, Spannungs-/Temperaturwarnung. Standard AN; false = abgewaehlt
 #   power_limit_pct: 80                         #   (zaehlt als Problem in HA). Alle Schluessel: agent/README.md, Abschnitt GPU-Schutz
@@ -120,6 +124,7 @@ tunnel:                                         # ausgehende Verbindung zum Rout
 #     health_tcp_port: 11434
 #     startup_grace_s: 60
 #     # Achtung: die Tray-App 'ollama app.exe' dann nicht mehr autostarten lassen - sie startet sekuendlich einen eigenen Server
+#     # Ollama-Updates macht dann der Router (Policy 'Ollama-Auto-Update' je Knoten, Nachtfenster); Block ollama_update: unten
 
 install:                                        # nur Windows (Install-Service.ps1 / install / apply-rules)
   service_name: SkirnirAgent

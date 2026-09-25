@@ -113,6 +113,22 @@ _e("modes.agent_update.canary", "str", "Kanarienvogel", "Knotenname, der neue Ve
 _e("modes.agent_update.canary_clean_h", "float", "... sauber seit h", "so lange muss der Kanarienvogel die Version fahren, bevor die anderen folgen", G, 24, min=0, max=720,
    label_en="... clean for h", help_en="the canary must run the version this long before the others follow")
 
+G = "Ollama-Update"
+_e("modes.ollama_update.enabled", "bool", "Ollama-Update", "an = Router prueft die neueste Ollama-Version und bringt Knoten mit Policy 'Ollama-Auto-Update' im Nachtfenster nach; aus = nur Anzeige und Knopf je Knoten", G, True,
+   label_en="Ollama update", help_en="on = the router checks the latest Ollama version and updates nodes with policy 'Ollama auto-update' in the night window; off = display and per-node button only")
+_e("modes.ollama_update.window_start", "str", "Fenster von (HH:MM)", "Ortszeit des Routers; leer = jederzeit", G, "02:00",
+   label_en="Window from (HH:MM)", help_en="router local time; empty = any time")
+_e("modes.ollama_update.window_end", "str", "Fenster bis (HH:MM)", "darf ueber Mitternacht gehen (z. B. 23:00 bis 05:00)", G, "05:00",
+   label_en="Window until (HH:MM)", help_en="may cross midnight (e.g. 23:00 to 05:00)")
+_e("modes.ollama_update.canary", "str", "Kanarienvogel", "Knotenname, der neue Ollama-Versionen zuerst bekommt; leer = der Kanarienvogel des Agent-Updates", G, "",
+   label_en="Canary", help_en="node name that gets new Ollama versions first; empty = the agent update's canary")
+_e("modes.ollama_update.canary_clean_h", "float", "... sauber seit h", "so lange muss der Kanarienvogel die Version fahren, bevor die anderen folgen", G, 24, min=0, max=720,
+   label_en="... clean for h", help_en="the canary must run the version this long before the others follow")
+_e("modes.ollama_update.check_interval_h", "float", "Pruefung alle h", "wie oft der Router die neueste Version erfragt", G, 6, min=1, max=168,
+   label_en="Check every h", help_en="how often the router asks for the latest version")
+_e("modes.ollama_update.release_url", "str", "Release-Quelle", "GitHub-API des neuesten Releases (tag_name, assets, sha256sum.txt); der Agent laedt von seiner eigenen festen Quelle", G, "https://api.github.com/repos/ollama/ollama/releases/latest",
+   label_en="Release source", help_en="GitHub API of the latest release (tag_name, assets, sha256sum.txt); the agent downloads from its own fixed source")
+
 G = "Busy-Erkennung"
 _e("modes.busy_enter.gpu_util_pct", "float", "GPU-Auslastung %", "ab hier gilt der Rechner als beschaeftigt (Spiel) ...", G, 40, min=0, max=100,
    label_en="GPU utilisation %", help_en="from here the machine counts as busy (game) ...")
@@ -192,10 +208,10 @@ _e(C + "data_class", "choice", "Datenklasse", "Deklaration fuer Anfragen ohne ro
 # Reihenfolge im Einstellungen-Tab. Review 2026-09-25: Decision Engine, GPU-Schutz und Agent-Update fehlten hier, ihre Eintraege
 # waren in der UI nie sichtbar (Speichern per API ging).
 GROUPS = ["Cloud", "Cloud-Anbieter", "Clients", "Scheduler", "Decision Engine", "Admission", "Circuit Breaker", "Busy-Erkennung", "Vorwaermen", "Anfragen & Limits",
-          "Knoten-Ueberwachung", "GPU-Schutz", "Agent-Update", "Wake-on-LAN", "Client-Auth"]
+          "Knoten-Ueberwachung", "GPU-Schutz", "Agent-Update", "Ollama-Update", "Wake-on-LAN", "Client-Auth"]
 # Englische Gruppennamen (view(lang="en")); deckt GROUPS und alle group-Strings der _e-Aufrufe ab.
 GROUPS_EN = {"Cloud": "Cloud", "Cloud-Anbieter": "Cloud providers", "Clients": "Clients", "Decision Engine": "Decision engine", "Scheduler": "Scheduler",
-             "Admission": "Admission", "Circuit Breaker": "Circuit breaker", "GPU-Schutz": "GPU guard", "Agent-Update": "Agent update",
+             "Admission": "Admission", "Circuit Breaker": "Circuit breaker", "GPU-Schutz": "GPU guard", "Agent-Update": "Agent update", "Ollama-Update": "Ollama update",
              "Busy-Erkennung": "Busy detection", "Vorwaermen": "Prewarming", "Anfragen & Limits": "Requests & limits", "Knoten-Ueberwachung": "Node monitoring",
              "Wake-on-LAN": "Wake-on-LAN", "Client-Auth": "Client auth"}
 

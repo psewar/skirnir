@@ -29,8 +29,9 @@ type App struct {
 	mqCancel context.CancelFunc
 	mqCfg    *MQTTCfg
 	prov     *Provision
-	guard    *Guard   // GPU-Schutz (guard.go)
-	updater  *Updater // Selbst-Update (updater.go)
+	guard    *Guard         // GPU-Schutz (guard.go)
+	updater  *Updater       // Selbst-Update (updater.go)
+	ollamaUp *OllamaUpdater // Ollama-Update ueber den Router (ollamaupdate.go, 0.12.0)
 	rootCtx  context.Context
 	crashed  string // Modul, das mit Panic endete (Run liefert dann einen Fehler, der Dienst startet neu)
 	ctlToken string // Token fuer POST /restart-child (Datei control.token neben der Config; Review 2026-09-25)
@@ -56,6 +57,11 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.updater = newUpdater(cfg.Update, cfg.path, log)
 	a.hb.updater = a.updater
 	a.updater.Cleanup()
+	a.ollamaUp = newOllamaUpdater(cfg.OllamaUpdate, cfg.Children, sup, cfg.Tunnel.Upstream, log)
+	a.hb.ollamaUp, a.hb.upstream = a.ollamaUp, cfg.Tunnel.Upstream
+	if a.ollamaUp.Managed() {
+		log.Infof("ollama-update: Ollama ist Kind %q in %s - Router darf Updates anstossen", a.ollamaUp.child, a.ollamaUp.dir)
+	}
 	if cfg.OllamaProxy.on() {
 		if a.proxy, err = newOllamaProxy(cfg.OllamaProxy, cfg.Router.Token, cfg.Node, log); err != nil {
 			return nil, err
@@ -72,6 +78,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.tunnel = newTunnel(cfg.Router.URL, cfg.Tunnel.Upstream, a.id, a.hb, facts, log)
 	a.tunnel.onStatus = a.onTunnelStatus
 	a.tunnel.onUpdate = a.updater.Handle
+	a.tunnel.onOllamaUpdate = a.ollamaUp.Handle
 	if a.prov != nil && a.prov.HeartbeatIntervalS > 0 {
 		a.tunnel.SetHeartbeatInterval(time.Duration(a.prov.HeartbeatIntervalS * float64(time.Second)))
 	}

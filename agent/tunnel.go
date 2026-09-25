@@ -48,15 +48,16 @@ const (
 )
 
 type Tunnel struct {
-	url      string
-	upstream string
-	log      *Logger
-	http     *http.Client
-	id       *Identity
-	facts    func(context.Context) Facts
-	hb       *Heartbeat
-	onStatus func(state, node string, p *Provision)
-	onUpdate func(UpdateOrder) // Auftrag {"t":"update"} vom Router
+	url            string
+	upstream       string
+	log            *Logger
+	http           *http.Client
+	id             *Identity
+	facts          func(context.Context) Facts
+	hb             *Heartbeat
+	onStatus       func(state, node string, p *Provision)
+	onUpdate       func(UpdateOrder)       // Auftrag {"t":"update"} vom Router
+	onOllamaUpdate func(OllamaUpdateOrder) // Auftrag {"t":"ollama-update"} vom Router (0.12.0)
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -251,6 +252,12 @@ func (t *Tunnel) applyStatus(m ctlMsg) {
 	if m.T == "update" {
 		if t.onUpdate != nil {
 			t.onUpdate(UpdateOrder{Version: m.Version, File: m.File, URL: m.URL, Sha256: m.Sha256, Size: m.Size, Token: m.Token, Manifest: m.Manifest, Signature: m.Signature})
+		}
+		return
+	}
+	if m.T == "ollama-update" {
+		if t.onOllamaUpdate != nil {
+			t.onOllamaUpdate(OllamaUpdateOrder{Version: m.Version, File: m.File, Sha256: m.Sha256, Size: m.Size})
 		}
 		return
 	}

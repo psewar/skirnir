@@ -10,14 +10,18 @@ import (
 // Heartbeat: GPU-Fakten des Knotens und das Urteil des Routers (free/busy). tunnel.go schickt payload() als HB-Rahmen
 // und ruft ack(). Der alte HTTP-Weg mit Token (POST /v1/heartbeat/<node>) ist seit 0.9.1 weg.
 type Heartbeat struct {
-	node    string
-	gpu     *GPU
-	log     *Logger
-	tlsFP   string   // Fingerprint der Ollama-Vorschaltstelle (leer = kein Proxy)
-	guard   *Guard   // GPU-Schutz: Status geht mit jedem Heartbeat (0.7.0)
-	updater *Updater // Selbst-Update: Zwischenstand geht mit dem Heartbeat (0.8.0)
+	node     string
+	gpu      *GPU
+	log      *Logger
+	tlsFP    string         // Fingerprint der Ollama-Vorschaltstelle (leer = kein Proxy)
+	guard    *Guard         // GPU-Schutz: Status geht mit jedem Heartbeat (0.7.0)
+	updater  *Updater       // Selbst-Update: Zwischenstand geht mit dem Heartbeat (0.8.0)
+	ollamaUp *OllamaUpdater // Ollama-Update: Zwischenstand (0.12.0)
+	upstream string         // lokales Ollama: Version geht mit dem Heartbeat (0.12.0, alle 60 s frisch)
 
 	mu         sync.Mutex
+	ovVersion  string
+	ovAt       time.Time
 	every      time.Duration // Sendeintervall (Tunnel/HTTP); Status.OK = juengste Bestaetigung innerhalb 3 Intervallen
 	state      string        // Antwort des Routers: free | busy | pending | ""
 	busyReason string
@@ -70,7 +74,31 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	if r := h.updater.Report(); r != nil { // 0.8.0: Stand eines Update-Auftrags
 		p["update"] = r
 	}
+	if r := h.ollamaUp.Report(); r != nil { // 0.12.0: Stand eines Ollama-Update-Auftrags
+		p["ollama_update"] = r
+	}
+	if v := h.ollamaVersionCached(ctx); v != "" { // 0.12.0: der Router sieht die Ollama-Version sofort, nicht erst beim Poll
+		p["ollama_version"] = v
+	}
 	return p, nil
+}
+
+// ollamaVersionCached: /api/version des lokalen Ollama, hoechstens alle 60 s (auch ein Fehlschlag wird 60 s gemerkt).
+func (h *Heartbeat) ollamaVersionCached(ctx context.Context) string {
+	if h.upstream == "" {
+		return ""
+	}
+	h.mu.Lock()
+	v, at := h.ovVersion, h.ovAt
+	h.mu.Unlock()
+	if time.Since(at) < 60*time.Second {
+		return v
+	}
+	v = ollamaVersion(ctx, h.upstream)
+	h.mu.Lock()
+	h.ovVersion, h.ovAt = v, time.Now()
+	h.mu.Unlock()
+	return v
 }
 
 func (h *Heartbeat) markSent() {

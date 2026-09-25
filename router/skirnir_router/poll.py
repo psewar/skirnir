@@ -5,7 +5,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import agentupdate, nodes, perf, state
+from . import agentupdate, nodes, ollamaupdate, perf, state
 from .common import GIB, log
 
 
@@ -73,7 +73,7 @@ async def fetch_version(node):
     try:
         async with nodes.nreq(node, "get", "/api/version", timeout=ClientTimeout(total=5)) as r:
             d = await r.json()
-        node.ollama_version = str(d.get("version") or "?")
+        ollamaupdate.note_version(node, str(d.get("version") or "?"), source="poll")   # setzt node.ollama_version (0.3.0)
     except Exception as e:  # noqa: BLE001
         log.debug("version %s: %s", node.name, e)
 
@@ -325,6 +325,10 @@ def apply_heartbeat(node, b, now):
     node.sensors = sens if isinstance(sens, dict) else None
     if isinstance(b.get("update"), dict):   # Agent >= 0.8.0: Zwischenstand eines Update-Auftrags
         agentupdate.note_report(node, b["update"], now)
+    if b.get("ollama_version"):   # Agent >= 0.12.0: Ollama-Version frisch vom Knoten (nach einem Ollama-Update sofort sichtbar)
+        ollamaupdate.note_version(node, str(b["ollama_version"]), now, source="agent")
+    if isinstance(b.get("ollama_update"), dict):   # Agent >= 0.12.0: Zwischenstand eines Ollama-Update-Auftrags
+        ollamaupdate.note_report(node, b["ollama_update"], now)
     g = b.get("gpu_guard")     # Agent >= 0.7.0: GPU-Schutz (Power-Limit, Hochlast-Stufe, Warnungen) - nur Flag neben dem Zustand
     if isinstance(g, dict):
         prev = node.guard or {}

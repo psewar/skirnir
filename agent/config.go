@@ -14,21 +14,22 @@ import (
 // braucht ein Knoten nur noch router.url; Name, GPU, MAC meldet der Agent selbst, MQTT-Zugang und Intervalle
 // provisioniert der Router nach der Freigabe. Lokale Angaben hier ueberschreiben das Provisionierte.
 type Config struct {
-	Node        string `yaml:"node"` // leer = Hostname (klein)
-	Router      RouterCfg
-	MQTT        MQTTCfg                 // optional: lokale Ueberschreibung (Host gesetzt) oder enabled: false
-	SecretStore SecretStoreCfg          `yaml:"secret_store"` // optional: nur fuer mqtt.password_secret (Universal-Auth-API)
-	Health      struct{ Listen string } `yaml:"health"`
-	Logging     LogCfg
-	Children    []ChildSpec `yaml:"children"`
-	Install     InstallCfg
-	OllamaProxy ProxyCfg  `yaml:"ollama_proxy"`
-	Tunnel      TunnelCfg `yaml:"tunnel"`
-	GPUZ        GPUZCfg   `yaml:"gpuz"`      // GPU-Z-Sensoren als Zusatzquelle (Windows), Standard an
-	GPUGuard    GuardCfg  `yaml:"gpu_guard"` // GPU-Schutz: Power-Limit, Hochlast-Stufe, Warnungen (guard.go), Standard an
-	Update      UpdateCfg `yaml:"update"`    // Selbst-Update ueber den Router (updater.go): public_key des Betreibers, enabled
-	path        string    // Pfad der geladenen Datei (fuer den Neustart nach einem Update)
-	Identity    struct {
+	Node         string `yaml:"node"` // leer = Hostname (klein)
+	Router       RouterCfg
+	MQTT         MQTTCfg                 // optional: lokale Ueberschreibung (Host gesetzt) oder enabled: false
+	SecretStore  SecretStoreCfg          `yaml:"secret_store"` // optional: nur fuer mqtt.password_secret (Universal-Auth-API)
+	Health       struct{ Listen string } `yaml:"health"`
+	Logging      LogCfg
+	Children     []ChildSpec `yaml:"children"`
+	Install      InstallCfg
+	OllamaProxy  ProxyCfg        `yaml:"ollama_proxy"`
+	Tunnel       TunnelCfg       `yaml:"tunnel"`
+	GPUZ         GPUZCfg         `yaml:"gpuz"`          // GPU-Z-Sensoren als Zusatzquelle (Windows), Standard an
+	GPUGuard     GuardCfg        `yaml:"gpu_guard"`     // GPU-Schutz: Power-Limit, Hochlast-Stufe, Warnungen (guard.go), Standard an
+	Update       UpdateCfg       `yaml:"update"`        // Selbst-Update ueber den Router (updater.go): public_key des Betreibers, enabled
+	OllamaUpdate OllamaUpdateCfg `yaml:"ollama_update"` // Ollama-Update ueber den Router (ollamaupdate.go, 0.12.0): enabled, source
+	path         string          // Pfad der geladenen Datei (fuer den Neustart nach einem Update)
+	Identity     struct {
 		Dir string `yaml:"dir"`
 	} `yaml:"identity"`
 }

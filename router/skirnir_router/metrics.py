@@ -233,6 +233,9 @@ def render():
     nodes = list(state.NODES.values())
     gauge("skirnir_node_up", "1 = node online (free or busy)", [({"node": n.name}, 1 if n.state != "offline" else 0) for n in nodes])
     gauge("skirnir_node_info", "Ollama version per node", [({"node": n.name, "ollama_version": n.ollama_version or "?"}, 1) for n in nodes])
+    from . import ollamaupdate
+    _pend = ollamaupdate.pending_nodes()
+    gauge("skirnir_node_ollama_update_pending", "1 = a newer Ollama release is available for the node", [({"node": n.name}, 1 if n.name in _pend else 0) for n in nodes])
     gauge("skirnir_node_state", "1 for the current node state",
           [({"node": n.name, "state": s}, 1 if n.state == s else 0) for n in nodes for s in ("free", "busy", "offline")])
     gauge("skirnir_node_inflight", "running requests per node", [({"node": n.name}, n.inflight) for n in nodes])

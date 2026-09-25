@@ -34,6 +34,7 @@ type childState struct {
 	LastExit  string    `json:"last_exit,omitempty"`
 	NextStart time.Time `json:"next_start,omitempty"`
 	kill      func()
+	held      bool // Hold(): angehalten, kein Neustart bis Release() (Ollama-Update, ollamaupdate.go)
 }
 
 var restartBackoff = []time.Duration{time.Second, 5 * time.Second, 30 * time.Second, 60 * time.Second}
@@ -87,11 +88,27 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 		delay := restartBackoff[min(attempt, len(restartBackoff)-1)]
 		attempt++
 		s.mu.Lock()
+		held := st.held
 		st.Running, st.Healthy, st.PID = false, false, 0
 		st.LastExit = fmt.Sprintf("%s nach %s", exitMsg, ran.Round(time.Second))
 		st.Restarts++
 		st.NextStart = time.Now().Add(delay)
+		if held {
+			st.NextStart = time.Time{}
+		}
 		s.mu.Unlock()
+		if held { // Ollama-Update: angehalten, bis Release() - dann sofort wieder starten, ohne Backoff
+			s.log.Infof("supervisor: %s angehalten (Update), wartet auf Freigabe", sp.Name)
+			for s.isHeld(sp.Name) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(300 * time.Millisecond):
+				}
+			}
+			attempt = 0
+			continue
+		}
 		if err != nil {
 			s.log.Warnf("supervisor: %s: %s, Neustart in %s", sp.Name, exitMsg, delay)
 		} else {
@@ -217,6 +234,50 @@ func (s *Supervisor) Status() map[string]childState {
 		out[k] = *v
 	}
 	return out
+}
+
+// Hold haelt ein Kind an und verhindert den Neustart, bis Release gerufen wird (Ollama-Update: Dateien tauschen, waehrend
+// nichts laeuft). Wartet bis zu wait, bis der Prozess samt Baum beendet ist; true = steht.
+func (s *Supervisor) Hold(name string, wait time.Duration) bool {
+	s.mu.Lock()
+	c, ok := s.children[name]
+	if !ok {
+		s.mu.Unlock()
+		return false
+	}
+	c.held = true
+	kill, running := c.kill, c.Running
+	s.mu.Unlock()
+	if running && kill != nil {
+		kill()
+	}
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		r := c.Running
+		s.mu.Unlock()
+		if !r {
+			return true
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return false
+}
+
+// Release hebt Hold auf; die Schleife startet das Kind sofort neu.
+func (s *Supervisor) Release(name string) {
+	s.mu.Lock()
+	if c, ok := s.children[name]; ok {
+		c.held = false
+	}
+	s.mu.Unlock()
+}
+
+func (s *Supervisor) isHeld(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.children[name]
+	return ok && c.held
 }
 
 // RestartChild beendet ein Kind; die Schleife startet es mit Backoff neu (Verb restart-child, /health POST).

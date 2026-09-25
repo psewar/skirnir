@@ -69,6 +69,31 @@ async def do_update(ws, session, lock, m, sslctx):
         await report("failed", (str(e) or e.__class__.__name__.replace("InvalidSignature", "Manifest-Signatur ungueltig"))[:120])
 
 
+async def do_ollama_update(ws, session, lock, m):
+    """Wie ollamaupdate.go (vereinfacht): Archiv laden, SHA-256 gegen den Auftrag, Stand im Heartbeat; danach traegt der
+    Heartbeat die neue Ollama-Version (Anhalten, Tausch und Neustart des Kindes werden nur simuliert)."""
+    import hashlib
+    hb = {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}
+    async def report(state, msg=""):
+        await send(ws, lock, HB, 0, json.dumps({**hb, "ollama_version": FACTS["ollama_version"],
+                                                "ollama_update": {"version": m.get("version"), "state": state, "message": msg}}).encode())
+        out(ollama_update=state, msg=msg)
+    try:
+        await report("downloading", "0 %")
+        async with session.get(m["url"]) as r:
+            data = await r.read()
+            if r.status != 200:
+                raise ValueError(f"Download HTTP {r.status}")
+        if hashlib.sha256(data).hexdigest() != m["sha256"]:
+            raise ValueError("SHA-256 stimmt nicht")
+        await report("applied", "Dateien getauscht, Ollama startet neu")
+        FACTS["ollama_version"] = m["version"]
+        await asyncio.sleep(0.3)
+        await report("applied", "Dateien getauscht, Ollama startet neu")   # naechster Heartbeat traegt die neue Version
+    except Exception as e:  # noqa: BLE001
+        await report("failed", (str(e) or e.__class__.__name__)[:120])
+
+
 def out(**kw):
     print(json.dumps({"agent": NODE, **kw}), flush=True)
 
@@ -128,6 +153,8 @@ async def main():
                                 await send(ws, lock, HB, 0, json.dumps({"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}).encode())
                             if m.get("t") == "update":
                                 asyncio.create_task(do_update(ws, session, lock, m, sslctx))  # noqa: RUF006
+                            if m.get("t") == "ollama-update":
+                                asyncio.create_task(do_ollama_update(ws, session, lock, m))  # noqa: RUF006
                             continue
                         if msg.type != aiohttp.WSMsgType.BINARY:
                             continue

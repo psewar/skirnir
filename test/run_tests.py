@@ -106,7 +106,7 @@ def main():
         subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
                         "-keyout", "test-key.pem", "-out", "test-cert.pem", "-days", "30", "-subj", "/CN=localhost"],
                        cwd=HERE, check=True, capture_output=True)
-    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl", "metrics.json", "agent-update.pub", "agent/manifest.json"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
+    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl", "metrics.json", "agent-update.pub", "agent/manifest.json", "ollama-latest.json"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
         try:
             os.remove(os.path.join(HERE, f))
         except FileNotFoundError:
@@ -1241,6 +1241,65 @@ def main():
               and any("Agent-Update auf big fehlgeschlagen" in p for p in ha_u["problems"]) and reg_big()["facts"]["agent_version"] == "test2" and not state()["nodes"]["big"]["draining"], str(u) + str(ha_u["problems"]))
         st, raw = http(C + "/v1/agent/binary/skirnir-agent-test3-windows-amd64.exe", headers={"Authorization": "Bearer falsch"})
         check("Agent-Update: Download ohne gueltiges Token -> 403", st == 403, str(st))
+
+        # --- Ollama-Update ueber den Router (ollamaupdate.py, 0.3.0): Versionspruefung gegen eine Fake-Quelle (GitHub-API-Form),
+        # Auftrag per UI-Knopf, Fake-Agent laedt, prueft den Hash, meldet Stand und Ollama-Version im Heartbeat.
+        import http.server as _hs
+        _rel = {"version": "0.99.0", "blob": b"fake ollama 0.99.0" * 50}
+        _rel["sum"] = hashlib.sha256(_rel["blob"]).hexdigest()
+        class _RelH(_hs.BaseHTTPRequestHandler):
+            def log_message(self, *a): pass
+            def do_GET(self):
+                if self.path == "/release":
+                    body = json.dumps({"tag_name": "v" + _rel["version"], "assets": [
+                        {"name": "sha256sum.txt", "browser_download_url": "http://127.0.0.1:21030/sha256sum.txt"},
+                        {"name": "ollama-windows-amd64.zip", "browser_download_url": "http://127.0.0.1:21030/ollama-windows-amd64.zip", "size": len(_rel["blob"])}]}).encode()
+                elif self.path == "/sha256sum.txt":
+                    body = f"{_rel['sum']}  ./ollama-windows-amd64.zip\n".encode()
+                elif self.path == "/ollama-windows-amd64.zip":
+                    body = _rel["blob"]
+                else:
+                    body = None
+                self.send_response(200 if body is not None else 404); self.send_header("Content-Length", str(len(body or b""))); self.end_headers(); self.wfile.write(body or b"")
+        _rs = _hs.ThreadingHTTPServer(("127.0.0.1", 21030), _RelH)
+        threading.Thread(target=_rs.serve_forever, daemon=True).start()
+        st, raw = http(C + "/admin/config", {"settings": {"modes.ollama_update.release_url": "http://127.0.0.1:21030/release", "modes.ollama_update.window_start": "", "modes.ollama_update.window_end": ""}}, method="PUT")
+        check("Ollama-Update: Quelle und Fenster per Einstellungen setzbar", st == 200, raw.decode()[:100])
+        st, raw = http(C + "/admin/ollama-update/check", {})
+        ou = json.loads(raw)
+        check("Ollama-Update: Versionspruefung liefert 0.99.0 mit Archiv windows/amd64 und Hash aus sha256sum.txt", st == 200 and ou["latest"]["version"] == "0.99.0" and ou["latest"]["files"]["windows/amd64"]["sha256"] == _rel["sum"], raw.decode()[:160])
+        rb = reg_big()["ollama_update"]
+        check("Ollama-Update: Knoten big zeigt laufende und ausstehende Version", rb["pending"] and rb["available"] == "0.99.0" and bool(rb["current"]), str(rb))
+        check("Ollama-Update: Metrik und HA-Sensor zaehlen den ausstehenden Knoten", "skirnir_node_ollama_update_pending{node=\"big\"} 1" in http(C + "/metrics")[1].decode() and json.loads(http(C + "/admin/ha")[1])["ollama_updates_pending"] >= 1)
+        st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
+        check("Ollama-Update: Auftrag angenommen, Knoten im Drain", st == 200 and state()["nodes"]["big"]["draining"], raw.decode()[:100])
+        for _ in range(60):
+            rb = reg_big()["ollama_update"]
+            if rb.get("state") in ("done", "failed"): break
+            time.sleep(0.25)
+        check("Ollama-Update: Fake-Agent hat geladen, Hash geprueft, gemeldet; Version 0.99.0 im Heartbeat -> done, kein Drain", rb.get("state") == "done" and rb["current"] == "0.99.0" and not rb["pending"] and not state()["nodes"]["big"]["draining"], str(rb))
+        evs = [d["state"] for d in state()["decisions"] if d.get("event") == "ollama_update"]
+        check("Ollama-Update: Ereignisse requested -> downloading -> applied -> done", evs[-4:] == ["requested", "downloading", "applied", "done"], str(evs))
+        st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
+        check("Ollama-Update: gleiche Version -> 409", st == 409 and "already" in raw.decode(), raw.decode()[:80])
+        ha_o = json.loads(http(C + "/admin/ha")[1])
+        check("Ollama-Update: HA-Snapshot kennt die neueste Version, nichts mehr ausstehend", ha_o.get("ollama_latest") == "0.99.0" and ha_o.get("ollama_updates_pending") == 0 and ha_o["nodes"]["big"].get("ollama_version") == "0.99.0", str({k: ha_o.get(k) for k in ("ollama_latest", "ollama_updates_pending")}))
+        # Fehlerfall: die Quelle liefert 0.99.1, aber das Archiv passt nicht zur sha256sum.txt -> Agent lehnt ab, HA-Problem, Version bleibt
+        _rel["version"], _rel["blob"] = "0.99.1", b"manipuliert" * 50
+        http(C + "/admin/ollama-update/check", {})
+        st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
+        for _ in range(60):
+            rb = reg_big()["ollama_update"]
+            if rb.get("state") in ("done", "failed") and rb.get("version") == "0.99.1": break
+            time.sleep(0.25)
+        ha_o = json.loads(http(C + "/admin/ha")[1])
+        check("Ollama-Update: Hash-Widerspruch -> failed, HA-Problem, Version unveraendert, kein Drain", st == 200 and rb.get("state") == "failed" and "SHA-256" in (rb.get("message") or "")
+              and any("Ollama-Update auf big fehlgeschlagen" in p for p in ha_o["problems"]) and rb["current"] == "0.99.0" and not state()["nodes"]["big"]["draining"], str(rb) + str(ha_o["problems"]))
+        st, raw = http(C + "/admin/config", {"settings": {"modes.ollama_update.window_start": "03:00", "modes.ollama_update.window_end": "03:01"}}, method="PUT")
+        ou = json.loads(http(C + "/admin/ollama-update")[1])
+        check("Ollama-Update: Nachtfenster aus den Einstellungen sichtbar, jetzt ausserhalb", st == 200 and ou["window_start"] == "03:00" and ou["in_window"] is (time.localtime().tm_hour == 3 and time.localtime().tm_min == 0), str({k: ou[k] for k in ("window_start", "window_end", "in_window")}))
+        http(C + "/admin/config", {"settings": {"modes.ollama_update.release_url": None, "modes.ollama_update.window_start": None, "modes.ollama_update.window_end": None}}, method="PUT")
+        _rs.shutdown()
 
         # Metriken persistent (0.1.9): metrics.json neben der Config, gesichert 60 s nach der ersten Aenderung (tick_loop); ein frischer
         # Prozess laedt Zaehler und Histogramme und liefert dieselben Werte in /metrics

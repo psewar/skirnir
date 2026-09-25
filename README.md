@@ -340,6 +340,15 @@ on the router; agents pull them through their outbound connection, verify signat
 A button per node in the web UI, or the rollout loop with a per-node policy and a canary node that gets new versions first
 (`modes.agent_update`). Failures and stalls become Home Assistant problems.
 
+**Updating Ollama (router 0.3.0, agent 0.12.0):** once Ollama runs as a child of the agent service, the tray app's own
+updater no longer applies (it runs under the desktop user, and the installer is per-user). The router checks the latest
+Ollama release every few hours and shows it per node in the *Agents* tab; a per-node policy *Ollama auto-update* lets the
+rollout loop update nodes inside a night window (`modes.ollama_update`, default 02:00 to 05:00 router local time), canary
+first, only when the node is free. The agent downloads the release archive (`ollama.exe` plus `lib/ollama`, no installer)
+from its own fixed source, verifies it against the release's `sha256sum.txt`, stops Ollama, swaps the files, restarts it and
+rolls back if the new version does not answer. The router therefore chooses only the version, never the code. Windows nodes
+only for now; Linux archives are tar.zst.
+
 **New Windows node since agent 0.10.0:** download the agent binary from the release, double-click it, confirm the UAC prompt,
 answer three questions (router address, the operator's update key, the user allowed to control the service); it installs
 itself as the service *Skirnir Agent* and the node appears in the *Agents* tab for approval.
@@ -438,6 +447,8 @@ WebSocket API); recorder history does not carry over.
   changed via UI or API, only via the configuration file.
 - Secrets live in `secrets.env` (0600), never appear in logs or `/admin/state`; the router has no write access to the secret store.
 - Prompts go to the cloud only with a declared data class and never with recognisable keys in them.
+- Ollama updates are fetched by the agent itself from a fixed source (`ollama_update.source`, default GitHub releases of
+  ollama/ollama) and checked against that release's `sha256sum.txt`; the router only names the version.
 - Open: the service runs as root (a dedicated user needs rights on configuration, log and certificate).
 
 ## Measurements as a reference

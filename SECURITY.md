@@ -20,6 +20,8 @@ Only the latest release is supported. Fixes land on `main` and are tagged; there
   (`public_url`), a failed login costs a hashed password check in a thread and five failures per minute lock the source address.
 - **Agents** authenticate with an Ed25519 key over an outbound WebSocket; nothing listens on the GPU node for the router. A new
   key is *pending* until an operator approves it in the UI.
+- **Ollama updates** are fetched by the agent itself from a fixed source (`ollama_update.source`, default GitHub releases of
+  ollama/ollama) and checked against that release's `sha256sum.txt`; the router only names the version.
 - **Agent updates** are signed with an operator key that never lives on the router. A compromised router can misroute
   inference but cannot push code to the nodes.
 - The **agent's local health port** (127.0.0.1:10398) is for diagnostics; `POST /restart-child` needs the token in

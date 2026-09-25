@@ -3,6 +3,7 @@
 import difflib
 import hashlib
 import os
+import re
 import ssl
 import time
 import yaml
@@ -75,6 +76,8 @@ SCHEMA = {
         "admission": {"max_inflight_default": None, "aging_s": None, "max_wait_s": None, "max_queue": None},
         "gpu_guard": {"enabled": None, "throttled_max_inflight": None, "score_penalty": None, "require_fresh_status": None},
         "agent_update": {"enabled": None, "canary": None, "canary_clean_h": None, "public_key": None},
+        "ollama_update": {"enabled": None, "canary": None, "canary_clean_h": None, "window_start": None, "window_end": None,
+                          "check_interval_h": None, "release_url": None},
     },
     "models": {"*": {"weights_gib": None, "kv_gib_per_1k": None, "capabilities": None, "source": None, "note": None, "measured_at": None,
                      "measured_on": None, "vram_gib_8k": None, "vram_gib_32k": None, "partial_offload": None,
@@ -343,6 +346,19 @@ class Config:
         au = m.get("agent_update") or {}
         self.agent_update = {"enabled": bool(au.get("enabled", _d("modes.agent_update.enabled"))), "canary": au.get("canary") or "",
                              "canary_clean_h": float(au.get("canary_clean_h", _d("modes.agent_update.canary_clean_h"))), "public_key": au.get("public_key") or ""}
+        # Ollama-Update ueber den Router (ollamaupdate.py, 0.3.0): Versionspruefung bei GitHub, Rollout im Nachtfenster,
+        # Kanarienvogel (leer = der des Agent-Updates).
+        ou = m.get("ollama_update") or {}
+        self.ollama_update = {"enabled": bool(ou.get("enabled", _d("modes.ollama_update.enabled"))), "canary": ou.get("canary") or "",
+                              "canary_clean_h": float(ou.get("canary_clean_h", _d("modes.ollama_update.canary_clean_h"))),
+                              "window_start": str(ou.get("window_start", _d("modes.ollama_update.window_start")) or ""),
+                              "window_end": str(ou.get("window_end", _d("modes.ollama_update.window_end")) or ""),
+                              "check_interval_h": float(ou.get("check_interval_h", _d("modes.ollama_update.check_interval_h"))),
+                              "release_url": str(ou.get("release_url", _d("modes.ollama_update.release_url")) or "")}
+        for k in ("window_start", "window_end"):
+            v = self.ollama_update[k]
+            if v and not re.match(r"^\d{2}:\d{2}$", v):
+                raise ValueError(f"modes.ollama_update.{k}: HH:MM erwartet, nicht {v!r}")
 
     def _parse_models(self, models):
         self.models = models

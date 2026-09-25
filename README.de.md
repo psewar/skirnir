@@ -342,6 +342,15 @@ Betreiber-Schlüssel (nie vom Router); die Agenten holen sie über ihre ausgehen
 tauschen sich selbst und starten neu. Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
 Kanarienvogel-Knoten, der neue Versionen zuerst bekommt (`modes.agent_update`). Fehler und Hänger werden HA-Probleme.
 
+**Ollama aktualisieren (Router 0.3.0, Agent 0.12.0):** läuft Ollama als Kind des Agent-Dienstes, greift der Updater der
+Tray-App nicht mehr (er läuft unter dem Desktop-Benutzer, der Installer ist ein Pro-Benutzer-Installer). Der Router prüft
+alle paar Stunden das neueste Ollama-Release und zeigt es je Knoten im Tab *Agenten*; die Policy *Ollama-Auto-Update* je
+Knoten lässt die Rollout-Schleife Knoten im Nachtfenster nachziehen (`modes.ollama_update`, Standard 02:00 bis 05:00
+Ortszeit des Routers), Kanarienvogel zuerst, nur wenn der Knoten frei ist. Der Agent lädt das Release-Archiv (`ollama.exe`
+plus `lib/ollama`, kein Installer) von seiner eigenen festen Quelle, prüft es gegen die `sha256sum.txt` des Releases, hält
+Ollama an, tauscht die Dateien, startet neu und setzt zurück, wenn die neue Version nicht antwortet. Der Router wählt also
+nur die Version, nie den Code. Vorerst nur Windows-Knoten; die Linux-Archive sind tar.zst.
+
 **Neuer Windows-Knoten seit Agent 0.10.0:** Agent-Binary aus dem Release laden, doppelklicken, UAC bestätigen, drei Fragen
 beantworten (Router-Adresse, Update-Schlüssel des Betreibers, Benutzer mit Steuerrecht); die Binary richtet sich selbst als
 Dienst *Skirnir Agent* ein, und der Knoten erscheint im Tab „Agenten“ zur Freigabe.
@@ -441,6 +450,8 @@ Connect weg. Home Assistant führt Registereinträge je unique_id, darum müssen
 - Secrets liegen in `secrets.env` (0600), erscheinen nie in Logs oder `/admin/state`; der Router hat keinen Schreibzugriff auf den
   Secret-Store.
 - Prompts gehen nur mit deklarierter Datenklasse in die Cloud und nie mit erkennbaren Schlüsseln darin.
+- Ollama-Updates lädt der Agent selbst von einer festen Quelle (`ollama_update.source`, Standard GitHub-Releases von
+  ollama/ollama) und prüft sie gegen die `sha256sum.txt` dieses Releases; der Router nennt nur die Version.
 - Offen: der Dienst läuft als root (ein eigener Benutzer braucht Rechte auf Konfiguration, Log und Zertifikat).
 
 ## Messwerte als Anhaltspunkt

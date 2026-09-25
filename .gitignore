@@ -10,6 +10,7 @@ test/audit.jsonl
 test/nodes.json
 test/perf.json
 test/usage.json
+test/ollama-latest.json
 test/roles.yaml
 test/secrets.env
 test/*.key

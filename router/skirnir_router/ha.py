@@ -55,7 +55,8 @@ def ha_snapshot(now=None):
         nodes[n.name] = {"state": n.state, "busy_reason": n.busy_reason, "gpu": n.gpu, "gpu_util": n.gpu_util if n.gpu_known(now) else None,
                          "vram_free_gib": round(n.vram_free_gib, 2) if (n.gpu_known(now) and n.vram_free_gib is not None) else None,
                          "vram_total_gib": n.vram_total_gib, "loaded": sorted(n.loaded), "models": sorted(n.models),
-                         "inflight": n.inflight, "agent": bool(n.gpu_known(now)), "gpu_guard": n.guard_view(now)}
+                         "inflight": n.inflight, "agent": bool(n.gpu_known(now)), "gpu_guard": n.guard_view(now),
+                         "ollama_version": n.ollama_version}
     pending = [e["name"] for e in (state.REG.nodes.values() if state.REG else []) if e.get("state") == "pending"]
     problems = []
     if not online:
@@ -86,8 +87,10 @@ def ha_snapshot(now=None):
             if n.guard_policy and g.get("problem") and n.guard_state(now) is not None:
                 reason = g.get("grund") or ", ".join(g.get("warnungen") or []) or "?"
                 problems.append(f"Knoten {n.name}: GPU-Schutz {g.get('state')} ({reason})")
-    from . import agentupdate
+    from . import agentupdate, ollamaupdate
     problems += agentupdate.problems(now)   # fehlgeschlagene oder haengende Agent-Updates
+    problems += ollamaupdate.problems(now)  # fehlgeschlagene oder haengende Ollama-Updates, dauerhaft scheiternde Versionspruefung
+    ollama_pending = ollamaupdate.pending_nodes(now)
     from . import cloud
     problems += cloud.budget_problems()   # Stufe 5: Budgetwarnung/-erschoepfung als HA-Problem
     cloud_view = cloud.budget_view()
@@ -105,6 +108,7 @@ def ha_snapshot(now=None):
         "last_route": (f"{last['role']} -> {last['node']} {last['model']} (tier {last['tier']}, ctx {last['ctx']})" if last else "-"),
         "last_route_ts": last["ts"] if last else None,
         "kuerzungen": state.KUERZUNGEN["anzahl"], "letzte_kuerzung": state.KUERZUNGEN["letzte"],
+        "ollama_latest": ollamaupdate.LATEST.get("version"), "ollama_updates_pending": len(ollama_pending), "ollama_updates": ollama_pending,
         "nodes": nodes, "version": VERSION, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
@@ -322,6 +326,10 @@ class HAPublisher:
             json_attributes_template="{{ {'letzte': value_json.letzte_kuerzung} | tojson }}")
         ent("event", "kuerzung", "Anfrage gekürzt", state_topic=f"{self.base}/kuerzung", event_types=["kontext_gekuerzt"],
             icon="mdi:content-cut")
+        # Ollama-Update (0.3.0): Knoten, denen die neueste Ollama-Version fehlt; Attribute: neueste Version, je Knoten laeuft/verfuegbar
+        ent("sensor", "ollama_updates", "Ollama-Updates ausstehend", value_template="{{ value_json.ollama_updates_pending }}", icon="mdi:update",
+            state_class="measurement", json_attributes_topic=st,
+            json_attributes_template="{{ {'latest': value_json.ollama_latest, 'nodes': value_json.ollama_updates} | tojson }}")
         self.sync_node_discovery()
 
     def publish_state(self):

@@ -122,6 +122,7 @@
   <section class="wide" data-tab="agenten">
     <h2>Registrierte Agenten <span class="muted" style="font-weight:normal">– jeder Agent meldet sich mit seinem Schlüssel; neue warten hier auf Freigabe. Fakten (GPU, VRAM, MAC) kommen vom Agenten, Policy (WOL, Gewicht, MQTT, gleichzeitige Anfragen) setzt du hier</span></h2>
     <div class="muted" id="agentUpdate" style="margin:4px 0 6px"></div>
+    <div class="muted" id="ollamaUpdate" style="margin:4px 0 6px"></div>
     <table id="registry"><thead><tr><th>Knoten</th><th>Status</th><th>Rechner</th><th>GPU / VRAM</th><th>MAC (WOL)</th><th title="Desktop-Grundverbrauch ohne Ollama: gelernter Median; Policy-Wert überschreibt">Baseline</th><th>Policy</th><th></th></tr></thead><tbody></tbody></table>
   </section>
 
@@ -511,6 +512,19 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "Router bringt diesen Agenten selbsttätig auf die hinterlegte Version (Kanarienvogel zuerst, dann die anderen nach der Wartezeit); nur im Leerlauf": "router updates this agent automatically to the staged version (canary first, then the others after the waiting time); only when idle",
   "Auto-Update": "Auto-update",
   "auf {v} aktualisieren": "update to {v}",
+  "Ollama-Auto-Update": "Ollama auto-update",
+  "Router bringt Ollama auf diesem Knoten selbsttätig auf die neueste Version: nur im Nachtfenster, Kanarienvogel zuerst, nur im Leerlauf. Voraussetzung: Ollama läuft als Kind des Agenten": "router updates Ollama on this node automatically to the latest release: only in the night window, canary first, only when idle. Requires Ollama running as a child of the agent",
+  "Ollama auf {v} aktualisieren": "update Ollama to {v}",
+  "Ollama auf {v} aktualisieren? Der Agent lädt das Release-Archiv (ca. 1,4 GB), hält Ollama an, tauscht die Dateien und startet es neu. Geladene Modelle gehen dabei verloren.": "Update Ollama to {v}? The agent downloads the release archive (about 1.4 GB), stops Ollama, swaps the files and restarts it. Loaded models are lost.",
+  "Ollama-Update": "Ollama update",
+  "neueste Ollama-Version": "latest Ollama release",
+  "Versionsprüfung fehlgeschlagen: {e}": "version check failed: {e}",
+  "noch nicht geprüft": "not checked yet",
+  "jetzt prüfen": "check now",
+  "Fenster {a}–{b}": "window {a}–{b}",
+  "jederzeit": "any time",
+  "neuere Ollama-Version verfügbar": "newer Ollama release available",
+  "geprüft {t}": "checked {t}",
   "freigeben": "approve",
   "löschen": "delete",
   "wieder freigeben": "approve again",
@@ -1057,6 +1071,7 @@ function renderDecisions() {
     if (d.event === 'unsatisfiable') return `<div class="bad">${ts} <b>${esc(d.role)}</b> → ${t('keine Stufe kann')}: ${esc(d.reasons || '')}</div>`;
     if (d.event === 'breaker') return `<div class="${d.state === 'closed' ? 'ok' : 'bad'}">${ts} Breaker ${esc(d.node)} → ${esc(d.state)} ${esc(d.reason || '')}</div>`;
     if (d.event === 'agent_update') return `<div class="${d.state === 'failed' || d.state === 'stalled' ? 'bad' : d.state === 'done' ? 'ok' : 'warn'}">${ts} ${t('Agent-Update')} ${esc(d.node)} → ${esc(d.state)} ${esc(d.version || '')} ${esc(d.reason || '')}</div>`;
+    if (d.event === 'ollama_update') return `<div class="${d.state === 'failed' || d.state === 'stalled' ? 'bad' : d.state === 'done' ? 'ok' : 'warn'}">${ts} ${t('Ollama-Update')} ${esc(d.node)} → ${esc(d.state)} ${esc(d.version || '')} ${esc(d.reason || '')}</div>`;
     if (d.event === 'gpu_guard') return `<div class="${d.problem ? 'bad' : (d.state === 'normal' ? 'ok' : 'warn')}">${ts} ${t('GPU-Schutz')} ${esc(d.node)} → ${esc(t(d.state))}${d.limit_w ? ` (${d.limit_w} W)` : ''} ${esc(d.reason || '')}</div>`;
     if (d.event === 'queued') return `<div class="warn">${ts} ${t('Warteschlange: {r} ({p}) wartet auf {n} ({i} aktiv)', { r: `<b>${esc(d.role)}</b>`, p: esc(d.priority), n: esc(d.node), i: d.inflight })}</div>`;
     if (d.event === 'wait_load') return `<div class="warn">${ts} ${t('{r} wartet, bis {n} {m} geladen hat', { r: `<b>${esc(d.role)}</b>`, n: esc(d.node), m: esc(d.model) })}</div>`;
@@ -1163,6 +1178,12 @@ async function renderRegistry() {
     $('#agentUpdate').innerHTML = m ? `${t('Agent-Update hinterlegt')}: <b>${esc(m.version)}</b> (${(m.files || []).map(f => esc(f.os + '/' + f.arch)).join(', ')}${au.signed ? ', ' + t('signiert') : `, <span class="bad">${t('unsigniert')}</span>`})`
       + ` · Rollout ${t(au.enabled ? 'an' : 'aus')}${au.canary ? ' · ' + t('Kanarienvogel {c}, danach {h} h warten', { c: `<b>${esc(au.canary)}</b>`, h: au.canary_clean_h }) : ' · ' + t('kein Kanarienvogel')}`
       : t('kein Agent-Update hinterlegt (deploy.py --agent legt Binaries und Manifest auf den Router)'); } catch (e) {}
+  try { const ou = await api('/admin/ollama-update'); const l = ou.latest || {};
+    const win = ou.window_start && ou.window_end ? t('Fenster {a}–{b}', { a: esc(ou.window_start), b: esc(ou.window_end) }) : t('jederzeit');
+    $('#ollamaUpdate').innerHTML = `${t('neueste Ollama-Version')}: ` + (l.version ? `<b>${esc(l.version)}</b> <span class="muted">(${t('geprüft {t}', { t: esc((l.checked_ts || '').replace('T', ' ')) })})</span>`
+      : l.error ? `<span class="bad">${t('Versionsprüfung fehlgeschlagen: {e}', { e: esc(l.error) })}</span>` : t('noch nicht geprüft'))
+      + ` · ${t('Ollama-Update')} ${t(ou.enabled ? 'an' : 'aus')} · ${win}${ou.canary ? ' · ' + t('Kanarienvogel {c}, danach {h} h warten', { c: `<b>${esc(ou.canary)}</b>`, h: ou.canary_clean_h }) : ''}`
+      + ` <button class="small" onclick="ollamaCheck()">${t('jetzt prüfen')}</button>`; } catch (e) {}
   $('nav.tabs button[data-tab=agenten] .dot').hidden = !r.nodes.some(n => n.state === 'pending');   // Punkt am Tab: jemand wartet auf Freigabe
   const tb = $('#registry tbody'); tb.innerHTML = '';
   if (!r.nodes.length) { tb.innerHTML = `<tr><td colspan="8" class="muted">${t('noch kein Agent registriert')}</td></tr>`; return; }
@@ -1177,8 +1198,12 @@ async function renderRegistry() {
       <label title="${t('busy ab so viel fremdem VRAM über der Baseline in GiB; leer = global. Kleine Karten brauchen kleinere Werte: auf 16 GiB neben 8 GiB Ollama bleibt einem Spiel nie 6 GiB')}">${t('busy ab fremd')} <input type="number" min="0.1" max="64" step="0.5" value="${p.busy_foreign_gib ?? ''}" placeholder="glob" style="width:48px" onchange="nodePolicy('${n.fp}', {busy_foreign_gib: this.value ? +this.value : null})"> GiB</label><br>
       <label title="${t('Router beachtet den GPU-Schutz-Status dieses Agenten: Deckel 1 in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA. Aus z. B. für Karten ohne 12V-2x6-Stecker; der Agent setzt sein Power-Limit trotzdem')}"><input type="checkbox" ${p.gpu_guard === false ? '' : 'checked'} onchange="nodePolicy('${n.fp}', {gpu_guard: this.checked})"> ${t('GPU-Schutz beachten')}</label><br>
       <label><input type="checkbox" ${p.mqtt === false ? '' : 'checked'} onchange="nodePolicy('${n.fp}', {mqtt: this.checked})"> ${t('MQTT-Gerät in HA')}</label><br>
-      <label title="${t('Router bringt diesen Agenten selbsttätig auf die hinterlegte Version (Kanarienvogel zuerst, dann die anderen nach der Wartezeit); nur im Leerlauf')}"><input type="checkbox" ${p.auto_update ? 'checked' : ''} onchange="nodePolicy('${n.fp}', {auto_update: this.checked})"> ${t('Auto-Update')}</label>`;
+      <label title="${t('Router bringt diesen Agenten selbsttätig auf die hinterlegte Version (Kanarienvogel zuerst, dann die anderen nach der Wartezeit); nur im Leerlauf')}"><input type="checkbox" ${p.auto_update ? 'checked' : ''} onchange="nodePolicy('${n.fp}', {auto_update: this.checked})"> ${t('Auto-Update')}</label><br>
+      <label title="${t('Router bringt Ollama auf diesem Knoten selbsttätig auf die neueste Version: nur im Nachtfenster, Kanarienvogel zuerst, nur im Leerlauf. Voraussetzung: Ollama läuft als Kind des Agenten')}"><input type="checkbox" ${p.ollama_auto_update ? 'checked' : ''} onchange="nodePolicy('${n.fp}', {ollama_auto_update: this.checked})"> ${t('Ollama-Auto-Update')}</label>`;
     const u = n.update || {};
+    const ou = n.ollama_update || {};
+    const ouState = ou.state ? `<div class="${ou.state === 'failed' || ou.state === 'stalled' ? 'bad' : ou.state === 'done' ? 'ok' : 'warn'}">Ollama ${esc(ou.version || '')}: ${esc(ou.state)}${ou.message ? ' – ' + esc(ou.message) : ''}${ou.ts ? ` <span class="muted">${esc(ou.ts.slice(11))}</span>` : ''}</div>` : '';
+    const ouBtn = n.state === 'approved' && ou.pending && n.connected ? `<button class="small" onclick="nodeOllamaUpdate('${n.fp}', '${esc(ou.available)}')">${t('Ollama auf {v} aktualisieren', { v: esc(ou.available) })}</button>` : '';
     const uState = u.state ? `<div class="${u.state === 'failed' || u.state === 'stalled' ? 'bad' : u.state === 'done' ? 'ok' : 'warn'}">Update ${esc(u.version || '')}: ${esc(u.state)}${u.message ? ' – ' + esc(u.message) : ''}${u.ts ? ` <span class="muted">${esc(u.ts.slice(11))}</span>` : ''}</div>` : '';
     const uBtn = n.state === 'approved' && u.pending && n.connected ? `<button class="small" onclick="nodeUpdate('${n.fp}', '${esc(u.available)}')">${t('auf {v} aktualisieren', { v: esc(u.available) })}</button>` : '';
     const btn = n.state === 'pending' ? `<button onclick="nodeAct('${n.fp}','approve')">${t('freigeben')}</button><br><button class="small" onclick="nodeDel('${n.fp}')">${t('löschen')}</button>`
@@ -1188,12 +1213,18 @@ async function renderRegistry() {
     const base = n.learned && n.learned.baseline_gib != null ? `${t('{g} GiB gelernt', { g: n.learned.baseline_gib })} <span class="muted">(${t('{n} Proben', { n: n.learned.samples || 0 })})</span>` : `<span class="muted">${t('noch nichts gelernt')}</span>`;
     tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(n.name)}</b><div class="muted" title="${n.fp}">${n.fp.slice(0, 16)}…${n.connected ? ' · ' + t('verbunden') : ''}</div></td>
       <td>${st}<div class="muted">${t('seit')} ${esc((n.first_seen || '').replace('T', ' '))}${n.remote ? ' · ' + esc(n.remote) : ''}</div></td>
-      <td>${esc(f.hostname || '')}<div class="muted">${esc([f.manufacturer, f.model].filter(Boolean).join(' '))}<br>${esc(f.os || '')}/${esc(f.arch || '')} · Agent ${esc(f.agent_version || '?')}${u.pending ? ` <span class="badge half_open" title="${t('neue Version hinterlegt')}">→ ${esc(u.available)}</span>` : ''} · Ollama ${esc(f.ollama_version || '?')}</div></td>
+      <td>${esc(f.hostname || '')}<div class="muted">${esc([f.manufacturer, f.model].filter(Boolean).join(' '))}<br>${esc(f.os || '')}/${esc(f.arch || '')} · Agent ${esc(f.agent_version || '?')}${u.pending ? ` <span class="badge half_open" title="${t('neue Version hinterlegt')}">→ ${esc(u.available)}</span>` : ''} · Ollama ${esc(ou.current || f.ollama_version || '?')}${ou.pending ? ` <span class="badge half_open" title="${t('neuere Ollama-Version verfügbar')}">→ ${esc(ou.available)}</span>` : ''}</div></td>
       <td>${esc(f.gpu || '–')}<div class="muted">${vram}</div></td><td>${esc(f.mac || '–')}<div class="muted">${esc(f.local_ip || '')}</div></td>
       <td>${base}${p.foreign_vram_baseline_gib != null ? `<div class="muted">Policy ${p.foreign_vram_baseline_gib} GiB</div>` : ''}</td>
-      <td>${pol}</td><td>${btn}${uBtn ? '<br>' + uBtn : ''}${uState}</td></tr>`);
+      <td>${pol}</td><td>${btn}${uBtn ? '<br>' + uBtn : ''}${uState}${ouBtn ? '<br>' + ouBtn : ''}${ouState}</td></tr>`);
   }
 }
+async function nodeOllamaUpdate(fp, v) { if (!confirm(t('Ollama auf {v} aktualisieren? Der Agent lädt das Release-Archiv (ca. 1,4 GB), hält Ollama an, tauscht die Dateien und startet es neu. Geladene Modelle gehen dabei verloren.', { v }))) return;
+  try { const r = await api(`/admin/nodes/${fp}/ollama-update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); $('#msg').innerHTML = `<span class="ok">${esc(r.message)}</span>`; }
+  catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } await refresh(); }
+async function ollamaCheck() { try { const r = await api('/admin/ollama-update/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    $('#msg').innerHTML = r.latest && r.latest.version ? `<span class="ok">Ollama ${esc(r.latest.version)}</span>` : `<span class="bad">${esc((r.latest || {}).error || '?')}</span>`; }
+  catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } await refresh(); }
 async function nodeUpdate(fp, v) { if (!confirm(t('Agent auf {v} aktualisieren? Der Dienst startet neu, Ollama und STT auf dem Knoten damit auch.', { v }))) return;
   try { const r = await api(`/admin/nodes/${fp}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); $('#msg').innerHTML = `<span class="ok">${esc(r.message)}</span>`; }
   catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } await refresh(); }

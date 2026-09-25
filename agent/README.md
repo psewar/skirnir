@@ -5,7 +5,7 @@ MQTT-Geraet fuer Home Assistant, Aufsicht ueber lokale KI-Dienste (z. B. einen W
 
 | Datei | Zweck |
 |---|---|
-| `*.go` | `main` (Verben), `app` (Verdrahtung), `config`, `logging`, `gpu` (NVML direkt aus `nvml.dll`, Rueckfall nvidia-smi; `gpu_nvml_windows.go`), `sensors` + `gpuz_*` (Sensoren, GPU-Z), `guard` (GPU-Schutz), `kuerzung` (Kuerzungsmeldung), `heartbeat`, `tunnel`, `identity`, `provision`, `facts`, `updater*` (Selbst-Update), `proxy` (TLS-Vorschaltstelle), `secrets` (Secret-Store, Universal-Auth-API), `mqtt`, `supervisor` (Kinder + Job-Objekt), `health`, `service` (SCM), `install` |
+| `*.go` | `main` (Verben), `app` (Verdrahtung), `config`, `logging`, `gpu` (NVML direkt aus `nvml.dll`, Rueckfall nvidia-smi; `gpu_nvml_windows.go`), `sensors` + `gpuz_*` (Sensoren, GPU-Z), `guard` (GPU-Schutz), `kuerzung` (Kuerzungsmeldung), `heartbeat`, `tunnel`, `identity`, `provision`, `facts`, `updater*` (Selbst-Update), `ollamaupdate*` (Ollama-Update ueber den Router), `proxy` (TLS-Vorschaltstelle), `secrets` (Secret-Store, Universal-Auth-API), `mqtt`, `supervisor` (Kinder + Job-Objekt), `health`, `service` (SCM), `install` |
 | `build.sh` | Cross-Compile aus WSL: `wsl -e bash -lc '/mnt/c/<workspace>/skirnir/agent/build.sh 0.1.1'` → `dist/skirnir-agent.exe` |
 | `config.example.yaml` | Vorlage fuer neue Rechner **mit Installationsanleitung Windows/Linux im Kopf**; die echte Datei liegt unter `C:\ProgramData\skirnir-agent\config.yaml` |
 | `skirnir-agent.service` | systemd-Unit fuer Linux-Knoten (`run --config /etc/skirnir-agent/config.yaml`) |
@@ -119,6 +119,33 @@ holt sie sich und tauscht sich selbst (`updater.go`; Router `agentupdate.py`).
    der Agent mit der neuen Version, gilt der Auftrag als `done`. Fehler oder 15 min Stille -> HA-Problem im Router.
 
 Tests: `updater_test.go` (Signatur fremd/veraendert, Hash-Widerspruch, fremde Datei, ohne Schluessel, abgewaehlt).
+
+## Ollama-Update ueber den Router (0.12.0)
+
+Laeuft Ollama als Kind des Dienstes (`children:` mit `ollama.exe`), greift der Updater der Tray-App nicht mehr: er laeuft
+unter dem Desktop-Benutzer, und `OllamaSetup.exe` ist ein Pro-Benutzer-Installer (unter LocalSystem landete er im
+SYSTEM-Profil). Der Router uebernimmt die Rolle des Updaters (`ollamaupdate.go`; Router `ollamaupdate.py`).
+
+1. Der Router prueft alle `check_interval_h` Stunden das neueste Release (GitHub-API, `sha256sum.txt`) und zeigt es je
+   Knoten. Auftrag: Knopf in der UI oder Rollout-Schleife (Policy **Ollama-Auto-Update** je Knoten, Nachtfenster
+   `modes.ollama_update.window_start..window_end`, Kanarienvogel zuerst, nur wenn der Knoten frei ist). Durch den Tunnel
+   kommt `{"t":"ollama-update", version, file, sha256, size}`.
+2. Der Agent nimmt den Auftrag nur an, wenn Ollama sein Kind ist und `file` das Archiv fuer dieses System ist
+   (`ollama-windows-amd64.zip`; Linux-Archive sind tar.zst und noch nicht unterstuetzt). Er holt `sha256sum.txt` von
+   seiner **eigenen festen Quelle** (`ollama_update.source`, Standard GitHub-Releases von ollama/ollama) und vergleicht
+   mit dem Auftrag: der Router kann nur die Version waehlen, nicht den Code.
+3. Download (ca. 1,4 GB, Fortschritt im Heartbeat) in `<Programme>\.skirnir-ollama-update\`, SHA-256, entpacken (Zip-Slip
+   abgefangen), `ollama --version` der entpackten Binary muss die Zielversion nennen. Vorher: dreifacher Archivplatz frei.
+4. Tausch: Supervisor haelt das Kind an (`Hold`, Prozessbaum samt Modellprozessen), `ollama.exe` und `lib` wandern in eine
+   Sicherung, die neuen Dateien an ihren Platz, `Release` startet das Kind sofort neu. `/api/version` muss binnen 3 min die
+   Zielversion melden, sonst Rollback auf die Sicherung. Tray-App und Windows-Deinstallationseintrag bleiben alt (kosmetisch).
+5. Stand im Heartbeat (`ollama_update: {state, version, message}`): checking, downloading, extracting, swapping, applied,
+   failed; dazu `ollama_version` alle 60 s frisch. Meldet der Knoten die Zielversion, gilt der Auftrag als `done`.
+
+Konfiguration: `ollama_update: {enabled: false}` schaltet es ab, `source:` aendert die Quelle (z. B. ein interner Spiegel
+mit derselben Ordnerstruktur `v<version>/<datei>` + `sha256sum.txt`).
+Tests: `ollamaupdate_test.go` (Pruefsummen-Datei, Versionsausgabe, Auftragspruefung, Zip-Slip, Tausch + Rollback, ganzer
+Ablauf gegen eine Fake-Quelle mit Erfolg und mit ausbleibender Neuversion).
 
 ## GPU-Schutz (0.7.0)
 
