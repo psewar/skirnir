@@ -98,7 +98,16 @@ func setupInteractive(cfgPath string) error {
 		}
 		return nil
 	}
-	defer pause()
+	err := setupBody(cfgPath)
+	if err != nil { // vor der Enter-Pause ausgeben, damit es im UAC-Fenster nicht untergeht (2026-09-26)
+		fmt.Printf("\n*** FEHLER: %v ***\n", err)
+	}
+	pause()
+	return err
+}
+
+// setupBody: die eigentliche Einrichtung (erhoeht).
+func setupBody(cfgPath string) error {
 	in := bufio.NewReader(os.Stdin)
 	if moved, err := migrateLegacyInstall(&cfgPath); err != nil {
 		return err
@@ -200,20 +209,28 @@ func migrateLegacyInstall(cfgPath *string) (bool, error) {
 		return false, nil
 	}
 	fmt.Println("Alte Installation gefunden - Umzug nach skirnir-agent (Dienst, Verzeichnis, Aufgabe) ...")
+	// Erst die umgeschriebene Konfiguration pruefen, dann anfassen: ein Umzug, der an der Konfiguration scheitert, liesse den
+	// Knoten ohne Dienst zurueck (gesehen 2026-09-26 auf einem Knoten mit alter Config).
+	raw, err := os.ReadFile(legacyConfigPathWindows)
+	if err != nil {
+		return false, err
+	}
+	s := upgradeConfigText(string(raw))
+	probe := filepath.Join(os.TempDir(), "skirnir-agent-umzug-probe.yaml")
+	if err := os.WriteFile(probe, []byte(s), 0o600); err != nil {
+		return false, err
+	}
+	_, cfgErr := loadConfig(probe)
+	os.Remove(probe)
+	if cfgErr != nil {
+		return false, fmt.Errorf("die vorhandene Konfiguration waere nach dem Umzug ungueltig - nichts veraendert, alter Dienst laeuft weiter.\n  %v\n  Bitte %s von Hand anpassen und setup erneut starten", cfgErr, legacyConfigPathWindows)
+	}
 	_ = controlService(legacyServiceName, "stop")
 	stopRelayProcesses()
 	runQuiet("schtasks.exe", "/Delete", "/F", "/TN", legacyRelayTaskName)
 	oldDir, newDir := filepath.Dir(legacyConfigPathWindows), filepath.Dir(newDefault)
 	if err := os.Rename(oldDir, newDir); err != nil {
 		return false, fmt.Errorf("%s nach %s verschieben: %w", oldDir, newDir, err)
-	}
-	raw, err := os.ReadFile(newDefault)
-	if err != nil {
-		return false, err
-	}
-	s := string(raw)
-	for old, repl := range map[string]string{`\ollama-router-agent\`: `\skirnir-agent\`, "OllamaRouterAgent": "SkirnirAgent", "Ollama Router Agent": "Skirnir Agent"} {
-		s = strings.ReplaceAll(s, old, repl)
 	}
 	_ = copyFile(newDefault, newDefault+".vor-umzug-"+time.Now().Format("20060102-150405"))
 	if err := os.WriteFile(newDefault, []byte(s), 0o600); err != nil {
@@ -227,6 +244,20 @@ func migrateLegacyInstall(cfgPath *string) (bool, error) {
 	}
 	*cfgPath = newDefault
 	return true, nil
+}
+
+// upgradeConfigText: Pfade und Namen der alten Installation, alter Blockname mimir: -> secret_store: (gleiche Schluessel).
+func upgradeConfigText(s string) string {
+	for old, repl := range map[string]string{`\ollama-router-agent\`: `\skirnir-agent\`, "OllamaRouterAgent": "SkirnirAgent", "Ollama Router Agent": "Skirnir Agent"} {
+		s = strings.ReplaceAll(s, old, repl)
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if strings.TrimRight(l, "\r") == "mimir:" {
+			lines[i] = "secret_store:   # hiess bis 0.9.0 mimir: (setup hat umbenannt)"
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func setupWriteConfig(in *bufio.Reader, cfgPath string) error {
@@ -290,7 +321,20 @@ func setupUpgradeConfig(in *bufio.Reader, cfgPath string) error {
 		}
 	}
 	if strings.Contains(s, "\nmimir:") {
-		fmt.Println("  Hinweis: der Block `mimir:` heisst seit 0.9.1 `secret_store:` - bitte von Hand umbenennen, sonst scheitert der Start.")
+		s = upgradeConfigText(s)
+		fmt.Println("  Block `mimir:` in `secret_store:` umbenannt (gleiche Schluessel)")
+		changed = true
+	}
+	if _, err := loadConfig(cfgPath); err == nil {
+		// Probe der geaenderten Fassung, bevor sie geschrieben wird
+		probe := filepath.Join(os.TempDir(), "skirnir-agent-probe.yaml")
+		if os.WriteFile(probe, []byte(s), 0o600) == nil {
+			if _, perr := loadConfig(probe); perr != nil {
+				os.Remove(probe)
+				return fmt.Errorf("Konfiguration waere ungueltig - nichts geschrieben: %w", perr)
+			}
+			os.Remove(probe)
+		}
 	}
 	if changed {
 		_ = copyFile(cfgPath, cfgPath+".bak-"+time.Now().Format("20060102-150405"))
