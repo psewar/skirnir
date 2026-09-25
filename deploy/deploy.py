@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deploy des Routers in seinen LXC-Container ueber den LXC-Host (SSH root, Passwort aus dem Secret-Store).
 
-Ablauf: SFTP nach <lxc-host>:/tmp/ollama-router/ -> Datei-Push in den Container (CT_PUSH) -> systemd reload/restart -> Smoke-Test.
+Ablauf: SFTP nach <lxc-host>:/tmp/skirnir-router/ -> Datei-Push in den Container (CT_PUSH) -> systemd reload/restart -> Smoke-Test.
 Aufruf:  python deploy.py              (voller Deploy)
          python deploy.py --status     (nur Status + Journal)
          python deploy.py --pull-roles (roles.yaml des CT in den Ops-Ordner holen, zur Ansicht/Sicherung)
@@ -33,27 +33,27 @@ CT = OPS["CT"]
 secrets_env = None   # nach load_secrets() gesetzt; decision-embed/deploy_ct.py nutzt connect()/run()/ct_exec()/ct_push() von hier
 
 FILES = [  # (lokal, Zielpfad im Container, mode); Quelle ist ROUTER_DIR, ausser bei absoluten Pfaden (Ops-Ordner).
-           # Liegt im Ops-Ordner unter router/ eine Datei gleichen Namens (z. B. ollama-router-cert.path mit dem echten
+           # Liegt im Ops-Ordner unter router/ eine Datei gleichen Namens (z. B. skirnir-router-cert.path mit dem echten
            # Zertifikatspfad), gewinnt sie - so bleibt das Repo generisch und der Standort privat.
-    ("router.py", "/opt/ollama-router/router.py", "0755"),
-    ("ui.html", "/opt/ollama-router/ui.html", "0644"),
-    ("skirnir.png", "/opt/ollama-router/skirnir.png", "0644"),    # Logo im UI-Kopf
-    ("favicon.png", "/opt/ollama-router/favicon.png", "0644"),    # Tab-Icon (128 px), auch /favicon.ico
-    ("decision-tfidf.json", "/etc/ollama-router/decision-tfidf.json", "0644"),   # Decision Engine Stufe 1 (train_tfidf.py)
-    (OPS["CONFIG_YAML"], "/etc/ollama-router/config.yaml", "0600"),
-    (OPS["RENDER_ENV_CONF"], "/etc/ollama-router/render-env.conf", "0600"),
-    ("ollama-router.service", "/etc/systemd/system/ollama-router.service", "0644"),
-    ("ollama-router-cert.path", "/etc/systemd/system/ollama-router-cert.path", "0644"),
-    ("ollama-router-cert.service", "/etc/systemd/system/ollama-router-cert.service", "0644"),
-    ("render-env.sh", "/opt/ollama-router/render-env.sh", "0755"),
-    ("ollama-router-secrets.service", "/etc/systemd/system/ollama-router-secrets.service", "0644"),
-    ("ollama-router-secrets.timer", "/etc/systemd/system/ollama-router-secrets.timer", "0644"),
-    ("ollama-router-secrets-refresh.service", "/etc/systemd/system/ollama-router-secrets-refresh.service", "0644"),
+    ("router.py", "/opt/skirnir-router/router.py", "0755"),
+    ("ui.html", "/opt/skirnir-router/ui.html", "0644"),
+    ("skirnir.png", "/opt/skirnir-router/skirnir.png", "0644"),    # Logo im UI-Kopf
+    ("favicon.png", "/opt/skirnir-router/favicon.png", "0644"),    # Tab-Icon (128 px), auch /favicon.ico
+    ("decision-tfidf.json", "/etc/skirnir-router/decision-tfidf.json", "0644"),   # Decision Engine Stufe 1 (train_tfidf.py)
+    (OPS["CONFIG_YAML"], "/etc/skirnir-router/config.yaml", "0600"),
+    (OPS["RENDER_ENV_CONF"], "/etc/skirnir-router/render-env.conf", "0600"),
+    ("skirnir-router.service", "/etc/systemd/system/skirnir-router.service", "0644"),
+    ("skirnir-router-cert.path", "/etc/systemd/system/skirnir-router-cert.path", "0644"),
+    ("skirnir-router-cert.service", "/etc/systemd/system/skirnir-router-cert.service", "0644"),
+    ("render-env.sh", "/opt/skirnir-router/render-env.sh", "0755"),
+    ("skirnir-router-secrets.service", "/etc/systemd/system/skirnir-router-secrets.service", "0644"),
+    ("skirnir-router-secrets.timer", "/etc/systemd/system/skirnir-router-secrets.timer", "0644"),
+    ("skirnir-router-secrets-refresh.service", "/etc/systemd/system/skirnir-router-secrets-refresh.service", "0644"),
 ]
-# router.py ist nur der Einstieg; der Code liegt im Paket router/ollama_router/. Unterpakete (z. B. ollama_router/decision/)
+# router.py ist nur der Einstieg; der Code liegt im Paket router/skirnir_router/. Unterpakete (z. B. skirnir_router/decision/)
 # werden rekursiv mitgenommen, __pycache__ nicht - ein fehlendes Unterpaket liess den Router nach dem Deploy mit ImportError
 # im Neustart-Kreis haengen.
-PKG_DIR = os.path.join(ROUTER_DIR, "ollama_router")
+PKG_DIR = os.path.join(ROUTER_DIR, "skirnir_router")
 PKG_SUBDIRS = []
 for _root, _dirs, _files in os.walk(PKG_DIR):
     _dirs[:] = sorted(d for d in _dirs if d != "__pycache__")
@@ -63,10 +63,10 @@ for _root, _dirs, _files in os.walk(PKG_DIR):
     for f in sorted(_files):
         if f.endswith(".py"):
             _sub = "" if _rel == "." else _rel + "/"
-            FILES.append((f"ollama_router/{_sub}{f}", f"/opt/ollama-router/ollama_router/{_sub}{f}", "0644"))
-_MKDIRS = " ".join(f"/opt/ollama-router/ollama_router/{d}" for d in PKG_SUBDIRS)
-_TMPDIRS = " ".join(f"/tmp/ollama-router/ollama_router/{d}" for d in PKG_SUBDIRS)
-# Rollen, die in der UI geaendert werden, liegen in /etc/ollama-router/roles.yaml (nicht im Repo).
+            FILES.append((f"skirnir_router/{_sub}{f}", f"/opt/skirnir-router/skirnir_router/{_sub}{f}", "0644"))
+_MKDIRS = " ".join(f"/opt/skirnir-router/skirnir_router/{d}" for d in PKG_SUBDIRS)
+_TMPDIRS = " ".join(f"/tmp/skirnir-router/skirnir_router/{d}" for d in PKG_SUBDIRS)
+# Rollen, die in der UI geaendert werden, liegen in /etc/skirnir-router/roles.yaml (nicht im Repo).
 # deploy.py laesst diese Datei in Ruhe; `--pull-roles` holt sie in den Ops-Ordner.
 
 
@@ -78,7 +78,7 @@ def _local(local):
 
 
 def _staged(local):
-    """Name unter /tmp/ollama-router/ auf dem LXC-Host (Ops-Dateien unter ihrem Dateinamen)."""
+    """Name unter /tmp/skirnir-router/ auf dem LXC-Host (Ops-Dateien unter ihrem Dateinamen)."""
     return os.path.basename(local) if os.path.isabs(local) else local
 
 
@@ -133,8 +133,8 @@ def curl_auth(url_and_args):
 
 
 AGENT_BINARIES = [  # (Dateiname in dist/, os, arch) - Namen wie im GitHub-Release
-    ("ollama-router-agent.exe", "windows", "amd64"),
-    ("ollama-router-agent-linux-amd64", "linux", "amd64"),
+    ("skirnir-agent.exe", "windows", "amd64"),
+    ("skirnir-agent-linux-amd64", "linux", "amd64"),
 ]
 
 
@@ -162,8 +162,8 @@ def agent_signing_key():
 
 
 def deploy_agent(c, dist_dir=None):
-    """Binaries aus dist/ signieren (Manifest) und nach /etc/ollama-router/agent/ legen. Version aus `<exe> version`."""
-    dist_dir = dist_dir or os.path.join(os.path.dirname(ROUTER_DIR), "agent-go", "dist")
+    """Binaries aus dist/ signieren (Manifest) und nach /etc/skirnir-router/agent/ legen. Version aus `<exe> version`."""
+    dist_dir = dist_dir or os.path.join(os.path.dirname(ROUTER_DIR), "agent", "dist")
     files = []
     version = None
     for name, os_name, arch in AGENT_BINARIES:
@@ -177,7 +177,7 @@ def deploy_agent(c, dist_dir=None):
                 print(f"Abbruch: Versionen unterschiedlich ({version} vs {v})"); sys.exit(2)
             version = v
         data = open(path, "rb").read()
-        files.append({"name": f"ollama-router-agent-{{v}}-{os_name}-{arch}" + (".exe" if os_name == "windows" else ""),
+        files.append({"name": f"skirnir-agent-{{v}}-{os_name}-{arch}" + (".exe" if os_name == "windows" else ""),
                       "os": os_name, "arch": arch, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "_src": path})
     version = version or (sys.argv[sys.argv.index("--version") + 1] if "--version" in sys.argv else None)
     if not files or not version:
@@ -191,26 +191,26 @@ def deploy_agent(c, dist_dir=None):
     mpath = os.path.join(dist_dir, "manifest.json")
     with open(mpath, "w", encoding="utf-8") as fh:
         json.dump({"manifest": manifest, "signature": signature}, fh, indent=1, ensure_ascii=False)
-    run(c, "mkdir -p /tmp/ollama-router-agent")
+    run(c, "mkdir -p /tmp/skirnir-agent")
     sftp = c.open_sftp()
     for f in files:
-        sftp.put(f["_src"], f"/tmp/ollama-router-agent/{f['name']}")
-    sftp.put(mpath, "/tmp/ollama-router-agent/manifest.json")
+        sftp.put(f["_src"], f"/tmp/skirnir-agent/{f['name']}")
+    sftp.put(mpath, "/tmp/skirnir-agent/manifest.json")
     sftp.close()
-    run(c, ct_exec("mkdir -p /etc/ollama-router/agent"))
+    run(c, ct_exec("mkdir -p /etc/skirnir-router/agent"))
     for f in files:
-        rc, out, err = run(c, ct_push(f"/tmp/ollama-router-agent/{f['name']}", f"/etc/ollama-router/agent/{f['name']}", "0644"))
+        rc, out, err = run(c, ct_push(f"/tmp/skirnir-agent/{f['name']}", f"/etc/skirnir-router/agent/{f['name']}", "0644"))
         if rc != 0:
             print("push failed:", f["name"], out, err); sys.exit(1)
-    rc, out, err = run(c, ct_push("/tmp/ollama-router-agent/manifest.json", "/etc/ollama-router/agent/manifest.json", "0644"))
-    run(c, "rm -rf /tmp/ollama-router-agent")
-    rc, out, err = run(c, ct_exec("ls -la /etc/ollama-router/agent/ && python3 -c \"import json; m=json.load(open('/etc/ollama-router/agent/manifest.json'))['manifest']; print('Manifest', m['version'], [f['name'] for f in m['files']])\""))
+    rc, out, err = run(c, ct_push("/tmp/skirnir-agent/manifest.json", "/etc/skirnir-router/agent/manifest.json", "0644"))
+    run(c, "rm -rf /tmp/skirnir-agent")
+    rc, out, err = run(c, ct_exec("ls -la /etc/skirnir-router/agent/ && python3 -c \"import json; m=json.load(open('/etc/skirnir-router/agent/manifest.json'))['manifest']; print('Manifest', m['version'], [f['name'] for f in m['files']])\""))
     print(out.strip(), err.strip())
     print(f"Agent {version} hinterlegt ({len(files)} Datei(en)). Oeffentlicher Schluessel fuer update.public_key der Agenten: {pub}")
 
 
 def _router_version():
-    m = re.search(r'^VERSION\s*=\s*"([^"]+)"', open(os.path.join(ROUTER_DIR, "ollama_router", "common.py"), encoding="utf-8").read(), re.M)
+    m = re.search(r'^VERSION\s*=\s*"([^"]+)"', open(os.path.join(ROUTER_DIR, "skirnir_router", "common.py"), encoding="utf-8").read(), re.M)
     return m.group(1) if m else "?"
 
 
@@ -227,7 +227,7 @@ def main():
         return
     status_only = "--status" in sys.argv
     if "--pull-roles" in sys.argv:
-        rc, out, err = run(c, ct_exec("cat /etc/ollama-router/roles.yaml 2>/dev/null || echo '# (keine roles.yaml vorhanden)'"))
+        rc, out, err = run(c, ct_exec("cat /etc/skirnir-router/roles.yaml 2>/dev/null || echo '# (keine roles.yaml vorhanden)'"))
         open(OPS["ROLES_YAML"], "w", encoding="utf-8").write(out)
         print("roles.yaml geholt:", len(out), "Bytes ->", OPS["ROLES_YAML"])
         c.close()
@@ -246,21 +246,32 @@ def main():
                     "files": {_staged(local): hashlib.sha256(open(_local(local), "rb").read()).hexdigest() for local, _, _ in FILES}}
         with open(os.path.join(ROUTER_DIR, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=1)
-        FILES.append(("manifest.json", "/etc/ollama-router/manifest.json", "0644"))
-        run(c, f"mkdir -p /tmp/ollama-router/ollama_router {_TMPDIRS}")
+        FILES.append(("manifest.json", "/etc/skirnir-router/manifest.json", "0644"))
+        # Umbenennung 2026-09-25 (ollama-router -> skirnir-router): einmaliger Umzug auf dem CT, bevor die neuen Dateien kommen.
+        rc, out, err = run(c, ct_exec(
+            "if [ ! -d /etc/skirnir-router ] && [ -d /etc/ollama-router ]; then "
+            "systemctl disable --now ollama-router ollama-router-cert.path ollama-router-secrets.timer >/dev/null 2>&1; "
+            "rm -f /etc/systemd/system/ollama-router.service /etc/systemd/system/ollama-router-cert.path /etc/systemd/system/ollama-router-cert.service "
+            "/etc/systemd/system/ollama-router-secrets.service /etc/systemd/system/ollama-router-secrets.timer /etc/systemd/system/ollama-router-secrets-refresh.service; "
+            "mv /etc/ollama-router /etc/skirnir-router; [ -d /opt/ollama-router ] && mv /opt/ollama-router /opt/skirnir-router; "
+            "[ -d /var/log/ollama-router ] && mv /var/log/ollama-router /var/log/skirnir-router; [ -d /var/lib/ollama-router ] && mv /var/lib/ollama-router /var/lib/skirnir-router; "
+            "systemctl daemon-reload; echo 'umgezogen: ollama-router -> skirnir-router'; fi"))
+        if out.strip():
+            print(out.strip())
+        run(c, f"mkdir -p /tmp/skirnir-router/skirnir_router {_TMPDIRS}")
         sftp = c.open_sftp()
         for local, _remote, _ in FILES:
-            sftp.put(_local(local), f"/tmp/ollama-router/{_staged(local)}")
+            sftp.put(_local(local), f"/tmp/skirnir-router/{_staged(local)}")
         sftp.close()
-        rc, out, err = run(c, ct_exec(f"mkdir -p /opt/ollama-router/ollama_router /etc/ollama-router {_MKDIRS}"))
+        rc, out, err = run(c, ct_exec(f"mkdir -p /opt/skirnir-router/skirnir_router /etc/skirnir-router {_MKDIRS}"))
         for local, remote, mode in FILES:
-            rc, out, err = run(c, ct_push(f"/tmp/ollama-router/{_staged(local)}", remote, mode))
+            rc, out, err = run(c, ct_push(f"/tmp/skirnir-router/{_staged(local)}", remote, mode))
             if rc != 0:
                 print("push failed:", local, out, err)
                 sys.exit(1)
-        run(c, "rm -rf /tmp/ollama-router")
-        rc, out, err = run(c, ct_exec("python3 /opt/ollama-router/router.py --check /etc/ollama-router/config.yaml && "
-                                  "python3 -c \"import yaml; yaml.safe_load(open(\\\"/etc/ollama-router/config.yaml\\\"))\""))
+        run(c, "rm -rf /tmp/skirnir-router")
+        rc, out, err = run(c, ct_exec("python3 /opt/skirnir-router/router.py --check /etc/skirnir-router/config.yaml && "
+                                  "python3 -c \"import yaml; yaml.safe_load(open(\\\"/etc/skirnir-router/config.yaml\\\"))\""))
         print(out.strip(), err.strip())
         if rc != 0 or "Konfiguration ok" not in out:
             print("Abbruch: Schema-Check auf dem CT fehlgeschlagen - Dienst NICHT neu gestartet (alter Prozess laeuft weiter, Dateien sind aber schon ersetzt)")
@@ -269,16 +280,16 @@ def main():
         # Neustart erst NACH bestandenem Check als eigenes Kommando (Review 2026-09-25: vorher hing er per ';' hinter dem
         # '||'-Zweig derselben Kommandokette und lief auch bei gescheitertem Check)
         rc, out, err = run(c, ct_exec("dpkg -s python3-cryptography >/dev/null 2>&1 || (apt-get install -y -q python3-cryptography >/dev/null 2>&1 && echo cryptography-installiert); "
-                                  "systemctl daemon-reload && systemctl enable ollama-router >/dev/null 2>&1; systemctl enable --now ollama-router-cert.path >/dev/null 2>&1; "
-                                  "systemctl enable --now ollama-router-secrets.timer >/dev/null 2>&1; /opt/ollama-router/render-env.sh; systemctl restart --no-block ollama-router; sleep 3; echo restarted"))
+                                  "systemctl daemon-reload && systemctl enable skirnir-router >/dev/null 2>&1; systemctl enable --now skirnir-router-cert.path >/dev/null 2>&1; "
+                                  "systemctl enable --now skirnir-router-secrets.timer >/dev/null 2>&1; /opt/skirnir-router/render-env.sh; systemctl restart --no-block skirnir-router; sleep 3; echo restarted"))
         print(out.strip(), err.strip())
         time.sleep(3)
     state_cmd, state_stdin = curl_auth(f"--resolve {host}:11435:127.0.0.1 https://{host}:11435/admin/state | head -c 400")
-    rc, out, err = run(c, ct_exec("systemctl --no-pager --lines=0 status ollama-router | head -5; "
-                              "echo ---; journalctl -u ollama-router --no-pager -n 25 -o short; "
+    rc, out, err = run(c, ct_exec("systemctl --no-pager --lines=0 status skirnir-router | head -5; "
+                              "echo ---; journalctl -u skirnir-router --no-pager -n 25 -o short; "
                               f"echo ---; curl -s -m 5 --resolve {host}:11434:127.0.0.1 https://{host}:11434/api/version; echo; "   # /api/version ist von der Client-Auth ausgenommen (Stufe 2); /api/tags braeuchte im enforce-Modus ein Token
                               f"echo ---; {state_cmd}; echo; "
-                              f"echo ---; systemctl is-active ollama-router-cert.path; openssl s_client -connect 127.0.0.1:11435 -servername {host} </dev/null 2>/dev/null | openssl x509 -noout -subject -enddate"),
+                              f"echo ---; systemctl is-active skirnir-router-cert.path; openssl s_client -connect 127.0.0.1:11435 -servername {host} </dev/null 2>/dev/null | openssl x509 -noout -subject -enddate"),
                       stdin=state_stdin)
     print(out)
     if err.strip():

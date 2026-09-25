@@ -1,5 +1,5 @@
 # Lint fuer den Router (2026-09-16, erweitert 2026-09-25): echte Fehler, Bugbear, blinde except-Klauseln, haengende asyncio-Tasks.
-#   python -m ruff check router/ollama_router
+#   python -m ruff check router/skirnir_router
 line-length = 150
 target-version = "py311"   # Debian 12 auf dem CT
 

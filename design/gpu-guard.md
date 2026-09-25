@@ -1,10 +1,10 @@
 # GPU-Schutz (12V-2x6) – Entwurf v0.1 (2026-09-24)
 
-> **Stand 2026-09-24, abends: umgesetzt** in Agent 0.7.0 (`agent-go/guard.go`, Tests `guard_test.go`) und Router 0.1.2
+> **Stand 2026-09-24, abends: umgesetzt** in Agent 0.7.0 (`agent/guard.go`, Tests `guard_test.go`) und Router 0.1.2
 > (`modes.gpu_guard`, Policy `gpu_guard` je Knoten, HA-Probleme, Metriken, UI-Badge). Entscheide des Betreibers: Default
 > 80 %, die Abwahl zählt als HA-Problem (abweichend von Abschnitt 4), `require_fresh_status` Standard aus. Konfigschlüssel
 > im Agenten heissen englisch und flach (`power_limit_pct`, `high_load_s`, `stage2_pct`, `recovery_s`, `voltage_warn_v`, …,
-> siehe `agent-go/README.md`). Lasttest (5a) und Nachtlauf Stufe 2 (5b) am 2026-09-25 gemessen; offen ist die Messwoche (HA-Historie). Der Router-Teil zu `routing.reason`/`skipped` ist nicht gebaut (Deckel wirkt über `max_inflight`).
+> siehe `agent/README.md`). Lasttest (5a) und Nachtlauf Stufe 2 (5b) am 2026-09-25 gemessen; offen ist die Messwoche (HA-Historie). Der Router-Teil zu `routing.reason`/`skipped` ist nicht gebaut (Deckel wirkt über `max_inflight`).
 > **0.9.0 (2026-09-25, Review):** Lastmass für Hochlast ist die Board Power aus NVML, nicht mehr die 16-Pin-Leistung aus GPU-Z:
 > die Relay-Werte kommen per `POST /gpuz` von localhost und dürfen das Limit nicht steuern; Board Power liegt nie unter der
 > 16-Pin-Leistung (Slot-Anteil), das Limit gilt für sie. 16-Pin-Leistung und -Spannung bleiben Anzeige und Warnung. Nach einem
@@ -12,13 +12,13 @@
 
 Anlass: Berichte über verschmorte 12VHPWR/12V-2x6-Stecker an RTX-5090-Karten nach längerer Zeit unter hohem Strom.
 Dieses Dokument prüft, was Router und Agent dagegen tun können, und schlägt einen Schutz vor, der **standardmässig an**
-ist und ausdrücklich abgewählt werden muss. Bezug: `agent-go/` (`gpu.go`, `gpu_nvml_windows.go`, `heartbeat.go`,
+ist und ausdrücklich abgewählt werden muss. Bezug: `agent/` (`gpu.go`, `gpu_nvml_windows.go`, `heartbeat.go`,
 `mqtt.go`, `config.go`, `provision.go`, `tunnel.go`) und `router/ollama_router/` (`poll.py`, `admission.py`,
 `nodes.py`, `registry.py`, `config.py`, `scheduler.py`, `request.py`, `ha.py`). Nur Analyse, nichts davon ist gebaut.
 
 Stand der Quellen: Der Agent las bis 0.5.3 per NVML nur Auslastung und VRAM (`nvmlDeviceGetUtilizationRates`,
 `nvmlDeviceGetMemoryInfo[_v2]`), Heartbeat-Intervall vom Router provisioniert (`heartbeat_interval_s`, im Betrieb 2 s,
-lokaler Rückfall 3 s). Die Messgrössen sind seit Agent 0.6.0 (gleicher Tag) im Repo (`agent-go/sensors.go`, Heartbeat-Block `sensors`, Router `nodes.<n>.sensors`); die Schwellen unten sind noch unbelegte Vorschläge und entsprechend markiert.
+lokaler Rückfall 3 s). Die Messgrössen sind seit Agent 0.6.0 (gleicher Tag) im Repo (`agent/sensors.go`, Heartbeat-Block `sensors`, Router `nodes.<n>.sensors`); die Schwellen unten sind noch unbelegte Vorschläge und entsprechend markiert.
 
 ## 1. Bedrohungsmodell – und was Software kann
 

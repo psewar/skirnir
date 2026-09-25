@@ -2,7 +2,7 @@
 """Stufe 1: TF-IDF (Zeichen-n-Gramme + Woerter) und Softmax-Regression fuer die Rollenwahl trainieren - numpy reicht.
 
     python train_tfidf.py [--out ../router/decision-tfidf.json] [--min-df 2] [--l2 1e-5] [--epochs 3000] [--lr 1.0]
-Merkmale kommen aus router/ollama_router/decision/tfidf.py (dieselbe Funktion wie im Router). Modell = JSON mit Vokabular,
+Merkmale kommen aus router/skirnir_router/decision/tfidf.py (dieselbe Funktion wie im Router). Modell = JSON mit Vokabular,
 IDF, Gewichten, Bias, Klassen und Kennzahlen; der Router laedt es ueber decision_engine.tfidf.model_path.
 Training: Vollbatch-Gradientenabstieg mit L2-Strafe, Wahl der Epoche mit der besten Validierungs-NLL (kein Ueberfitten
 auf den Testsatz). Danach Top-1 auf Validierung und Test.
@@ -22,7 +22,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "router"))
-from ollama_router.decision.tfidf import features  # noqa: E402
+from skirnir_router.decision.tfidf import features  # noqa: E402
 
 DATA = os.path.join(HERE, "data")
 

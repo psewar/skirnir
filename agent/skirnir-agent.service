@@ -1,0 +1,23 @@
+# systemd-Unit fuer den skirnir-agent auf Linux (siehe config.example.yaml, Abschnitt LINUX)
+# Installation: sudo cp skirnir-agent.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#               && sudo systemctl enable --now skirnir-agent
+[Unit]
+Description=Skirnir Agent (Tunnel zum Skirnir-Router, GPU-Heartbeat, HA-MQTT)
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/skirnir-agent run --config /etc/skirnir-agent/config.yaml
+Restart=always
+RestartSec=5
+# Schluessel (0600) und Provisionierung liegen in identity.dir, Logs in logging.dir - beide Pfade in der Config setzen
+# (z. B. /var/lib/skirnir-agent und /var/log/skirnir-agent) und dem Dienst gehoeren lassen:
+User=root
+ProtectSystem=full
+# /usr/local/bin: das Selbst-Update (updater.go) legt <binary>.new daneben und tauscht - unter ProtectSystem=full sonst read-only
+ReadWritePaths=/var/lib/skirnir-agent /var/log/skirnir-agent /usr/local/bin
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

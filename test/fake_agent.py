@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake-Agent fuer die Tests: meldet sich wie agent-go/tunnel.go mit Ed25519-Schluessel am Router an (Challenge ->
+"""Fake-Agent fuer die Tests: meldet sich wie agent/tunnel.go mit Ed25519-Schluessel am Router an (Challenge ->
 signiertes Hello -> Status), haelt den Tunnel und reicht die Anfragen des Routers an ein (Fake-)Ollama weiter.
 Schluessel wird in <keyfile> persistiert, damit ein Neustart dieselbe Identitaet hat (wie der echte Agent).
 Aufruf: fake_agent.py <router-ws> <node> <upstream> <keyfile> [upstream-token]

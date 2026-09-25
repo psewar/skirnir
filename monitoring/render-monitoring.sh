@@ -2,13 +2,13 @@
 # skirnir-monitoring: Secrets aus dem Secret-Store rendern (Universal-Auth-API, gleicher Zugang wie render-env.sh des Routers):
 #   OLLAMA_ROUTER_UI_METRICS_PASS -> secrets/metrics.pass   (Prometheus: Basic Auth am Router-/metrics)
 #   GRAFANA_ADMIN_PASSWORD        -> secrets/grafana_admin  (Grafana: GF_SECURITY_ADMIN_PASSWORD__FILE)
-# Zugang: /etc/ollama-router/render-env.conf (SECRET_STORE_DOMAIN/CLIENT_ID/CLIENT_SECRET, PROJECT_ID, ENVIRONMENT).
+# Zugang: /etc/skirnir-router/render-env.conf (SECRET_STORE_DOMAIN/CLIENT_ID/CLIENT_SECRET, PROJECT_ID, ENVIRONMENT).
 # Bei Ausfall des Secret-Stores bleiben die letzten Dateien stehen. Aendert sich ein Secret, wird der betroffene Container
 # neu gestartet (nur mit --restart, sonst reines Rendern - fuer den ersten Lauf vor `docker compose up`).
 set -e
 RESTART=0; [ "$1" = "--restart" ] && RESTART=1
 DIR=$(cd "$(dirname "$0")" && pwd)
-CONF=/etc/ollama-router/render-env.conf
+CONF=/etc/skirnir-router/render-env.conf
 [ -r "$CONF" ] || { echo "$CONF fehlt - nichts gerendert"; exit 0; }
 . "$CONF"
 [ -n "$SECRET_STORE_AUTH_FILE" ] && . "$SECRET_STORE_AUTH_FILE"

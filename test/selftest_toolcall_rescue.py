@@ -10,7 +10,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "router"))
-from ollama_router import toolcall_rescue as tr   # noqa: E402
+from skirnir_router import toolcall_rescue as tr   # noqa: E402
 
 FAILS = []
 

@@ -43,7 +43,7 @@ print("Samples gesamt:", total)
 print(f"\n== Selbstzeit (Blatt) Top {top} ==")
 for f, c in leaf.most_common(top):
     print(f"{100 * c / total:5.1f}%  {short(f)}")
-print(f"\n== Inklusivzeit eigene Module (ollama_router) Top {top} ==")
-own = sorted(((f, c) for f, c in incl.items() if "ollama_router" in f), key=lambda x: -x[1])
+print(f"\n== Inklusivzeit eigene Module (skirnir_router) Top {top} ==")
+own = sorted(((f, c) for f, c in incl.items() if "skirnir_router" in f), key=lambda x: -x[1])
 for f, c in own[:top]:
     print(f"{100 * c / total:5.1f}%  {short(f)}")

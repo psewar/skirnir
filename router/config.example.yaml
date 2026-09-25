@@ -1,4 +1,4 @@
-# Skirnir - Beispielkonfiguration (Ziel auf dem Router-Host: /etc/ollama-router/config.yaml)
+# Skirnir - Beispielkonfiguration (Ziel auf dem Router-Host: /etc/skirnir-router/config.yaml)
 # Die Produktivkonfiguration liegt AUSSERHALB des Repos (Ops-Ordner, siehe deploy/ops_env.py); deploy.py rollt sie aus.
 # Algorithmus: design/routing-algorithm.md
 
@@ -6,9 +6,9 @@ router:
   listen: 0.0.0.0:11434
   control_listen: 0.0.0.0:11435
   public_url: https://router.example.net:11435
-  control_tls:                   # Zertifikat fuer public_url (z. B. Let's Encrypt); Renewal -> ollama-router-cert.path startet den Dienst neu
-    cert: /etc/ollama-router/certs/fullchain.pem
-    key: /etc/ollama-router/certs/privkey.pem
+  control_tls:                   # Zertifikat fuer public_url (z. B. Let's Encrypt); Renewal -> skirnir-router-cert.path startet den Dienst neu
+    cert: /etc/skirnir-router/certs/fullchain.pem
+    key: /etc/skirnir-router/certs/privkey.pem
   ollama_poll_s: 5                # Takt fuer /api/tags + /api/ps (welche Modelle geladen sind)
   heartbeat_interval_s: 2         # Takt, in dem Agenten GPU-Auslastung und VRAM melden; wird an die Agenten
                                   # provisioniert und gilt bei deren naechster Verbindung (also nach dem Deploy)
@@ -36,7 +36,7 @@ router:
         kind: openai
         base_url: https://api.openai.com/v1
         api_key_env: OPENAI_API_KEY
-        secrets_file: /etc/ollama-router/secrets.env
+        secrets_file: /etc/skirnir-router/secrets.env
         budget_month_chf: 10     # erschoepft = Anbieter faellt als Stufe weg; Warnung als HA-Problem ab warn_at_percent
         warn_at_percent: 80
         region: us               # OpenAI ohne EU-Datenresidenz in diesem Tarif
@@ -46,7 +46,7 @@ router:
         enabled: false
         base_url: https://api.anthropic.com
         api_key_env: ANTHROPIC_API_KEY
-        secrets_file: /etc/ollama-router/secrets.env
+        secrets_file: /etc/skirnir-router/secrets.env
         budget_month_chf: 10
         warn_at_percent: 80
         region: us
@@ -58,7 +58,7 @@ router:
     locked: true                 # Modus nur per config.yaml + Deploy aenderbar (UI/POST /admin/client_auth -> 403)
     mode: enforce                # observe = alles bedienen, Unbekannte zaehlen (UI/State) und ins Audit-Log;
                                  # enforce = 401 ohne gueltige Identitaet. Umschalten zur Laufzeit: POST /admin/client_auth.
-    audit_log: /var/log/ollama-router/audit.jsonl
+    audit_log: /var/log/skirnir-router/audit.jsonl
     clients:
       home-assistant:            # HA-Ollama-Integration: API-Key im Eintrag -> "Authorization: Bearer <token>"
         token_sha256: "057ba03d6c44104863dc7361fe4578965d1887360f90a0895882e58a6248fc86"         # sha256 des Client-Tokens (hier: von "changeme" - ersetzen)
@@ -93,15 +93,15 @@ router:
     broadcast_addresses: ["255.255.255.255", "192.0.2.255"]
 
 # Home Assistant: Router als Geraet "Ollama Router" per MQTT-Discovery (MQTT-Broker auf ha-host).
-# Passwort kommt aus /etc/ollama-router/secrets.env (MQTT_PASSWORD, von Hand oder per render-env.sh).
+# Passwort kommt aus /etc/skirnir-router/secrets.env (MQTT_PASSWORD, von Hand oder per render-env.sh).
 mqtt:
   host: ha.example.net   # per Name, TLS-Zertifikat (LE) lautet darauf
   port: 8883
   tls: true
   username: skirnir
   password_env: MQTT_PASSWORD
-  password_file: /etc/ollama-router/secrets.env   # roh gelesen; EnvironmentFile-Parsing von systemd veraendert Sonderzeichen
-  base_topic: ollama-router
+  password_file: /etc/skirnir-router/secrets.env   # roh gelesen; EnvironmentFile-Parsing von systemd veraendert Sonderzeichen
+  base_topic: skirnir-router
   discovery_prefix: homeassistant
   interval_s: 10
 
@@ -205,7 +205,7 @@ models:
     price_chf_per_m: { input: 3.0, output: 15.0 }
     context_tokens: 200000
 
-nodes: {}   # Knoten kommen ueber die Registrierung (Agent-Schluessel, Freigabe in der UI -> /etc/ollama-router/nodes.json).
+nodes: {}   # Knoten kommen ueber die Registrierung (Agent-Schluessel, Freigabe in der UI -> /etc/skirnir-router/nodes.json).
             # Hier nur noch Knoten OHNE Agent (ollama: http://... URL) oder Policy-Vorgaben fuer einen Namen.
 # Rollen = stabile Modellnamen für HA. busy_ok = darf auf einem Knoten im Spielmodus laufen.
 # granite4.2:8b statt gpt-oss:20b als Kleinmodell: kann HA-"structure" (gpt-oss antwortet darauf HTTP 500) und ist kleiner.
@@ -236,7 +236,7 @@ roles:
       - { model: qwen3-coder:30b, num_ctx: 65536 }
       - { model: qwen3-coder:30b, num_ctx: 32768 }
       - { model: granite4.2:8b,   num_ctx: 32768, busy_ok: true }
-  # HINWEIS: Aenderungen aus der UI landen in /etc/ollama-router/roles.yaml und ueberlagern diese Basis
+  # HINWEIS: Aenderungen aus der UI landen in /etc/skirnir-router/roles.yaml und ueberlagern diese Basis
   # (z. B. eine Cloud-Stufe am Ende von gross). Hier steht nur die Basis fuer einen Neuaufbau.
   cloud:                         # Stufe 5: ausdrueckliche Cloud-Rolle (Fall 3: zu komplex fuer lokal); lokal nur als Ausweich
     exposed_as: "cloud:latest"
@@ -253,7 +253,7 @@ decision_engine:                 # Decision Engine (design/decision-engine.md): 
   chain: [embed, local_llm, tfidf, rules]   # embed (CPU, 10-19 ms, 93 %) zuerst, LLM bei Unsicherheit (~6 %), tfidf/rules wenn der GPU-Knoten fehlt
   context_chars: 512
   policy: { min_top_probability: 0.5, min_margin: 0.2, max_entropy_ratio: 0.75 }
-  tfidf: { model_path: /etc/ollama-router/decision-tfidf.json }   # Stufe 1 (decision-eval/train_tfidf.py), rein Python, <1 ms; Datei per deploy.py
+  tfidf: { model_path: /etc/skirnir-router/decision-tfidf.json }   # Stufe 1 (decision-eval/train_tfidf.py), rein Python, <1 ms; Datei per deploy.py
   embed: { endpoint: http://127.0.0.1:8082, model: skirnir-embed-e5-small-v1, timeout_s: 2 }   # Stufe 2 (decision-embed/), Container auf dem Router-Host
   local_llm:                     # erste Stufe der Kette; Rollenbeschreibungen sind Pflicht (s. u.)
     model: "assist:latest"
@@ -263,4 +263,4 @@ decision_engine:                 # Decision Engine (design/decision-engine.md): 
       gross: "lange, tiefe Analysen, Konzepte, Gutachten, mehrstufige Planung"
       assist: "Smart-Home-Sprachbefehle und Hausfragen: Licht, Heizung, Timer, Einkaufsliste, Wetter"
       code: "Programmieren: Code schreiben, Fehler suchen, Skripte, SQL, YAML-Automationen"
-  capture: { enabled: false, path: /var/lib/ollama-router/decisions.jsonl, clients: [], anonymize: true, max_context_chars: 2000 }   # Trainingsdaten nur fuer Clients im Opt-in, anonymisiert
+  capture: { enabled: false, path: /var/lib/skirnir-router/decisions.jsonl, clients: [], anonymize: true, max_context_chars: 2000 }   # Trainingsdaten nur fuer Clients im Opt-in, anonymisiert

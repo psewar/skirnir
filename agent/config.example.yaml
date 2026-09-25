@@ -1,0 +1,138 @@
+# skirnir-agent - Beispielkonfiguration fuer einen neuen GPU-Rechner
+# =====================================================================
+# Der Agent meldet den Rechner beim Skirnir-Router an. Er braucht KEINEN Token, keine Firewall-Regel,
+# kein Zertifikat und keine IP/MAC von Hand: beim ersten Start erzeugt er ein Schluesselpaar, meldet
+# Hostname, GPU, VRAM und MAC selbst und wartet, bis der Knoten in der Router-UI freigegeben ist.
+# Nach der Freigabe schickt der Router den MQTT-Zugang fuer das HA-Geraet durch den Tunnel.
+#
+# Voraussetzungen auf dem Rechner
+#   - NVIDIA-Treiber (nvidia-smi funktioniert), Ollama installiert und gestartet (darf auf localhost bleiben),
+#     gewuenschte Modelle einmal gepullt (der Router routet nur Rollen, deren Modelle der Knoten hat)
+#   - Netzwerkzugang zu https://router.example.net:11435
+#
+# ---------------------------------------------------------------------
+# WINDOWS (seit 0.10.0: Doppelklick)
+#   1. skirnir-agent.exe aus dem GitHub-Release irgendwohin legen und doppelklicken (oder `skirnir-agent.exe setup`).
+#      Windows fragt nach Adminrechten; danach drei Fragen: Router-Adresse, Update-Schluessel des Betreibers (optional),
+#      Benutzer, der den Dienst ohne Adminrechte steuern darf. Das war's: Konfiguration unter
+#      C:\ProgramData\skirnir-agent\config.yaml, Binary in C:\Program Files\skirnir-agent\, Dienst "Skirnir Agent"
+#      (technischer Name SkirnirAgent, LocalSystem, Autostart, Neustart bei Absturz), GPU-Z-Relay-Aufgabe,
+#      Schluessel unter ...\identity\ (DPAPI), Logs unter ...\logs\. Bei bestehender Installation: Update in place.
+#   2. Router-UI https://router.example.net:11435  -> Tab "Agenten" -> freigeben
+#   Diese Datei braucht nur, wer mehr einstellen will (Kinder, Firewall, MQTT lokal): nach ...\config.yaml und setup erneut.
+#   Install-Service.ps1 bleibt fuer Sonderfaelle (alte Tasks entfernen, Firewall-Regeln des Ollama-Installers).
+#      (dabei WOL erlauben ja/nein, Gewicht, MQTT-Geraet in HA). HA kann neue Knoten per Benachrichtigung melden.
+#   Nuetzlich (ohne Admin): skirnir-agent.exe status | identity | restart
+#   Update: seit 0.8.0 ueber den Router (update.public_key unten, Knopf/Rollout in der Router-UI); von Hand: neue Binary
+#           nach dist\, Install-Service.ps1 erneut als Administrator.
+#
+# LINUX (systemd)
+#   1. Binary:  sudo install -m 755 skirnir-agent-linux-amd64 /usr/local/bin/skirnir-agent
+#   2. Config:  sudo mkdir -p /etc/skirnir-agent && sudo cp config.yaml /etc/skirnir-agent/config.yaml
+#               (identity.dir und logging.dir unten fuer Linux setzen, siehe Kommentare)
+#   3. Unit:    sudo cp skirnir-agent.service /etc/systemd/system/
+#               sudo systemctl daemon-reload && sudo systemctl enable --now skirnir-agent
+#   4. Router-UI -> "Registrierte Agenten" -> freigeben
+#   Pruefen:    skirnir-agent status --config /etc/skirnir-agent/config.yaml ; journalctl -u skirnir-agent -f
+#   Hinweis: Dienstinstallation per Verb (install/apply-rules) und DPAPI gibt es nur unter Windows; unter Linux liegt der
+#            Schluessel als Datei mit Modus 0600 im identity.dir.
+#
+# WAKE-ON-LAN: der Rechner muss es selbst koennen (BIOS + Netzwerkadapter "Wake on Magic Packet"); die MAC kennt der
+#              Router vom Agenten, die Erlaubnis setzt du bei der Freigabe.
+# ---------------------------------------------------------------------
+
+# node: mein-rechner            # Knotenname im Router; leer = Hostname in Kleinbuchstaben
+
+router:
+  url: https://router.example.net:11435     # einzige Pflichtangabe
+  # token: ...                              # nur fuer die TLS-Vorschaltstelle ollama_proxy (X-Router-Token)
+
+# ollama_proxy:                                 # TLS-Vorschaltstelle vor Ollama (Alternative ohne Tunnel; braucht router.token)
+#   enabled: true
+#   listen: 0.0.0.0:11443
+#   upstream: http://127.0.0.1:11434
+#   cert_dir: C:\ProgramData\skirnir-agent\tls
+#   require_token: true                         #   false = ohne X-Router-Token (nur in abgeschottetem Netz)
+
+tunnel:                                         # ausgehende Verbindung zum Router (einziger Weg seit 0.9.1)
+  upstream: http://127.0.0.1:11434              # lokales Ollama, das der Router durch den Tunnel aufruft
+
+# gpuz:                                         # GPU-Z-Sensoren (Windows) als Zusatzquelle, Standard an: laeuft GPU-Z,
+#   enabled: false                              #   kommen Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung dazu
+
+# update:                                       # Selbst-Update ueber den Router (Standard an); Schluessel zeigt `deploy.py --agent`
+#   public_key: <base64 Ed25519>                #   ohne public_key lehnt der Agent jeden Auftrag ab
+#   enabled: false
+
+# gpu_guard:                                    # GPU-Schutz (12V-2x6-Stecker): Power-Limit 80 % des Standards, Stufe 2 bei
+#   enabled: false                              #   Dauer-Vollast, Spannungs-/Temperaturwarnung. Standard AN; false = abgewaehlt
+#   power_limit_pct: 80                         #   (zaehlt als Problem in HA). Alle Schluessel: agent/README.md, Abschnitt GPU-Schutz
+
+# identity:
+#   dir: /var/lib/skirnir-agent           # Linux; Windows-Standard: C:\ProgramData\skirnir-agent\identity
+# logging:
+#   dir: /var/log/skirnir-agent           # Linux; Windows-Standard: C:\ProgramData\skirnir-agent\logs
+# health:
+#   listen: 127.0.0.1:10398                     # /health fuer 'status'; POST /restart-child braucht X-Agent-Token (control.token neben der Config)
+# logging:
+#   max_size_mb: 5                              # Rotation je Logdatei (agent.log, <kind>.log), max_backups Dateien
+#   max_backups: 10
+#   debug: false
+
+# mqtt:                                         # kommt nach der Freigabe vom Router; lokal nur zum Ueberschreiben:
+#   enabled: false                              #   ... oder um das HA-Geraet fuer diesen Rechner abzuschalten
+#   host: mqtt.example.net                      #   lokale Angaben gewinnen ueber das Provisionierte
+#   port: 1883                                  #   8883 mit tls: true
+#   tls: false
+#   username: ...
+#   password: ...
+#   password_secret: MQTT_PASSWORD              #   statt password: Schluesselname im Secret-Store (Block secret_store unten)
+#   device_id: mein_rechner                     #   HA-Geraet (Standard: Knotenname mit _), device_name, manufacturer, model
+#   discovery_prefix: homeassistant
+#   interval_s: 30                              #   Meldeintervall des HA-Geraets
+#   ollama_url: http://127.0.0.1:11434          #   fuer die Modell-Entitaeten
+#   alias_model: assist:latest                  #   optional: Alias-Modell, das der Knoten fuehrt -> zwei HA-Entitaeten (Basismodell, strukturfaehig)
+#   stt_child: stt                              #   welches Kind der STT-Server ist (Entitaet), stt_fallback_port: 10300
+# secret_store:                                 # nur mit mqtt.password_secret: Universal-Auth-API (Client-ID/-Secret -> Token)
+#   domain: https://secrets.example.net         #   Pflicht, wenn password_secret gesetzt ist (kein Platzhalter mehr)
+#   project_id: 00000000-0000-0000-0000-000000000000
+#   environment: prod
+#   secret_path: /
+#   client_id: ...
+#   client_secret: ...
+
+# children:                                     # optionale Kindprozesse, die der Agent startet/ueberwacht (Beispiel: ein STT-Server)
+#   - name: stt
+#     # enabled: false                          # Eintrag behalten, aber nicht starten
+#     cmd: 'C:\Pfad\zu\python.exe'
+#     args: ['C:\Pfad\stt_server.py', '--uri', 'tcp://0.0.0.0:10300']
+#     cwd: 'C:\Pfad'
+#     health_tcp_port: 10300
+#     startup_grace_s: 120
+#   - name: ollama                              # Ollama selbst als Dienst-Kind statt Tray-App (laeuft dann schon vor der Anmeldung)
+#     cmd: 'C:\Users\<benutzer>\AppData\Local\Programs\Ollama\ollama.exe'
+#     args: ['serve']
+#     env:                                      # Benutzer-Umgebungsvariablen gelten fuer das Dienstkonto nicht -> hier setzen
+#       - 'OLLAMA_HOST=0.0.0.0:11434'
+#       - 'OLLAMA_MODELS=C:\Users\<benutzer>\.ollama\models'         # + grant_modify; Lesen auf den Ollama-Programmordner
+#       - 'USERPROFILE=C:\ProgramData\skirnir-agent\ollama-home' # ~/.ollama des Dienstes; + grant_modify
+#       - 'OLLAMA_NUM_PARALLEL=2'
+#     health_tcp_port: 11434
+#     startup_grace_s: 60
+#     # Achtung: die Tray-App 'ollama app.exe' dann nicht mehr autostarten lassen - sie startet sekuendlich einen eigenen Server
+
+install:                                        # nur Windows (Install-Service.ps1 / install / apply-rules)
+  service_name: SkirnirAgent
+  display_name: Skirnir Agent
+  # description: ...
+  account: ''                                   # '' = LocalSystem: noetig fuer den GPU-Schutz (Power-Limit setzen) und den direkten GPU-Z-Zugriff.
+  # account: 'NT SERVICE\SkirnirAgent'    #   Virtuelles Konto: GPU-Schutz nur Beobachtung (zaehlt als HA-Problem), GPU-Z nur per Relay
+  allow_control_users:
+    - 'RECHNERNAME\benutzer'                    # darf den Dienst ohne Admin starten/stoppen (services.msc oder 'restart'); kein Recht auf das Config-Verzeichnis
+  # grant_read: []                              # zusaetzliche Lesepfade fuer das Dienstkonto (z. B. Python fuer Kinder)
+  # grant_modify: []                            # zusaetzliche Schreibpfade (z. B. ein OpenVINO-Cache)
+  # firewall:                                   # eingehende Regeln nur fuer Kinder, die im LAN lauschen (der Tunnel braucht keine)
+  #   - name: Wyoming STT (skirnir-agent)
+  #     port: 10300
+  #     program: 'C:\Pfad\zu\python.exe'
+  #     remote: ['192.0.2.10']                  #   erlaubte Quell-IPs (leer = alle)

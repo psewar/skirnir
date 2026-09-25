@@ -6,7 +6,7 @@ developer and no stability guarantees, but security reports are taken seriously.
 ## Reporting a vulnerability
 
 Please use GitHub's **private vulnerability reporting** on this repository (Security tab → "Report a vulnerability") rather
-than a public issue. Include the version (`/api/version` reports `router<x.y.z>`, the agent prints `ollama-router-agent version`),
+than a public issue. Include the version (`/api/version` reports `router<x.y.z>`, the agent prints `skirnir-agent version`),
 what you observed, and how to reproduce it. You should get a first reply within a week.
 
 ## Supported versions

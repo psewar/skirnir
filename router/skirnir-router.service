@@ -1,0 +1,25 @@
+[Unit]
+Description=Skirnir - Ollama role router
+After=network-online.target skirnir-router-secrets.service
+Wants=network-online.target skirnir-router-secrets.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/skirnir-router/router.py /etc/skirnir-router/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/skirnir-router/secrets.env
+User=root
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/skirnir-router
+ReadWritePaths=/etc/skirnir-router
+StateDirectory=skirnir-router
+LogsDirectory=skirnir-router
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

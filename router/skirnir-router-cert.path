@@ -1,0 +1,9 @@
+[Unit]
+Description=Restart skirnir-router when the TLS certificate is renewed (path = control_tls.cert in config.yaml)
+
+[Path]
+PathChanged=/etc/skirnir-router/certs/fullchain.pem
+Unit=skirnir-router-cert.service
+
+[Install]
+WantedBy=multi-user.target

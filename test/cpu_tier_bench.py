@@ -17,7 +17,7 @@ THREADS = [int(x) for x in sys.argv[2:]] or [0, 8]
 CTX = 8192
 LONG_PROMPT = ("Fasse den folgenden Text in drei Saetzen zusammen.\n\n" +
                ("Ein Smart Home besteht aus einer Hausautomation, mehreren Sprachsatelliten, einer lokalen Spracherkennung "
-                "und einem Ollama-Router, der Anfragen an einen GPU-Rechner verteilt. Wird die GPU anderweitig gebraucht, "
+                "und einem Skirnir-Router, der Anfragen an einen GPU-Rechner verteilt. Wird die GPU anderweitig gebraucht, "
                 "entlaedt der Router das grosse Modell und ein kleines Modell uebernimmt. ") * 60)
 
 
@@ -71,7 +71,7 @@ def run_case(threads):
           f"size={inst.get('size',0)/2**30:.1f} GiB; VRAM vorher {v0} MiB -> nachher {v1} MiB")
     # kurze Frage
     smp = CPUSampler(); smp.start()
-    r = post("/api/generate", {"model": MODEL, "prompt": "Wozu dient ein Ollama-Router? Antworte in zwei Saetzen.", "stream": False,
+    r = post("/api/generate", {"model": MODEL, "prompt": "Wozu dient ein Skirnir-Router? Antworte in zwei Saetzen.", "stream": False,
                                "keep_alive": "10m", "options": {**opts, "temperature": 0}, "think": False})
     smp.stop.set(); smp.join(timeout=3)
     gen = r["eval_count"] / (r["eval_duration"] / 1e9)

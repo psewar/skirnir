@@ -42,7 +42,7 @@ Befunde je Engine:
 - **Vorbehalt Datensatz:** 1282 Beispiele aus 136 Vorlagen (Deutsch/Englisch, Smart-Home, Coding, Analysen, Alltag), Split nach
   Vorlage. Vorlagen-Sprache ist sauberer als echter Verkehr; 97,7 % beim LLM heisst: der Satz ist fuer ein 35B-Modell leicht.
 
-**Stand Produktion (2026-09-17 00:30):** Kette `[embed, local_llm, tfidf, rules]`, Capture an fuer zwei Clients (Agenten-Framework, Node-RED) (anonymisiert, `/var/lib/ollama-router/decisions.jsonl`; `build_dataset.py --capture` nimmt die `client`-Labels). Empfehlung: nach ein paar Wochen Capture
+**Stand Produktion (2026-09-17 00:30):** Kette `[embed, local_llm, tfidf, rules]`, Capture an fuer zwei Clients (Agenten-Framework, Node-RED) (anonymisiert, `/var/lib/skirnir-router/decisions.jsonl`; `build_dataset.py --capture` nimmt die `client`-Labels). Empfehlung: nach ein paar Wochen Capture
 (Agenten-Framework, Node-RED) den tfidf auf echten Daten neu trainieren, dann `[tfidf, local_llm, rules]` schalten und Stufe 2
 (mehrsprachiges Embedding-Modell, ONNX, CPU) nur angehen, wenn tfidf auf echten Daten unter ~90 % bleibt.
 
@@ -51,7 +51,7 @@ Befunde je Engine:
 | Datei | Zweck |
 |---|---|
 | `build_dataset.py` | Vorlagen -> `data/{train,validation,test}.jsonl` (Jevlike-Format + `role`, `group`), Split je Rolle nach Gruppen, `--capture` mischt echte Client-Labels dazu |
-| `train_tfidf.py` | Stufe 1: TF-IDF + Softmax-Regression (numpy, 20 s) -> `router/decision-tfidf.json`, deploy.py legt es nach `/etc/ollama-router/` |
+| `train_tfidf.py` | Stufe 1: TF-IDF + Softmax-Regression (numpy, 20 s) -> `router/decision-tfidf.json`, deploy.py legt es nach `/etc/skirnir-router/` |
 | `train.py` | Jevlike-Training beider Varianten (`tiny`, `hf`) mit Skirnir-Parametern (Kontext 512), danach `jevlike-eval` |
 | `run_eval.py` | Messreihe: startet Jevlike-Dienste aus Checkpoints, fragt rules/local_llm ueber `/admin/decide`, rechnet Top-1/Top-3, Konfusion, p50/p95/p99, Fallback-Rate, ECE, Temperatur -> `results*/report.md`, `calibration.json` |
 | `results-router/` | rules + tfidf + local_llm gegen Produktion (2026-09-17 00:00) |

@@ -12,8 +12,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "router"))
-from ollama_router import kontextpruefung as kp   # noqa: E402
-from ollama_router import state   # noqa: E402
+from skirnir_router import kontextpruefung as kp   # noqa: E402
+from skirnir_router import state   # noqa: E402
 
 FAILS = []
 MESSUNG = os.environ.get("SKIRNIR_TOKENMESSUNG", "")

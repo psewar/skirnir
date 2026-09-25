@@ -223,7 +223,7 @@ def main():
         decs = state()["decisions"]
         ev_lines = [json.loads(l) for l in open(os.path.join(HERE, "events.jsonl"), encoding="utf-8") if l.strip()]
         check("events.jsonl: jeder Eintrag des Protokolls steht als Zeile in der Datei", len(ev_lines) >= len(decs) and ev_lines[-1]["ts"] == decs[-1]["ts"] and ev_lines[-1]["event"] == decs[-1]["event"], f"{len(ev_lines)} Zeilen, {len(decs)} im Speicher")
-        prog = "import sys; sys.path.insert(0, sys.argv[1]); from ollama_router import state; C = type('C', (), {'path': sys.argv[2]}); " "state.CFG = C(); n = state.decisions_load(); print(n, state.DECISIONS[-1]['event'], len(state.DECISIONS))"
+        prog = "import sys; sys.path.insert(0, sys.argv[1]); from skirnir_router import state; C = type('C', (), {'path': sys.argv[2]}); " "state.CFG = C(); n = state.decisions_load(); print(n, state.DECISIONS[-1]['event'], len(state.DECISIONS))"
         rc_l = subprocess.run([PY, "-c", prog,
                                os.path.join(HERE, "..", "router"), os.path.join(HERE, "test-config.yaml")], capture_output=True, text=True, cwd=HERE)
         check("events.jsonl: frischer Prozess laedt die Eintraege (Neustart)", rc_l.returncode == 0 and rc_l.stdout.split()[:2] == [str(len(ev_lines)), decs[-1]["event"]], (rc_l.stdout + rc_l.stderr)[-160:])
@@ -1170,8 +1170,8 @@ def main():
         check("Rate Limit 3/min: die vierte Anfrage bekommt 429", codes == [200, 200, 200, 429], str(codes))
         # client_auth.locked (Audit 2026-09-16): gesperrter Modus ist per Settings nicht aenderbar, Konfiguration traegt das Flag
         sys.path.insert(0, os.path.join(HERE, "..", "router"))
-        from ollama_router import settings as _smod   # noqa: E402
-        from ollama_router.config import Config as _Cfg   # noqa: E402
+        from skirnir_router import settings as _smod   # noqa: E402
+        from skirnir_router.config import Config as _Cfg   # noqa: E402
         locked_cfg = {"router": {"client_auth": {"mode": "enforce", "locked": True}}}
         try:
             _smod.coerce("router.client_auth.mode", "observe", locked_cfg); lock_err = ""
@@ -1206,7 +1206,7 @@ def main():
         open(os.path.join(HERE, "agent-update.pub"), "w", encoding="utf-8").write(base64.b64encode(_upk.public_key().public_bytes(_ser.Encoding.Raw, _ser.PublicFormat.Raw)).decode())
         _adir = os.path.join(HERE, "agent"); os.makedirs(_adir, exist_ok=True)
         def _manifest(version, sign_with):
-            name = f"ollama-router-agent-{version}-windows-amd64.exe"
+            name = f"skirnir-agent-{version}-windows-amd64.exe"
             blob = f"fake agent {version}".encode() * 100
             open(os.path.join(_adir, name), "wb").write(blob)
             man = {"version": version, "generated": "2026-09-25T10:00:00", "files": [{"name": name, "os": "windows", "arch": "amd64", "sha256": hashlib.sha256(blob).hexdigest(), "size": len(blob)}]}
@@ -1239,7 +1239,7 @@ def main():
         ha_u = json.loads(http(C + "/admin/ha")[1])
         check("Agent-Update: falsche Signatur -> failed, HA-Problem, Version unveraendert, kein Drain", st == 200 and u.get("state") == "failed" and "Signatur" in (u.get("message") or "")
               and any("Agent-Update auf big fehlgeschlagen" in p for p in ha_u["problems"]) and reg_big()["facts"]["agent_version"] == "test2" and not state()["nodes"]["big"]["draining"], str(u) + str(ha_u["problems"]))
-        st, raw = http(C + "/v1/agent/binary/ollama-router-agent-test3-windows-amd64.exe", headers={"Authorization": "Bearer falsch"})
+        st, raw = http(C + "/v1/agent/binary/skirnir-agent-test3-windows-amd64.exe", headers={"Authorization": "Bearer falsch"})
         check("Agent-Update: Download ohne gueltiges Token -> 403", st == 403, str(st))
 
         # Metriken persistent (0.1.9): metrics.json neben der Config, gesichert 60 s nach der ersten Aenderung (tick_loop); ein frischer
@@ -1247,7 +1247,7 @@ def main():
         mp = os.path.join(HERE, "metrics.json")
         check("metrics.json: liegt neben der Config (Lauf > 60 s, tick_loop hat gesichert)", os.path.exists(mp), mp)
         mtxt = http(C + "/metrics")[1].decode()
-        rc_m = subprocess.run([PY, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); from ollama_router import state, config, metrics; "
+        rc_m = subprocess.run([PY, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); from skirnir_router import state, config, metrics; "
                                "state.CFG = config.Config(sys.argv[2]); n = metrics.metrics_load(); "
                                "c = state.METRICS['counters'].get('skirnir_requests_total', {}); print(n, round(sum(c.values())), json.load(open(sys.argv[3]))['since'][:4])",
                                os.path.join(HERE, "..", "router"), os.path.join(HERE, "test-config.yaml"), mp], capture_output=True, text=True)

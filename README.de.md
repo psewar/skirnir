@@ -190,10 +190,10 @@ decision_engine:
   default: standard
   chain: [embed, local_llm, tfidf, rules]
   policy: { min_top_probability: 0.5, min_margin: 0.2, max_entropy_ratio: 0.75 }
-  tfidf: { model_path: /etc/ollama-router/decision-tfidf.json }
+  tfidf: { model_path: /etc/skirnir-router/decision-tfidf.json }
   embed: { endpoint: http://127.0.0.1:8082, timeout_s: 2 }
   local_llm: { model: "assist:latest", timeout_s: 20, descriptions: { code: "Programmieren, Skripte, Fehlersuche", ... } }
-  capture: { enabled: false, path: /var/lib/ollama-router/decisions.jsonl, clients: [], anonymize: true }
+  capture: { enabled: false, path: /var/lib/skirnir-router/decisions.jsonl, clients: [], anonymize: true }
 ```
 
 Das Ergebnis steht in `routing.decision` (Verteilung, Engine, Latenz, Unsicherheitsgründe, Fallback-Spur), in den Metriken
@@ -218,7 +218,7 @@ PBKDF2 wäre hier Selbstsabotage.
 client_auth:
   mode: enforce
   locked: true
-  audit_log: /var/log/ollama-router/audit.jsonl
+  audit_log: /var/log/skirnir-router/audit.jsonl
   clients:
     home-assistant: { token_sha256: "…", roles: ["*"], models: true, requests_per_minute: 120 }
     node-red:       { token_sha256: "…", ip: ["192.0.2.20"], roles: ["*"], models: true }
@@ -296,7 +296,7 @@ Eine Seite ([router/ui.html](router/ui.html)), ohne externe Bibliotheken, sechs 
   (n Anfragen mit Parallelität c, dazu Sonden mit `interactive`).
 - **Clients:** Karten je Client, Secret erzeugen und rotieren, Quell-IPs, Rollen, Limits.
 - **Modellkatalog:** Gewichte, Kontext-Kosten, VRAM-Bedarf, Tempo, Fähigkeiten, Messen und Benchmark; Cloud-Modelle mit Preisen.
-- **Einstellungen:** alles, was der Router zur Laufzeit liest (Allowlist in [settings.py](router/ollama_router/settings.py)),
+- **Einstellungen:** alles, was der Router zur Laufzeit liest (Allowlist in [settings.py](router/skirnir_router/settings.py)),
   mit config.yaml-Wert, Markierung geänderter Werte und Rücksetzen.
 
 Lokal ansehen ohne echte Knoten: `python test/dev_env.py` startet Fake-Knoten, Fake-Cloud, Fake-Agent und den Router ohne TLS
@@ -308,14 +308,14 @@ Der Router meldet sich per MQTT-Discovery als Gerät **Skirnir** an: Sensoren f�
 bereite Rollen (Attribut: welcher Knoten und welches Modell jetzt gewählt würde), Anfragen und Tokens heute, Cloud-Kosten
 im Monat, letzte Zuweisung, je Knoten Zustand / GPU-Auslastung / freies VRAM, ein `binary_sensor` **Problem** mit Attribut
 `problems` (kein Knoten online, Rolle nicht bedienbar, Agent schweigt, Budget-Warnung) und ein Sensor **Knoten wartet auf
-Freigabe** für neue Agenten. Last-Will `ollama-router/status=offline`; fehlende Messwerte sind `unavailable`, nicht `unknown`.
+Freigabe** für neue Agenten. Last-Will `ollama-router/status=offline` (MQTT-Thema und Entitäts-IDs behalten absichtlich den alten Namen); fehlende Messwerte sind `unavailable`, nicht `unknown`.
 Knoten-Entitäten werden nachgeführt: gesperrte oder gelöschte Knoten verschwinden aus HA, auch wenn sie während eines
 Router-Neustarts verschwanden. Die HA-Ollama-Integration spricht den Router direkt (`https://router.example.net:11434`, API-Key =
 Client-Token); Modell = Rolle.
 
 ## GPU-Knoten: der Agent
 
-[agent-go/](agent-go/) enthält den Agenten als Windows-Dienst bzw. Linux-Binary (Go, eigenes README). Er
+[agent/](agent/) enthält den Agenten als Windows-Dienst bzw. Linux-Binary (Go, eigenes README). Er
 
 - baut den Tunnel zum Router (`wss://…:11435/v1/tunnel`) und hält ihn mit Backoff; ein Router-Neustart kostet 1–2 s,
 - weist sich mit einem beim ersten Start erzeugten **Ed25519-Schlüssel** aus (Windows: DPAPI-geschützt); unbekannte Schlüssel
@@ -342,8 +342,12 @@ Betreiber-Schlüssel (nie vom Router); die Agenten holen sie über ihre ausgehen
 tauschen sich selbst und starten neu. Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
 Kanarienvogel-Knoten, der neue Versionen zuerst bekommt (`modes.agent_update`). Fehler und Hänger werden HA-Probleme.
 
+**Neuer Windows-Knoten seit Agent 0.10.0:** Agent-Binary aus dem Release laden, doppelklicken, UAC bestätigen, drei Fragen
+beantworten (Router-Adresse, Update-Schlüssel des Betreibers, Benutzer mit Steuerrecht); die Binary richtet sich selbst als
+Dienst *Skirnir Agent* ein, und der Knoten erscheint im Tab „Agenten“ zur Freigabe.
+
 Ein neuer GPU-Rechner braucht: Ollama mit Modellen, das Agent-Binary, eine Konfiguration mit `router.url` (Vorlage
-[agent-go/config.example.yaml](agent-go/config.example.yaml)), `Install-Service.ps1` als Administrator, dann die Freigabe in der
+[agent/config.example.yaml](agent/config.example.yaml)), `Install-Service.ps1` als Administrator, dann die Freigabe in der
 Router-UI (Wake-on-LAN, Gewicht, MQTT-Gerät). Kein Token, keine Firewall-Regel, kein Zertifikat, keine IP von Hand.
 
 ## Installation des Routers
@@ -352,19 +356,19 @@ Voraussetzungen: Debian 12 (oder vergleichbar) mit Python 3.11, Pakete `python3-
 `python3-paho-mqtt` für Home Assistant, `python3-uvloop` optional (unter Windows läuft der Router mit dem Standard-Event-Loop).
 Ein TLS-Zertifikat für den Hostnamen des Routers (z. B. Let's Encrypt), auf den die Clients zugreifen.
 
-1. `router/` nach `/opt/ollama-router/` kopieren (mit dem Paket `ollama_router/`).
-2. [router/config.example.yaml](router/config.example.yaml) nach `/etc/ollama-router/config.yaml` (0600) und anpassen:
+1. `router/` nach `/opt/skirnir-router/` kopieren (mit dem Paket `skirnir_router/`).
+2. [router/config.example.yaml](router/config.example.yaml) nach `/etc/skirnir-router/config.yaml` (0600) und anpassen:
    `public_url`, Zertifikatspfade, Rollen, Katalog, Clients. Passwort-Hashes für die UI erzeugt
    `python3 router.py --hash '<passwort>'`; Client-Hashes sind `sha256` des Tokens.
-3. Prüfen: `python3 router.py --check /etc/ollama-router/config.yaml` – meldet unbekannte Schlüssel mit Vorschlag.
-4. systemd-Einheiten aus `router/` nach `/etc/systemd/system/`: `ollama-router.service` (läuft mit `ProtectSystem=strict`,
-   schreibt nur `/etc/ollama-router` und sein Log-Verzeichnis), optional `ollama-router-cert.path` (Neustart bei erneuertem
-   Zertifikat) und `ollama-router-secrets.*` (siehe 5). `systemctl enable --now ollama-router`.
-5. Secrets: der Router liest `/etc/ollama-router/secrets.env` (`MQTT_PASSWORD`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). Die Datei
+3. Prüfen: `python3 router.py --check /etc/skirnir-router/config.yaml` – meldet unbekannte Schlüssel mit Vorschlag.
+4. systemd-Einheiten aus `router/` nach `/etc/systemd/system/`: `skirnir-router.service` (läuft mit `ProtectSystem=strict`,
+   schreibt nur `/etc/skirnir-router` und sein Log-Verzeichnis), optional `skirnir-router-cert.path` (Neustart bei erneuertem
+   Zertifikat) und `skirnir-router-secrets.*` (siehe 5). `systemctl enable --now skirnir-router`.
+5. Secrets: der Router liest `/etc/skirnir-router/secrets.env` (`MQTT_PASSWORD`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). Die Datei
    kann von Hand gepflegt werden oder von `render-env.sh` aus einem Secret-Store gerendert werden (Universal-Auth-API)
-   (Zugangsdaten in `/etc/ollama-router/render-env.conf`, Vorlage [router/render-env.conf.example](router/render-env.conf.example);
+   (Zugangsdaten in `/etc/skirnir-router/render-env.conf`, Vorlage [router/render-env.conf.example](router/render-env.conf.example);
    täglicher Timer startet den Router bei geändertem Secret neu).
-6. Für die Auto-Rolle: `decision-tfidf.json` nach `/etc/ollama-router/` und den Embedding-Container aus `decision-embed/` starten
+6. Für die Auto-Rolle: `decision-tfidf.json` nach `/etc/skirnir-router/` und den Embedding-Container aus `decision-embed/` starten
    (`compose.yaml`, bindet nur `127.0.0.1:8082`). Beides ist optional; ohne sie bleibt `decision_engine.enabled: false`.
 7. Agenten installieren und in der UI freigeben.
 
@@ -400,11 +404,11 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 
 | Pfad | Inhalt |
 |---|---|
-| `router/router.py`, `router/ollama_router/` | Dienst: `app`, `config` (Schema), `proxy` (Ollama-API), `openai_api`, `request` (routing-Block), `scheduler`, `admission`, `nodes`, `poll` (Zustandsautomat, Prewarm), `registry` (Agenten-Register), `tunnel`, `auth`, `cloud`, `decision/` (Engines), `metrics`, `perf`, `ops` (Idempotency, Canary, Shadow, Manifest), `ha` (MQTT), `admin`, `settings` (UI-Allowlist), `toolcall_rescue` (Tool-Calls, die Ollamas Parser als Text verliert, werden zurückgeholt), `wol` |
+| `router/router.py`, `router/skirnir_router/` | Dienst: `app`, `config` (Schema), `proxy` (Ollama-API), `openai_api`, `request` (routing-Block), `scheduler`, `admission`, `nodes`, `poll` (Zustandsautomat, Prewarm), `registry` (Agenten-Register), `tunnel`, `auth`, `cloud`, `decision/` (Engines), `metrics`, `perf`, `ops` (Idempotency, Canary, Shadow, Manifest), `ha` (MQTT), `admin`, `settings` (UI-Allowlist), `toolcall_rescue` (Tool-Calls, die Ollamas Parser als Text verliert, werden zurückgeholt), `wol` |
 | `router/ui.html`, `router/skirnir.png`, `router/favicon.png` | Web-UI und Logo |
 | `router/config.example.yaml`, `router/*.service`, `*.timer`, `*.path`, `render-env.sh`, `render-env.conf.example` | Beispielkonfiguration, systemd-Einheiten, Secrets-Renderer |
 | `router/decision-tfidf.json` | trainiertes TF-IDF-Modell der Auto-Rolle |
-| `agent-go/` | Agent für die GPU-Knoten (Go 1.27, Windows-Dienst / Linux-Binary), eigenes README |
+| `agent/` | Agent für die GPU-Knoten (Go 1.27, Windows-Dienst / Linux-Binary), eigenes README |
 | `decision-eval/` | Datensatz-Generator (136 Vorlagen, 1282 Beispiele, Gruppen-Split), Trainer für TF-IDF und Jevlike, Auswertung (Top-1, Kalibrierung, Ketten), Ergebnisse |
 | `decision-embed/` | Stufe 2 der Auto-Rolle: ONNX-Export, Kopf-Training, Dienst, Container |
 | `decision-jevlike/` | Jevlike-Dienst (Prototyp, gemessen, nicht produktiv) |
@@ -415,15 +419,15 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 | `monitoring/` | Prometheus + Grafana neben dem Router (Compose, Scrape-Konfiguration, provisioniertes Dashboard, Secret-Renderer, `deploy_ct.py`), eigene README |
 | `.github/workflows/ci.yml`, `CHANGELOG.md`, `SECURITY.md` | CI (Lint, Go vet/test, Windows-Cross-Build, Selbsttests; die End-to-End-Suite nächtlich), Release-Historie, Meldeweg für Sicherheitslücken |
 
-### Zwei Namen, mit Absicht
+### Namen
 
-**Skirnir** ist der Produktname: Repository, Home-Assistant-Gerät, die `skirnir_*`-Metriken, die `X-Skirnir-*`-Header, die
-Container-Images. **`ollama-router`** ist der eingefrorene technische Name darunter: das Python-Paket `ollama_router`, die
-systemd-Units und Pfade (`/opt/ollama-router`, `/etc/ollama-router`), das MQTT-Basisthema und die Discovery-IDs, der
-Windows-Dienst `OllamaRouterAgent` mit virtuellem Konto, Aufgabe und `ProgramData`-Ordner, die Agent-Binary und die
-Namen der Release-Dateien. Eine Umbenennung würde jeden installierten Knoten und jede Entitätshistorie in Home Assistant
-brechen, und eine Dienstumbenennung lässt sich nicht über das Selbst-Update ausrollen. Die technischen Namen bleiben also;
-neue Funktionen tragen den Namen Skirnir überall dort, wo ein Mensch ihn sieht.
+Seit Router 0.2.0 / Agent 0.11.0 folgen die technischen Namen dem Produkt: Paket `skirnir_router`, Dienst und Pfade
+`skirnir-router` (`/opt/skirnir-router`, `/etc/skirnir-router`), Agent-Binary `skirnir-agent`, Windows-Dienst `SkirnirAgent`
+(„Skirnir Agent“). `deploy.py` zieht eine bestehende Router-Installation einmalig um (Verzeichnisse, Units), das `setup` des
+Agenten einen bestehenden Knoten (Verzeichnisse, Dienst, Relay-Aufgabe). Ein Agent, der sich unter dem alten Dateinamen
+selbst aktualisiert hat, läuft weiter: alter Konfigurationspfad, Dienst- und Aufgabenname werden als Rückfall gefunden, bis
+`setup` gelaufen ist. Absichtlich eingefroren: das MQTT-Basisthema `ollama-router`, die Discovery-Node-ID und die
+Entitäts-IDs `ollama_router_*`, weil Historie und Automationen in Home Assistant daran hängen.
 
 ## Sicherheitsmodell, kurz
 
