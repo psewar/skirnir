@@ -6,7 +6,7 @@ import base64, json, os, random, ssl, sys, threading, time, urllib.request
 OPS, OUT = sys.argv[1], sys.argv[2]
 MODEL = sys.argv[3] if len(sys.argv) > 3 else "gemma4:26b"
 WORKERS = int(sys.argv[4]) if len(sys.argv) > 4 else 4
-sys.path.insert(0, r"D:\repos\skirnir\deploy")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deploy"))
 os.environ["SKIRNIR_OPS"] = OPS
 import ops_env  # noqa: E402
 

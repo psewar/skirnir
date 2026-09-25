@@ -15,6 +15,7 @@ schwierige Faelle zu brauchen. Dieser Text haelt fest, was umgesetzt ist und wo 
 | Messbarkeit | `metrics` (`skirnir_decision_total`, `_latency_seconds`, `_fallback_total`), Entscheidungsprotokoll `event: decision`, UI-Protokollzeile | |
 | Trainingsdaten | `decision/capture.py` | JSONL im Jevlike-Format; Labels `client` (echte Rollenwahl eines Clients) getrennt von `engine` (Pseudo-Label); Opt-in je Client, Anonymisierung, Gruppen-Hash fuer saubere Splits |
 | Admin | `POST /admin/decide`, `GET /admin/decision` | Engine direkt fragen (auch eine bestimmte), Status/Gesundheit |
+| Embedding-Dienst (Stufe 2) | `decision-embed/` | multilingual-e5-small als ONNX int8 + Softmax-Kopf, gleiches Protokoll wie Jevlike (`JevlikeEngine(name="embed")`), Container auf dem Router-Host; Beispielkette `[embed, local_llm, tfidf, rules]` |
 | Jevlike-Dienst | `decision-jevlike/` | `server.py` (stdlib-HTTP + torch, Offline-Variablen vor dem Import), `Dockerfile`/`compose.yaml` (nur 127.0.0.1:8081), `prepare_encoder.py` (einmaliger HF-Download in den Cache) |
 | Datensatz + Auswertung | `decision-eval/` | Vorlagen aus dem Betrieb, Split nach Gruppen, `run_eval.py` mit Top-1/Top-3, Konfusionsmatrix, Latenz p50/p95/p99, Fallback-Rate, ECE, Temperatur-Kalibrierung |
 
@@ -53,7 +54,8 @@ schwierige Faelle zu brauchen. Dieser Text haelt fest, was umgesetzt ist und wo 
 - TypeSafe Jev als Provider (Schnittstelle steht, keine Implementierung).
 - Faehigkeits-Hinweise aus der Engine (Abschnitt 6, `vision true/0.99`): heute leitet `request.implicit_caps` Faehigkeiten
   deterministisch aus dem Body ab (Bilder, Tools, format). Eine gelernte Ergaenzung braeuchte erst Daten.
-- Produktiv-Einsatz der Auto-Rolle: haengt an den Messwerten (Genauigkeit, Latenz, Fallback-Rate) aus `decision-eval`.
+- ~~Produktiv-Einsatz der Auto-Rolle: haengt an den Messwerten aus `decision-eval`.~~ Seit 2026-09-17 produktiv mit der
+  Kette `embed -> local_llm -> tfidf -> rules` (Beispielkonfiguration). Jevlike bleibt Provider, ist aber nicht in der Kette.
 
 ## Nachtrag 2026-09-17: Stufe 1 und Ausblick
 

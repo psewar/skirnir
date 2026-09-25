@@ -1,11 +1,11 @@
 """Lasttest GPU-Schutz (design/gpu-guard.md, Test 6): je Power-Limit 575/500/460/400 W Tempo (Prefill, Generierung, 2 parallel),
 16-Pin-Spannung, Leistung und Throttle-Gruende messen. Laeuft ERHOEHT (nvidia-smi -pl braucht Admin); der Guard steht waehrenddessen
-auf 100 % (guard_override.py). Am Ende: Limit auf den Standard, dann stellt der Guard sein Dauerlimit selbst wieder her.
+auf 100 % (`guard_override.py`, Ops-Ordner: setzt gpu_guard.power_limit_pct per Config-Push). Am Ende: Limit auf den Standard, dann stellt der Guard sein Dauerlimit selbst wieder her.
 Aufruf: python guard_loadtest.py <ops-ordner> <ausgabe.json>"""
 import base64, json, os, random, ssl, statistics, subprocess, sys, threading, time, urllib.request
 
 OPS, OUT = sys.argv[1], sys.argv[2]
-sys.path.insert(0, r"D:\repos\skirnir\deploy")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deploy"))
 os.environ["SKIRNIR_OPS"] = OPS
 import ops_env  # noqa: E402
 

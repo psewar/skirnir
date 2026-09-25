@@ -374,10 +374,16 @@ have no LXC host, copy by hand or adapt the two templates `CT_EXEC`/`CT_PUSH` in
 python test/run_tests.py          # about 250 end-to-end checks, ~3 min: two fake Ollama nodes, fake agent through the tunnel,
                                   # fake cloud (OpenAI and Anthropic), fake decision service, self-signed TLS, client auth,
                                   # admission, breaker, canary/shadow, idempotency, cloud limits, UI config round trips
+python test/selftest_kontextpruefung.py   # standalone self-tests without a router: context pre-check and
+python test/selftest_toolcall_rescue.py   # tool-call rescue (a few seconds each)
 python test/dev_env.py            # the same environment for clicking around, without TLS/login
 python test/perf_run.py           # test bench: CPU per request, py-spy profile (test/perf_profile_report.py)
 ruff check .                      # lint (ruff.toml: F, E9, B904, B905)
 ```
+
+Dependencies for running and developing: `router/requirements.txt` (runtime, matches the Debian 12 packages) and
+`requirements-dev.txt` (lint, deploy, tests). CI runs lint, `go vet`/`go test`, a Windows cross-build and the self-tests on
+every push; the end-to-end suite runs nightly because it is timing-sensitive.
 
 Measured, the router is I/O-bound: around 0.6 ms CPU per forwarded request on the test bench, about 10 ms per `/api/chat` in
 production versus 200–300 ms in the model. One process with one event loop is enough because the GPU nodes deliver 2–4
@@ -392,14 +398,14 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 | `router/config.example.yaml`, `router/*.service`, `*.timer`, `*.path`, `render-env.sh`, `render-env.conf.example` | Example configuration, systemd units, secrets renderer |
 | `router/decision-tfidf.json` | trained TF-IDF model of the auto role |
 | `agent-go/` | Agent for the GPU nodes (Go 1.27, Windows service / Linux binary), own README |
-| `agent/` | Predecessor of the agent as a PowerShell task; fallback path only |
 | `decision-eval/` | Dataset generator (136 templates, 1282 examples, group split), trainers for TF-IDF and Jevlike, evaluation (top-1, calibration, chains), results |
 | `decision-embed/` | Stage 2 of the auto role: ONNX export, head training, service, container |
 | `decision-jevlike/` | Jevlike service (prototype, measured, not in production) |
 | `deploy/` | `deploy.py`, `ops_env.py` |
 | `design/` | Design notes: `routing-algorithm.md`, `roadmap.md` (stages and decisions), `decision-engine.md`; logos (generated with an image model, metadata removed) |
 | `test/` | Test suite, fakes, dev environment, test bench |
-| `tools/split_router.py` | one-off tool that split the former single file into the package via the syntax tree |
+| `tools/` | measurement scripts for the GPU guard (load test, stage-2 night run) |
+| `.github/workflows/ci.yml`, `CHANGELOG.md`, `SECURITY.md` | CI (lint, Go vet/test, Windows cross-build, self-tests; the end-to-end suite nightly), release history, vulnerability reporting |
 
 ## Security model, in short
 

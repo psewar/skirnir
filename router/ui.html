@@ -699,7 +699,7 @@ function renderOps() {
     <div class="tile"><h4>Scheduler</h4><div class="muted">Score: warm ${w.warm} · Anfrage −${w.inflight} · voll −${w.saturated} · VRAM ×${w.vram_free} · Gewicht ×${w.weight} · Tempo ×${w.speed} · Fehler −${w.errors}</div>
       <div class="muted">Breaker: ${(sch.breaker || {}).failures} Fehler / ${(sch.breaker || {}).window_s} s → ${(sch.breaker || {}).open_s} s offen</div>
       <div class="muted">Admission: ${(sch.admission || {}).max_inflight_default} je Knoten · Alterung ${(sch.admission || {}).aging_s} s · max. Wartezeit ${(sch.admission || {}).max_wait_s} s</div></div>
-    <div class="tile"><h4>Build &amp; Supply Chain</h4><div class="muted">${b.present ? `Deploy ${esc((b.deployed_at || '').replace('T', ' '))} von ${esc(b.by || '?')} · ${Object.keys(b.files || {}).length} Dateien (SHA-256)` : 'kein Manifest'}</div>
+    <div class="tile"><h4>Build &amp; Supply Chain</h4><div class="muted">${b.present ? `Deploy ${esc((b.deployed_at || '').replace('T', ' '))}${b.router_version ? ' · Router ' + esc(b.router_version) : ''} · ${Object.keys(b.files || {}).length} Dateien (SHA-256)` : 'kein Manifest'}</div>
       ${Object.entries(sc).map(([n, v]) => `<div class="muted">${esc(n)}: Ollama ${esc(v.ollama_version || '?')} · ${Object.keys(v.models || {}).length} Modelle</div>`).join('')}</div>`;
 }
 

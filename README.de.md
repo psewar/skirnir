@@ -374,10 +374,16 @@ oder passt die zwei Vorlagen `CT_EXEC`/`CT_PUSH` in `deploy.env` an.
 python test/run_tests.py          # rund 250 End-to-End-Prüfungen, ~3 min: zwei Fake-Ollama-Knoten, Fake-Agent durch den Tunnel,
                                   # Fake-Cloud (OpenAI und Anthropic), Fake-Decision-Dienst, selbstsigniertes TLS, Client-Auth,
                                   # Admission, Breaker, Canary/Shadow, Idempotency, Cloud-Schranken, UI-Config-Runden
+python test/selftest_kontextpruefung.py   # Selbsttests ohne Router: Kontext-Vorabprüfung und
+python test/selftest_toolcall_rescue.py   # Tool-Call-Rettung (je ein paar Sekunden)
 python test/dev_env.py            # dieselbe Umgebung zum Klicken, ohne TLS/Login
 python test/perf_run.py           # Messstand: CPU je Anfrage, py-spy-Profil (test/perf_profile_report.py)
 ruff check .                      # Lint (ruff.toml: F, E9, B904, B905)
 ```
+
+Abhängigkeiten: `router/requirements.txt` (Laufzeit, entspricht den Debian-12-Paketen) und `requirements-dev.txt` (Lint,
+Deploy, Tests). Die CI prüft bei jedem Push Lint, `go vet`/`go test`, einen Windows-Cross-Build und die Selbsttests; die
+End-to-End-Suite läuft nächtlich, weil sie zeitempfindlich ist.
 
 Gemessen ist der Router I/O-gebunden: rund 0,6 ms CPU je weitergeleiteter Anfrage im Messstand, etwa 10 ms je `/api/chat` in
 Produktion gegenüber 200–300 ms im Modell. Ein Prozess mit einem Event-Loop reicht, weil die GPU-Knoten 2–4 Anfragen/s liefern
@@ -392,14 +398,14 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 | `router/config.example.yaml`, `router/*.service`, `*.timer`, `*.path`, `render-env.sh`, `render-env.conf.example` | Beispielkonfiguration, systemd-Einheiten, Secrets-Renderer |
 | `router/decision-tfidf.json` | trainiertes TF-IDF-Modell der Auto-Rolle |
 | `agent-go/` | Agent für die GPU-Knoten (Go 1.27, Windows-Dienst / Linux-Binary), eigenes README |
-| `agent/` | Vorgänger des Agenten als PowerShell-Task; nur noch Rückfallweg |
 | `decision-eval/` | Datensatz-Generator (136 Vorlagen, 1282 Beispiele, Gruppen-Split), Trainer für TF-IDF und Jevlike, Auswertung (Top-1, Kalibrierung, Ketten), Ergebnisse |
 | `decision-embed/` | Stufe 2 der Auto-Rolle: ONNX-Export, Kopf-Training, Dienst, Container |
 | `decision-jevlike/` | Jevlike-Dienst (Prototyp, gemessen, nicht produktiv) |
 | `deploy/` | `deploy.py`, `ops_env.py` |
 | `design/` | Entwürfe: `routing-algorithm.md`, `roadmap.md` (Ausbaustufen und Entscheidungen), `decision-engine.md`; Logos (mit einem Bildmodell erzeugt, Metadaten entfernt) |
 | `test/` | Testsuite, Fakes, Dev-Umgebung, Messstand |
-| `tools/split_router.py` | einmaliges Werkzeug, das die frühere Einzeldatei über den Syntaxbaum in das Paket zerlegte |
+| `tools/` | Messskripte für den GPU-Schutz (Lasttest, Nachtlauf Stufe 2) |
+| `.github/workflows/ci.yml`, `CHANGELOG.md`, `SECURITY.md` | CI (Lint, Go vet/test, Windows-Cross-Build, Selbsttests; die End-to-End-Suite nächtlich), Release-Historie, Meldeweg für Sicherheitslücken |
 
 ## Sicherheitsmodell, kurz
 

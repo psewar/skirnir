@@ -1,0 +1,5 @@
+# Lint, deploy and tests (the router's own dependencies are in router/requirements.txt)
+-r router/requirements.txt
+ruff>=0.6
+paramiko>=3.0          # deploy/deploy.py (SSH/SFTP to the LXC host)
+# test/run_tests.py additionally needs the `openssl` command line tool for the self-signed test certificate

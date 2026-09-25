@@ -57,7 +57,7 @@ Befunde je Engine:
 | `results-router/` | rules + tfidf + local_llm gegen Produktion (2026-09-17 00:00) |
 | `results-jevlike/` | tiny + hf lokal (2026-09-16 23:50) |
 | `results-embed/`, `results-all/` | Stufe 2 allein bzw. alle Engines mit vier Ketten (2026-09-17 00:30); `results-all/calibration.json` fuer `decision_engine.calibration_path` |
-| `train-hf.log` | Verlauf des Frozen-Encoder-Trainings (Ueberfitten ab Epoche 2 sichtbar) |
+| `train-hf.log` | Verlauf des Frozen-Encoder-Trainings (Ueberfitten ab Epoche 2 sichtbar); entsteht lokal, nicht im Repo (`*.log`) |
 
 ```bash
 python build_dataset.py                                   # Datensatz

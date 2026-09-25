@@ -17,6 +17,7 @@ ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/opt/ollama-router
 ReadWritePaths=/etc/ollama-router
+StateDirectory=ollama-router
 LogsDirectory=ollama-router
 PrivateTmp=true
 

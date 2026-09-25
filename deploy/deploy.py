@@ -5,6 +5,9 @@ Ablauf: SFTP nach <lxc-host>:/tmp/ollama-router/ -> Datei-Push in den Container 
 Aufruf:  python deploy.py              (voller Deploy)
          python deploy.py --status     (nur Status + Journal)
          python deploy.py --pull-roles (roles.yaml des CT in den Ops-Ordner holen, zur Ansicht/Sicherung)
+         python deploy.py --agent [dist-ordner] [--version v]   (Agent-Binaries signieren und auf den Router legen)
+Der SSH-Host-Schluessel des LXC-Hosts wird beim ersten Verbinden in <ops>/known_hosts gespeichert und danach geprueft
+(ein anderer Schluessel bricht ab - Datei loeschen, wenn der Host wirklich neu aufgesetzt wurde).
 
 Alles Standortspezifische (LXC-Host, CT-Nummer, Router-Hostname, Secrets-Ordner, Produktivkonfiguration, Secret-Store-
 Zugang des CT) kommt aus dem Ops-Ordner ausserhalb des Repos, siehe ops_env.py. Das Repo enthaelt nur config.example.yaml.
@@ -13,6 +16,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -82,8 +86,13 @@ def ct_host():
     return ops_env.ct_host(OPS)
 
 
-def run(c, cmd, timeout=120):
-    _, o, e = c.exec_command(cmd, timeout=timeout)
+def run(c, cmd, timeout=120, stdin=None):
+    """Kommando auf dem LXC-Host; stdin (Text) wird durchgereicht - so bleiben Passwoerter aus der Prozessliste."""
+    i, o, e = c.exec_command(cmd, timeout=timeout)
+    if stdin is not None:
+        i.write(stdin)
+        i.flush()
+        i.channel.shutdown_write()
     out = o.read().decode(errors="replace")
     err = e.read().decode(errors="replace")
     rc = o.channel.recv_exit_status()
@@ -105,9 +114,22 @@ def connect():
     global secrets_env
     secrets_env = ops_env.load_secrets(OPS)
     c = paramiko.SSHClient()
-    c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    kh = os.path.join(OPS["OPS"], "known_hosts")
+    if os.path.exists(kh):   # Host-Schluessel gepinnt: ein anderer Schluessel (MITM, neu aufgesetzter Host) bricht ab
+        c.load_host_keys(kh)
+        c.set_missing_host_key_policy(paramiko.RejectPolicy())
+    else:                    # erstes Mal: Schluessel uebernehmen und merken (Trust on first use)
+        c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        print("Host-Schluessel des LXC-Hosts wird beim ersten Verbinden gespeichert:", kh)
     c.connect(ct_host(), username=OPS["HOST_USER"], password=os.environ[OPS["HOST_PASS_ENV"]], timeout=20)
+    if not os.path.exists(kh):
+        c.save_host_keys(kh)
     return c
+
+
+def curl_auth(url_and_args):
+    """curl mit Basic Auth aus stdin (`-K -`), damit das UI-Passwort nicht in der Prozessliste von Host und Container steht."""
+    return "curl -s -m 8 -K - " + url_and_args, 'user = "%s:%s"\n' % (OPS["UI_USER"], os.environ.get(OPS["UI_PASS_ENV"], ""))
 
 
 AGENT_BINARIES = [  # (Dateiname in dist/, os, arch) - Namen wie im GitHub-Release
@@ -187,8 +209,16 @@ def deploy_agent(c, dist_dir=None):
     print(f"Agent {version} hinterlegt ({len(files)} Datei(en)). Oeffentlicher Schluessel fuer update.public_key der Agenten: {pub}")
 
 
+def _router_version():
+    m = re.search(r'^VERSION\s*=\s*"([^"]+)"', open(os.path.join(ROUTER_DIR, "ollama_router", "common.py"), encoding="utf-8").read(), re.M)
+    return m.group(1) if m else "?"
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # systemctl-Ausgabe enthaelt Unicode-Punkte, Windows-Konsole ist cp1252
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__)
+        return
     host = OPS["ROUTER_HOST"]
     c = connect()
     if "--agent" in sys.argv:
@@ -210,8 +240,9 @@ def main():
         if chk.returncode != 0:
             print("Abbruch: config.yaml ungueltig, nichts ausgerollt")
             sys.exit(2)
-        # Deploy-Manifest (Supply Chain): Zeitpunkt, Quelle, SHA-256 jeder ausgerollten Datei -> /admin/state build
-        manifest = {"deployed_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "source": os.path.abspath(ROUTER_DIR), "by": os.environ.get("USERNAME") or os.environ.get("USER"),
+        # Deploy-Manifest (Supply Chain): Zeitpunkt, Router-Version und SHA-256 jeder ausgerollten Datei -> /admin/state build
+        # (kein Arbeitsplatz-Pfad, kein Benutzername: das Manifest liegt auf dem Router und erscheint in der UI)
+        manifest = {"deployed_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "router_version": _router_version(),
                     "files": {_staged(local): hashlib.sha256(open(_local(local), "rb").read()).hexdigest() for local, _, _ in FILES}}
         with open(os.path.join(ROUTER_DIR, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=1)
@@ -229,20 +260,26 @@ def main():
                 sys.exit(1)
         run(c, "rm -rf /tmp/ollama-router")
         rc, out, err = run(c, ct_exec("python3 /opt/ollama-router/router.py --check /etc/ollama-router/config.yaml && "
-                                  "python3 -c \"import yaml; yaml.safe_load(open(\\\"/etc/ollama-router/config.yaml\\\"))\" && "
-                                  "dpkg -s python3-cryptography >/dev/null 2>&1 || (apt-get install -y -q python3-cryptography >/dev/null 2>&1 && echo cryptography-installiert); systemctl daemon-reload && systemctl enable ollama-router >/dev/null 2>&1; systemctl enable --now ollama-router-cert.path >/dev/null 2>&1; systemctl enable --now ollama-router-secrets.timer >/dev/null 2>&1; /opt/ollama-router/render-env.sh; systemctl restart --no-block ollama-router; sleep 3; echo restarted"))
+                                  "python3 -c \"import yaml; yaml.safe_load(open(\\\"/etc/ollama-router/config.yaml\\\"))\""))
         print(out.strip(), err.strip())
-        if "Konfiguration ok" not in out:
+        if rc != 0 or "Konfiguration ok" not in out:
             print("Abbruch: Schema-Check auf dem CT fehlgeschlagen - Dienst NICHT neu gestartet (alter Prozess laeuft weiter, Dateien sind aber schon ersetzt)")
             c.close()
             sys.exit(1)
+        # Neustart erst NACH bestandenem Check als eigenes Kommando (Review 2026-09-25: vorher hing er per ';' hinter dem
+        # '||'-Zweig derselben Kommandokette und lief auch bei gescheitertem Check)
+        rc, out, err = run(c, ct_exec("dpkg -s python3-cryptography >/dev/null 2>&1 || (apt-get install -y -q python3-cryptography >/dev/null 2>&1 && echo cryptography-installiert); "
+                                  "systemctl daemon-reload && systemctl enable ollama-router >/dev/null 2>&1; systemctl enable --now ollama-router-cert.path >/dev/null 2>&1; "
+                                  "systemctl enable --now ollama-router-secrets.timer >/dev/null 2>&1; /opt/ollama-router/render-env.sh; systemctl restart --no-block ollama-router; sleep 3; echo restarted"))
+        print(out.strip(), err.strip())
         time.sleep(3)
-    ui_pass = os.environ.get(OPS["UI_PASS_ENV"], "")
+    state_cmd, state_stdin = curl_auth(f"--resolve {host}:11435:127.0.0.1 https://{host}:11435/admin/state | head -c 400")
     rc, out, err = run(c, ct_exec("systemctl --no-pager --lines=0 status ollama-router | head -5; "
                               "echo ---; journalctl -u ollama-router --no-pager -n 25 -o short; "
                               f"echo ---; curl -s -m 5 --resolve {host}:11434:127.0.0.1 https://{host}:11434/api/version; echo; "   # /api/version ist von der Client-Auth ausgenommen (Stufe 2); /api/tags braeuchte im enforce-Modus ein Token
-                              f"echo ---; curl -s -m 5 -u {OPS['UI_USER']}:{ui_pass} --resolve {host}:11435:127.0.0.1 https://{host}:11435/admin/state | head -c 400; echo; "
-                              f"echo ---; systemctl is-active ollama-router-cert.path; openssl s_client -connect 127.0.0.1:11435 -servername {host} </dev/null 2>/dev/null | openssl x509 -noout -subject -enddate"))
+                              f"echo ---; {state_cmd}; echo; "
+                              f"echo ---; systemctl is-active ollama-router-cert.path; openssl s_client -connect 127.0.0.1:11435 -servername {host} </dev/null 2>/dev/null | openssl x509 -noout -subject -enddate"),
+                      stdin=state_stdin)
     print(out)
     if err.strip():
         print("STDERR:", err)

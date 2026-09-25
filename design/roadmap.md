@@ -1,5 +1,9 @@
 # Ausbau zur Inference- und Scheduling-Schicht – Fahrplan (2026-09-09)
 
+> **Stand 2026-09-25: historisch.** Alle sechs Stufen sind seit 2026-09-10 gebaut und live; die Testzahlen im Text sind
+> die von damals (heute rund 250). Was seither dazukam, steht in `CHANGELOG.md` und in den Releases; die Entscheidungen
+> (Cloud-Opt-out, Reihenfolge, Paketschnitt) und der Abschnitt „Wo die Spezifikation an diesem Router reibt“ gelten weiter.
+
 Grundlage: Erweiterungsanforderungen des Betreibers (64 Abschnitte, 2026-09-08 abends). Dieses Dokument hält fest,
 was davon schon steht, wo die Spezifikation an bewussten Entscheidungen dieses Routers reibt, und in welcher
 Reihenfolge gebaut wird. Die Reihenfolge hat der Betreiber am 2026-09-09 entschieden.

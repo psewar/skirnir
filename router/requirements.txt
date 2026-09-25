@@ -1,0 +1,9 @@
+# Runtime dependencies of the router (Debian 12 ships these as python3-aiohttp, python3-yaml, python3-cryptography,
+# python3-paho-mqtt, python3-uvloop; the lower bounds are those package versions).
+aiohttp>=3.8.4
+PyYAML>=6.0
+cryptography>=38.0
+# optional: Home Assistant device via MQTT discovery
+paho-mqtt>=1.6.1,<2
+# optional: faster event loop (Linux)
+uvloop>=0.17; sys_platform != "win32"

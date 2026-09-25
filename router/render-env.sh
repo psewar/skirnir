@@ -18,8 +18,10 @@ CONF=/etc/ollama-router/render-env.conf
 [ -n "$SECRET_STORE_DOMAIN" -a -n "$SECRET_STORE_CLIENT_ID" -a -n "$SECRET_STORE_CLIENT_SECRET" -a -n "$PROJECT_ID" ] || { echo "render-env.conf unvollstaendig - nichts gerendert"; exit 0; }
 ENVIRONMENT=${ENVIRONMENT:-prod}
 OUT=/etc/ollama-router/secrets.env
-T=$(curl -s -m 15 "$SECRET_STORE_DOMAIN/api/v1/auth/universal-auth/login" -H 'Content-Type: application/json' \
-     -d "{\"clientId\":\"$SECRET_STORE_CLIENT_ID\",\"clientSecret\":\"$SECRET_STORE_CLIENT_SECRET\"}" | jq -r .accessToken)
+# Login-Body per stdin (-d @-), damit das Client-Secret nicht in der Prozessliste steht
+T=$(printf '{"clientId":"%s","clientSecret":"%s"}' "$SECRET_STORE_CLIENT_ID" "$SECRET_STORE_CLIENT_SECRET" \
+     | curl -s -m 15 "$SECRET_STORE_DOMAIN/api/v1/auth/universal-auth/login" -H 'Content-Type: application/json' -d @- | jq -r .accessToken)
+[ -z "$T" -o "$T" = "null" ] && { echo "Secret-Store-Login fehlgeschlagen - behalte bestehende $OUT"; exit 0; }
 g(){ curl -s -m 15 "$SECRET_STORE_DOMAIN/api/v3/secrets/raw/$1?workspaceId=$PROJECT_ID&environment=$ENVIRONMENT&secretPath=%2F" -H "Authorization: Bearer $T" | jq -r .secret.secretValue; }
 M=$(g MQTT_PASSWORD)
 [ -z "$M" -o "$M" = "null" ] && { echo "Secret-Fetch fehlgeschlagen (Secret-Store nicht erreichbar?) - behalte bestehende $OUT"; exit 0; }

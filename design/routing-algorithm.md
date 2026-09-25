@@ -1,5 +1,10 @@
 # Routing-Algorithmus – Entwurf v0.1 (2026-09-04)
 
+> **Stand 2026-09-25:** Entwurf vor dem ersten Produktivbetrieb. Umgesetzt und seither erweitert (Score mit Gewichten,
+> Breaker-Zustände, Admission, Residenz, Tunnel statt Direktzugriff); die Messvorschrift in Abschnitt 5 ist das Verfahren
+> hinter dem Knopf „Messen“ im Modellkatalog. Abschnitt 6 ist entschieden: Go-Agent (seit 0.3.0 mit NVML), der
+> PowerShell-Task ist entfernt.
+
 Gehört zur Beispielkonfiguration (`router/config.example.yaml`). Drei Teile: Zustandsermittlung pro Knoten,
 Auswahl pro Anfrage, Weiterleitung inkl. WOL. Am Ende: was gemessen werden muss.
 

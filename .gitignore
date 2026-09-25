@@ -28,15 +28,8 @@ test/agent/
 # Deploy-Ausgabe (Manifest entsteht bei jedem deploy.py-Lauf)
 router/manifest.json
 
-# alter PowerShell-Agent: Konfiguration traegt einen Token, Log ist Laufzeit
-agent/agent-config.json
-agent/agent.log
-
 # gebaute Binaries des Go-Agenten (build.sh erzeugt sie)
 agent-go/dist/
-
-# Vor-Split-Original des Routers (Referenz, nicht Quelle)
-tools/router.py.orig
 
 # Decision Engine: venv, Modelle/HF-Cache und Auswertungsartefakte (Daten und Berichte bleiben im Repo)
 decision-jevlike/.venv/

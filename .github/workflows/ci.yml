@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 2 * * *"   # nightly: the end-to-end suite is timing-sensitive, so it does not gate pushes
+  workflow_dispatch:
+
+jobs:
+  python:
+    name: Router lint, config check, self-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: python router/router.py --check router/config.example.yaml --pure
+      - run: python test/selftest_kontextpruefung.py
+      - run: python test/selftest_toolcall_rescue.py
+
+  go:
+    name: Agent vet, test, Windows cross-build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent-go/go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: GOOS=windows go vet ./...
+      - run: go test ./...
+      - run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /dev/null .
+      - run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /dev/null .
+
+  e2e:
+    name: Router end-to-end suite (nightly, informational)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - run: python test/run_tests.py
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-logs
+          path: test/*.log
+          if-no-files-found: ignore
