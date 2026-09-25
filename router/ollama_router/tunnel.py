@@ -7,6 +7,7 @@ import time
 from aiohttp import ClientError
 
 from . import poll
+from .common import log
 
 
 # Der Agent haelt eine ausgehende WebSocket-Verbindung; der Router schickt seine Ollama-Aufrufe als Streams hindurch.
@@ -132,6 +133,14 @@ class Tunnel:
         async with self.lock:
             await self.ws.send_bytes(frame)
 
+    async def send_quiet(self, frame):
+        """Fire-and-forget (HBACK): schliesst der Tunnel gerade (Router-Stopp, Agent weg), ist das kein Fehler - ohne diese
+        Huelle stand bei jedem Deploy 'Task exception was never retrieved' mit Traceback im Journal (2026-09-25)."""
+        try:
+            await self.send(frame)
+        except (ConnectionError, RuntimeError, ClientError) as e:
+            log.debug("tunnel %s: Antwort verworfen, Verbindung schliesst (%s)", self.name(), e)
+
     async def open(self, method, path, body, deadline):
         sid = self.next_id
         self.next_id = self.next_id % 0xFFFFFFFF + 1
@@ -180,7 +189,7 @@ class Tunnel:
                     ack = {"state": "", "error": str(e)}
             else:
                 ack = {"state": "pending", "busy_reason": ""}
-            asyncio.create_task(self.send(tun_frame(TUN_HBACK, 0, json.dumps(ack).encode())))
+            asyncio.create_task(self.send_quiet(tun_frame(TUN_HBACK, 0, json.dumps(ack).encode())))
             return
         r = self.streams.get(sid)
         if r is None:
