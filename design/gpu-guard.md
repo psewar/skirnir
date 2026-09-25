@@ -332,7 +332,8 @@ Befunde:
   Historie); löst die Warnung im Alltag ohne erkennbaren Grund aus, ist 0,40 V der nächste Kandidat, nicht die Deaktivierung.
 - **Nebenbefund Router**: während des Modellwechsels (qwen3.6 → gemma4:26b, VRAM-Fit) beantwortete der Router ~30 s lang
   alle Anfragen sofort mit 503 `no node available` (778 von 1142), statt sie bis zum Laden zu halten. Für den Guard
-  belanglos, für Batch-Clients ein eigenes Thema (Roadmap).
+  belanglos, für Batch-Clients ein eigenes Thema – behoben in Router 0.1.3 (`proxy._wait_for_load`: warten, bis das
+  Laden durch ist, Ereignis `wait_load`).
 
 ## 6. Offene Fragen und Grenzen
 

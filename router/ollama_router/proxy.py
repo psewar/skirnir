@@ -190,6 +190,7 @@ class _Acquire:
         self.name, self.role, self.tiers, self.req, self.client_ctx = name, role, tiers, req, client_ctx
         self.tried = set()
         self.woke = False
+        self.waited_loads = set()   # (Knoten, Modell), auf deren Laden schon gewartet wurde
         self.t_enq = None
         self.deadline_at = time.time() + (req.deadline_ms / 1000.0 if req.deadline_ms else state.CFG.admission["max_wait_s"])
 
@@ -198,6 +199,8 @@ class _Acquire:
             now = time.time()
             pick = scheduler.choose(self.role, self.tiers, self.client_ctx, now, self.tried, self.req)
             if pick is None:
+                if await self._wait_for_load(now):
+                    continue   # Ladevorgang beendet (oder Frist um): neu waehlen
                 await self._wake_or_reject()
                 continue
             node = pick[3]
@@ -208,6 +211,36 @@ class _Acquire:
                 self.req.queued_ms = (time.time() - self.t_enq) * 1000
             self.tried.add(node.name)
             return pick
+
+    async def _wait_for_load(self, now):
+        """Kein Kandidat, aber ein passender Knoten laedt gerade ein Modell (VRAM-Anspruch aus announce_load): auf das Ende
+        des Ladens warten statt sofort 503. Gemessen 2026-09-25: beim Wechsel qwen3.6 -> gemma4:26b bekamen ~30 s lang
+        alle weiteren Anfragen 'no node available' (778 von 1142), weil das alte Modell bis zum naechsten /api/ps-Poll als
+        geladen zaehlte und der Anspruch des neuen das Budget sprengte. Wartet je (Knoten, Modell) einmal, bis /api/ps das
+        Modell zeigt oder der Anspruch weg ist (dann noch zwei Poll-Intervalle), hoechstens bis zur Admission-Frist."""
+        found = scheduler.loading_for(self.tiers, now, self.tried)
+        if found is None or now >= self.deadline_at:
+            return False
+        node, model = found
+        if (node.name, model) in self.waited_loads:
+            return False   # schon abgewartet, immer noch kein Platz: normal weiter (wecken / 503)
+        self.waited_loads.add((node.name, model))
+        if self.t_enq is None:
+            self.t_enq = now
+        state.remember({"event": "wait_load", "role": self.role["name"], "node": node.name, "model": model,
+                        "request_id": self.req.request_id})
+        settle = 2 * state.CFG.poll_s + 1
+        t_gone = None
+        while time.time() < self.deadline_at:
+            if node.is_loaded(model):
+                break
+            claim = node.loading.get(model)
+            if claim is None or time.time() >= claim[1]:
+                t_gone = t_gone or time.time()
+                if time.time() - t_gone >= settle:
+                    break
+            await asyncio.sleep(0.5)
+        return True
 
     async def _wake_or_reject(self):
         """Kandidaten erschoepft -> einmal Weckversuch, danach 503."""

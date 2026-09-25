@@ -702,6 +702,7 @@ function renderDecisions() {
     if (d.event === 'breaker') return `<div class="${d.state === 'closed' ? 'ok' : 'bad'}">${t} Breaker ${esc(d.node)} → ${esc(d.state)} ${esc(d.reason || '')}</div>`;
     if (d.event === 'gpu_guard') return `<div class="${d.problem ? 'bad' : (d.state === 'normal' ? 'ok' : 'warn')}">${t} GPU-Schutz ${esc(d.node)} → ${esc(d.state)}${d.limit_w ? ` (${d.limit_w} W)` : ''} ${esc(d.reason || '')}</div>`;
     if (d.event === 'queued') return `<div class="warn">${t} Warteschlange: <b>${esc(d.role)}</b> (${esc(d.priority)}) wartet auf ${esc(d.node)} (${d.inflight} aktiv)</div>`;
+    if (d.event === 'wait_load') return `<div class="warn">${t} <b>${esc(d.role)}</b> wartet, bis ${esc(d.node)} ${esc(d.model)} geladen hat</div>`;
     if (d.event === 'admission_timeout') return `<div class="bad">${t} Deadline: <b>${esc(d.role)}</b> (${esc(d.priority)}) nach ${d.waited_ms} ms abgewiesen</div>`;
     if (d.event === 'shadow') return `<div class="muted">${t} 🌒 Shadow <b>${esc(d.role)}</b> → ${esc(d.model)} auf ${esc(d.node || '–')}: ${esc(d.status)}${d.ms ? ' · ' + d.ms + ' ms' : ''}</div>`;
     if (d.event === 'prewarm') return `<div class="muted">${t} prewarm ${esc(d.model)} auf ${esc(d.node)} (${esc(d.reason || '')})</div>`;

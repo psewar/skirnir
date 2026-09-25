@@ -157,6 +157,8 @@ Grössenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_mes
   Ergebnisse ok / error / timeout / structured_error. Persistiert in `perf.json`.
 - **Circuit Breaker je Knoten:** drei Backend-Fehler in 60 s → `open` (30 s), dann `half_open` mit genau einer Probe. Ein
   Neustart des Knotens setzt ihn zurück. Retry auf einen anderen Knoten bei Verbindungsfehler oder 5xx vor dem ersten Byte.
+- **Modellwechsel:** lädt ein Knoten gerade ein Modell, warten weitere Anfragen, die diesen Knoten bräuchten, auf das
+  Ende des Ladens statt 503 zu bekommen (Ereignis `wait_load`).
 - **Admission:** höchstens `max_inflight` gleichzeitige Anfragen je Knoten (Policy im Register, Vorgabe 2 – sollte
   `OLLAMA_NUM_PARALLEL` des Knotens entsprechen). Weitere warten im Router; beim Freiwerden gewinnt der beste Rang aus
   Prioritätsklasse und Alter (`aging_s` 30 s, damit Batch nicht verhungert). `max_queue` überschritten → 503 sofort.

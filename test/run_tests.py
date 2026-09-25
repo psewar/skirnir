@@ -56,9 +56,9 @@ class Decision(dict):
         return None
 
 
-def chat(model, ctx=None, stream=True):
+def chat(model, ctx=None, stream=True, **extra):
     global REQ_T
-    body = {"model": model, "messages": [{"role": "user", "content": "hi"}], "stream": stream}
+    body = {"model": model, "messages": [{"role": "user", "content": "hi"}], "stream": stream, **extra}
     if ctx:
         body["options"] = {"num_ctx": ctx}
     REQ_T = time.time()
@@ -301,6 +301,17 @@ def main():
         # wirft bei >31.8 GiB das aelteste raus: granite, dann qwen). Ohne die Regel bliebe qwen kalt und "warm zuerst"
         # naehme fortan die Ausweichstufe; mit ihr kommt qwen nach residency_idle_s (3 s im Test) zurueck - aber nur,
         # weil der Verdraenger seit dann nicht mehr angefragt wurde.
+        # Modellwechsel: waehrend gpt-oss laedt (slow_load 2.5 s, qwen zaehlt bis zum naechsten Poll als geladen), darf eine
+        # zweite Anfrage auf dasselbe Modell nicht mit 503 'no node' abgewiesen werden, sondern wartet auf das Laden.
+        hb("big", 2, 26600, 6000)   # 5.9 GiB frei: ohne qwen in /api/ps reicht das Budget fuer gpt-oss (12.8) nicht -> frueher 503
+        first = {}
+        th = threading.Thread(target=lambda: first.update(zip(("st", "txt"), chat("gpt-oss:20b", ctx=8192, slow_load=6))))
+        th.start(); time.sleep(2.5)   # Poll hat die Verdraengung gesehen, gpt-oss noch nicht da
+        st2, txt2 = chat("gpt-oss:20b", ctx=8192)
+        th.join()
+        waits = [d for d in state()["decisions"] if d.get("event") == "wait_load"]
+        check("Modellwechsel: zweite Anfrage wartet auf das Laden statt 503", first.get("st") == 200 and st2 == 200 and waits and waits[-1]["model"] == "gpt-oss:20b",
+              f"erste {first.get('st')} zweite {st2} {txt2[:80] if st2 != 200 else ''} wait_load {len(waits)}")
         st, txt = chat("gpt-oss:20b", ctx=8192)
         time.sleep(0.8)   # der Kaltstart stoesst einen sofortigen Poll an; kurz warten, bis /api/ps eingelesen ist
         n = state()["nodes"]["big"]

@@ -69,7 +69,11 @@ async def infer(req):
     if b.get("sleep_s"):       # Testhilfe (Stufe 3): lange Anfrage, haelt den Platz auf dem Knoten belegt
         await asyncio.sleep(float(b["sleep_s"]))
     if b.get("slow_load"):   # Testhilfe: erst nach dieser Zeit in /api/ps - wie ein echter Kaltstart,
-        await asyncio.sleep(float(b["slow_load"]))   # bei dem nvidia-smi das VRAM schon sieht
+        # bei dem nvidia-smi das VRAM schon sieht. Wie echtes Ollama wird das alte Modell VOR dem Laden verdraengt:
+        # /api/ps zeigt waehrenddessen keins von beiden (der Fall, der 2026-09-25 zu 503 'no node' fuehrte).
+        while loaded and m not in loaded and sum(SIZES.get(k, 5.0) for k in loaded) + SIZES.get(m, 5.0) > 31.8:
+            loaded.pop(next(iter(loaded)))
+        await asyncio.sleep(float(b["slow_load"]))
     ctx = (b.get("options") or {}).get("num_ctx") or 4096   # Ollama-Default im Fake
     loaded[m] = ctx
     while len(loaded) > 1 and sum(SIZES.get(k, 5.0) for k in loaded) > 31.8:   # VRAM-Verdrängung wie echtes Ollama

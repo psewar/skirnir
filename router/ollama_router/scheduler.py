@@ -93,6 +93,23 @@ def rank(nodes, model, req=None):
     return [n for s, n in scored]
 
 
+def loading_for(tiers, now, exclude=()):
+    """Ein Knoten, der fuer eine der Stufen in Frage kaeme und gerade ein Modell laedt (unverfallener Anspruch aus
+    announce_load): Grund zu warten statt 503. Liefert (Knoten, ladendes Modell) oder None."""
+    for t in tiers:
+        if t.get("cloud"):
+            continue
+        for n in state.NODES.values():
+            if n.name in exclude or n.state == "offline" or t["model"] not in n.models:
+                continue
+            if n.state == "busy" and not t["busy_ok"]:
+                continue
+            for m, (gib, deadline) in n.loading.items():
+                if now < deadline and not n.is_loaded(m):
+                    return n, m
+    return None
+
+
 def choose(role, tiers, client_ctx, now, exclude=(), req=None):
     """Liefert (tier_index, tier, ctx, node) oder None. `req` (request.Routing) filtert Stufen nach Anforderungen,
     bevorzugt Stufen mit gewuenschten Faehigkeiten und haelt eine Session auf ihrem warmen Knoten."""

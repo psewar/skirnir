@@ -159,6 +159,8 @@ Size limits before the backend (413): `max_images` 16, `max_tools` 128, `max_mes
   ok / error / timeout / structured_error. Persisted in `perf.json`.
 - **Circuit breaker per node:** three backend errors in 60 s → `open` (30 s), then `half_open` with exactly one probe. A restart of
   the node resets it. Retry on another node on connection error or 5xx before the first byte.
+- **Model switch:** while a node is loading a model, further requests that would need that node wait for the load to
+  finish instead of getting 503 (event `wait_load`).
 - **Admission:** at most `max_inflight` concurrent requests per node (policy in the registry, default 2 – should match the node's
   `OLLAMA_NUM_PARALLEL`). Further requests wait in the router; when a slot frees up, the best rank from priority class and age
   wins (`aging_s` 30 s so that batch does not starve). `max_queue` exceeded → 503 immediately.
