@@ -49,10 +49,11 @@ type GuardCfg struct {
 	PowerLimitPct *float64 `yaml:"power_limit_pct" json:"power_limit_pct,omitempty"` // Dauerlimit in % des Standardlimits
 	PowerLimitW   *float64 `yaml:"power_limit_w" json:"power_limit_w,omitempty"`     // alternativ absolut; gewinnt vor pct
 	ReapplyS      *float64 `yaml:"reapply_s" json:"reapply_s,omitempty"`
-	HighLoadPct   *float64 `yaml:"high_load_pct" json:"high_load_pct,omitempty"` // Hochlast ab % des aktiven Limits ...
-	HighLoadS     *float64 `yaml:"high_load_s" json:"high_load_s,omitempty"`     // ... ununterbrochen so lange -> Stufe 2
-	Stage2Pct     *float64 `yaml:"stage2_pct" json:"stage2_pct,omitempty"`       // Limit in Stufe 2 (% des Standardlimits)
-	RecoveryS     *float64 `yaml:"recovery_s" json:"recovery_s,omitempty"`       // Dauer von Stufe 2
+	HighLoadPct   *float64 `yaml:"high_load_pct" json:"high_load_pct,omitempty"`     // Hochlast ab % des aktiven Limits ...
+	HighLoadS     *float64 `yaml:"high_load_s" json:"high_load_s,omitempty"`         // ... so lange -> Stufe 2
+	HighLoadGapS  *float64 `yaml:"high_load_gap_s" json:"high_load_gap_s,omitempty"` // Luecken unter der Schwelle bis zu so lange zaehlen nicht als Unterbrechung
+	Stage2Pct     *float64 `yaml:"stage2_pct" json:"stage2_pct,omitempty"`           // Limit in Stufe 2 (% des Standardlimits)
+	RecoveryS     *float64 `yaml:"recovery_s" json:"recovery_s,omitempty"`           // Dauer von Stufe 2
 	VoltageWarnV  *float64 `yaml:"voltage_warn_v" json:"voltage_warn_v,omitempty"`
 	VoltageDropV  *float64 `yaml:"voltage_drop_v" json:"voltage_drop_v,omitempty"`
 	VoltageHoldS  *float64 `yaml:"voltage_hold_s" json:"voltage_hold_s,omitempty"`
@@ -65,11 +66,11 @@ func (c *GuardCfg) on() bool { return c.Enabled == nil || *c.Enabled }
 
 // guardParams: aufgeloeste Werte.
 type guardParams struct {
-	enabled                                    bool
-	limitPct, limitW, reapplyS                 float64
-	highPct, highS, stage2Pct, recoveryS       float64
-	voltWarnV, voltDropV, voltHoldS, voltLoadW float64
-	memWarnC, hotWarnC                         float64
+	enabled                                        bool
+	limitPct, limitW, reapplyS                     float64
+	highPct, highS, highGapS, stage2Pct, recoveryS float64
+	voltWarnV, voltDropV, voltHoldS, voltLoadW     float64
+	memWarnC, hotWarnC                             float64
 }
 
 func (c GuardCfg) resolved() guardParams {
@@ -81,7 +82,7 @@ func (c GuardCfg) resolved() guardParams {
 	}
 	return guardParams{
 		enabled: c.on(), limitPct: f(c.PowerLimitPct, 80), limitW: f(c.PowerLimitW, 0), reapplyS: f(c.ReapplyS, 30),
-		highPct: f(c.HighLoadPct, 90), highS: f(c.HighLoadS, 600), stage2Pct: f(c.Stage2Pct, 70), recoveryS: f(c.RecoveryS, 300),
+		highPct: f(c.HighLoadPct, 90), highS: f(c.HighLoadS, 600), highGapS: f(c.HighLoadGapS, 15), stage2Pct: f(c.Stage2Pct, 70), recoveryS: f(c.RecoveryS, 300),
 		voltWarnV: f(c.VoltageWarnV, 11.6), voltDropV: f(c.VoltageDropV, 0.35), voltHoldS: f(c.VoltageHoldS, 30), voltLoadW: f(c.VoltageLoadW, 300),
 		memWarnC: f(c.MemTempWarnC, 95), hotWarnC: f(c.HotspotWarnC, 100),
 	}
@@ -139,6 +140,7 @@ type guardEngine struct {
 
 	state         string
 	highSince     time.Time
+	lowSince      time.Time // seit wann die Last unter der Schwelle liegt (Luecke); leer = gerade hoch
 	stage2Since   time.Time
 	recoverySince time.Time
 	lastApply     time.Time
@@ -227,7 +229,20 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 	if in.Pin16W != nil {
 		load = in.Pin16W
 	}
+	// Hochlast: Leistung >= highPct des aktiven Limits. Zwischen zwei Anfragen faellt die Leistung fuer Sekundenbruchteile
+	// ab (Warteschlange, Antwort); gemessen 2026-09-25: mit 2-s-Abtastung kam der Zaehler bei Dauer-Batchlast nie ueber
+	// wenige Sekunden. Darum gilt eine Luecke erst nach highGapS unter der Schwelle als Unterbrechung.
 	high := load != nil && in.Limits.Cur > 0 && *load >= in.Limits.Cur*g.p.highPct/100
+	if high {
+		g.lowSince = time.Time{}
+	} else if !g.highSince.IsZero() {
+		if g.lowSince.IsZero() {
+			g.lowSince = in.Now
+		}
+		if in.Now.Sub(g.lowSince).Seconds() < g.p.highGapS {
+			high = true // kurze Luecke: Zaehler laeuft weiter
+		}
+	}
 	switch g.state {
 	case guardGedrosselt:
 		if in.Now.Sub(g.stage2Since).Seconds() >= g.p.recoveryS {
@@ -262,7 +277,7 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 				g.state = guardNormal
 			}
 		} else {
-			g.highSince = time.Time{}
+			g.highSince, g.lowSince = time.Time{}, time.Time{}
 			g.state = guardNormal
 		}
 	}

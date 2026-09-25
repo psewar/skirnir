@@ -4,8 +4,7 @@
 > (`modes.gpu_guard`, Policy `gpu_guard` je Knoten, HA-Probleme, Metriken, UI-Badge). Entscheide des Betreibers: Default
 > 80 %, die Abwahl zählt als HA-Problem (abweichend von Abschnitt 4), `require_fresh_status` Standard aus. Konfigschlüssel
 > im Agenten heissen englisch und flach (`power_limit_pct`, `high_load_s`, `stage2_pct`, `recovery_s`, `voltage_warn_v`, …,
-> siehe `agent-go/README.md`). Noch offen: Messwoche und Lasttest (Abschnitt 5, Tests 5 und 6) – die Schwellen sind weiter
-> Annahmen. Der Router-Teil zu `routing.reason`/`skipped` ist nicht gebaut (Deckel wirkt über `max_inflight`).
+> siehe `agent-go/README.md`). Lasttest (5a) und Nachtlauf Stufe 2 (5b) am 2026-09-25 gemessen; offen ist die Messwoche (HA-Historie). Der Router-Teil zu `routing.reason`/`skipped` ist nicht gebaut (Deckel wirkt über `max_inflight`).
 
 Anlass: Berichte über verschmorte 12VHPWR/12V-2x6-Stecker an RTX-5090-Karten nach längerer Zeit unter hohem Strom.
 Dieses Dokument prüft, was Router und Agent dagegen tun können, und schlägt einen Schutz vor, der **standardmässig an**
@@ -300,6 +299,40 @@ Befunde:
 Entscheidung: Default 80 % bleibt. Stufe 2 (70 %) kostet bei dichten Modellen ~4 %/12 %, ist also als Erholungsstufe
 tragbar. Test 5 (Messwoche) läuft passiv über die HA-Historie der Sensoren `GPU Leistung`, `GPU 16-Pin Leistung`,
 `GPU 16-Pin Spannung`, `GPU-Schutz` – auszuwerten nach einer Woche Betrieb.
+
+## 5b. Nachtlauf Stufe 2, 2026-09-25 04:13–04:30 (Zustandsfolge unter Dauerlast)
+
+Aufbau: `tools/guard_stage2_run.py` – vier Worker schicken ohne Pause Prefill-Anfragen (~17k Token, gemma4:26b) durch
+`/admin/try`; der Router hält zwei davon auf dem Knoten, der Rest wartet in der Admission. `/health` alle 2 s. Guard mit
+Standardwerten (80 %, 90 %/600 s, 70 %/300 s), Agent 0.7.1.
+
+| Zeit | Ereignis | Limit | Beleg |
+|---|---|---|---|
+| 04:13:43 | Start, `normal` | 460 W | Leerlauf 17 W |
+| 04:19:08 | `hochlast` nach 301 s | 460 W | Agent-Log „Hochlast seit 302 s (456 W von 460 W)“ |
+| 04:24:08 | `gedrosselt` nach 601 s | **403 W** | `nvidia-smi` 403 W; Router: `max_inflight` 1, drei Anfragen wartend, Ereignis `gpu_guard` |
+| 04:24:49 | Last beendet | 403 W | |
+| 04:29:09 | `erholung` nach 300 s | 460 W | Limit vom Guard selbst angehoben (eigener Wert) |
+| 04:30:09 | `normal` nach 60 s | 460 W | |
+
+Unter Last (312 Proben): 16-Pin Median 451 W, Spitzen bis 525 W (das Limit ist ein Mittelwert über das NVML-Fenster,
+Momentanwerte liegen darüber), Board Median 397 W, `sw_power_cap` in 69 % der Proben. **16-Pin-Spannung min 11,71 V**,
+also 0,32–0,34 V unter der Leerlauf-Referenz (12,03–12,05 V) – knapp unter der Warnschwelle 0,35 V, keine Warnung.
+Speicher max 78 °C, Hot Spot max 88,5 °C (Schwellen 95/100 °C). Prefill-Tempo Median 11 473 tok/s.
+
+Befunde:
+- **Die Zustandsfolge stimmt** und die Zeiten sind auf die Sekunde die konfigurierten. Die Router-Seite (Deckel 1, Ereignis,
+  HA-Attribute) greift im selben Heartbeat.
+- **Bug gefunden und behoben (0.7.1):** mit „ununterbrochen“ auf 2-s-Raster kam der Zähler bei echter Batchlast nie über
+  ~40 s, weil die Leistung zwischen zwei Anfragen (Warteschlangen-Übergabe, Antwort) für Sekundenbruchteile abfällt. Neu
+  `high_load_gap_s` (15 s): Lücken bis dahin zählen nicht als Unterbrechung. Im Lauf kam eine 200-W-Probe bei 337 s vor,
+  der Zähler lief weiter.
+- **Spannungsabfall wächst mit der Dauer**: 0,24 V bei 543 W kurz (5a), 0,32–0,34 V bei ~450 W über zehn Minuten – der
+  Kabelweg wird warm. 0,35 V ist damit an dieser Karte die Grenze zwischen „gesund, warm“ und „auffällig“. Beobachten (HA-
+  Historie); löst die Warnung im Alltag ohne erkennbaren Grund aus, ist 0,40 V der nächste Kandidat, nicht die Deaktivierung.
+- **Nebenbefund Router**: während des Modellwechsels (qwen3.6 → gemma4:26b, VRAM-Fit) beantwortete der Router ~30 s lang
+  alle Anfragen sofort mit 503 `no node available` (778 von 1142), statt sie bis zum Laden zu halten. Für den Guard
+  belanglos, für Batch-Clients ein eigenes Thema (Roadmap).
 
 ## 6. Offene Fragen und Grenzen
 

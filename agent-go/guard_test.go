@@ -133,8 +133,15 @@ func TestGuardHochlastStufe2Erholung(t *testing.T) {
 	if st.State != guardHochlast || !hasEvent(evs, guardEvHochlast) || st.HighLoadS < 300 {
 		t.Fatalf("Hochlast: %+v %v", st, evs)
 	}
-	// Unterbrechung setzt den Zaehler zurueck
-	st, _ = g.step(guardIn(base.Add(320*time.Second), c, 100))
+	// kurze Luecke (unter high_load_gap_s 15 s, z. B. Warteschlange zwischen zwei Anfragen) zaehlt nicht als Unterbrechung
+	st, _ = g.step(guardIn(base.Add(310*time.Second), c, 100))
+	st, _ = g.step(guardIn(base.Add(320*time.Second), c, 450))
+	if st.State != guardHochlast || st.HighLoadS < 319 {
+		t.Fatalf("kurze Luecke hat den Zaehler zurueckgesetzt: %+v", st)
+	}
+	// lange Unterbrechung setzt den Zaehler zurueck
+	st, _ = g.step(guardIn(base.Add(330*time.Second), c, 100))
+	st, _ = g.step(guardIn(base.Add(350*time.Second), c, 100))
 	if st.State != guardNormal || st.HighLoadS != 0 {
 		t.Fatalf("Unterbrechung: %+v", st)
 	}

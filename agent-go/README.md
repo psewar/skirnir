@@ -85,7 +85,7 @@ Dauer-Vollast begrenzen und frueh warnen. Der Agent tut genau das (`guard.go`, r
 |---|---|
 | `normal` | Dauerlimit gesetzt (Standard 80 % des Standardlimits, 5090: 460 W) |
 | `hochlast` | Leistung >= 90 % des aktiven Limits seit der halben Frist (300 s) - Vorwarnung |
-| `gedrosselt` | 600 s ununterbrochen am Limit -> Stufe 2 (70 %, 5090: 403 W) fuer 300 s |
+| `gedrosselt` | 600 s am Limit -> Stufe 2 (70 %, 5090: 403 W) fuer 300 s; Luecken bis 15 s (`high_load_gap_s`) unterbrechen den Zaehler nicht (0.7.1 - vorher setzte jede Warteschlangen-Luecke ihn zurueck, gemessen 2026-09-25) |
 | `erholung` | zurueck auf das Dauerlimit, 60 s lang gemeldet |
 | `unverfuegbar` | Limit nicht lesbar oder nicht setzbar (kein NVML, keine Berechtigung, Linux ohne root) - nur Beobachtung, **Problem** |
 | `aus` | `gpu_guard.enabled: false` - kein Limit; zaehlt auf Wunsch des Betreibers als **Problem**, damit eine vergessene Abwahl auffaellt |
@@ -104,6 +104,7 @@ gpu_guard:                    # alles optional; fehlende Werte = Standard
   reapply_s: 30
   high_load_pct: 90
   high_load_s: 600
+  high_load_gap_s: 15        # kurze Einbrueche zwischen Anfragen zaehlen nicht als Unterbrechung
   stage2_pct: 70
   recovery_s: 300
   voltage_warn_v: 11.6
