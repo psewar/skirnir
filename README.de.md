@@ -341,6 +341,8 @@ Client-Token); Modell = Rolle.
 Betreiber-Schlüssel (nie vom Router); die Agenten holen sie über ihre ausgehende Verbindung, prüfen Signatur und Hash,
 tauschen sich selbst und starten neu. Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
 Kanarienvogel-Knoten, der neue Versionen zuerst bekommt (`modes.agent_update`). Fehler und Hänger werden HA-Probleme.
+Windows mit Smart App Control blockt unsignierte Binaries, darum wird die Release-Binary nach dem Build Authenticode-signiert
+(`agent/sign.ps1`; `deploy.py --agent` verweigert eine unsignierte Binary, sobald ein Signier-Thumbprint konfiguriert ist).
 
 **Ollama aktualisieren (Router 0.3.0, Agent 0.12.0):** läuft Ollama als Kind des Agent-Dienstes, greift der Updater der
 Tray-App nicht mehr (er läuft unter dem Desktop-Benutzer, der Installer ist ein Pro-Benutzer-Installer). Der Router prüft

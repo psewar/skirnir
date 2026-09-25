@@ -1,6 +1,9 @@
 """Private Betriebsparameter fuer die Deploy- und Messskripte - aus einem Ordner AUSSERHALB des Repos.
 
-Gesucht wird `deploy.env` in $SKIRNIR_OPS, sonst im Geschwisterordner `../skirnir-ops` des Repos. Schluessel:
+Gesucht wird `deploy.env` in $SKIRNIR_OPS, sonst im Geschwisterordner `../skirnir-ops` des Repos. Optional:
+  AGENT_SIGN_THUMBPRINT  SHA-1-Thumbprint des Code-Signing-Zertifikats; deploy.py --agent verlangt dann eine gueltige Authenticode-
+                         Signatur der Windows-Binary (agent/sign.ps1), ohne Eintrag nur eine Warnung.
+Schluessel:
     HOST_FILE       Datei mit einer Zeile <HOST_VAR>=<host oder url> des LXC-Hosts (SSH)
     HOST_VAR        Name dieser Variable (Standard LXC_HOST); HOST_USER SSH-Benutzer (Standard root)
     HOST_PASS_ENV   Umgebungsvariable mit dem SSH-Passwort, gefuellt vom Secrets-Modul (Standard LXC_HOST_PASS)

@@ -161,6 +161,30 @@ def agent_signing_key():
     return key, base64.b64encode(pub).decode()
 
 
+def check_authenticode(files):
+    """Windows-Binaries muessen mit dem Betreiber-Zertifikat signiert sein (AGENT_SIGN_THUMBPRINT in deploy.env; agent/sign.ps1),
+    sonst blockt Smart App Control / WDAC auf den Knoten die neue Datei (gesehen 2026-09-26). Ohne Thumbprint nur eine Warnung."""
+    want = (OPS.get("AGENT_SIGN_THUMBPRINT") or "").upper().replace(" ", "").replace(":", "")
+    if sys.platform != "win32":
+        if want:
+            print("Hinweis: Signaturpruefung nur unter Windows moeglich (Get-AuthenticodeSignature) - unter Linux nicht geprueft")
+        return
+    for f in files:
+        if f["os"] != "windows":
+            continue
+        ps = ("$s = Get-AuthenticodeSignature -LiteralPath '" + f["_src"].replace("'", "''") + "'; "
+              "Write-Output ($s.Status.ToString() + '|' + $(if ($s.SignerCertificate) { $s.SignerCertificate.Thumbprint + '|' + $s.SignerCertificate.Subject } else { '|' }))")
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True, text=True)
+        status, thumb, subject = (r.stdout.strip().split("|", 2) + ["", ""])[:3]
+        if want:
+            if status != "Valid" or thumb.upper() != want:
+                print(f"Abbruch: {os.path.basename(f['_src'])} ist nicht mit dem Betreiber-Zertifikat signiert (Status {status or '?'}, Signierer {subject or '-'}). "
+                      "Erst agent/sign.ps1 ausfuehren."); sys.exit(2)
+            print(f"Signatur ok: {os.path.basename(f['_src'])} von {subject}")
+        elif status != "Valid":
+            print(f"WARNUNG: {os.path.basename(f['_src'])} ist unsigniert ({status or '?'}) - Smart App Control auf den Knoten blockt sie (AGENT_SIGN_THUMBPRINT in deploy.env + agent/sign.ps1)")
+
+
 def deploy_agent(c, dist_dir=None):
     """Binaries aus dist/ signieren (Manifest) und nach /etc/skirnir-router/agent/ legen. Version aus `<exe> version`."""
     dist_dir = dist_dir or os.path.join(os.path.dirname(ROUTER_DIR), "agent", "dist")
@@ -186,6 +210,7 @@ def deploy_agent(c, dist_dir=None):
     version = version or (sys.argv[sys.argv.index("--version") + 1] if "--version" in sys.argv else None)
     if not files or not version:
         print("Abbruch: keine Binaries oder keine Version (unter Linux --version <v> angeben)"); sys.exit(2)
+    check_authenticode(files)
     for f in files:
         f["name"] = f["name"].replace("{v}", version)
     key, pub = agent_signing_key()

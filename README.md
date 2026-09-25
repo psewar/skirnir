@@ -338,7 +338,9 @@ talks to the router directly (`https://router.example.net:11434`, API key = clie
 **Updating agents:** `deploy.py --agent` puts the binaries with a manifest signed by an operator key (never by the router)
 on the router; agents pull them through their outbound connection, verify signature and hash, swap themselves and restart.
 A button per node in the web UI, or the rollout loop with a per-node policy and a canary node that gets new versions first
-(`modes.agent_update`). Failures and stalls become Home Assistant problems.
+(`modes.agent_update`). Failures and stalls become Home Assistant problems. Windows with Smart App Control blocks unsigned
+binaries, so the release binary is Authenticode-signed after the build (`agent/sign.ps1`; `deploy.py --agent` refuses an
+unsigned binary once a signing thumbprint is configured).
 
 **Updating Ollama (router 0.3.0, agent 0.12.0):** once Ollama runs as a child of the agent service, the tray app's own
 updater no longer applies (it runs under the desktop user, and the installer is per-user). The router checks the latest

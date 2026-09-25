@@ -9,6 +9,7 @@ MQTT-Geraet fuer Home Assistant, Aufsicht ueber lokale KI-Dienste (z. B. einen W
 | `build.sh` | Cross-Compile aus WSL: `wsl -e bash -lc '/mnt/c/<workspace>/skirnir/agent/build.sh 0.1.1'` → `dist/skirnir-agent.exe` |
 | `config.example.yaml` | Vorlage fuer neue Rechner **mit Installationsanleitung Windows/Linux im Kopf**; die echte Datei liegt unter `C:\ProgramData\skirnir-agent\config.yaml` |
 | `skirnir-agent.service` | systemd-Unit fuer Linux-Knoten (`run --config /etc/skirnir-agent/config.yaml`) |
+| `sign.ps1` | Authenticode-Signatur der gebauten Exe mit dem Betreiber-Zertifikat (Smart App Control / WDAC blockt Unsigniertes); Thumbprint aus `AGENT_SIGN_THUMBPRINT` in `deploy.env`, `deploy.py --agent` prueft die Signatur |
 | `Install-Service.ps1` | Sonderfaelle (alte Tasks entfernen, Firewall-Regeln des Ollama-Installers); die normale Einrichtung ist seit 0.10.0 `setup` (Doppelklick auf die Exe) |
 
 ## Umbenennung (0.11.0)
@@ -119,6 +120,14 @@ holt sie sich und tauscht sich selbst (`updater.go`; Router `agentupdate.py`).
    der Agent mit der neuen Version, gilt der Auftrag als `done`. Fehler oder 15 min Stille -> HA-Problem im Router.
 
 Tests: `updater_test.go` (Signatur fremd/veraendert, Hash-Widerspruch, fremde Datei, ohne Schluessel, abgewaehlt).
+
+**Signieren (seit 2026-09-26):** Windows mit Smart App Control (oder einer WDAC-Richtlinie) blockt eine unsignierte Binary beim
+Tausch (`neue Binary meldet "" ... An Application Control policy has blocked this file`) und beim Doppelklick-Setup. Darum wird
+`dist/skirnir-agent.exe` nach dem Build mit einem Code-Signing-Zertifikat aus dem Microsoft Trusted Root Program signiert
+(`sign.ps1`: signtool, `/sha1 <Thumbprint> /fd SHA256 /td SHA256 /tr <Zeitstempel>`, prueft danach mit
+`Get-AuthenticodeSignature`). `deploy.py --agent` verweigert unsignierte Windows-Binaries, sobald `AGENT_SIGN_THUMBPRINT`
+in `deploy.env` steht; ohne Eintrag warnt es nur. Self-signed reicht nicht. Die Ed25519-Manifestsignatur bleibt
+unabhaengig davon die Vertrauensbasis des Selbst-Updates.
 
 ## Ollama-Update ueber den Router (0.12.0)
 
