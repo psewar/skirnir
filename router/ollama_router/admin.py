@@ -381,6 +381,13 @@ async def handle_try(request):
                               "thinking_chars": len(thinking)})
 
 
+def _decisions_n(request):
+    try:
+        return max(1, min(int(request.query.get("decisions", 50)), state.DECISIONS_KEEP))
+    except (TypeError, ValueError):
+        return 50
+
+
 LOADTEST = {"running": False}
 
 
@@ -518,7 +525,7 @@ async def handle_state(request):
         "build": ops.build_info(),
         "supply_chain": ops.supply_chain(),
         "scheduler": {"score": state.CFG.score, "breaker": state.CFG.breaker, "admission": state.CFG.admission},
-        "decisions": state.DECISIONS[-50:],
+        "decisions": state.DECISIONS[-_decisions_n(request):],   # ?decisions=N (1..DECISIONS_KEEP), Standard 50
         "client_auth": auth.client_auth_view(),
     })
 

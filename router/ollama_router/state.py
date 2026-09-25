@@ -24,7 +24,8 @@ PERF_DIRTY = [0.0]
 
 BENCHING = {}     # model -> {"node","step","started","error"}
 SESSION = None
-DECISIONS = []   # Ringpuffer der letzten Routing-Entscheidungen
+DECISIONS = []   # Ringpuffer der letzten Routing-Entscheidungen und Ereignisse (DECISIONS_KEEP Eintraege, ~300 B je Eintrag)
+DECISIONS_KEEP = 2000   # Betreiber 2026-09-25: 50 in der UI waren zu wenig, eine Nacht (Guard-Zustandsfolge) war schon weg
 CAPS = {}        # model -> capabilities (aus /api/show)
 SESSIONS = {}    # routing.session_id -> {node, model, t} (Affinitaet, Stufe 1)
 CLOUD = {}       # Stufe 5: provider -> cloud.CloudTarget
@@ -47,7 +48,7 @@ def remember(entry):
     if entry.get("event") in ("busy", "free", "wol", "no_node", "kontext_gekuerzt"):
         MQTT_DIRTY.append(True)
     DECISIONS.append(entry)
-    del DECISIONS[:-200]
+    del DECISIONS[:-DECISIONS_KEEP]
     try:
         from . import metrics   # spaet, um Importzyklen zu vermeiden
         metrics.count_event(entry)

@@ -35,7 +35,10 @@
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
   .muted { color:var(--muted); } .warn { color:var(--warn); } .bad { color:var(--bad); } .ok { color:var(--ok); }
   pre { background:#0b0f14; border:1px solid var(--line); border-radius:4px; padding:8px; white-space:pre-wrap; max-height:260px; overflow:auto; font-size:12px; }
+  .decisions { max-height:60vh; overflow:auto; }
   .decisions div { font-family: ui-monospace, Consolas, monospace; font-size:12px; padding:2px 0; border-bottom:1px dashed var(--line); }
+  .dec-ctl { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:4px 0 8px; font-size:13px; }
+  .dec-ctl input[type=text] { width:220px; }
   #msg { min-height:18px; }
   .tiles { display:grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap:12px; }
   .tile { border:1px solid var(--line); border-radius:6px; padding:10px 12px; } .tile h4 { margin:0 0 6px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
@@ -203,6 +206,12 @@
 
   <section class="wide" data-tab="uebersicht">
     <h2>Letzte Entscheidungen <span class="muted" style="font-weight:normal">– <span class="cloudc">☁</span> Cloud · 🐤 Canary · 👥 Client · Grund: warm-first / rank / affinity / canary / cloud</span></h2>
+    <div class="dec-ctl">
+      <label>Umfang <select id="decN" onchange="setDecN(this.value)"><option>50</option><option>200</option><option>500</option><option>1000</option><option>2000</option></select></label>
+      <label><input type="checkbox" id="decEventsOnly" onchange="renderDecisions()"> nur Ereignisse (ohne Routen)</label>
+      <label>Filter <input type="text" id="decFilter" placeholder="z. B. gpu_guard, busy, psewar" oninput="renderDecisions()"></label>
+      <span class="muted" id="decCount"></span>
+    </div>
     <div class="decisions" id="decisions"></div>
   </section>
 </main>
@@ -693,9 +702,21 @@ function renderOps() {
       ${Object.entries(sc).map(([n, v]) => `<div class="muted">${esc(n)}: Ollama ${esc(v.ollama_version || '?')} · ${Object.keys(v.models || {}).length} Modelle</div>`).join('')}</div>`;
 }
 
+// Umfang des Protokolls: der Router haelt 2000 Eintraege, /admin/state liefert ?decisions=N (Standard 50). Wahl bleibt im Browser.
+let DEC_N = 50;
+try { DEC_N = +localStorage.getItem('skirnir.decN') || 50; } catch (e) {}
+function setDecN(n) { DEC_N = +n; try { localStorage.setItem('skirnir.decN', String(DEC_N)); } catch (e) {} refresh(); }
+function decisionsUrl() { return '/admin/state' + (DEC_N !== 50 ? `?decisions=${DEC_N}` : ''); }
 function renderDecisions() {
-  $('#decisions').innerHTML = (STATE.decisions || []).slice().reverse().map(d => {
-    const t = d.ts.slice(11);
+  const sel = $('#decN'); if (sel && +sel.value !== DEC_N) sel.value = String(DEC_N);
+  const onlyEv = $('#decEventsOnly') && $('#decEventsOnly').checked;
+  const q = (($('#decFilter') || {}).value || '').trim().toLowerCase();
+  const all = (STATE.decisions || []);
+  const today = new Date().toISOString().slice(0, 10);
+  const shown = all.slice().reverse().filter(d => !(onlyEv && d.event === 'route')).filter(d => !q || JSON.stringify(d).toLowerCase().includes(q));
+  if ($('#decCount')) $('#decCount').textContent = `${shown.length} von ${all.length} Einträgen${all.length ? ' · seit ' + all[0].ts.replace('T', ' ') : ''}`;
+  $('#decisions').innerHTML = shown.map(d => {
+    const t = d.ts.startsWith(today) ? d.ts.slice(11) : d.ts.slice(5, 10) + ' ' + d.ts.slice(11);
     if (d.event === 'route') return `<div>${t} <b>${esc(d.role)}</b> → ${d.cloud || String(d.node).startsWith('cloud:') ? '<span class="cloudc">☁ </span>' : ''}${esc(d.node)} · ${esc(d.model)} · tier ${d.tier} · ctx ${d.ctx ?? 'default'} · ${d.warm ? '<span class="ok">warm</span>' : 'kalt'}${d.canary ? ' · 🐤' : ''}${d.reason ? ' · <span class="muted">' + esc(d.reason) + '</span>' : ''}${d.skipped ? ` · <span class="warn">${d.skipped} übersprungen</span>` : ''}${d.client ? ' · 👥 ' + esc(d.client) : ''}${d.via && d.via !== 'ollama' ? ' · ' + esc(d.via) : ''}</div>`;
     if (d.event === 'no_node') return `<div class="bad">${t} <b>${esc(d.role)}</b> → kein Knoten verfügbar</div>`;
     if (d.event === 'unsatisfiable') return `<div class="bad">${t} <b>${esc(d.role)}</b> → keine Stufe kann: ${esc(d.reasons || '')}</div>`;
@@ -831,9 +852,9 @@ async function nodePolicy(fp, pol) { try { await api(`/admin/nodes/${fp}/policy`
 async function nodeDel(fp) { if (!confirm('Registereintrag löschen?')) return; try { await api(`/admin/nodes/${fp}`, { method: 'DELETE' }); } catch (e) { alert(e.message); } await refresh(); }
 
 let TICK = 0;
-async function refresh() { STATE = await api('/admin/state'); await loadMetrics(); sampleLive(); renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderOps(); renderDecisions();
+async function refresh() { STATE = await api(decisionsUrl()); await loadMetrics(); sampleLive(); renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderOps(); renderDecisions();
   if (!dirty && (++TICK % 5 === 0)) { CFG = await api('/admin/config'); renderModels(); } }   // Konfiguration aendert sich selten: alle 15 s statt 3 s
-async function load() { CFG = await api('/admin/config'); STATE = await api('/admin/state'); await loadMetrics(); sampleLive(); dirty = false; renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderModels(); renderRoles(); renderSettings(); renderClients(); renderOps(); renderDecisions(); $('#msg').textContent = ''; }
+async function load() { CFG = await api('/admin/config'); STATE = await api(decisionsUrl()); await loadMetrics(); sampleLive(); dirty = false; renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderModels(); renderRoles(); renderSettings(); renderClients(); renderOps(); renderDecisions(); $('#msg').textContent = ''; }
 // Rollen-Editor setzt nur `dirty`; Tab-Punkt daraus ableiten (Einstellungen/Katalog pflegen ihre Punkte selbst)
 $('#roles').addEventListener('change', () => { rolesDirty = true; markDirty(); });
 $('#roles').addEventListener('click', e => { if (e.target.tagName === 'BUTTON') { rolesDirty = true; setTimeout(markDirty, 0); } });
