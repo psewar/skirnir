@@ -5,6 +5,10 @@ werden beim Abruf aus dem Laufzeitzustand gelesen. Alle Namen tragen das Praefix
 
 Usage: je Tag und Client (dazu je Rolle und je Modell) Anfragen, Prompt-/Antwort-Tokens, Fehler - persistiert in
 usage.json neben perf.json (90 Tage), sichtbar unter /admin/usage und als HA-Sensoren (requests_today, tokens_today).
+
+Zaehler und Histogramme sind seit 0.1.9 ebenfalls persistent (metrics.json neben der Config, alle METRICS_SAVE_S und beim
+Stopp): ein Deploy setzt sie nicht mehr auf null, die UI zeigt "gesamt" seit `since`. Fuer Verlaeufe ueber Tage bleibt ein
+Prometheus, der /metrics abfragt, der richtige Ort - der Router ist keine Zeitreihendatenbank.
 """
 
 import json
@@ -18,16 +22,23 @@ DURATION_BUCKETS = (0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300)
 TTFT_BUCKETS = (0.1, 0.25, 0.5, 1, 2, 5, 15)
 QUEUE_BUCKETS = (0.1, 0.5, 1, 2, 5, 10, 30, 60, 120)
 USAGE_DAYS = 90
+METRICS_SAVE_S = 60
 
 
 def _labels(d):
     return "{" + ",".join(f'{k}="{str(v).replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34))}"' for k, v in d.items()) + "}"
 
 
+def _dirty():
+    if not state.METRICS_DIRTY[0]:
+        state.METRICS_DIRTY[0] = time.time()
+
+
 def _counter(name, labels, inc=1.0):
     c = state.METRICS["counters"].setdefault(name, {})
     key = tuple(sorted(labels.items()))
     c[key] = c.get(key, 0.0) + inc
+    _dirty()
 
 
 def _hist(name, labels, buckets, value):
@@ -39,6 +50,7 @@ def _hist(name, labels, buckets, value):
             s["counts"][i] += 1
     s["sum"] += value
     s["n"] += 1
+    _dirty()
 
 
 def count_event(entry):
@@ -78,6 +90,65 @@ def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion
 
 def usage_path():
     return os.path.join(os.path.dirname(os.path.abspath(state.CFG.path)), "usage.json")
+
+
+def metrics_path():
+    return os.path.join(os.path.dirname(os.path.abspath(state.CFG.path)), "metrics.json")
+
+
+def _key_out(key):
+    return [list(kv) for kv in key]
+
+
+def _key_in(rows):
+    return tuple(tuple(kv) for kv in rows)
+
+
+def metrics_load():
+    """Beim Start: Zaehler und Histogramme aus metrics.json uebernehmen. Liefert die Zahl der Reihen (0 = Datei fehlt)."""
+    state.METRICS.setdefault("since", time.strftime("%Y-%m-%dT%H:%M:%S"))
+    try:
+        with open(metrics_path(), encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        return 0
+    except Exception as e:  # noqa: BLE001
+        log.warning("metrics.json unlesbar: %s", e)
+        return 0
+    n = 0
+    for name, rows in (d.get("counters") or {}).items():
+        c = state.METRICS["counters"].setdefault(name, {})
+        for labels, v in rows:
+            c[_key_in(labels)] = c.get(_key_in(labels), 0.0) + float(v)
+            n += 1
+    for name, h in (d.get("hist") or {}).items():
+        buckets = tuple(h.get("buckets") or ())
+        hh = state.METRICS["hist"].setdefault(name, {"buckets": buckets, "series": {}})
+        if tuple(hh["buckets"]) != buckets:   # Buckets im Code geaendert: alte Reihen passen nicht mehr, weglassen
+            continue
+        for labels, s in h.get("series") or []:
+            if len(s.get("counts") or []) != len(buckets):
+                continue
+            hh["series"][_key_in(labels)] = {"counts": [int(x) for x in s["counts"]], "sum": float(s["sum"]), "n": int(s["n"])}
+            n += 1
+    if d.get("since"):
+        state.METRICS["since"] = d["since"]
+    return n
+
+
+def metrics_save():
+    """Atomar nach metrics.json (tick_loop alle METRICS_SAVE_S bei Aenderung, app beim Stopp)."""
+    try:
+        d = {"since": state.METRICS.get("since"), "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+             "counters": {name: [[_key_out(k), v] for k, v in c.items()] for name, c in state.METRICS["counters"].items()},
+             "hist": {name: {"buckets": list(h["buckets"]), "series": [[_key_out(k), s] for k, s in h["series"].items()]}
+                      for name, h in state.METRICS["hist"].items()}}
+        tmp = metrics_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp, metrics_path())
+    except Exception as e:  # noqa: BLE001
+        log.warning("metrics.json schreiben: %s", e)
 
 
 def usage_load():

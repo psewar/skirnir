@@ -269,6 +269,10 @@ async def tick_loop():
             state.USAGE_DIRTY[0] = 0.0
             from . import metrics
             await asyncio.to_thread(metrics.usage_save)
+        if state.METRICS_DIRTY[0] and now - state.METRICS_DIRTY[0] >= 60:   # metrics.METRICS_SAVE_S; Zaehler ueberleben Deploys
+            state.METRICS_DIRTY[0] = 0.0
+            from . import metrics
+            await asyncio.to_thread(metrics.metrics_save)
         if state.REG is not None:
             state.REG.maybe_save(now)
         await asyncio.sleep(1)

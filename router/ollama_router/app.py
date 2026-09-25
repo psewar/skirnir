@@ -83,6 +83,9 @@ async def main(cfg_path):
     log.info("Knotenregister: %d Eintraege (%d freigegeben)", len(state.REG.nodes), sum(1 for e in state.REG.nodes.values() if e["state"] == "approved"))
     perf.perf_load()
     metrics.usage_load()
+    n_met = metrics.metrics_load()
+    if n_met:
+        log.info("Metriken: %d Reihen aus metrics.json uebernommen (gesamt seit %s)", n_met, state.METRICS.get("since"))
     n_dec = state.decisions_load()
     if n_dec:
         log.info("Entscheidungsprotokoll: %d Eintraege aus events.jsonl uebernommen", n_dec)
@@ -146,6 +149,8 @@ async def main(cfg_path):
             pass
     if state.REG is not None and state.REG.dirty:
         state.REG.save()
+    metrics.usage_save()     # letzter Stand statt bis zu 10 s Verlust
+    metrics.metrics_save()   # Zaehler/Histogramme ueberleben den Neustart
     for r in runners:
         await r.cleanup()
     await state.SESSION.close()

@@ -91,7 +91,7 @@
 </nav>
 <main id="main" data-active="uebersicht">
   <section class="wide" data-tab="uebersicht">
-    <h2>Live <span class="muted" style="font-weight:normal">– aus <code>/metrics</code> alle 3 s; Verläufe der letzten 10 Minuten entstehen im Browser, „seit Start“ = seit dem letzten Router-Neustart, Tage aus usage.json</span></h2>
+    <h2>Live <span class="muted" style="font-weight:normal">– aus <code>/metrics</code> alle 3 s; Verläufe der letzten 10 Minuten entstehen im Browser, „gesamt“ = seit Beginn der Aufzeichnung (metrics.json, überlebt Neustarts), Tage aus usage.json</span></h2>
     <div class="tiles" id="live">
       <div class="tile"><h4>Anfragen / min</h4><div class="big" id="lv-rpm">–</div><canvas class="spark" id="sp-rpm"></canvas></div>
       <div class="tile"><h4>Antwort-Tokens / s</h4><div class="big" id="lv-tps">–</div><canvas class="spark" id="sp-tps"></canvas></div>
@@ -101,14 +101,14 @@
     </div>
     <div class="charts">
       <div class="tile"><h4>Anfragen je Tag <span class="muted">– 30 Tage, Fehler rot, Linie = Tokens (k)</span></h4><canvas class="chart" id="ch-days"></canvas></div>
-      <div class="tile"><h4>Antwortzeiten seit Start <span class="muted">– Sekunden je Anfrage</span></h4><canvas class="chart" id="ch-dur"></canvas></div>
-      <div class="tile"><h4>Anfragen seit Start nach Knoten</h4><canvas class="chart" id="ch-node"></canvas></div>
+      <div class="tile"><h4>Antwortzeiten gesamt <span class="muted">– Sekunden je Anfrage</span></h4><canvas class="chart" id="ch-dur"></canvas></div>
+      <div class="tile"><h4>Anfragen gesamt nach Knoten</h4><canvas class="chart" id="ch-node"></canvas></div>
       <div class="tile"><h4>… nach Rolle</h4><canvas class="chart" id="ch-role"></canvas></div>
       <div class="tile"><h4>… nach Client</h4><canvas class="chart" id="ch-client"></canvas></div>
       <div class="tile"><h4>Tempo je Modell <span class="muted">– EWMA tok/s, Modell @ Knoten</span></h4><canvas class="chart" id="ch-tps"></canvas></div>
       <div class="tile" style="grid-column:1 / -1"><h4>Effektiv genutzte Modelle <span class="muted">– Anfragen/min je konkretem Modell, letzte 10 Minuten, gestapelt; Legende = Anteil im 30-s-Fenster</span></h4><div class="legend" id="lv-models">–</div><canvas class="chart" id="ch-models"></canvas></div>
-      <div class="tile"><h4>Anfragen seit Start nach Modell</h4><canvas class="chart" id="ch-model-share"></canvas></div>
-      <div class="tile"><h4>Antwort-Tokens seit Start nach Modell</h4><canvas class="chart" id="ch-model-tokens"></canvas></div>
+      <div class="tile"><h4>Anfragen gesamt nach Modell</h4><canvas class="chart" id="ch-model-share"></canvas></div>
+      <div class="tile"><h4>Antwort-Tokens gesamt nach Modell</h4><canvas class="chart" id="ch-model-tokens"></canvas></div>
     </div>
   </section>
 
@@ -239,7 +239,7 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "Modellkatalog": "Model catalog",
   "Einstellungen": "Settings",
   "– aus": "– from",
-  "alle 3 s; Verläufe der letzten 10 Minuten entstehen im Browser, „seit Start“ = seit dem letzten Router-Neustart, Tage aus usage.json": "every 3 s; the last 10 minutes of history are built in the browser, “since start” = since the last router restart, days from usage.json",
+  "alle 3 s; Verläufe der letzten 10 Minuten entstehen im Browser, „gesamt“ = seit Beginn der Aufzeichnung (metrics.json, überlebt Neustarts), Tage aus usage.json": "every 3 s; the last 10 minutes of history are built in the browser, “total” = since recording began (metrics.json, survives restarts), days from usage.json",
   "Anfragen / min": "Requests / min",
   "Antwort-Tokens / s": "Response tokens / s",
   "GPU-Auslastung %": "GPU utilisation %",
@@ -247,17 +247,17 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "Laufend · wartend": "Running · waiting",
   "Anfragen je Tag": "Requests per day",
   "– 30 Tage, Fehler rot, Linie = Tokens (k)": "– 30 days, errors red, line = tokens (k)",
-  "Antwortzeiten seit Start": "Response times since start",
+  "Antwortzeiten gesamt": "Response times, total",
   "– Sekunden je Anfrage": "– seconds per request",
-  "Anfragen seit Start nach Knoten": "Requests since start by node",
+  "Anfragen gesamt nach Knoten": "Requests, total, by node",
   "… nach Rolle": "… by role",
   "… nach Client": "… by client",
   "Tempo je Modell": "Speed per model",
   "– EWMA tok/s, Modell @ Knoten": "– EWMA tok/s, model @ node",
   "Effektiv genutzte Modelle": "Models actually used",
   "– Anfragen/min je konkretem Modell, letzte 10 Minuten, gestapelt; Legende = Anteil im 30-s-Fenster": "– requests/min per concrete model, last 10 minutes, stacked; legend = share in the 30-s window",
-  "Anfragen seit Start nach Modell": "Requests since start by model",
-  "Antwort-Tokens seit Start nach Modell": "Response tokens since start by model",
+  "Anfragen gesamt nach Modell": "Requests, total, by model",
+  "Antwort-Tokens gesamt nach Modell": "Response tokens, total, by model",
   "h2>Knoten": "Nodes",
   "Knoten": "Node",
   "Zustand": "State",
@@ -432,7 +432,7 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "noch keine Anfragen im Fenster": "no requests in the window yet",
   "sammelt …": "collecting …",
   "noch keine Daten": "no data yet",
-  "noch keine Anfragen seit dem Start": "no requests since start yet",
+  "noch keine Anfragen": "no requests yet",
   "noch keine Messung": "no measurement yet",
   "laufend": "running",
   "noch keine Anfragen im 30-s-Fenster": "no requests in the 30-s window yet",
@@ -971,7 +971,7 @@ function bars(id, labels, series, opts = {}) {
 function donut(id, parts) {
   const x = cv(id); if (!x) return; const { g, w, h } = x;
   const entries = Object.entries(parts).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]); const total = entries.reduce((a, [, v]) => a + v, 0);
-  if (!total) { g.fillStyle = '#8b98a8'; g.fillText(t('noch keine Anfragen seit dem Start'), 8, h / 2); return; }
+  if (!total) { g.fillStyle = '#8b98a8'; g.fillText(t('noch keine Anfragen'), 8, h / 2); return; }
   const r = Math.min(h / 2 - 8, 72), cx = r + 10, cy = h / 2; let a0 = -Math.PI / 2;
   entries.forEach(([, v], i) => { const a1 = a0 + v / total * 2 * Math.PI; g.beginPath(); g.arc(cx, cy, r, a0, a1); g.arc(cx, cy, r * 0.62, a1, a0, true); g.closePath(); g.fillStyle = PAL[i % PAL.length]; g.fill(); a0 = a1; });
   g.fillStyle = '#e6edf3'; g.textAlign = 'center'; g.font = 'bold 15px system-ui, sans-serif'; g.fillText(fmtN(total), cx, cy + 5); g.font = '11px system-ui, sans-serif'; g.textAlign = 'left';

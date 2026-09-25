@@ -270,7 +270,10 @@ scrape_configs:
     static_configs: [{ targets: ["router.example.net:11435"] }]
 ```
 
-`usage.json` keeps requests, tokens, errors and cloud costs per day and client for 90 days (`GET /admin/usage`). The decision
+`usage.json` keeps requests, tokens, errors and cloud costs per day and client for 90 days (`GET /admin/usage`). The counters
+and histograms behind `/metrics` persist in `metrics.json` next to the configuration (written a minute after a change and at
+shutdown), so a deploy no longer resets them; the UI labels them 'total' since the recording began. For history over days
+and weeks point a Prometheus at `/metrics` (scrape config above); the router is not a time-series database. The decision
 log (`/admin/state`, last 2000 entries, persisted in `events.jsonl` next to the configuration so it survives restarts; `?decisions=N` selects how many are returned, default 50) holds the most recent routes and events (busy/free, WOL, breaker, queue, shadow, decision). `/admin/state`
 also shows `build` (deploy manifest) and `supply_chain` (Ollama version and model digests per node).
 

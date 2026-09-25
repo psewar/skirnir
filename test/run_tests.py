@@ -106,7 +106,7 @@ def main():
         subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
                         "-keyout", "test-key.pem", "-out", "test-cert.pem", "-days", "30", "-subj", "/CN=localhost"],
                        cwd=HERE, check=True, capture_output=True)
-    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl", "agent-update.pub", "agent/manifest.json"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
+    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl", "metrics.json", "agent-update.pub", "agent/manifest.json"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
         try:
             os.remove(os.path.join(HERE, f))
         except FileNotFoundError:
@@ -1241,6 +1241,21 @@ def main():
               and any("Agent-Update auf big fehlgeschlagen" in p for p in ha_u["problems"]) and reg_big()["facts"]["agent_version"] == "test2" and not state()["nodes"]["big"]["draining"], str(u) + str(ha_u["problems"]))
         st, raw = http(C + "/v1/agent/binary/ollama-router-agent-test3-windows-amd64.exe", headers={"Authorization": "Bearer falsch"})
         check("Agent-Update: Download ohne gueltiges Token -> 403", st == 403, str(st))
+
+        # Metriken persistent (0.1.9): metrics.json neben der Config, gesichert 60 s nach der ersten Aenderung (tick_loop); ein frischer
+        # Prozess laedt Zaehler und Histogramme und liefert dieselben Werte in /metrics
+        mp = os.path.join(HERE, "metrics.json")
+        check("metrics.json: liegt neben der Config (Lauf > 60 s, tick_loop hat gesichert)", os.path.exists(mp), mp)
+        mtxt = http(C + "/metrics")[1].decode()
+        rc_m = subprocess.run([PY, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); from ollama_router import state, config, metrics; "
+                               "state.CFG = config.Config(sys.argv[2]); n = metrics.metrics_load(); "
+                               "c = state.METRICS['counters'].get('skirnir_requests_total', {}); print(n, round(sum(c.values())), json.load(open(sys.argv[3]))['since'][:4])",
+                               os.path.join(HERE, "..", "router"), os.path.join(HERE, "test-config.yaml"), mp], capture_output=True, text=True)
+        live_total = round(sum(float(l.split()[-1]) for l in mtxt.splitlines() if l.startswith("skirnir_requests_total{")))
+        parts = rc_m.stdout.split()
+        check("metrics.json: frischer Prozess laedt die Reihen, skirnir_requests_total stimmt bis auf die letzte Minute", rc_m.returncode == 0 and len(parts) == 3 and int(parts[0]) > 10
+              and 0 < int(parts[1]) <= live_total and parts[2] == "2026", (rc_m.stdout + rc_m.stderr)[-200:] + f" live={live_total}")
+        check("/admin/state: metrics_since gesetzt", str(state().get("metrics_since") or "").startswith("2026"), str(state().get("metrics_since")))
 
         # Sperren: Knoten verschwindet aus dem Routing, Agent bekommt 'revoked'; danach loeschen
         fp = next(n["fp"] for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "big")

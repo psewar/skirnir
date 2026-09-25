@@ -34,7 +34,8 @@ _DEC_WARNED = 0.0       # letzte Warnung 'schreiben fehlgeschlagen' (hoechstens 
 CAPS = {}        # model -> capabilities (aus /api/show)
 SESSIONS = {}    # routing.session_id -> {node, model, t} (Affinitaet, Stufe 1)
 CLOUD = {}       # Stufe 5: provider -> cloud.CloudTarget
-METRICS = {"counters": {}, "hist": {}}   # Stufe 4: Prometheus-Zaehler/Histogramme (metrics.py); Gauges kommen live
+METRICS = {"counters": {}, "hist": {}}   # Stufe 4: Prometheus-Zaehler/Histogramme (metrics.py); Gauges kommen live; persistiert in metrics.json
+METRICS_DIRTY = [0.0]                    # Zeitpunkt der ersten ungesicherten Aenderung (tick_loop sichert nach METRICS_SAVE_S)
 USAGE = {"days": {}}                     # Stufe 4: Nutzung je Tag/Client/Rolle/Modell, persistiert in usage.json
 USAGE_DIRTY = [0.0]
 # Client-Authentifizierung (Stufe 2): Laufzeit-Ueberschreibung des Modus (POST /admin/client_auth, gilt bis zum Neustart;

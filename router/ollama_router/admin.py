@@ -507,6 +507,7 @@ async def handle_state(request):
         "version": VERSION,
         "public_url": state.CFG.public_url,
         "measuring": state.MEASURING,
+        "metrics_since": state.METRICS.get("since"),   # Beginn der Aufzeichnung von metrics.json (UI: "gesamt seit")
         "benching": state.BENCHING,
         "perf": state.PERF,
         "fit_overhead_gib": state.CFG.overhead_gib,
