@@ -9,6 +9,7 @@ Aufruf:  python deploy.py              (voller Deploy)
 Alles Standortspezifische (LXC-Host, CT-Nummer, Router-Hostname, Secrets-Ordner, Produktivkonfiguration, Secret-Store-
 Zugang des CT) kommt aus dem Ops-Ordner ausserhalb des Repos, siehe ops_env.py. Das Repo enthaelt nur config.example.yaml.
 """
+import base64
 import hashlib
 import json
 import os
@@ -109,10 +110,91 @@ def connect():
     return c
 
 
+AGENT_BINARIES = [  # (Dateiname in dist/, os, arch) - Namen wie im GitHub-Release
+    ("ollama-router-agent.exe", "windows", "amd64"),
+    ("ollama-router-agent-linux-amd64", "linux", "amd64"),
+]
+
+
+def agent_signing_key():
+    """Betreiber-Schluessel fuer Agent-Manifeste: Ed25519, roh (32 Bytes Seed, base64) im Ops-Ordner. Beim ersten Aufruf erzeugt;
+    der oeffentliche Teil gehoert in die Agent-Konfiguration (update.public_key) und optional in modes.agent_update.public_key."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    path = os.path.join(ops_env.ops_dir(), "agent-update.key")
+    if os.path.exists(path):
+        seed = base64.b64decode(open(path, encoding="utf-8").read().strip())
+        key = Ed25519PrivateKey.from_private_bytes(seed)
+    else:
+        key = Ed25519PrivateKey.generate()
+        seed = key.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(base64.b64encode(seed).decode())
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        print("Neuer Betreiber-Schluessel fuer Agent-Updates:", path)
+    pub = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return key, base64.b64encode(pub).decode()
+
+
+def deploy_agent(c, dist_dir=None):
+    """Binaries aus dist/ signieren (Manifest) und nach /etc/ollama-router/agent/ legen. Version aus `<exe> version`."""
+    dist_dir = dist_dir or os.path.join(os.path.dirname(ROUTER_DIR), "agent-go", "dist")
+    files = []
+    version = None
+    for name, os_name, arch in AGENT_BINARIES:
+        path = os.path.join(dist_dir, name)
+        if not os.path.exists(path):
+            print("fehlt, uebersprungen:", path)
+            continue
+        if os_name == "windows" and sys.platform == "win32":
+            v = subprocess.run([path, "version"], capture_output=True, text=True).stdout.strip()
+            if version and v != version:
+                print(f"Abbruch: Versionen unterschiedlich ({version} vs {v})"); sys.exit(2)
+            version = v
+        data = open(path, "rb").read()
+        files.append({"name": f"ollama-router-agent-{{v}}-{os_name}-{arch}" + (".exe" if os_name == "windows" else ""),
+                      "os": os_name, "arch": arch, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "_src": path})
+    version = version or (sys.argv[sys.argv.index("--version") + 1] if "--version" in sys.argv else None)
+    if not files or not version:
+        print("Abbruch: keine Binaries oder keine Version (unter Linux --version <v> angeben)"); sys.exit(2)
+    for f in files:
+        f["name"] = f["name"].replace("{v}", version)
+    key, pub = agent_signing_key()
+    manifest = {"version": version, "generated": time.strftime("%Y-%m-%dT%H:%M:%S"), "files": [{k: v for k, v in f.items() if k != "_src"} for f in files]}
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    signature = base64.b64encode(key.sign(canonical)).decode()
+    mpath = os.path.join(dist_dir, "manifest.json")
+    with open(mpath, "w", encoding="utf-8") as fh:
+        json.dump({"manifest": manifest, "signature": signature}, fh, indent=1, ensure_ascii=False)
+    run(c, "mkdir -p /tmp/ollama-router-agent")
+    sftp = c.open_sftp()
+    for f in files:
+        sftp.put(f["_src"], f"/tmp/ollama-router-agent/{f['name']}")
+    sftp.put(mpath, "/tmp/ollama-router-agent/manifest.json")
+    sftp.close()
+    run(c, ct_exec("mkdir -p /etc/ollama-router/agent"))
+    for f in files:
+        rc, out, err = run(c, ct_push(f"/tmp/ollama-router-agent/{f['name']}", f"/etc/ollama-router/agent/{f['name']}", "0644"))
+        if rc != 0:
+            print("push failed:", f["name"], out, err); sys.exit(1)
+    rc, out, err = run(c, ct_push("/tmp/ollama-router-agent/manifest.json", "/etc/ollama-router/agent/manifest.json", "0644"))
+    run(c, "rm -rf /tmp/ollama-router-agent")
+    rc, out, err = run(c, ct_exec("ls -la /etc/ollama-router/agent/ && python3 -c \"import json; m=json.load(open('/etc/ollama-router/agent/manifest.json'))['manifest']; print('Manifest', m['version'], [f['name'] for f in m['files']])\""))
+    print(out.strip(), err.strip())
+    print(f"Agent {version} hinterlegt ({len(files)} Datei(en)). Oeffentlicher Schluessel fuer update.public_key der Agenten: {pub}")
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # systemctl-Ausgabe enthaelt Unicode-Punkte, Windows-Konsole ist cp1252
     host = OPS["ROUTER_HOST"]
     c = connect()
+    if "--agent" in sys.argv:
+        deploy_agent(c, sys.argv[sys.argv.index("--agent") + 1] if len(sys.argv) > sys.argv.index("--agent") + 1 and not sys.argv[sys.argv.index("--agent") + 1].startswith("--") else None)
+        c.close()
+        return
     status_only = "--status" in sys.argv
     if "--pull-roles" in sys.argv:
         rc, out, err = run(c, ct_exec("cat /etc/ollama-router/roles.yaml 2>/dev/null || echo '# (keine roles.yaml vorhanden)'"))

@@ -42,6 +42,8 @@ def candidates_for(tier, client_ctx, now, exclude=()):
     for n in state.NODES.values():
         if n.name in exclude or n.state == "offline" or tier["model"] not in n.models:
             continue
+        if now < n.draining_until:   # Agent-Update laeuft: Knoten leert sich, keine neuen Anfragen
+            continue
         if n.state == "busy" and not tier["busy_ok"]:
             continue
         if not n.breaker_allows(now):   # Stufe 3: Knoten mit offenem Breaker bleiben aussen vor (half_open: eine Probe)

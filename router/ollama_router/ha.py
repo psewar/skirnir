@@ -82,6 +82,8 @@ def ha_snapshot(now=None):
             if n.guard_policy and g.get("problem") and n.guard_state(now) is not None:
                 reason = g.get("grund") or ", ".join(g.get("warnungen") or []) or "?"
                 problems.append(f"Knoten {n.name}: GPU-Schutz {g.get('state')} ({reason})")
+    from . import agentupdate
+    problems += agentupdate.problems(now)   # fehlgeschlagene oder haengende Agent-Updates
     from . import cloud
     problems += cloud.budget_problems()   # Stufe 5: Budgetwarnung/-erschoepfung als HA-Problem
     cloud_view = cloud.budget_view()

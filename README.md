@@ -329,6 +329,11 @@ talks to the router directly (`https://router.example.net:11434`, API key = clie
   throttled node to one request, penalises it in the score and forwards problems to Home Assistant (`modes.gpu_guard`,
   per-node policy in the agent registry).
 
+**Updating agents:** `deploy.py --agent` puts the binaries with a manifest signed by an operator key (never by the router)
+on the router; agents pull them through their outbound connection, verify signature and hash, swap themselves and restart.
+A button per node in the web UI, or the rollout loop with a per-node policy and a canary node that gets new versions first
+(`modes.agent_update`). Failures and stalls become Home Assistant problems.
+
 A new GPU machine needs: Ollama with models, the agent binary, a configuration with `router.url` (template
 [agent-go/config.example.yaml](agent-go/config.example.yaml)), `Install-Service.ps1` as administrator, then approval in the router
 UI (Wake-on-LAN, weight, MQTT device). No token, no firewall rule, no certificate, no IP by hand.

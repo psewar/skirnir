@@ -15,7 +15,7 @@ try:
 except ImportError:  # pragma: no cover
     Ed25519PublicKey = None
 
-from . import nodes, state, tunnel
+from . import agentupdate, nodes, state, tunnel
 from .common import VERSION, log, safe_node_name
 
 
@@ -84,6 +84,7 @@ class NodeRegistry:
             self.nodes[fp] = e
             log.info("node %s: neuer Agent-Schluessel %s... von %s -> wartet auf Freigabe", cand, fp[:16], remote)
             state.remember({"event": "node_pending", "node": cand, "fp": fp[:16]})
+        agentupdate.note_hello(e, facts or {})   # Versionswechsel merken, offenen Update-Auftrag abschliessen
         e["facts"] = facts or {}
         e["last_seen"], e["remote"], e["pubkey"] = now, remote, pub_b64
         self.dirty = True
@@ -319,7 +320,7 @@ def registry_view():
         out.append({"fp": fp, "name": e["name"], "state": e["state"], "facts": e.get("facts") or {}, "policy": e.get("policy") or {},
                     "learned": e.get("learned") or {}, "models": e.get("models") or [],   # zuletzt gesehene Modelle (fuer WOL nach Neustart)
                     "first_seen": e.get("first_seen"), "last_seen": e.get("last_seen"), "remote": e.get("remote"),
-                    "approved_at": e.get("approved_at"),
+                    "approved_at": e.get("approved_at"), "update": agentupdate.update_view(e),
                     "connected": (fp in state.PENDING) or (node is not None and node.fp == fp and node.tunnel is not None),
                     "node_state": node.state if (node is not None and node.fp == fp) else None})
     return out
@@ -337,7 +338,7 @@ async def handle_node_action(request):
         body = await request.json() if request.can_read_body else {}
     except Exception:  # noqa: BLE001
         body = {}
-    pol = {k: body.get(k) for k in ("wol", "weight", "mqtt", "foreign_vram_baseline_gib", "mac", "max_inflight", "busy_gpu_util_pct", "busy_foreign_gib", "gpu_guard") if k in body}
+    pol = {k: body.get(k) for k in ("wol", "weight", "mqtt", "foreign_vram_baseline_gib", "mac", "max_inflight", "busy_gpu_util_pct", "busy_foreign_gib", "gpu_guard", "auto_update") if k in body}
     for k, lo, hi in (("busy_gpu_util_pct", 1, 100), ("busy_foreign_gib", 0.1, 64)):
         if pol.get(k) is not None:
             try:
@@ -356,6 +357,9 @@ async def handle_node_action(request):
     if action == "revoke":
         await revoke_node(fp)
         return web.json_response({"ok": True})
+    if action == "update":   # Agent-Update anstossen (agentupdate.py); force = auch bei laufenden Anfragen / gleicher Version
+        ok, msg = await agentupdate.order_update(fp, "ui", force=bool(body.get("force")))
+        return web.json_response({"ok": ok, "message": msg}, status=200 if ok else 409)
     if action == "policy":
         e = state.REG.nodes[fp]
         e["policy"] = {**(e.get("policy") or {}), **{k: v for k, v in pol.items() if v is not None}}

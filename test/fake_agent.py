@@ -13,7 +13,7 @@ import sys
 
 import aiohttp
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 ROUTER_WS, NODE, UPSTREAM, KEYFILE = sys.argv[1:5]
 UP_TOKEN = sys.argv[5] if len(sys.argv) > 5 else None
@@ -34,6 +34,39 @@ def load_key():
 
 KEY = load_key()
 PUB = KEY.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+
+
+UPDATE_PUB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-update.pub")   # base64, von run_tests geschrieben
+
+
+async def do_update(ws, session, lock, m, sslctx):
+    """Wie updater.go: Signatur mit dem Betreiber-Schluessel, Datei im Manifest, Download mit Token, SHA-256, Bericht im
+    Heartbeat, dann Neuanmeldung mit der neuen Version (Tausch und Neustart werden nur simuliert)."""
+    import hashlib
+    hb = {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}
+    async def report(state, msg=""):
+        await send(ws, lock, HB, 0, json.dumps({**hb, "update": {"version": m.get("version"), "state": state, "message": msg}}).encode())
+        out(update=state, msg=msg)
+    try:
+        pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(open(UPDATE_PUB, encoding="utf-8").read().strip()))
+        pub.verify(base64.b64decode(m["signature"]), m["manifest"].encode("utf-8"))
+        man = json.loads(m["manifest"])
+        f = next(x for x in man["files"] if x["name"] == m["file"] and x["os"] == FACTS["os"] and x["arch"] == FACTS["arch"])
+        if f["sha256"] != m["sha256"] or man["version"] != m["version"]:
+            raise ValueError("Auftrag widerspricht Manifest")
+        await report("downloading")
+        async with session.get(m["url"], headers={"Authorization": "Bearer " + m["token"]}, ssl=sslctx) as r:
+            data = await r.read()
+            if r.status != 200:
+                raise ValueError(f"Download HTTP {r.status}")
+        if hashlib.sha256(data).hexdigest() != f["sha256"]:
+            raise ValueError("SHA-256 stimmt nicht")
+        await report("applied", "Binary getauscht, Neustart")
+        FACTS["agent_version"] = m["version"]
+        await asyncio.sleep(0.3)
+        await ws.close()   # 'Neustart': die Schleife meldet sich mit der neuen Version wieder an
+    except Exception as e:  # noqa: BLE001
+        await report("failed", (str(e) or e.__class__.__name__.replace("InvalidSignature", "Manifest-Signatur ungueltig"))[:120])
 
 
 def out(**kw):
@@ -93,6 +126,8 @@ async def main():
                             out(ctl=m.get("t"), status=m.get("state"), node=m.get("node"), config=m.get("config"))
                             if m.get("state") == "approved":
                                 await send(ws, lock, HB, 0, json.dumps({"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}).encode())
+                            if m.get("t") == "update":
+                                asyncio.create_task(do_update(ws, session, lock, m, sslctx))
                             continue
                         if msg.type != aiohttp.WSMsgType.BINARY:
                             continue

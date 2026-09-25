@@ -51,6 +51,10 @@ tunnel:
 # gpuz:                                         # GPU-Z-Sensoren (Windows) als Zusatzquelle, Standard an: laeuft GPU-Z,
 #   enabled: false                              #   kommen Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung dazu
 
+# update:                                       # Selbst-Update ueber den Router (Standard an); Schluessel zeigt `deploy.py --agent`
+#   public_key: <base64 Ed25519>                #   ohne public_key lehnt der Agent jeden Auftrag ab
+#   enabled: false
+
 # gpu_guard:                                    # GPU-Schutz (12V-2x6-Stecker): Power-Limit 80 % des Standards, Stufe 2 bei
 #   enabled: false                              #   Dauer-Vollast, Spannungs-/Temperaturwarnung. Standard AN; false = abgewaehlt
 #   power_limit_pct: 80                         #   (zaehlt als Problem in HA). Alle Schluessel: agent-go/README.md, Abschnitt GPU-Schutz

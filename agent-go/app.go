@@ -24,7 +24,8 @@ type App struct {
 	mqCancel context.CancelFunc
 	mqCfg    *MQTTCfg
 	prov     *Provision
-	guard    *Guard // GPU-Schutz (guard.go)
+	guard    *Guard   // GPU-Schutz (guard.go)
+	updater  *Updater // Selbst-Update (updater.go)
 	rootCtx  context.Context
 }
 
@@ -44,6 +45,9 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.hb = newHeartbeat(cfg.Router, cfg.Node, gpu, log)
 	a.guard = newGuard(cfg.GPUGuard, gpu, log)
 	a.hb.guard = a.guard
+	a.updater = newUpdater(cfg.Update, cfg.path, log)
+	a.hb.updater = a.updater
+	a.updater.Cleanup()
 	if cfg.OllamaProxy.on() {
 		if a.proxy, err = newOllamaProxy(cfg.OllamaProxy, cfg.Router.Token, cfg.Node, log); err != nil {
 			return nil, err
@@ -60,6 +64,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 		facts := func(ctx context.Context) Facts { return collectFacts(ctx, cfg.Router.URL, cfg.Tunnel.Upstream, gpu) }
 		a.tunnel = newTunnel(cfg.Router.URL, cfg.Tunnel.Upstream, a.id, a.hb, facts, log)
 		a.tunnel.onStatus = a.onTunnelStatus
+		a.tunnel.onUpdate = a.updater.Handle
 		if a.prov != nil && a.prov.HeartbeatIntervalS > 0 {
 			a.tunnel.SetHeartbeatInterval(time.Duration(a.prov.HeartbeatIntervalS * float64(time.Second)))
 		}

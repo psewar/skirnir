@@ -5,7 +5,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import nodes, perf, state
+from . import agentupdate, nodes, perf, state
 from .common import GIB, log
 
 
@@ -324,6 +324,8 @@ def apply_heartbeat(node, b, now):
     node.ollama_proc_gib = op / 1024 if op is not None else None
     sens = b.get("sensors")   # Agent >= 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z-Werte (unveraendert durchgereicht)
     node.sensors = sens if isinstance(sens, dict) else None
+    if isinstance(b.get("update"), dict):   # Agent >= 0.8.0: Zwischenstand eines Update-Auftrags
+        agentupdate.note_report(node, b["update"], now)
     g = b.get("gpu_guard")     # Agent >= 0.7.0: GPU-Schutz (Power-Limit, Hochlast-Stufe, Warnungen) - nur Flag neben dem Zustand
     if isinstance(g, dict):
         prev = node.guard or {}

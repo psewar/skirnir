@@ -70,6 +70,7 @@ SCHEMA = {
         "score": None, "breaker": {"failures": None, "window_s": None, "open_s": None},
         "admission": {"max_inflight_default": None, "aging_s": None, "max_wait_s": None, "max_queue": None},
         "gpu_guard": {"enabled": None, "throttled_max_inflight": None, "score_penalty": None, "require_fresh_status": None},
+        "agent_update": {"enabled": None, "canary": None, "canary_clean_h": None, "public_key": None},
     },
     "models": {"*": {"weights_gib": None, "kv_gib_per_1k": None, "capabilities": None, "source": None, "note": None, "measured_at": None,
                      "measured_on": None, "vram_gib_8k": None, "vram_gib_32k": None, "partial_offload": None,
@@ -312,6 +313,11 @@ class Config:
         # Spannung, Temperatur) gehen an HA. require_fresh_status: ohne frischen Status ebenfalls deckeln (kostet
         # Parallelitaet bei jedem Agent-Ausfall, darum Standard aus).
         gg = m.get("gpu_guard") or {}
+        # Agent-Update ueber den Router (agentupdate.py): Rollout-Schleife an/aus, Kanarienvogel-Knoten, Wartezeit, optionaler
+        # oeffentlicher Betreiber-Schluessel zur Selbstpruefung des Manifests vor dem Versand.
+        au = m.get("agent_update") or {}
+        self.agent_update = {"enabled": bool(au.get("enabled", True)), "canary": au.get("canary") or "",
+                             "canary_clean_h": float(au.get("canary_clean_h", 24)), "public_key": au.get("public_key") or ""}
         self.gpu_guard = {"enabled": bool(gg.get("enabled", True)), "throttled_max_inflight": int(gg.get("throttled_max_inflight", 1)),
                           "score_penalty": float(gg.get("score_penalty", 40)), "require_fresh_status": bool(gg.get("require_fresh_status", False))}
 

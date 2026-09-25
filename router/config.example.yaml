@@ -149,6 +149,11 @@ modes:
     failures: 3             #   binnen window_s ist der Knoten open_s lang kein Kandidat; danach eine Probe (half_open),
     window_s: 60            #   Erfolg = closed, Fehler = wieder open. Ein Neustart des Knotens (offline -> online) setzt zurueck.
     open_s: 30
+  agent_update:               # Agent-Update ueber den Router (deploy.py --agent legt Manifest + Binaries ab)
+    enabled: true             # Rollout-Schleife fuer Knoten mit Policy auto_update
+    canary: ""                # Knotenname, der neue Versionen zuerst bekommt
+    canary_clean_h: 24        # so lange muss er sie sauber fahren, bevor die anderen folgen
+    # public_key: <base64>    # optional: Router prueft das Manifest vor dem Versand selbst
   gpu_guard:                  # Router-Seite des GPU-Schutzes (Agent >= 0.7.0 setzt das Power-Limit selbst)
     enabled: true             # Status beachten: Deckel in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA
     throttled_max_inflight: 1

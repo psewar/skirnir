@@ -80,6 +80,7 @@ class Node:
         self.gpu_util = None
         self.sensors = None   # Zusatzsensoren aus dem Heartbeat (Agent >= 0.6.0), dict oder None
         self.guard = None     # GPU-Schutz laut Agent (>= 0.7.0): state, limit_w, target_w, problem, grund, warnungen
+        self.draining_until = 0.0   # Agent-Update laeuft: bis dahin keine neuen Anfragen an diesen Knoten
         self.guard_ts = 0.0
         self.vram_free_gib = None
         self.vram_used_gib = None
@@ -356,5 +357,5 @@ class Node:
             "heartbeat_age_s": round(now - self.hb_ts, 1) if self.hb_ts else None,
             "wol": self.wol, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,
             "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
-            "breaker": self.breaker, "max_inflight": self.effective_max_inflight(),
+            "breaker": self.breaker, "max_inflight": self.effective_max_inflight(), "draining": now < self.draining_until,
         }

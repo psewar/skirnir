@@ -73,6 +73,11 @@ _e("modes.gpu_guard.throttled_max_inflight", "int", "Deckel in Stufe 2", "gleich
 _e("modes.gpu_guard.score_penalty", "float", "Score-Abzug Hochlast", "bei hochlast/gedrosselt; voller Knoten = 50", G, 40, min=0, max=1000)
 _e("modes.gpu_guard.require_fresh_status", "bool", "ohne Status deckeln", "Knoten ohne frischen Schutzstatus (Agent < 0.7.0 oder schweigt) wie gedrosselt behandeln", G, False)
 
+G = "Agent-Update"
+_e("modes.agent_update.enabled", "bool", "Rollout-Schleife", "aus = Updates nur von Hand (Knopf je Knoten); an = Knoten mit Policy 'Auto-Update' bekommen die Manifest-Version, Kanarienvogel zuerst", G, True)
+_e("modes.agent_update.canary", "str", "Kanarienvogel", "Knotenname, der neue Versionen zuerst bekommt; die anderen erst, wenn er sie lange genug sauber faehrt", G, "")
+_e("modes.agent_update.canary_clean_h", "float", "... sauber seit h", "so lange muss der Kanarienvogel die Version fahren, bevor die anderen folgen", G, 24, min=0, max=720)
+
 G = "Busy-Erkennung"
 _e("modes.busy_enter.gpu_util_pct", "float", "GPU-Auslastung %", "ab hier gilt der Rechner als beschaeftigt (Spiel) ...", G, 40, min=0, max=100)
 _e("modes.busy_enter.sustain_s", "float", "... anhaltend s", "", G, 10, min=0, max=3600)

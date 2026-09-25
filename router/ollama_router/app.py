@@ -10,7 +10,7 @@ import sys
 
 from aiohttp import ClientSession, web
 
-from . import admin, auth, cloud, config, ha, metrics, nodes, openai_api, perf, poll, proxy, registry, state
+from . import admin, agentupdate, auth, cloud, config, ha, metrics, nodes, openai_api, perf, poll, proxy, registry, state
 from . import decision
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 
@@ -39,6 +39,8 @@ def build_apps():
     ctl.router.add_post("/v1/heartbeat/{node}", poll.handle_heartbeat)
     ctl.router.add_get("/v1/tunnel/{node}", registry.handle_tunnel)
     ctl.router.add_get("/v1/tunnel", registry.handle_tunnel_v2)
+    ctl.router.add_get("/v1/agent/binary/{name}", agentupdate.handle_binary)   # Download mit Einmal-Token aus dem Update-Auftrag
+    ctl.router.add_get("/admin/agent-update", agentupdate.handle_manifest)
     ctl.router.add_get("/admin/nodes", registry.handle_nodes)
     ctl.router.add_post("/admin/nodes/{fp}/{action}", registry.handle_node_action)
     ctl.router.add_delete("/admin/nodes/{fp}", registry.handle_node_delete)
@@ -105,7 +107,7 @@ async def main(cfg_path):
         await web.TCPSite(runner, h, p, ssl_context=sslctx).start()
         runners.append(runner)
         log.info("listening on %s://%s:%d", "https" if sslctx else "http", h, p)
-    tasks = [asyncio.create_task(poll.poll_loop()), asyncio.create_task(poll.tick_loop())]
+    tasks = [asyncio.create_task(poll.poll_loop()), asyncio.create_task(poll.tick_loop()), asyncio.create_task(agentupdate.rollout_loop())]
     ha_pub = None
     if state.CFG.mqtt and state.CFG.mqtt.get("host"):
         ha_pub = ha.HAPublisher(state.CFG.mqtt)

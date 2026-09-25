@@ -21,6 +21,7 @@ FAILS = []
 
 
 import base64
+import hashlib
 AUTH = {"Authorization": "Basic " + base64.b64encode(b"tester:geheim").decode()}
 
 
@@ -105,7 +106,7 @@ def main():
         subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
                         "-keyout", "test-key.pem", "-out", "test-cert.pem", "-days", "30", "-subj", "/CN=localhost"],
                        cwd=HERE, check=True, capture_output=True)
-    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
+    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl", "agent-update.pub", "agent/manifest.json"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
         try:
             os.remove(os.path.join(HERE, f))
         except FileNotFoundError:
@@ -1188,6 +1189,50 @@ def main():
         alog = open(os.path.join(HERE, "audit.jsonl"), encoding="utf-8").read()
         check("Audit-Log: auth_missing, forbidden, rate_limited, auth_denied, client_auth_mode protokolliert",
               all(e in alog for e in ("auth_missing", "forbidden", "rate_limited", "auth_denied", "client_auth_mode")), alog[-240:])
+
+        # --- Agent-Update ueber den Router (agentupdate.py): Manifest signiert vom Betreiber-Schluessel, Auftrag per UI-Knopf,
+        # Fake-Agent prueft Signatur/Hash, laedt mit Einmal-Token, meldet Stand im Heartbeat und meldet sich mit der neuen Version an.
+        from cryptography.hazmat.primitives import serialization as _ser
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as _Ed
+        _upk = _Ed.generate()
+        open(os.path.join(HERE, "agent-update.pub"), "w", encoding="utf-8").write(base64.b64encode(_upk.public_key().public_bytes(_ser.Encoding.Raw, _ser.PublicFormat.Raw)).decode())
+        _adir = os.path.join(HERE, "agent"); os.makedirs(_adir, exist_ok=True)
+        def _manifest(version, sign_with):
+            name = f"ollama-router-agent-{version}-windows-amd64.exe"
+            blob = f"fake agent {version}".encode() * 100
+            open(os.path.join(_adir, name), "wb").write(blob)
+            man = {"version": version, "generated": "2026-09-25T10:00:00", "files": [{"name": name, "os": "windows", "arch": "amd64", "sha256": hashlib.sha256(blob).hexdigest(), "size": len(blob)}]}
+            canon = json.dumps(man, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            json.dump({"manifest": man, "signature": base64.b64encode(sign_with.sign(canon)).decode()}, open(os.path.join(_adir, "manifest.json"), "w", encoding="utf-8"))
+        _manifest("test2", _upk)
+        fp_big = next(n["fp"] for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "big")
+        reg_big = lambda: next(n for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "big")  # noqa: E731
+        am = json.loads(http(C + "/admin/agent-update")[1])
+        check("Agent-Update: Manifest sichtbar, Knoten zeigt verfuegbare Version", am["manifest"]["version"] == "test2" and am["signed"] and reg_big()["update"]["pending"] and reg_big()["update"]["available"] == "test2", str(reg_big()["update"]))
+        st, raw = http(C + f"/admin/nodes/{fp_big}/update", {})
+        drained = state()["nodes"]["big"]["draining"]
+        check("Agent-Update: Auftrag angenommen, Knoten im Drain", st == 200 and drained, raw.decode()[:100])
+        for _ in range(40):
+            u = reg_big()["update"]
+            if u.get("state") in ("done", "failed"): break
+            time.sleep(0.25)
+        check("Agent-Update: Fake-Agent hat geprueft, geladen, gemeldet und laeuft mit der neuen Version", u.get("state") == "done" and reg_big()["facts"]["agent_version"] == "test2" and not state()["nodes"]["big"]["draining"], str(u))
+        evs = [d["state"] for d in state()["decisions"] if d.get("event") == "agent_update"]
+        check("Agent-Update: Ereignisse requested -> downloading -> applied -> done", evs[-4:] == ["requested", "downloading", "applied", "done"], str(evs))
+        st, raw = http(C + f"/admin/nodes/{fp_big}/update", {})
+        check("Agent-Update: gleiche Version -> 409", st == 409 and "schon" in raw.decode(), raw.decode()[:80])
+        # Fehlerfall: Manifest mit fremdem Schluessel signiert -> Agent lehnt ab, HA-Problem
+        _manifest("test3", _Ed.generate())
+        st, raw = http(C + f"/admin/nodes/{fp_big}/update", {})
+        for _ in range(40):
+            u = reg_big()["update"]
+            if u.get("state") in ("done", "failed") and u.get("version") == "test3": break
+            time.sleep(0.25)
+        ha_u = json.loads(http(C + "/admin/ha")[1])
+        check("Agent-Update: falsche Signatur -> failed, HA-Problem, Version unveraendert, kein Drain", st == 200 and u.get("state") == "failed" and "Signatur" in (u.get("message") or "")
+              and any("Agent-Update auf big fehlgeschlagen" in p for p in ha_u["problems"]) and reg_big()["facts"]["agent_version"] == "test2" and not state()["nodes"]["big"]["draining"], str(u) + str(ha_u["problems"]))
+        st, raw = http(C + "/v1/agent/binary/ollama-router-agent-test3-windows-amd64.exe", headers={"Authorization": "Bearer falsch"})
+        check("Agent-Update: Download ohne gueltiges Token -> 403", st == 403, str(st))
 
         # Sperren: Knoten verschwindet aus dem Routing, Agent bekommt 'revoked'; danach loeschen
         fp = next(n["fp"] for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "big")

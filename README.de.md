@@ -329,6 +329,11 @@ Client-Token); Modell = Rolle.
   Problem gemeldet. Der Router deckelt einen gedrosselten Knoten auf eine Anfrage, zieht Score ab und reicht Probleme an
   Home Assistant (`modes.gpu_guard`, Policy je Knoten im Agenten-Register).
 
+**Agenten aktualisieren:** `deploy.py --agent` legt die Binaries mit einem Manifest auf den Router, signiert mit einem
+Betreiber-Schlüssel (nie vom Router); die Agenten holen sie über ihre ausgehende Verbindung, prüfen Signatur und Hash,
+tauschen sich selbst und starten neu. Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
+Kanarienvogel-Knoten, der neue Versionen zuerst bekommt (`modes.agent_update`). Fehler und Hänger werden HA-Probleme.
+
 Ein neuer GPU-Rechner braucht: Ollama mit Modellen, das Agent-Binary, eine Konfiguration mit `router.url` (Vorlage
 [agent-go/config.example.yaml](agent-go/config.example.yaml)), `Install-Service.ps1` als Administrator, dann die Freigabe in der
 Router-UI (Wake-on-LAN, Gewicht, MQTT-Gerät). Kein Token, keine Firewall-Regel, kein Zertifikat, keine IP von Hand.

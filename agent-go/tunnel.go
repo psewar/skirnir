@@ -56,6 +56,7 @@ type Tunnel struct {
 	facts    func(context.Context) Facts
 	hb       *Heartbeat
 	onStatus func(state, node string, p *Provision)
+	onUpdate func(UpdateOrder) // Auftrag {"t":"update"} vom Router
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -129,6 +130,15 @@ type ctlMsg struct {
 	Node    string          `json:"node,omitempty"`
 	Message string          `json:"message,omitempty"`
 	Config  json.RawMessage `json:"config,omitempty"`
+	// t == "update" (updater.go)
+	Version   string `json:"version,omitempty"`
+	File      string `json:"file,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Sha256    string `json:"sha256,omitempty"`
+	Size      int64  `json:"size,omitempty"`
+	Token     string `json:"token,omitempty"`
+	Manifest  string `json:"manifest,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
 func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
@@ -237,6 +247,12 @@ func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 
 // applyStatus verarbeitet status/config-Nachrichten des Routers (Freigabe, Sperre, Konfigurationspaket).
 func (t *Tunnel) applyStatus(m ctlMsg) {
+	if m.T == "update" {
+		if t.onUpdate != nil {
+			t.onUpdate(UpdateOrder{Version: m.Version, File: m.File, URL: m.URL, Sha256: m.Sha256, Size: m.Size, Token: m.Token, Manifest: m.Manifest, Signature: m.Signature})
+		}
+		return
+	}
 	if m.T != "status" && m.T != "config" {
 		return
 	}

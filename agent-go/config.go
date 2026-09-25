@@ -27,6 +27,8 @@ type Config struct {
 	Tunnel      TunnelCfg `yaml:"tunnel"`
 	GPUZ        GPUZCfg   `yaml:"gpuz"`      // GPU-Z-Sensoren als Zusatzquelle (Windows), Standard an
 	GPUGuard    GuardCfg  `yaml:"gpu_guard"` // GPU-Schutz: Power-Limit, Hochlast-Stufe, Warnungen (guard.go), Standard an
+	Update      UpdateCfg `yaml:"update"`    // Selbst-Update ueber den Router (updater.go): public_key des Betreibers, enabled
+	path        string    // Pfad der geladenen Datei (fuer den Neustart nach einem Update)
 	Identity    struct {
 		Dir string `yaml:"dir"`
 	} `yaml:"identity"`
@@ -151,6 +153,7 @@ func loadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(raw, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	c.path = path
 	c.applyDefaults()
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)

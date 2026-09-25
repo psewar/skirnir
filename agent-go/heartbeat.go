@@ -15,13 +15,14 @@ import (
 // (tunnel.go schickt payload() als HB-Rahmen und ruft ack()); Run() ist der alte HTTP-Weg mit Token fuer
 // Router ohne Tunnel-Anmeldung.
 type Heartbeat struct {
-	cfg   RouterCfg
-	node  string
-	gpu   *GPU
-	log   *Logger
-	http  *http.Client
-	tlsFP string // Fingerprint der Ollama-Vorschaltstelle (leer = kein Proxy)
-	guard *Guard // GPU-Schutz: Status geht mit jedem Heartbeat (0.7.0)
+	cfg     RouterCfg
+	node    string
+	gpu     *GPU
+	log     *Logger
+	http    *http.Client
+	tlsFP   string   // Fingerprint der Ollama-Vorschaltstelle (leer = kein Proxy)
+	guard   *Guard   // GPU-Schutz: Status geht mit jedem Heartbeat (0.7.0)
+	updater *Updater // Selbst-Update: Zwischenstand geht mit dem Heartbeat (0.8.0)
 
 	mu         sync.Mutex
 	state      string // Antwort des Routers: free | busy | pending | ""
@@ -63,6 +64,9 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	}
 	if h.guard != nil { // 0.7.0: Zustand des GPU-Schutzes
 		p["gpu_guard"] = h.guard.Status()
+	}
+	if r := h.updater.Report(); r != nil { // 0.8.0: Stand eines Update-Auftrags
+		p["update"] = r
 	}
 	return p, nil
 }

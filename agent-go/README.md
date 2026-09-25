@@ -74,6 +74,30 @@ Nebeneffekt: ohne STT-Kind entfaellt auch der Portversuch auf 10300 in jedem Zyk
 Anlass war ein zweiter Knoten: dort standen `STT-Dienst` und `Alias-Modell strukturfaehig` dauerhaft `off`,
 weil beides nur auf dem ersten Knoten existiert. Tests dazu in `mqtt_test.go` (`go test ./...`).
 
+## Selbst-Update ueber den Router (0.8.0)
+
+Knoten ohne Fernzugriff (nur ausgehender Tunnel) und wachsende Geraetezahl: der Router verteilt Agent-Binaries, der Agent
+holt sie sich und tauscht sich selbst (`updater.go`; Router `agentupdate.py`).
+
+1. `deploy.py --agent` (Arbeitsstation) legt die Binaries aus `agent-go/dist/` mit einem **Manifest** (Version, Datei je
+   OS/Arch, SHA-256) nach `/etc/ollama-router/agent/`. Das Manifest ist mit dem **Betreiber-Schluessel** signiert (Ed25519,
+   `agent-update.key` im Ops-Ordner, beim ersten Aufruf erzeugt). Der Router selbst kann nichts signieren: ein
+   kompromittierter Router kann Inferenz umlenken, aber keinen Code auf die Knoten bringen.
+2. Der oeffentliche Schluessel gehoert in die Agent-Konfiguration: `update: {public_key: <base64>}`. Ohne ihn lehnt der
+   Agent jeden Auftrag ab. `update: {enabled: false}` schaltet das Selbst-Update ab.
+3. Auftrag: Knopf in der Router-UI (Registrierte Agenten) oder die Rollout-Schleife (Policy **Auto-Update** je Knoten;
+   `modes.agent_update.canary` bekommt neue Versionen zuerst, die anderen erst, wenn der Kanarienvogel sie
+   `canary_clean_h` Stunden faehrt). Nur im Leerlauf; der Knoten bekommt waehrenddessen keine neuen Anfragen.
+4. Der Agent prueft **erst die Signatur** ueber das mitgeschickte Manifest, dann ob Datei, OS, Arch und SHA-256 darin
+   stehen, laedt die Binary mit einem Einmal-Token (15 min) neben sich (`<exe>.new`), prueft den Hash, laesst sie
+   `version` sagen, benennt die laufende Datei in `<exe>.old` um, setzt die neue ein und startet den Dienst neu
+   (Windows: `restart` aus einem vom Job losgeloesten Prozess; Linux: Ende, systemd `Restart=always`). Beim naechsten
+   Start raeumt er `.old` weg und startet die GPU-Z-Relay-Aufgabe neu, die noch aus der alten Datei laeuft.
+5. Stand geht im Heartbeat mit (`update: {state, version, message}`): `downloading`, `applied`, `failed`. Meldet sich
+   der Agent mit der neuen Version, gilt der Auftrag als `done`. Fehler oder 15 min Stille -> HA-Problem im Router.
+
+Tests: `updater_test.go` (Signatur fremd/veraendert, Hash-Widerspruch, fremde Datei, ohne Schluessel, abgewaehlt).
+
 ## GPU-Schutz (0.7.0)
 
 Hintergrund und Abwaegung: [design/gpu-guard.md](../design/gpu-guard.md). Der 12V-2x6-Stecker einer RTX 5090 fuehrt bei
