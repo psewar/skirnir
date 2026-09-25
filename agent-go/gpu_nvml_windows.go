@@ -84,7 +84,7 @@ func openNVML() (*nvmlDev, error) {
 	d.name = d.dll.NewProc("nvmlDeviceGetName")
 	d.temp = optProc(d.dll, "nvmlDeviceGetTemperature")
 	d.power = optProc(d.dll, "nvmlDeviceGetPowerUsage")
-	d.limit = optProc(d.dll, "nvmlDeviceGetEnforcedPowerLimit", "nvmlDeviceGetPowerManagementLimit")
+	d.limit = optProc(d.dll, "nvmlDeviceGetPowerManagementLimit", "nvmlDeviceGetEnforcedPowerLimit") // Management-Limit = was gesetzt ist; Enforced kann bei Power Brake tiefer liegen (Review 2026-09-25)
 	d.defLimit = optProc(d.dll, "nvmlDeviceGetPowerManagementDefaultLimit")
 	d.fan = optProc(d.dll, "nvmlDeviceGetFanSpeed")
 	d.throttle = optProc(d.dll, "nvmlDeviceGetCurrentClocksEventReasons", "nvmlDeviceGetCurrentClocksThrottleReasons")

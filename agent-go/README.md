@@ -1,11 +1,11 @@
-# ollama-router-agent (Windows-Dienst)
+# ollama-router-agent (Skirnir-Agent: Windows-Dienst, Linux-Binary)
 
 Eine .exe (Go, statisch) ersetzt auf einem GPU-Rechner die Dauerlauf-Scheduled-Tasks: Heartbeat an den Router,
 MQTT-Geraet fuer Home Assistant, Aufsicht ueber lokale KI-Dienste (z. B. einen Wyoming-STT-Server als Kindprozess).
 
 | Datei | Zweck |
 |---|---|
-| `*.go` | `main` (Verben), `app` (Verdrahtung), `config`, `logging`, `gpu` (NVML direkt aus `nvml.dll`, Rueckfall nvidia-smi; `gpu_nvml_windows.go`), `heartbeat`, `secrets` (Secret-Store, Universal-Auth-API), `mqtt`, `supervisor` (Kinder + Job-Objekt), `health`, `service` (SCM), `install` |
+| `*.go` | `main` (Verben), `app` (Verdrahtung), `config`, `logging`, `gpu` (NVML direkt aus `nvml.dll`, Rueckfall nvidia-smi; `gpu_nvml_windows.go`), `sensors` + `gpuz_*` (Sensoren, GPU-Z), `guard` (GPU-Schutz), `kuerzung` (Kuerzungsmeldung), `heartbeat`, `tunnel`, `identity`, `provision`, `facts`, `updater*` (Selbst-Update), `proxy` (TLS-Vorschaltstelle), `secrets` (Secret-Store, Universal-Auth-API), `mqtt`, `supervisor` (Kinder + Job-Objekt), `health`, `service` (SCM), `install` |
 | `build.sh` | Cross-Compile aus WSL: `wsl -e bash -lc '/mnt/c/<workspace>/skirnir/agent-go/build.sh 0.1.1'` → `dist/ollama-router-agent.exe` |
 | `config.example.yaml` | Vorlage fuer neue Rechner **mit Installationsanleitung Windows/Linux im Kopf**; die echte Datei liegt unter `C:\ProgramData\ollama-router-agent\config.yaml` |
 | `ollama-router-agent.service` | systemd-Unit fuer Linux-Knoten (`run --config /etc/ollama-router-agent/config.yaml`) |
@@ -27,7 +27,8 @@ Schlüssel als 0600-Datei, `run` per systemd). `build.sh` baut Windows, `GOOS=li
 
 ## Tunnel (0.3.0, Normalweg)
 
-`tunnel.enabled: true` (Standard): ausgehende WebSocket-Verbindung zum Router (`/v1/tunnel/<node>`, Router-Token), der
+`tunnel.enabled: true` (Standard): ausgehende WebSocket-Verbindung zum Router (`/v1/tunnel`, Anmeldung mit der
+Ed25519-Identitaet per Challenge, kein Token), der
 Router ruft Ollama hindurch auf (`tunnel.upstream`, Standard `http://127.0.0.1:11434`). Keine eingehende Firewall-Regel, kein
 Zertifikat, keine feste IP; Reconnect mit Backoff 1-30 s; `/health` zeigt `tunnel`. Ein neuer Rechner braucht nur die Binary,
 die Config (node, router.url; optional secret_store fuer ein MQTT-Passwort aus dem Secret-Store) und `Install-Service.ps1`.
@@ -197,9 +198,12 @@ kein Treffer in den 5 132 Normalzeilen `truncated = 0`).
 
 - Logs: `C:\ProgramData\ollama-router-agent\logs\agent.log`, `stt.log` und `ollama.log` (rotiert, 10 × 5 MB); Start/Stopp auch im
   Windows-Ereignisprotokoll (Quelle `OllamaRouterAgent`).
-- Dienstkonto `NT SERVICE\OllamaRouterAgent`; der Installer gibt ihm Lesen auf die Pfade in `grant_read`, Aendern auf `grant_modify` und
-  `ProgramData\ollama-router-agent`, und schottet das Config-Verzeichnis ab
-  (SYSTEM, Administratoren, Dienstkonto, <user>).
+- Dienstkonto: **LocalSystem** (`install.account: ''`, Normalfall seit dem GPU-Schutz) oder das virtuelle Konto
+  `NT SERVICE\OllamaRouterAgent` (nur Beobachtung). Der Installer gibt dem Konto Lesen auf die Pfade in `grant_read`, Aendern
+  auf `grant_modify` und `ProgramData\ollama-router-agent`, und schottet das Config-Verzeichnis ab (SYSTEM, Administratoren,
+  Dienstkonto). `allow_control_users` bekommen seit 0.9.0 nur das Dienst-Steuerrecht, kein Verzeichnisrecht mehr: dort liegen
+  Identitaetsschluessel, Provisionierung (MQTT-Passwort) und `control.token`, das Token fuer `POST /restart-child`
+  (Header `X-Agent-Token`) am Health-Port.
 - **Ollama als Kind des Dienstes:** `ollama.exe serve` laeuft als `children`-Eintrag, nicht
   mehr als Tray-App aus dem Startup-Ordner. Grund: die Tray-App startet erst mit der Anmeldung, und ihr Autostart-Eintrag
   kann deaktiviert sein - dann kommt Ollama nach einem Reboot nie hoch und der Knoten bleibt fuer
@@ -218,9 +222,12 @@ kein Treffer in den 5 132 Normalzeilen `truncated = 0`).
   mit dem Dienst (getestet: harter Kill des Dienstes nimmt den STT-Prozess mit, LWT setzt das HA-Geraet sofort offline).
 - Secrets: MQTT-Passwort zur Laufzeit aus Secret-Store (Identity `gpu-desktop-runtime`, viewer auf Projekt router-host; Creds
   in `<secrets-dir>\gpu-desktop-runtime.env` und in der Config). Router-Token steht in der Config.
-- Update: neue Binary bauen, `Install-Service.ps1` als Admin (erkennt den bestehenden Dienst: stop, kopieren, start).
-  Auf Knoten ohne Kindprozesse reicht die Binary plus die Config; `grant_read`
-  und `firewall` bleiben dort leer.
+- Update: ueber den Router (Abschnitt Selbst-Update); von Hand: neue Binary bauen, `Install-Service.ps1` als Admin (erkennt den
+  bestehenden Dienst: stop, kopieren, start). Auf Knoten ohne Kindprozesse reicht die Binary plus die Config; `grant_read`
+  und `firewall` bleiben dort leer. Linux: die Unit gibt `/usr/local/bin` frei (`ReadWritePaths`), sonst kann der Updater
+  die neue Binary nicht daneben legen.
+- Stirbt ein Modul mit Panic (Tunnel, Guard, MQTT ...), beendet sich der Dienst mit Fehler statt als gesunder Zombie
+  weiterzulaufen; Recovery (Windows) bzw. `Restart=always` (systemd) starten ihn neu.
 - Rueckbau: `ollama-router-agent.exe uninstall` (Admin), danach ggf. die eigenen Installer der abgeloesten Tasks.
 
 

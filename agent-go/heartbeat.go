@@ -25,7 +25,8 @@ type Heartbeat struct {
 	updater *Updater // Selbst-Update: Zwischenstand geht mit dem Heartbeat (0.8.0)
 
 	mu         sync.Mutex
-	state      string // Antwort des Routers: free | busy | pending | ""
+	every      time.Duration // Sendeintervall (Tunnel/HTTP); Status.OK = juengste Bestaetigung innerhalb 3 Intervallen
+	state      string        // Antwort des Routers: free | busy | pending | ""
 	busyReason string
 	lastOK     time.Time
 	lastErr    string
@@ -44,6 +45,15 @@ type hbResponse struct {
 func newHeartbeat(cfg RouterCfg, node string, gpu *GPU, log *Logger) *Heartbeat {
 	return &Heartbeat{cfg: cfg, node: node, gpu: gpu, log: log,
 		http: &http.Client{Timeout: time.Duration(cfg.TimeoutS * float64(time.Second))}}
+}
+
+// SetInterval merkt das Sendeintervall (Provisionierung durch den Router), damit das OK-Fenster in Status() dazu passt.
+func (h *Heartbeat) SetInterval(d time.Duration) {
+	if d > 0 {
+		h.mu.Lock()
+		h.every = d
+		h.mu.Unlock()
+	}
 }
 
 // payload sammelt die GPU-Fakten fuer einen Heartbeat.
@@ -104,6 +114,7 @@ func (h *Heartbeat) fail(msg string) {
 // Run: alter HTTP-Weg (POST /v1/heartbeat/<node> mit X-Router-Token), nur wenn der Tunnel abgeschaltet ist.
 func (h *Heartbeat) Run(ctx context.Context) {
 	h.log.Infof("heartbeat (HTTP, Token): node=%s router=%s interval=%.0fs", h.node, h.cfg.URL, h.cfg.IntervalS)
+	h.SetInterval(time.Duration(h.cfg.IntervalS * float64(time.Second)))
 	t := time.NewTicker(time.Duration(h.cfg.IntervalS * float64(time.Second)))
 	defer t.Stop()
 	for {
@@ -160,7 +171,11 @@ func (h *Heartbeat) Status() HeartbeatStatus {
 	st := HeartbeatStatus{State: h.state, BusyReason: h.busyReason, LastError: h.lastErr, Failures: h.failures, Sent: h.sent, GuardAck: h.guardAck}
 	if !h.lastOK.IsZero() {
 		st.LastOK = h.lastOK.Format(time.RFC3339)
-		st.OK = time.Since(h.lastOK) < 30*time.Second
+		window := 30 * time.Second // fest 30 s liess /healthz bei Intervallen ab 30 s dauerhaft 503 sagen (Review 2026-09-25)
+		if 3*h.every > window {
+			window = 3 * h.every
+		}
+		st.OK = time.Since(h.lastOK) < window
 	}
 	return st
 }

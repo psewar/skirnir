@@ -86,7 +86,11 @@ func (g *GPU) RelayAge() time.Duration {
 }
 
 // Source: womit gemessen wird (Log, /health).
-func (g *GPU) Source() string { return g.source }
+func (g *GPU) Source() string { g.mu.Lock(); defer g.mu.Unlock(); return g.source }
+
+// dev liefert das NVML-Geraet unter dem Lock (nil = nvidia-smi). Heartbeat, Guard und /health rufen gleichzeitig; der
+// Rueckfall auf nvidia-smi setzt g.nvml auf nil - ohne Lock waere das ein nil-Zugriff im anderen Aufrufer (Review 2026-09-25).
+func (g *GPU) dev() *nvmlDev { g.mu.Lock(); defer g.mu.Unlock(); return g.nvml }
 
 // GPUZActive: ob im letzten Sample frische GPU-Z-Werte waren.
 func (g *GPU) GPUZActive() bool {
@@ -123,12 +127,12 @@ var smiFields = []string{
 
 // Sample misst per NVML, sonst per nvidia-smi (ohne Konsolenfenster), und merkt sich den letzten Wert.
 func (g *GPU) Sample(ctx context.Context) (*GPUSample, error) {
-	if g.nvml != nil {
-		util, memUtil, total, used, free, err := g.nvml.sample()
+	if nv := g.dev(); nv != nil {
+		util, memUtil, total, used, free, err := nv.sample()
 		if err == nil {
-			s := &GPUSample{Name: g.nvml.gpuName, UtilPct: util, TotalMiB: total, UsedMiB: used, FreeMiB: free, At: time.Now(),
+			s := &GPUSample{Name: nv.gpuName, UtilPct: util, TotalMiB: total, UsedMiB: used, FreeMiB: free, At: time.Now(),
 				Sensors: &GPUSensors{MemUtilPct: iptr(memUtil)}}
-			g.nvml.extra(s.Sensors)
+			nv.extra(s.Sensors)
 			g.addGPUZ(s.Sensors)
 			g.mu.Lock()
 			g.last, g.err, g.falls = s, nil, 0
@@ -137,12 +141,15 @@ func (g *GPU) Sample(ctx context.Context) (*GPUSample, error) {
 		}
 		g.mu.Lock()
 		g.falls++
-		giveUp := g.falls >= 3 && g.smi != "nvml"
+		giveUp := g.falls >= 3 && g.smi != "nvml" && g.nvml == nv
+		if giveUp {
+			g.nvml, g.source = nil, "nvidia-smi"
+		}
+		smiOnly := g.smi == "nvml"
 		g.mu.Unlock()
 		if giveUp {
-			g.nvml.close()
-			g.nvml, g.source = nil, "nvidia-smi"
-		} else if g.smi == "nvml" {
+			nv.close()
+		} else if smiOnly {
 			g.setErr(err)
 			return nil, err
 		}
@@ -243,8 +250,8 @@ func (g *GPU) addGPUZ(s *GPUSensors) {
 
 // PowerLimits liest aktuelles, Standard-, Min- und Max-Limit (Watt): per NVML, sonst per nvidia-smi.
 func (g *GPU) PowerLimits() guardLimits {
-	if g.nvml != nil {
-		return g.nvml.limits()
+	if nv := g.dev(); nv != nil {
+		return nv.limits()
 	}
 	if g.smi == "" || g.smi == "nvml" {
 		return guardLimits{Err: "kein nvidia-smi"}
@@ -275,8 +282,8 @@ func (g *GPU) PowerLimits() guardLimits {
 // SetPowerLimit setzt das Power-Limit (Watt): NVML (Admin) oder `nvidia-smi -pl` (root). Der Guard klemmt den Wert
 // vorher auf [Min, Standard]; hier wird nichts mehr geprueft.
 func (g *GPU) SetPowerLimit(w float64) error {
-	if g.nvml != nil {
-		return g.nvml.setLimit(w)
+	if nv := g.dev(); nv != nil {
+		return nv.setLimit(w)
 	}
 	if g.smi == "" || g.smi == "nvml" {
 		return fmt.Errorf("kein nvidia-smi")

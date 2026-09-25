@@ -141,7 +141,7 @@ func (p *OllamaProxy) Run(ctx context.Context) {
 		fmt.Fprintf(w, `{"error":"ollama upstream: %s"}`, err.Error())
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if p.cfg.requireToken() && p.token != "" && r.Header.Get("X-Router-Token") != p.token {
+		if p.cfg.requireToken() && (p.token == "" || r.Header.Get("X-Router-Token") != p.token) { // leerer Token = alles ablehnen, nie alles durchlassen
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(`{"error":"unauthorized"}`))

@@ -2,7 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -27,6 +32,8 @@ type App struct {
 	guard    *Guard   // GPU-Schutz (guard.go)
 	updater  *Updater // Selbst-Update (updater.go)
 	rootCtx  context.Context
+	crashed  string // Modul, das mit Panic endete (Run liefert dann einen Fehler, der Dienst startet neu)
+	ctlToken string // Token fuer POST /restart-child (Datei control.token neben der Config; Review 2026-09-25)
 }
 
 func newApp(cfg *Config, log *Logger) (*App, error) {
@@ -42,6 +49,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 		return nil, err
 	}
 	a := &App{cfg: cfg, log: log, gpu: gpu, sup: sup, started: time.Now()}
+	a.ctlToken = loadOrCreateControlToken(cfg.path, log)
 	a.hb = newHeartbeat(cfg.Router, cfg.Node, gpu, log)
 	a.guard = newGuard(cfg.GPUGuard, gpu, log)
 	a.hb.guard = a.guard
@@ -81,8 +89,11 @@ func (a *App) effectiveMQTT() *MQTTCfg {
 		c := a.cfg.MQTT
 		return &c
 	}
-	if a.prov != nil && a.prov.MQTT != nil {
-		c := *a.prov.MQTT
+	a.mu.Lock()
+	prov := a.prov
+	a.mu.Unlock()
+	if prov != nil && prov.MQTT != nil {
+		c := *prov.MQTT
 		// Knoten-lokale Angaben ueberlagern das Provisionierte: welcher Alias hier liegt und welches Kind der STT-Server ist,
 		// weiss nur dieser Rechner.
 		if a.cfg.MQTT.AliasModel != "" {
@@ -148,6 +159,8 @@ func (a *App) onTunnelStatus(state, node string, p *Provision) {
 
 // Run blockiert bis ctx endet; dann werden alle Module gestoppt (Kinder inklusive).
 func (a *App) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	a.rootCtx = ctx
 	fp := ""
 	if a.id != nil {
@@ -161,7 +174,15 @@ func (a *App) Run(ctx context.Context) error {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					a.log.Errorf("%s: panic: %v", name, r)
+					// Nicht still weiterlaufen: ohne das Modul (z. B. Tunnel) waere der Dienst ein gesunder Zombie, den kein
+					// Recovery neu startet. Alles stoppen, Run liefert einen Fehler, der SCM/systemd startet neu.
+					a.log.Errorf("%s: panic: %v - Dienst wird beendet", name, r)
+					a.mu.Lock()
+					if a.crashed == "" {
+						a.crashed = name
+					}
+					a.mu.Unlock()
+					cancel()
 				}
 			}()
 			f(ctx)
@@ -190,7 +211,35 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("Module haben nach 20 s nicht gestoppt")
 	}
 	a.log.Infof("gestoppt")
+	a.mu.Lock()
+	crashed := a.crashed
+	a.mu.Unlock()
+	if crashed != "" {
+		return fmt.Errorf("Modul %s ist abgestuerzt (panic)", crashed)
+	}
 	return nil
+}
+
+// loadOrCreateControlToken: zufaelliges Token in control.token neben der Config (Verzeichnis-ACL: SYSTEM, Administratoren,
+// Dienstkonto). Wer /restart-child aufrufen will, muss es lesen koennen. Ohne Config-Pfad (Tests) nur im Speicher.
+func loadOrCreateControlToken(cfgPath string, log *Logger) string {
+	fresh := func() string {
+		b := make([]byte, 24)
+		_, _ = rand.Read(b)
+		return hex.EncodeToString(b)
+	}
+	if cfgPath == "" {
+		return fresh()
+	}
+	p := filepath.Join(filepath.Dir(cfgPath), "control.token")
+	if raw, err := os.ReadFile(p); err == nil && len(strings.TrimSpace(string(raw))) >= 32 {
+		return strings.TrimSpace(string(raw))
+	}
+	tok := fresh()
+	if err := os.WriteFile(p, []byte(tok+"\n"), 0o600); err != nil {
+		log.Warnf("control.token: %v (Token nur im Speicher)", err)
+	}
+	return tok
 }
 
 func (a *App) mqStatus() *MQTTStatus {

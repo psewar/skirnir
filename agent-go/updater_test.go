@@ -7,9 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // signedOrder baut Manifest + Signatur wie deploy.py --agent (kompaktes JSON, sortierte Schluessel).
@@ -64,5 +67,28 @@ func TestUpdaterVerifyOrder(t *testing.T) {
 	u3 := newUpdater(UpdateCfg{Enabled: &off, PublicKey: base64.StdEncoding.EncodeToString(pub)}, "", nil)
 	if _, err := u3.verifyOrder(o); err == nil || !strings.Contains(err.Error(), "abgewaehlt") {
 		t.Fatalf("abgewaehlt akzeptiert: %v", err)
+	}
+}
+
+// Review 2026-09-25: eine gesperrte .old wird beim Tausch als .old-<ts> geparkt; Cleanup kannte nur .old und liess die
+// geparkten liegen - und startete das Relay genau dann nicht neu.
+func TestUpdaterCleanupRaeumtGeparkteAlteBinaries(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "agent.exe")
+	for _, n := range []string{exe + ".old", exe + ".old-1758800000", exe + ".new"} {
+		if err := os.WriteFile(n, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := oldBinaries(exe); len(got) != 2 {
+		t.Fatalf("oldBinaries: %v", got)
+	}
+	log, _ := newLogger(LogCfg{Dir: t.TempDir()}, "test", false)
+	called := false
+	if !cleanupOld(exe, func() { called = true }, time.Millisecond, log) || !called {
+		t.Fatalf("cleanupOld: nicht alles entfernt oder Relay-Neustart nicht aufgerufen (called=%v)", called)
+	}
+	if got := oldBinaries(exe); len(got) != 0 {
+		t.Fatalf("alte Binaries liegen noch: %v", got)
 	}
 }

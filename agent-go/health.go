@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,8 +10,9 @@ import (
 	"time"
 )
 
-// HealthServer: GET /health (JSON-Gesamtbild), GET /healthz (200/503), POST /restart-child?name=stt,
-// POST /gpuz (GPU-Z-Sensoren vom Relay aus der Anmeldesitzung, nur von localhost).
+// HealthServer: GET /health (JSON-Gesamtbild), GET /healthz (200/503), POST /restart-child?name=stt (Header
+// X-Agent-Token = Inhalt von control.token neben der Config), POST /gpuz (GPU-Z-Sensoren vom Relay aus der
+// Anmeldesitzung, nur von localhost; die Werte gehen in Sensoren und Warnungen, nie in die Limit-Entscheidung des Guards).
 // Nur auf localhost; dient Debugging, dem status-Verb und einem etwaigen externen Watchdog.
 type HealthServer struct {
 	app *App
@@ -34,6 +36,11 @@ func (h *HealthServer) Run(ctx context.Context) {
 	mux.HandleFunc("/restart-child", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(405)
+			return
+		}
+		if h.app.ctlToken == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Agent-Token")), []byte(h.app.ctlToken)) != 1 {
+			w.WriteHeader(403)
+			w.Write([]byte("X-Agent-Token fehlt oder falsch (control.token neben der Config)\n"))
 			return
 		}
 		if h.app.sup.RestartChild(r.URL.Query().Get("name")) {

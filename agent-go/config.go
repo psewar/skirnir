@@ -167,7 +167,14 @@ func (c *Config) applyDefaults() {
 			c.Node = strings.ToLower(h)
 		}
 	}
+	// Basisordner fuer identity/logs/tls: der Ordner der geladenen Config, nicht der Standardpfad - sonst teilt ein
+	// Testlauf mit --config X die Identitaet und Provisionierung des Dienstes (Review 2026-09-25)
 	base := filepath.Dir(defaultConfigPath)
+	if c.path != "" {
+		if abs, err := filepath.Abs(c.path); err == nil {
+			base = filepath.Dir(abs)
+		}
+	}
 	if c.Identity.Dir == "" {
 		c.Identity.Dir = filepath.Join(base, "identity")
 	}
@@ -182,9 +189,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.SecretStore == (SecretStoreCfg{}) { // alter Blockname `mimir:` weiter lesbar
 		c.SecretStore = c.MimirLegacy
-	}
-	if c.SecretStore.Domain == "" {
-		c.SecretStore.Domain = "https://secrets.example.net"
 	}
 	if c.SecretStore.Environment == "" {
 		c.SecretStore.Environment = "prod"
@@ -283,6 +287,12 @@ func (c *Config) validate() error {
 		if c.MQTT.PasswordSecret != "" && (c.SecretStore.ProjectID == "" || c.SecretStore.ClientID == "" || c.SecretStore.ClientSecret == "") {
 			return fmt.Errorf("mqtt.password_secret gesetzt, aber secret_store.project_id/client_id/client_secret fehlen")
 		}
+		if c.MQTT.PasswordSecret != "" && !strings.HasPrefix(c.SecretStore.Domain, "https://") {
+			return fmt.Errorf("secret_store.domain fehlt oder ist kein https://-URL (frueher stand hier still ein Platzhalter)")
+		}
+	}
+	if c.OllamaProxy.on() && c.OllamaProxy.requireToken() && c.Router.Token == "" {
+		return fmt.Errorf("ollama_proxy.enabled braucht router.token (oder ollama_proxy.require_token: false) - sonst waere Ollama fuer das LAN offen")
 	}
 	seen := map[string]bool{}
 	for _, ch := range c.Children {

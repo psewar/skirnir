@@ -46,12 +46,17 @@ func restartSelf(exe, cfgPath string, log *Logger) {
 // die neue nutzt und die .old-Datei freigibt. Kein Fehler, wenn es die Aufgabe nicht gibt.
 func afterSwap(exe string, log *Logger) {
 	// `schtasks /End` beendet nicht zuverlaessig das Relay aus der alten Binary (gesehen 2026-09-25: das alte Relay lief
-	// weiter, hielt die .old-Datei und liess das naechste Update am Umbenennen scheitern). Darum alle anderen Prozesse
-	// dieser Binary beenden - das sind nur Relay-Instanzen und der schon fertige Neustart-Helfer.
-	kill := exec.Command("taskkill.exe", "/F", "/FI", "IMAGENAME eq "+filepath.Base(exe), "/FI", fmt.Sprintf("PID ne %d", os.Getpid()))
+	// weiter, hielt die .old-Datei und liess das naechste Update am Umbenennen scheitern). Darum die Relay-Prozesse
+	// dieser Binary gezielt beenden - nur die mit `gpuz-relay` in der Kommandozeile, nicht jeden Aufruf der Binary
+	// (status, identity, ein zweiter Dienst mit anderer Config).
+	ps := fmt.Sprintf(`Get-CimInstance Win32_Process -Filter "Name = '%s'" | Where-Object { $_.CommandLine -like '*gpuz-relay*' -and $_.ProcessId -ne %d } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }`,
+		filepath.Base(exe), os.Getpid())
+	kill := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
 	hideWindow(kill)
-	if out, err := kill.CombinedOutput(); err == nil {
-		log.Infof("update: alte Prozesse der Binary beendet: %s", strings.TrimSpace(strings.Split(string(out), "\n")[0]))
+	if out, err := kill.CombinedOutput(); err == nil && strings.TrimSpace(string(out)) != "" {
+		log.Infof("update: alte Relay-Prozesse beendet (PID %s)", strings.Join(strings.Fields(string(out)), ", "))
+	} else if err != nil {
+		log.Debugf("update: Relay-Prozesse beenden: %v %s", err, strings.TrimSpace(string(out)))
 	}
 	for _, args := range [][]string{{"/End", "/TN", gpuzRelayTaskName}, {"/Run", "/TN", gpuzRelayTaskName}} {
 		cmd := exec.Command("schtasks.exe", args...)

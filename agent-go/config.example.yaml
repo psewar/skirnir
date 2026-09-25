@@ -22,7 +22,8 @@
 #   4. Router-UI https://router.example.net:11435  -> "Registrierte Agenten" -> freigeben
 #      (dabei WOL erlauben ja/nein, Gewicht, MQTT-Geraet in HA). HA kann neue Knoten per Benachrichtigung melden.
 #   Nuetzlich (ohne Admin): ollama-router-agent.exe status | identity | restart
-#   Update: neue Binary nach dist\, Install-Service.ps1 erneut als Administrator.
+#   Update: seit 0.8.0 ueber den Router (update.public_key unten, Knopf/Rollout in der Router-UI); von Hand: neue Binary
+#           nach dist\, Install-Service.ps1 erneut als Administrator.
 #
 # LINUX (systemd)
 #   1. Binary:  sudo install -m 755 ollama-router-agent-linux-amd64 /usr/local/bin/ollama-router-agent
@@ -43,6 +44,16 @@
 
 router:
   url: https://router.example.net:11435     # einzige Pflichtangabe
+  # token: ...                              # nur ohne Tunnel (HTTP-Heartbeat) und fuer die TLS-Vorschaltstelle ollama_proxy
+  # interval_s: 3                           # HTTP-Heartbeat; mit Tunnel provisioniert der Router das Intervall
+  # timeout_s: 5
+
+# ollama_proxy:                                 # TLS-Vorschaltstelle vor Ollama (Alternative ohne Tunnel; braucht router.token)
+#   enabled: true
+#   listen: 0.0.0.0:11443
+#   upstream: http://127.0.0.1:11434
+#   cert_dir: C:\ProgramData\ollama-router-agent\tls
+#   require_token: true                         #   false = ohne X-Router-Token (nur in abgeschottetem Netz)
 
 tunnel:
   enabled: true
@@ -64,21 +75,37 @@ tunnel:
 # logging:
 #   dir: /var/log/ollama-router-agent           # Linux; Windows-Standard: C:\ProgramData\ollama-router-agent\logs
 # health:
-#   listen: 127.0.0.1:10398                     # /health fuer 'status'
+#   listen: 127.0.0.1:10398                     # /health fuer 'status'; POST /restart-child braucht X-Agent-Token (control.token neben der Config)
+# logging:
+#   max_size_mb: 5                              # Rotation je Logdatei (agent.log, <kind>.log), max_backups Dateien
+#   max_backups: 10
+#   debug: false
 
 # mqtt:                                         # kommt nach der Freigabe vom Router; lokal nur zum Ueberschreiben:
 #   enabled: false                              #   ... oder um das HA-Geraet fuer diesen Rechner abzuschalten
+#   host: mqtt.example.net                      #   lokale Angaben gewinnen ueber das Provisionierte
+#   port: 1883                                  #   8883 mit tls: true
+#   tls: false
+#   username: ...
+#   password: ...
 #   password_secret: MQTT_PASSWORD              #   statt password: Schluesselname im Secret-Store (Block secret_store unten)
+#   device_id: mein_rechner                     #   HA-Geraet (Standard: Knotenname mit _), device_name, manufacturer, model
+#   discovery_prefix: homeassistant
+#   interval_s: 30                              #   Meldeintervall des HA-Geraets
+#   ollama_url: http://127.0.0.1:11434          #   fuer die Modell-Entitaeten
 #   alias_model: assist:latest                  #   optional: Alias-Modell, das der Knoten fuehrt -> zwei HA-Entitaeten (Basismodell, strukturfaehig)
+#   stt_child: stt                              #   welches Kind der STT-Server ist (Entitaet), stt_fallback_port: 10300
 # secret_store:                                 # nur mit mqtt.password_secret: Universal-Auth-API (Client-ID/-Secret -> Token)
-#   domain: https://secrets.example.net
+#   domain: https://secrets.example.net         #   Pflicht, wenn password_secret gesetzt ist (kein Platzhalter mehr)
 #   project_id: 00000000-0000-0000-0000-000000000000
 #   environment: prod
+#   secret_path: /
 #   client_id: ...
 #   client_secret: ...
 
 # children:                                     # optionale Kindprozesse, die der Agent startet/ueberwacht (Beispiel: ein STT-Server)
 #   - name: stt
+#     # enabled: false                          # Eintrag behalten, aber nicht starten
 #     cmd: 'C:\Pfad\zu\python.exe'
 #     args: ['C:\Pfad\stt_server.py', '--uri', 'tcp://0.0.0.0:10300']
 #     cwd: 'C:\Pfad'
@@ -99,12 +126,15 @@ tunnel:
 install:                                        # nur Windows (Install-Service.ps1 / install / apply-rules)
   service_name: OllamaRouterAgent
   display_name: Ollama Router Agent
-  account: 'NT SERVICE\OllamaRouterAgent'       # '' = LocalSystem (noetig fuer den GPU-Schutz: Power-Limit setzen); virtuelles Konto = kein Limit, nur Beobachtung
+  # description: ...
+  account: ''                                   # '' = LocalSystem: noetig fuer den GPU-Schutz (Power-Limit setzen) und den direkten GPU-Z-Zugriff.
+  # account: 'NT SERVICE\OllamaRouterAgent'    #   Virtuelles Konto: GPU-Schutz nur Beobachtung (zaehlt als HA-Problem), GPU-Z nur per Relay
   allow_control_users:
-    - 'RECHNERNAME\benutzer'                    # darf den Dienst ohne Admin starten/stoppen (services.msc oder 'restart')
+    - 'RECHNERNAME\benutzer'                    # darf den Dienst ohne Admin starten/stoppen (services.msc oder 'restart'); kein Recht auf das Config-Verzeichnis
   # grant_read: []                              # zusaetzliche Lesepfade fuer das Dienstkonto (z. B. Python fuer Kinder)
   # grant_modify: []                            # zusaetzliche Schreibpfade (z. B. ein OpenVINO-Cache)
   # firewall:                                   # eingehende Regeln nur fuer Kinder, die im LAN lauschen (der Tunnel braucht keine)
   #   - name: Wyoming STT (ollama-router-agent)
   #     port: 10300
   #     program: 'C:\Pfad\zu\python.exe'
+  #     remote: ['192.0.2.10']                  #   erlaubte Quell-IPs (leer = alle)

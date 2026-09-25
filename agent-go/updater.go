@@ -250,8 +250,8 @@ func (u *Updater) run(o UpdateOrder) error {
 	return nil
 }
 
-// Cleanup beim Start: Reste eines Tauschs entfernen (.old, .new); unter Windows das GPU-Z-Relay neu starten, das noch
-// mit der alten Binary laeuft.
+// Cleanup beim Start: Reste eines Tauschs entfernen (.old, .old-<ts>, .new); unter Windows das GPU-Z-Relay neu starten,
+// das noch mit der alten Binary laeuft.
 func (u *Updater) Cleanup() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -261,20 +261,37 @@ func (u *Updater) Cleanup() {
 		exe = p
 	}
 	_ = os.Remove(exe + ".new")
-	if _, err := os.Stat(exe + ".old"); err != nil {
+	if len(oldBinaries(exe)) == 0 {
 		return
 	}
-	go func() {
-		afterSwap(exe, u.log)
-		// Der alte Dienstprozess und das alte Relay geben die Datei erst nach ihrem Ende frei: ein paar Mal nachfassen
-		// (gesehen 2026-09-25: beim ersten Selbst-Update blieb .old liegen, weil der Vorgaenger noch stoppte).
-		for i := 0; i < 12; i++ {
-			if err := os.Remove(exe + ".old"); err == nil {
-				u.log.Infof("update: laeuft mit %s, alte Binary entfernt", version)
-				return
+	go cleanupOld(exe, func() { afterSwap(exe, u.log) }, 5*time.Second, u.log)
+}
+
+// oldBinaries: <exe>.old und geparkte <exe>.old-<ts> (updater.go run: gesperrte .old wird unter Zeitstempel geparkt).
+func oldBinaries(exe string) []string {
+	m, _ := filepath.Glob(exe + ".old*")
+	return m
+}
+
+// cleanupOld: Relay neu starten (after), dann alle alten Binaries entfernen; der alte Dienstprozess und das alte Relay
+// geben die Datei erst nach ihrem Ende frei, darum bis zu 12 Versuche im Abstand von wait. Liefert true, wenn alles weg ist.
+func cleanupOld(exe string, after func(), wait time.Duration, log *Logger) bool {
+	if after != nil {
+		after()
+	}
+	for i := 0; i < 12; i++ {
+		left := 0
+		for _, p := range oldBinaries(exe) {
+			if err := os.Remove(p); err != nil {
+				left++
 			}
-			time.Sleep(5 * time.Second)
 		}
-		u.log.Warnf("update: %s.old liess sich nicht entfernen (noch in Benutzung?) - beim naechsten Start erneut", filepath.Base(exe))
-	}()
+		if left == 0 {
+			log.Infof("update: laeuft mit %s, alte Binary entfernt", version)
+			return true
+		}
+		time.Sleep(wait)
+	}
+	log.Warnf("update: %s.old* liess sich nicht entfernen (noch in Benutzung?) - beim naechsten Start erneut", filepath.Base(exe))
+	return false
 }

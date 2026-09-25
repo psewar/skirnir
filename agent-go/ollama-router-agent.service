@@ -15,7 +15,8 @@ RestartSec=5
 # (z. B. /var/lib/ollama-router-agent und /var/log/ollama-router-agent) und dem Dienst gehoeren lassen:
 User=root
 ProtectSystem=full
-ReadWritePaths=/var/lib/ollama-router-agent /var/log/ollama-router-agent
+# /usr/local/bin: das Selbst-Update (updater.go) legt <binary>.new daneben und tauscht - unter ProtectSystem=full sonst read-only
+ReadWritePaths=/var/lib/ollama-router-agent /var/log/ollama-router-agent /usr/local/bin
 NoNewPrivileges=true
 
 [Install]

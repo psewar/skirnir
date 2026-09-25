@@ -89,6 +89,7 @@ func (t *Tunnel) SetHeartbeatInterval(d time.Duration) {
 		t.mu.Lock()
 		t.hbEvery = d
 		t.mu.Unlock()
+		t.hb.SetInterval(d)
 	}
 }
 
@@ -273,6 +274,7 @@ func (t *Tunnel) applyStatus(m ctlMsg) {
 	}
 	if p != nil && p.HeartbeatIntervalS > 0 {
 		t.hbEvery = time.Duration(p.HeartbeatIntervalS * float64(time.Second))
+		t.hb.SetInterval(t.hbEvery)
 	}
 	st, nd := t.state, t.nodeName
 	t.mu.Unlock()

@@ -281,3 +281,40 @@ func TestGuardInputFromSample(t *testing.T) {
 		t.Fatal("nil-Sample")
 	}
 }
+
+// Review 2026-09-25: lastSetW lebt nur im Speicher. Startet der Dienst neu, waehrend die Karte auf Stufe 2 steht, muss der
+// Guard den eigenen Zielwert erkennen und wieder auf das Dauerlimit heben - ein fremder Wert bleibt weiter unangetastet.
+func TestGuardNeustartInStufe2HebtWiederAn(t *testing.T) {
+	c := newFakeCard()
+	c.lim.Cur = 403 // 70 % von 575: unser Stufe-2-Wert, vom Vorgaengerprozess gesetzt
+	g := newGuardEngine(GuardCfg{}, c.set)
+	st, _ := g.step(guardIn(time.Now(), c, 30))
+	if len(c.sets) != 1 || c.sets[0] != 460 || st.State != guardNormal {
+		t.Fatalf("Stufe-2-Wert nach Neustart nicht angehoben: sets=%v state=%s", c.sets, st.State)
+	}
+	c2 := newFakeCard()
+	c2.lim.Cur = 420 // Fremdtool
+	g2 := newGuardEngine(GuardCfg{}, c2.set)
+	g2.step(guardIn(time.Now(), c2, 30))
+	if c2.calls != 0 {
+		t.Fatalf("fremder Wert 420 W wurde angehoben: %d Aufrufe", c2.calls)
+	}
+}
+
+// Die 16-Pin-Leistung kommt per Relay von localhost (jeder lokale Prozess koennte sie schicken): sie darf die
+// Hochlast-Entscheidung nicht treiben, nur die Board Power aus NVML.
+func TestGuardHochlastNurAusBoardPower(t *testing.T) {
+	c := newFakeCard()
+	g := newGuardEngine(GuardCfg{}, c.set)
+	t0 := time.Now()
+	g.step(guardIn(t0, c, 30))
+	in := guardIn(t0.Add(5*time.Second), c, 100)
+	in.Pin16W, in.GPUZ = fptr(560), true
+	if st, _ := g.step(in); st.HighLoadS != 0 || st.State != guardNormal {
+		t.Fatalf("gefaelschte 16-Pin-Leistung zaehlt als Hochlast: %+v", st)
+	}
+	g.step(guardIn(t0.Add(10*time.Second), c, 455)) // Board Power am Limit (460 W * 90 %): Zaehler startet
+	if st, _ := g.step(guardIn(t0.Add(14*time.Second), c, 455)); st.HighLoadS != 4 {
+		t.Fatalf("Board Power am Limit zaehlt nicht als Hochlast: %+v", st)
+	}
+}

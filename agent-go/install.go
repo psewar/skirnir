@@ -26,6 +26,9 @@ func install(cfg *Config, cfgPath string) error {
 		return err
 	}
 	exe, _ = filepath.Abs(exe)
+	if abs, err := filepath.Abs(cfgPath); err == nil {
+		cfgPath = abs // ein relativer Pfad stuende woertlich im SCM; der Dienst startet aus System32 und faende ihn nicht
+	}
 	in := cfg.Install
 	m, err := mgr.Connect()
 	if err != nil {
@@ -76,19 +79,21 @@ func install(cfg *Config, cfgPath string) error {
 // applyRules setzt Verzeichnis-ACLs, Firewall-Regeln und das Steuerrecht - idempotent, auch bei Updates (Verb apply-rules).
 func applyRules(cfg *Config, cfgPath string) error {
 	in := cfg.Install
-	// Config-Verzeichnis abschotten: enthaelt Router-Token und Secret-Store-Client-Secret. Vererbung kappen,
-	// nur SYSTEM, Administratoren, das Dienstkonto und die steuernden Benutzer duerfen hinein.
+	// Config-Verzeichnis abschotten: enthaelt Router-Token, Secret-Store-Client-Secret, den Identitaetsschluessel und die
+	// Provisionierung (MQTT-Passwort). Vererbung kappen; nur SYSTEM, Administratoren und das Dienstkonto duerfen hinein.
+	// Die steuernden Benutzer (allow_control_users) bekommen NUR das Dienst-Steuerrecht (unten), kein Verzeichnisrecht:
+	// mit Aendern-Recht koennten sie children[].cmd umschreiben und per restart als SYSTEM ausfuehren (Review 2026-09-25).
 	acl := []string{filepath.Dir(cfgPath), "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"}
 	if in.Account != "" {
 		acl = append(acl, fmt.Sprintf("%s:(OI)(CI)M", in.Account))
 	}
 	for _, u := range in.AllowControlUsers {
-		acl = append(acl, fmt.Sprintf("%s:(OI)(CI)M", u))
+		runQuiet("icacls.exe", filepath.Dir(cfgPath), "/remove:g", u) // Rest aus Installationen vor 0.9.0
 	}
 	if out, err := exec.Command("icacls.exe", acl...).CombinedOutput(); err != nil {
 		fmt.Printf("  ACL %s: %v %s\n", filepath.Dir(cfgPath), err, strings.TrimSpace(string(out)))
 	} else {
-		fmt.Printf("  %s abgeschottet (SYSTEM, Administratoren, %s, %s)\n", filepath.Dir(cfgPath), firstNonEmpty(in.Account, "-"), strings.Join(in.AllowControlUsers, ", "))
+		fmt.Printf("  %s abgeschottet (SYSTEM, Administratoren, %s)\n", filepath.Dir(cfgPath), firstNonEmpty(in.Account, "-"))
 	}
 	// Dateirechte fuer das Dienstkonto
 	if in.Account != "" {

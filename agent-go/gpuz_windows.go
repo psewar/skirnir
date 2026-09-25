@@ -158,8 +158,8 @@ func gpuzCandidates() []string {
 	if rc, _, _ := pProcIdToSession.Call(uintptr(windows.GetCurrentProcessId()), uintptr(unsafe.Pointer(&own))); rc == 0 {
 		own = 0xFFFFFFFF
 	}
-	if act, _, _ := pActiveConsoleSess.Call(); act != 0xFFFFFFFF && uint32(act) != own {
-		out = append(out, fmt.Sprintf(`\Sessions\%d\BaseNamedObjects\GPUZShMem`, act))
+	if act, _, _ := pActiveConsoleSess.Call(); uint32(act) != 0xFFFFFFFF && uint32(act) != own { // DWORD: obere 32 Bit nicht definiert
+		out = append(out, fmt.Sprintf(`\Sessions\%d\BaseNamedObjects\GPUZShMem`, uint32(act)))
 	}
 	out = append(out, `\BaseNamedObjects\GPUZShMem`)
 	return out

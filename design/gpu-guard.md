@@ -5,6 +5,10 @@
 > 80 %, die Abwahl zählt als HA-Problem (abweichend von Abschnitt 4), `require_fresh_status` Standard aus. Konfigschlüssel
 > im Agenten heissen englisch und flach (`power_limit_pct`, `high_load_s`, `stage2_pct`, `recovery_s`, `voltage_warn_v`, …,
 > siehe `agent-go/README.md`). Lasttest (5a) und Nachtlauf Stufe 2 (5b) am 2026-09-25 gemessen; offen ist die Messwoche (HA-Historie). Der Router-Teil zu `routing.reason`/`skipped` ist nicht gebaut (Deckel wirkt über `max_inflight`).
+> **0.9.0 (2026-09-25, Review):** Lastmass für Hochlast ist die Board Power aus NVML, nicht mehr die 16-Pin-Leistung aus GPU-Z:
+> die Relay-Werte kommen per `POST /gpuz` von localhost und dürfen das Limit nicht steuern; Board Power liegt nie unter der
+> 16-Pin-Leistung (Slot-Anteil), das Limit gilt für sie. 16-Pin-Leistung und -Spannung bleiben Anzeige und Warnung. Nach einem
+> Dienstneustart erkennt der Guard seine eigenen Zielwerte (Stufe 2 bleibt nicht mehr hängen).
 
 Anlass: Berichte über verschmorte 12VHPWR/12V-2x6-Stecker an RTX-5090-Karten nach längerer Zeit unter hohem Strom.
 Dieses Dokument prüft, was Router und Agent dagegen tun können, und schlägt einen Schutz vor, der **standardmässig an**

@@ -224,11 +224,10 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 	}
 	dauer, stufe2 := g.targets(in.Limits)
 
-	// Lastmass: 16-Pin-Leistung, wenn GPU-Z sie liefert, sonst Board Power (konservativer, enthaelt den Slot-Anteil).
+	// Lastmass: Board Power aus NVML. Sie enthaelt den Slot-Anteil, liegt also nie unter der 16-Pin-Leistung, und das
+	// Limit gilt fuer sie. Die 16-Pin-Werte aus GPU-Z kommen ueber das Relay (POST /gpuz, jeder lokale Prozess koennte
+	// sie schicken) - sie bleiben Anzeige und Warnung, entscheiden aber nicht ueber das Limit (Review 2026-09-25).
 	load := in.PowerW
-	if in.Pin16W != nil {
-		load = in.Pin16W
-	}
 	// Hochlast: Leistung >= highPct des aktiven Limits. Zwischen zwei Anfragen faellt die Leistung fuer Sekundenbruchteile
 	// ab (Warteschlange, Antwort); gemessen 2026-09-25: mit 2-s-Abtastung kam der Zaehler bei Dauer-Batchlast nie ueber
 	// wenige Sekunden. Darum gilt eine Luecke erst nach highGapS unter der Schwelle als Unterbrechung.
@@ -294,7 +293,9 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 	cur := in.Limits.Cur
 	// Senken immer; anheben nur von einem Wert, den wir selbst gesetzt haben (Stufe 2 -> Dauerlimit). Ein Fremdtool,
 	// das tiefer stellt, bleibt unangetastet - und ueber das Standardlimit geht es nie (targets klemmt).
-	ownValue := g.lastSetW > 0 && math.Abs(cur-g.lastSetW) < 0.5
+	// "Selbst gesetzt" heisst auch: das Limit steht auf einem unserer Zielwerte. lastSetW lebt nur im Speicher; nach
+	// einem Dienstneustart mitten in Stufe 2 bliebe die Karte sonst fuer immer auf 70 % (Review 2026-09-25).
+	ownValue := (g.lastSetW > 0 && math.Abs(cur-g.lastSetW) < 0.5) || math.Abs(cur-stufe2) < 0.5 || math.Abs(cur-dauer) < 0.5
 	needSet := cur > want+0.5 || (cur < want-0.5 && ownValue)
 	due := g.lastApply.IsZero() || in.Now.Sub(g.lastApply).Seconds() >= g.p.reapplyS || g.lastWant != want
 	if needSet && due {

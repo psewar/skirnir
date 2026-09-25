@@ -4,7 +4,7 @@
 #   3. Dienst anlegen (Konto, ACLs, Firewall, Steuerrecht) und starten
 #   4. Zustand zeigen
 # Voraussetzung: C:\ProgramData\ollama-router-agent\config.yaml liegt schon da (Vorlage: config.example.yaml).
-# Rueckbau: ollama-router-agent.exe uninstall; dann agent\Install-Task.ps1 (und ggf. die eigenen Installer der entfernten Tasks).
+# Rueckbau: ollama-router-agent.exe uninstall (und ggf. die eigenen Installer der entfernten Tasks).
 param([switch]$RemoveOpenOllamaRules,   # entfernt die Installer-Regeln 'ollama.exe' (Quelle: Any) - Ollama nur noch via TLS-Proxy/Router
       [switch]$RemoveOllamaLanRules,    # entfernt 'Ollama 11434 - ha-host/nodered-host': seit dem Tunnel gibt es keinen Direktzugriff mehr (2026-09-09)
       [switch]$SkipGpuzRelay,           # keine Aufgabe fuer das GPU-Z-Relay anlegen (bzw. eine vorhandene entfernen)
