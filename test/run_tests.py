@@ -105,7 +105,7 @@ def main():
         subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
                         "-keyout", "test-key.pem", "-out", "test-cert.pem", "-days", "30", "-subj", "/CN=localhost"],
                        cwd=HERE, check=True, capture_output=True)
-    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
+    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
         try:
             os.remove(os.path.join(HERE, f))
         except FileNotFoundError:
@@ -218,6 +218,14 @@ def main():
         m_txt = http(C + "/metrics")[1]
         m_txt = m_txt.decode() if isinstance(m_txt, bytes) else str(m_txt)
         check("Metrik skirnir_node_gpu_guard", 'skirnir_node_gpu_guard{node="big",state="normal"} 1' in m_txt, "")
+        # Entscheidungsprotokoll persistent: events.jsonl neben der Config, eine Zeile je Eintrag; ein frischer Prozess laedt es
+        decs = state()["decisions"]
+        ev_lines = [json.loads(l) for l in open(os.path.join(HERE, "events.jsonl"), encoding="utf-8") if l.strip()]
+        check("events.jsonl: jeder Eintrag des Protokolls steht als Zeile in der Datei", len(ev_lines) >= len(decs) and ev_lines[-1]["ts"] == decs[-1]["ts"] and ev_lines[-1]["event"] == decs[-1]["event"], f"{len(ev_lines)} Zeilen, {len(decs)} im Speicher")
+        prog = "import sys; sys.path.insert(0, sys.argv[1]); from ollama_router import state; C = type('C', (), {'path': sys.argv[2]}); " "state.CFG = C(); n = state.decisions_load(); print(n, state.DECISIONS[-1]['event'], len(state.DECISIONS))"
+        rc_l = subprocess.run([PY, "-c", prog,
+                               os.path.join(HERE, "..", "router"), os.path.join(HERE, "test-config.yaml")], capture_output=True, text=True, cwd=HERE)
+        check("events.jsonl: frischer Prozess laedt die Eintraege (Neustart)", rc_l.returncode == 0 and rc_l.stdout.split()[:2] == [str(len(ev_lines)), decs[-1]["event"]], (rc_l.stdout + rc_l.stderr)[-160:])
         st, txt = chat("assist:latest")
         d = route()
         check("assist: warmes Modell (tier0 geladen) gewinnt", d["tier"] == 0 and d["warm"] is True, str(d))

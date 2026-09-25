@@ -82,6 +82,9 @@ async def main(cfg_path):
     log.info("Knotenregister: %d Eintraege (%d freigegeben)", len(state.REG.nodes), sum(1 for e in state.REG.nodes.values() if e["state"] == "approved"))
     perf.perf_load()
     metrics.usage_load()
+    n_dec = state.decisions_load()
+    if n_dec:
+        log.info("Entscheidungsprotokoll: %d Eintraege aus events.jsonl uebernommen", n_dec)
     cloud.setup()
     state.SESSION = ClientSession()
     api, ctl = build_apps()

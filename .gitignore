@@ -21,6 +21,7 @@ test/perf-profile.txt
 test/perf-result.json
 test/locked-config.yaml
 test/decisions.jsonl
+test/events.jsonl
 
 # Deploy-Ausgabe (Manifest entsteht bei jedem deploy.py-Lauf)
 router/manifest.json

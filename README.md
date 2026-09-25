@@ -270,7 +270,7 @@ scrape_configs:
 ```
 
 `usage.json` keeps requests, tokens, errors and cloud costs per day and client for 90 days (`GET /admin/usage`). The decision
-log (`/admin/state`, last 2000 entries in memory, `?decisions=N` selects how many are returned, default 50) holds the most recent routes and events (busy/free, WOL, breaker, queue, shadow, decision). `/admin/state`
+log (`/admin/state`, last 2000 entries, persisted in `events.jsonl` next to the configuration so it survives restarts; `?decisions=N` selects how many are returned, default 50) holds the most recent routes and events (busy/free, WOL, breaker, queue, shadow, decision). `/admin/state`
 also shows `build` (deploy manifest) and `supply_chain` (Ollama version and model digests per node).
 
 ## Web UI
