@@ -602,7 +602,7 @@ def main():
         st, raw = http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"execution": "cloud"}})
         ri = rinfo(raw, st)
         check("Default-Datenklasse personal: Cloud-Stufe mit Grund uebersprungen, lokal bedient", st == 200 and ri.get("model") == "qwen3.6:35b-a3b"
-              and any("Datenklasse personal" in s_["reason"] for s_ in ri.get("skipped", [])), str(ri.get("skipped")))
+              and any("data class personal" in s_["reason"] for s_ in ri.get("skipped", [])), str(ri.get("skipped")))
         st, raw = http(R + "/api/chat", {"model": "wolke:latest", "messages": [{"role": "user", "content": "mein key ist sk-abcdefghijklmnopqrstuvwxyz0123456789"}], "stream": False,
                                          "routing": {"execution": "cloud", "data_class": "public"}})
         ri = rinfo(raw, st)
@@ -612,7 +612,7 @@ def main():
                        headers={"Authorization": "Bearer lokal-token"})
         ri = rinfo(raw, st)
         check("Client-Opt-out (cloud: false): trotz execution cloud lokal", st == 200 and ri.get("model") == "qwen3.6:35b-a3b"
-              and any("Opt-out" in s_["reason"] for s_ in ri.get("skipped", [])), str(ri.get("skipped")))
+              and any("opt-out" in s_["reason"] for s_ in ri.get("skipped", [])), str(ri.get("skipped")))
         st, raw = http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"execution": "local", "data_class": "public"}})
         ri = rinfo(raw, st)
         check("routing.execution local: Cloud-Stufe uebersprungen", st == 200 and ri.get("model") == "qwen3.6:35b-a3b" and any("execution: local" in s_["reason"] for s_ in ri.get("skipped", [])), str(ri.get("skipped")))
@@ -656,7 +656,7 @@ def main():
             st, raw = http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"execution": "cloud", "data_class": "internal"}})
             ri = rinfo(raw, st)
             if ri.get("model") == "qwen3.6:35b-a3b":
-                hit = [s_["reason"] for s_ in ri.get("skipped", []) if "Monatsbudget" in s_["reason"]]
+                hit = [s_["reason"] for s_ in ri.get("skipped", []) if "monthly budget" in s_["reason"]]
                 break
         check("Budget 1.9 CHF erschoepft: Cloud-Stufe faellt weg (Grund), lokal bedient", bool(hit), str(hit or ri))
         ha_ = json.loads(http(C + "/admin/ha")[1])
@@ -1155,7 +1155,7 @@ def main():
         check("falsches Token zaehlt als bad_token (kein Rueckfall auf die IP)", st == 200
               and any(u["bad_token"] >= 1 for u in ca()["unauthenticated"].values()))
         st, raw = http(R + "/api/chat", chat_body("standard:latest"), headers=hdr("restricted-token"))
-        check("Rolle fuer diesen Client nicht erlaubt -> 403", st == 403 and "nicht erlaubt" in raw.decode(), f"{st} {raw[:90]}")
+        check("Rolle fuer diesen Client nicht erlaubt -> 403", st == 403 and "not allowed" in raw.decode(), f"{st} {raw[:90]}")
         st, raw = http(R + "/api/chat", chat_body("klein:latest"), headers=hdr("restricted-token"))
         check("erlaubte Rolle -> 200", st == 200, f"{st} {raw[:60]}")
         # konkrete Modelle sind seit dem UI-Test oben (expose_concrete_models: False) verborgen -> fuer diese Pruefung
@@ -1163,7 +1163,7 @@ def main():
         http(C + "/admin/config", {"expose_concrete_models": True}, method="PUT")
         st, raw = http(R + "/api/chat", chat_body("granite4.2:8b"), headers=hdr("restricted-token"))
         nd = {k: (v["state"], sorted(v["models"])) for k, v in state()["nodes"].items()}   # Kontext fuer den Fehlerfall
-        check("konkretes Modell fuer diesen Client gesperrt -> 403", st == 403 and "konkrete Modellnamen" in raw.decode(),
+        check("konkretes Modell fuer diesen Client gesperrt -> 403", st == 403 and "concrete model names" in raw.decode(),
               f"{st} {raw[:90]} | Knoten: {nd}")
         http(C + "/admin/config", {"expose_concrete_models": False}, method="PUT")
         codes = [http(R + "/api/tags", headers=hdr("limited-token"))[0] for _ in range(4)]
@@ -1228,7 +1228,7 @@ def main():
         evs = [d["state"] for d in state()["decisions"] if d.get("event") == "agent_update"]
         check("Agent-Update: Ereignisse requested -> downloading -> applied -> done", evs[-4:] == ["requested", "downloading", "applied", "done"], str(evs))
         st, raw = http(C + f"/admin/nodes/{fp_big}/update", {})
-        check("Agent-Update: gleiche Version -> 409", st == 409 and "schon" in raw.decode(), raw.decode()[:80])
+        check("Agent-Update: gleiche Version -> 409", st == 409 and "already" in raw.decode(), raw.decode()[:80])
         # Fehlerfall: Manifest mit fremdem Schluessel signiert -> Agent lehnt ab, HA-Problem
         _manifest("test3", _Ed.generate())
         st, raw = http(C + f"/admin/nodes/{fp_big}/update", {})

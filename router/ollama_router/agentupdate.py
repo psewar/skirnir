@@ -98,7 +98,7 @@ def update_view(e, now=None):
     avail, _ = available_for(e)
     u = dict(e.get("update") or {})
     if u.get("state") in ("requested", "downloading", "applied") and now - (u.get("t") or 0) > STALL_S:
-        u["state"], u["message"] = "stalled", f"keine Rueckmeldung seit {int((now - u['t']) // 60)} min"
+        u["state"], u["message"] = "stalled", f"no report for {int((now - u['t']) // 60)} min"
     return {"current": facts.get("agent_version"), "available": avail, "pending": bool(avail and avail != facts.get("agent_version")),
             "auto": bool((e.get("policy") or {}).get("auto_update")), "version_since": e.get("version_since"), **u}
 
@@ -174,33 +174,33 @@ async def order_update(fp, reason="ui", force=False):
     """Auftrag an einen Knoten. Liefert (ok, Meldung)."""
     e = state.REG.nodes.get(fp)
     if e is None:
-        return False, "unbekannter Fingerprint"
+        return False, "unknown fingerprint"
     if e.get("state") != "approved":
-        return False, "Knoten ist nicht freigegeben"
+        return False, "node is not approved"
     node = state.NODES.get(e["name"])
     if node is None or node.fp != fp or node.tunnel is None:
-        return False, "Agent nicht verbunden"
+        return False, "agent not connected"
     m = load_manifest()
     if not m:
-        return False, "kein Agent-Manifest hinterlegt (deploy.py --agent)"
+        return False, "no agent manifest on the router (deploy.py --agent)"
     facts = e.get("facts") or {}
     f = file_for(m["manifest"], facts.get("os"), facts.get("arch"))
     if not f:
-        return False, f"keine Binary fuer {facts.get('os')}/{facts.get('arch')} im Manifest"
+        return False, f"no binary for {facts.get('os')}/{facts.get('arch')} in the manifest"
     version = m["manifest"]["version"]
     if version == facts.get("agent_version") and not force:
-        return False, f"laeuft schon mit {version}"
+        return False, f"already running {version}"
     u = e.get("update") or {}
     if u.get("state") in ("requested", "downloading", "applied") and time.time() - (u.get("t") or 0) < STALL_S and not force:
-        return False, f"Auftrag auf {u.get('version')} laeuft seit {int((time.time() - u['t']) // 60)} min"
+        return False, f"order for {u.get('version')} running for {int((time.time() - u['t']) // 60)} min"
     if node.inflight > 0 and not force:
-        return False, f"Knoten bearbeitet gerade {node.inflight} Anfrage(n)"
+        return False, f"node is serving {node.inflight} request(s)"
     pub = (state.CFG.agent_update or {}).get("public_key")
     if pub:
         try:
             verify_with(pub, m["manifest"], m["signature"])
         except (InvalidSignature, ValueError) as ex:
-            return False, f"Manifest-Signatur ungueltig ({ex.__class__.__name__}) - nichts geschickt"
+            return False, f"manifest signature invalid ({ex.__class__.__name__}), nothing sent"
     token = make_token(fp, f["name"])
     url = f"{state.CFG.public_url.rstrip('/')}/v1/agent/binary/{f['name']}"
     msg = {"t": "update", "version": version, "file": f["name"], "url": url, "sha256": f["sha256"], "size": f.get("size", 0),
@@ -214,7 +214,7 @@ async def order_update(fp, reason="ui", force=False):
     state.remember({"event": "agent_update", "node": e["name"], "state": "requested", "version": version, "reason": reason})
     state.MQTT_DIRTY.append(True)
     log.info("node %s: Agent-Update auf %s angestossen (%s, %s)", e["name"], version, reason, f["name"])
-    return True, f"Update auf {version} angestossen"
+    return True, f"update to {version} started"
 
 
 async def handle_binary(request):
@@ -224,12 +224,12 @@ async def handle_binary(request):
     tok = auth[7:] if auth.startswith("Bearer ") else ""
     t = TOKENS.get(tok)
     if not t or t["expires"] < time.time() or t["file"] != name or t["uses"] <= 0:
-        return web.json_response({"error": "token ungueltig oder abgelaufen"}, status=403)
+        return web.json_response({"error": "token invalid or expired"}, status=403)
     if "/" in name or "\\" in name or name.startswith("."):
-        return web.json_response({"error": "ungueltiger Dateiname"}, status=400)
+        return web.json_response({"error": "invalid file name"}, status=400)
     path = os.path.join(agent_dir(), name)
     if not os.path.isfile(path):
-        return web.json_response({"error": "Datei fehlt auf dem Router"}, status=404)
+        return web.json_response({"error": "file missing on the router"}, status=404)
     t["uses"] -= 1
     e = state.REG.nodes.get(t["fp"]) if state.REG else None
     if e is not None and (e.get("update") or {}).get("state") == "requested":

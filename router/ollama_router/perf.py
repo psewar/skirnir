@@ -183,12 +183,12 @@ async def handle_bench(request):
         return web.json_response({"error": "invalid json"}, status=400)
     model = b.get("model")
     if not model:
-        return web.json_response({"error": "model fehlt"}, status=400)
+        return web.json_response({"error": "model missing"}, status=400)
     if state.BENCHING or state.MEASURING:
-        return web.json_response({"error": "es laeuft schon eine Messung/ein Benchmark, bitte warten"}, status=409)
+        return web.json_response({"error": "a measurement or benchmark is already running, please wait"}, status=409)
     node = _free_node_for(model, b.get("node"), prefer_loaded=True)
     if node is None:
-        return web.json_response({"error": f"kein freier Knoten ohne laufende Anfragen hat {model}"}, status=409)
+        return web.json_response({"error": f"no free node without running requests has {model}"}, status=409)
     state.spawn(bench_model(model, node))
     return web.json_response({"started": True, "node": node.name, "model": model})
 
@@ -247,13 +247,13 @@ async def handle_measure(request):
         return web.json_response({"error": "invalid json"}, status=400)
     model = b.get("model")
     if not model:
-        return web.json_response({"error": "model fehlt"}, status=400)
+        return web.json_response({"error": "model missing"}, status=400)
     if model in state.MEASURING:
-        return web.json_response({"error": f"{model} wird gerade gemessen"}, status=409)
+        return web.json_response({"error": f"{model} is being measured right now"}, status=409)
     if len(state.MEASURING) >= 1:
-        return web.json_response({"error": "es laeuft schon eine Messung, bitte warten"}, status=409)
+        return web.json_response({"error": "a measurement is already running, please wait"}, status=409)
     node = _free_node_for(model, b.get("node"))
     if node is None:
-        return web.json_response({"error": f"kein freier Knoten ohne laufende Anfragen hat {model}"}, status=409)
+        return web.json_response({"error": f"no free node without running requests has {model}"}, status=409)
     state.spawn(measure_model(model, node))
     return web.json_response({"started": True, "node": node.name, "model": model})

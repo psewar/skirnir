@@ -158,54 +158,54 @@ def render():
                 continue
             out.append(f"{name}{_labels(labels) if labels else ''} {v}")
 
-    gauge("skirnir_info", "Router-Version", [({"version": VERSION}, 1)])
+    gauge("skirnir_info", "router version", [({"version": VERSION}, 1)])
     nodes = list(state.NODES.values())
-    gauge("skirnir_node_up", "1 = Knoten online (free oder busy)", [({"node": n.name}, 1 if n.state != "offline" else 0) for n in nodes])
-    gauge("skirnir_node_info", "Ollama-Version je Knoten", [({"node": n.name, "ollama_version": n.ollama_version or "?"}, 1) for n in nodes])
-    gauge("skirnir_node_state", "1 fuer den aktuellen Zustand des Knotens",
+    gauge("skirnir_node_up", "1 = node online (free or busy)", [({"node": n.name}, 1 if n.state != "offline" else 0) for n in nodes])
+    gauge("skirnir_node_info", "Ollama version per node", [({"node": n.name, "ollama_version": n.ollama_version or "?"}, 1) for n in nodes])
+    gauge("skirnir_node_state", "1 for the current node state",
           [({"node": n.name, "state": s}, 1 if n.state == s else 0) for n in nodes for s in ("free", "busy", "offline")])
-    gauge("skirnir_node_inflight", "laufende Anfragen je Knoten", [({"node": n.name}, n.inflight) for n in nodes])
-    gauge("skirnir_node_max_inflight", "Admission-Grenze je Knoten", [({"node": n.name}, n.effective_max_inflight()) for n in nodes])
-    gauge("skirnir_node_gpu_util_percent", "GPU-Auslastung (Agent)", [({"node": n.name}, n.gpu_util if n.gpu_known(now) else None) for n in nodes])
-    gauge("skirnir_node_vram_free_gib", "freies VRAM", [({"node": n.name}, round(n.vram_free_gib, 3) if n.gpu_known(now) and n.vram_free_gib is not None else None) for n in nodes])
-    gauge("skirnir_node_vram_used_gib", "belegtes VRAM", [({"node": n.name}, round(n.vram_used_gib, 3) if n.gpu_known(now) and n.vram_used_gib is not None else None) for n in nodes])
-    gauge("skirnir_node_vram_total_gib", "VRAM gesamt", [({"node": n.name}, n.vram_total_gib) for n in nodes])
-    gauge("skirnir_node_vram_foreign_gib", "fremdes VRAM (Desktop, Spiel) ueber der Baseline", [({"node": n.name}, round(n.foreign_vram_gib(), 3)) for n in nodes])
-    gauge("skirnir_node_ollama_vram_gib", "von Ollama belegtes VRAM (/api/ps)", [({"node": n.name}, round(n.ollama_vram_gib(), 3)) for n in nodes])
-    gauge("skirnir_node_breaker", "1 fuer den Breaker-Zustand", [({"node": n.name, "state": s}, 1 if n.breaker == s else 0) for n in nodes for s in ("closed", "open", "half_open")])
+    gauge("skirnir_node_inflight", "running requests per node", [({"node": n.name}, n.inflight) for n in nodes])
+    gauge("skirnir_node_max_inflight", "admission limit per node", [({"node": n.name}, n.effective_max_inflight()) for n in nodes])
+    gauge("skirnir_node_gpu_util_percent", "GPU utilisation (agent)", [({"node": n.name}, n.gpu_util if n.gpu_known(now) else None) for n in nodes])
+    gauge("skirnir_node_vram_free_gib", "free VRAM", [({"node": n.name}, round(n.vram_free_gib, 3) if n.gpu_known(now) and n.vram_free_gib is not None else None) for n in nodes])
+    gauge("skirnir_node_vram_used_gib", "used VRAM", [({"node": n.name}, round(n.vram_used_gib, 3) if n.gpu_known(now) and n.vram_used_gib is not None else None) for n in nodes])
+    gauge("skirnir_node_vram_total_gib", "total VRAM", [({"node": n.name}, n.vram_total_gib) for n in nodes])
+    gauge("skirnir_node_vram_foreign_gib", "foreign VRAM (desktop, game) above the baseline", [({"node": n.name}, round(n.foreign_vram_gib(), 3)) for n in nodes])
+    gauge("skirnir_node_ollama_vram_gib", "VRAM used by Ollama (/api/ps)", [({"node": n.name}, round(n.ollama_vram_gib(), 3)) for n in nodes])
+    gauge("skirnir_node_breaker", "1 for the breaker state", [({"node": n.name, "state": s}, 1 if n.breaker == s else 0) for n in nodes for s in ("closed", "open", "half_open")])
     # Sensoren (Agent >= 0.6.0) und GPU-Schutz (>= 0.7.0)
     sens = lambda n, k: (n.sensors or {}).get(k) if n.gpu_known(now) else None  # noqa: E731
-    gauge("skirnir_node_gpu_power_w", "Leistungsaufnahme der Karte (Board Power)", [({"node": n.name}, sens(n, "power_w")) for n in nodes])
-    gauge("skirnir_node_gpu_power_limit_w", "wirksames Power-Limit", [({"node": n.name}, sens(n, "power_limit_w")) for n in nodes])
-    gauge("skirnir_node_gpu_pin16_power_w", "Leistung durch den 16-Pin-Stecker (GPU-Z)", [({"node": n.name}, sens(n, "pin16_power_w")) for n in nodes])
-    gauge("skirnir_node_gpu_pin16_v", "Spannung am 16-Pin-Stecker (GPU-Z)", [({"node": n.name}, sens(n, "pin16_voltage_v")) for n in nodes])
-    gauge("skirnir_node_gpu_temp_c", "GPU-Temperatur", [({"node": n.name}, sens(n, "temp_c")) for n in nodes])
-    gauge("skirnir_node_gpu_mem_temp_c", "Speichertemperatur (GPU-Z)", [({"node": n.name}, sens(n, "mem_temp_c")) for n in nodes])
-    gauge("skirnir_node_gpu_guard", "1 fuer den Zustand des GPU-Schutzes", [({"node": n.name, "state": s}, 1 if n.guard_state(now) == s else 0) for n in nodes for s in ("aus", "unverfuegbar", "normal", "hochlast", "gedrosselt", "erholung")])
-    gauge("skirnir_model_loaded_gib", "geladene Modelle und ihre VRAM-Belegung", [({"node": n.name, "model": m}, round(g, 3)) for n in nodes for m, g in n.loaded.items()])
+    gauge("skirnir_node_gpu_power_w", "board power draw of the card", [({"node": n.name}, sens(n, "power_w")) for n in nodes])
+    gauge("skirnir_node_gpu_power_limit_w", "effective power limit", [({"node": n.name}, sens(n, "power_limit_w")) for n in nodes])
+    gauge("skirnir_node_gpu_pin16_power_w", "power through the 16-pin connector (GPU-Z)", [({"node": n.name}, sens(n, "pin16_power_w")) for n in nodes])
+    gauge("skirnir_node_gpu_pin16_v", "voltage at the 16-pin connector (GPU-Z)", [({"node": n.name}, sens(n, "pin16_voltage_v")) for n in nodes])
+    gauge("skirnir_node_gpu_temp_c", "GPU temperature", [({"node": n.name}, sens(n, "temp_c")) for n in nodes])
+    gauge("skirnir_node_gpu_mem_temp_c", "memory temperature (GPU-Z)", [({"node": n.name}, sens(n, "mem_temp_c")) for n in nodes])
+    gauge("skirnir_node_gpu_guard", "1 for the GPU guard state", [({"node": n.name, "state": s}, 1 if n.guard_state(now) == s else 0) for n in nodes for s in ("aus", "unverfuegbar", "normal", "hochlast", "gedrosselt", "erholung")])
+    gauge("skirnir_model_loaded_gib", "loaded models and their VRAM", [({"node": n.name, "model": m}, round(g, 3)) for n in nodes for m, g in n.loaded.items()])
     adm = admission.view()
-    gauge("skirnir_admission_waiting", "wartende Anfragen je Knoten", [({"node": k}, v) for k, v in adm["by_node"].items()] or [({}, 0)])
-    gauge("skirnir_sessions", "aktive Session-Affinitaeten", [({}, len(state.SESSIONS))])
+    gauge("skirnir_admission_waiting", "waiting requests per node", [({"node": k}, v) for k, v in adm["by_node"].items()] or [({}, 0)])
+    gauge("skirnir_sessions", "active session affinities", [({}, len(state.SESSIONS))])
     rows = []
     for _exposed, role in state.CFG.roles.items():
         pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # Sicht: /metrics wechselt keinen Breaker
         rows.append(({"role": role["name"]}, 1 if pick else 0))
-    gauge("skirnir_role_ready", "1 = Rolle koennte jetzt bedient werden", rows)
-    gauge("skirnir_perf_gen_tps", "EWMA Generier-Tempo tok/s je Modell@Knoten",
+    gauge("skirnir_role_ready", "1 = role could be served right now", rows)
+    gauge("skirnir_perf_gen_tps", "EWMA generation speed tok/s per model@node",
           [({"model": e["model"], "node": e["node"]}, (e.get("ewma") or {}).get("gen_tps")) for e in state.PERF.values() if isinstance(e, dict) and e.get("model")])
-    gauge("skirnir_perf_error_rate", "Anteil Nicht-ok der letzten 20 Ergebnisse",
+    gauge("skirnir_perf_error_rate", "share of non-ok outcomes in the last 20 results",
           [({"model": e["model"], "node": e["node"]}, round(perf.error_rate(e["model"], e["node"]), 3)) for e in state.PERF.values() if isinstance(e, dict) and e.get("model")])
     ca = state.CLIENT_STATS
-    gauge("skirnir_client_forbidden_total", "abgewiesene Anfragen je Client (403)", [({"client": k}, v.get("forbidden", 0)) for k, v in ca["clients"].items()])
-    gauge("skirnir_client_rate_limited_total", "gedrosselte Anfragen je Client (429)", [({"client": k}, v.get("rate_limited", 0)) for k, v in ca["clients"].items()])
-    gauge("skirnir_unauthenticated_total", "Anfragen ohne gueltige Identitaet je Quell-IP", [({"ip": k}, v.get("total", 0)) for k, v in ca["unauth"].items()])
+    gauge("skirnir_client_forbidden_total", "rejected requests per client (403)", [({"client": k}, v.get("forbidden", 0)) for k, v in ca["clients"].items()])
+    gauge("skirnir_client_rate_limited_total", "rate-limited requests per client (429)", [({"client": k}, v.get("rate_limited", 0)) for k, v in ca["clients"].items()])
+    gauge("skirnir_unauthenticated_total", "requests without a valid identity per source IP", [({"ip": k}, v.get("total", 0)) for k, v in ca["unauth"].items()])
     t = usage_totals(usage_today())
-    gauge("skirnir_usage_today_requests", "Anfragen heute (alle Clients)", [({}, t["requests"])])
+    gauge("skirnir_usage_today_requests", "requests today (all clients)", [({}, t["requests"])])
     from . import cloud
-    gauge("skirnir_cloud_spend_month_chf", "Cloud-Ausgaben im laufenden Monat je Anbieter", [({"provider": p}, round(cloud.spend_month(p), 4)) for p in state.CLOUD])
-    gauge("skirnir_cloud_budget_month_chf", "Monatsbudget je Anbieter", [({"provider": p}, float(t_.spec.get("budget_month_chf") or 0)) for p, t_ in state.CLOUD.items()])
-    gauge("skirnir_cloud_enabled", "1 = Anbieter aktiv und mit Schluessel", [({"provider": p}, 1 if (t_.spec.get("enabled", True) and t_.api_key) else 0) for p, t_ in state.CLOUD.items()])
-    gauge("skirnir_usage_today_tokens", "Tokens heute", [({"kind": "prompt"}, t["prompt_tokens"]), ({"kind": "completion"}, t["completion_tokens"])])
+    gauge("skirnir_cloud_spend_month_chf", "cloud spend in the current month per provider", [({"provider": p}, round(cloud.spend_month(p), 4)) for p in state.CLOUD])
+    gauge("skirnir_cloud_budget_month_chf", "monthly budget per provider", [({"provider": p}, float(t_.spec.get("budget_month_chf") or 0)) for p, t_ in state.CLOUD.items()])
+    gauge("skirnir_cloud_enabled", "1 = provider enabled and has a key", [({"provider": p}, 1 if (t_.spec.get("enabled", True) and t_.api_key) else 0) for p, t_ in state.CLOUD.items()])
+    gauge("skirnir_usage_today_tokens", "tokens today", [({"kind": "prompt"}, t["prompt_tokens"]), ({"kind": "completion"}, t["completion_tokens"])])
 
     for name, series in state.METRICS["counters"].items():
         out.append(f"# TYPE {name} counter")

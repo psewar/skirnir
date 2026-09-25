@@ -158,36 +158,36 @@ def request_block_reason(req, body, client_name):
     if not cfg.get("enabled"):
         return "Cloud in der Konfiguration deaktiviert"
     if req.execution == "local":
-        return "routing.execution: local (Opt-out des Clients)"
+        return "routing.execution: local (client opt-out)"
     cc = ((state.CFG.client_auth.get("clients") or {}).get(client_name or "") or {})
     if cc.get("cloud") is False:
-        return f"Client {client_name}: cloud: false (Opt-out)"
+        return f"client {client_name}: cloud: false (opt-out)"
     dc = req.data_class or cc.get("data_class") or cfg.get("default_data_class", "personal")
     req.data_class_effective = dc
     if class_index(dc) > class_index(cfg.get("max_cloud_data_class", "internal")):
-        return f"Datenklasse {dc} > {cfg.get('max_cloud_data_class', 'internal')} (nicht fuer Cloud freigegeben)"
+        return f"data class {dc} > {cfg.get('max_cloud_data_class', 'internal')} (not cleared for the cloud)"
     if cfg.get("credential_scan", "block") == "block":
         hit = scan_secrets(body)
         if hit:
-            return f"credential_scan: moeglicher Schluessel im Prompt ({hit})"
+            return f"credential_scan: possible secret in the prompt ({hit})"
     return None
 
 
 def provider_block_reason(tier, req=None):
     t = target_for(tier)
     if t is None:
-        return f"Cloud-Anbieter {tier.get('cloud')} nicht konfiguriert"
+        return f"cloud provider {tier.get('cloud')} not configured"
     if not t.spec.get("enabled", True):
-        return f"Cloud-Anbieter {t.provider} deaktiviert"
+        return f"cloud provider {t.provider} disabled"
     if not t.api_key:
-        return f"Cloud-Anbieter {t.provider}: kein API-Schluessel"
+        return f"cloud provider {t.provider}: no API key"
     if req is not None and t.spec.get("max_data_class"):
         dc = getattr(req, "data_class_effective", None) or state.CFG.cloud.get("default_data_class", "personal")
         if class_index(dc) > class_index(t.spec["max_data_class"]):
-            return f"Datenklasse {dc} > {t.spec['max_data_class']} fuer Anbieter {t.provider}"
+            return f"data class {dc} > {t.spec['max_data_class']} for provider {t.provider}"
     budget = float(t.spec.get("budget_month_chf") or 0)
     if budget and spend_month(t.provider) >= budget:
-        return f"Cloud-Anbieter {t.provider}: Monatsbudget {budget:.2f} CHF erschoepft"
+        return f"cloud provider {t.provider}: monthly budget {budget:.2f} CHF exhausted"
     return None
 
 

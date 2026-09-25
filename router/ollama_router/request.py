@@ -142,7 +142,7 @@ class Routing:
             return f"num_ctx {tier['num_ctx']} < min_context {self.min_context}"
         missing = lacks(tier["model"], sorted(self.require))
         if missing:
-            return "fehlende Faehigkeit: " + ", ".join(missing)
+            return "missing capability: " + ", ".join(missing)
         return None
 
     def info(self, role, tier_idx, tier, ctx, node, warm, via, client=None):

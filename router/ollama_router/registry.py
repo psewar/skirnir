@@ -234,7 +234,7 @@ async def push_config(fp):
 async def handle_tunnel_v2(request):
     """WebSocket-Endpunkt fuer Agenten mit Schluessel-Identitaet: Challenge -> signiertes Hello -> Status."""
     if Ed25519PublicKey is None:
-        return web.json_response({"error": "python3-cryptography fehlt auf dem Router"}, status=503)
+        return web.json_response({"error": "python3-cryptography is missing on the router"}, status=503)
     ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024 * 1024)
     await ws.prepare(request)
     nonce = secrets.token_bytes(32)
@@ -324,7 +324,7 @@ async def handle_nodes(request):
 async def handle_node_action(request):
     fp, action = request.match_info["fp"], request.match_info["action"]
     if fp not in state.REG.nodes:
-        return web.json_response({"error": "unbekannter Fingerprint"}, status=404)
+        return web.json_response({"error": "unknown fingerprint"}, status=404)
     try:
         body = await request.json() if request.can_read_body else {}
     except Exception:  # noqa: BLE001
@@ -335,15 +335,15 @@ async def handle_node_action(request):
             try:
                 pol[k] = float(pol[k])
             except (TypeError, ValueError):
-                return web.json_response({"error": f"{k}: Zahl erwartet"}, status=400)
+                return web.json_response({"error": f"{k}: number expected"}, status=400)
             if not lo <= pol[k] <= hi:
-                return web.json_response({"error": f"{k}: {pol[k]} liegt nicht zwischen {lo} und {hi}"}, status=400)
+                return web.json_response({"error": f"{k}: {pol[k]} is not between {lo} and {hi}"}, status=400)
     if "weight" in pol and pol["weight"] is not None:
         pol["weight"] = int(pol["weight"])
     if pol.get("mac") is not None:
         pol["mac"] = normalize_mac(pol["mac"])
         if pol["mac"] is None:
-            return web.json_response({"error": "mac: sechs Hex-Paare erwartet (aa:bb:cc:dd:ee:ff)"}, status=400)
+            return web.json_response({"error": "mac: six hex pairs expected (aa:bb:cc:dd:ee:ff)"}, status=400)
     if pol.get("max_inflight") is not None:
         pol["max_inflight"] = int(pol["max_inflight"])
     if action == "approve":
@@ -370,22 +370,22 @@ async def handle_node_action(request):
         new = safe_node_name(body.get("name") or "")
         e = state.REG.nodes[fp]
         if not new or any(x["name"] == new for f2, x in state.REG.nodes.items() if f2 != fp) or (new in state.CFG.nodes and new != e["name"]):
-            return web.json_response({"error": "Name leer oder schon vergeben"}, status=400)
+            return web.json_response({"error": "name empty or already taken"}, status=400)
         if e["state"] == "approved":
-            return web.json_response({"error": "Umbenennen nur vor der Freigabe (Rollen/Perf haengen am Namen)"}, status=400)
+            return web.json_response({"error": "rename only before approval (roles and perf data are keyed by name)"}, status=400)
         e["name"] = new
         state.REG.save()
         return web.json_response({"ok": True, "name": new})
-    return web.json_response({"error": "unbekannte Aktion"}, status=404)
+    return web.json_response({"error": "unknown action"}, status=404)
 
 
 async def handle_node_delete(request):
     fp = request.match_info["fp"]
     e = state.REG.nodes.get(fp)
     if e is None:
-        return web.json_response({"error": "unbekannter Fingerprint"}, status=404)
+        return web.json_response({"error": "unknown fingerprint"}, status=404)
     if e["state"] == "approved":
-        return web.json_response({"error": "erst sperren, dann loeschen"}, status=400)
+        return web.json_response({"error": "revoke first, then delete"}, status=400)
     tun = state.PENDING.pop(fp, None)
     if tun is not None:
         try:

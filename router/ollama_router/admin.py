@@ -44,7 +44,7 @@ async def handle_config_get(request):
     return web.json_response({"roles": config.roles_as_config(), "models": state.CFG.models, "nodes": state.CFG.nodes,
                               "expose_concrete_models": state.CFG.expose_concrete, "modes": state.CFG.raw.get("modes", {}),
                               "warm_first": state.CFG.warm_first,
-                              "settings": config.settings_view(),                     # Stufe 7: per UI aenderbare Einstellungen
+                              "settings": config.settings_view(lang=request.query.get("lang", "de")),                     # Stufe 7: per UI aenderbare Einstellungen
                               "ui_models": sorted(m for m in state.CFG.models if m not in base_models),   # Katalogeintraege aus roles.yaml (loeschbar)
                               "cloud_providers": sorted(state.CFG.cloud.get("providers") or {}),
                               "clients": clients_view(),                                 # Clients-Tab: Identitaet, Herkunft, Felder
@@ -109,7 +109,7 @@ async def handle_client_token(request):
     und wird nirgends gespeichert oder geloggt. Das bisherige Secret ist sofort ungueltig (Rotation)."""
     name = request.match_info["name"]
     if name not in (state.CFG.client_auth.get("clients") or {}):
-        return web.json_response({"error": f"Client {name} unbekannt"}, status=404)
+        return web.json_response({"error": f"unknown client {name}"}, status=404)
     token = secrets.token_urlsafe(32)
     digest = hashlib.sha256(token.encode()).hexdigest()
     current = config.read_overrides()
@@ -118,7 +118,7 @@ async def handle_client_token(request):
     try:
         config.write_overrides({**current, "clients": cl})
     except Exception as e:  # noqa: BLE001
-        return web.json_response({"error": f"Konfiguration ungültig: {e}"}, status=400)
+        return web.json_response({"error": f"invalid configuration: {e}"}, status=400)
     auth.audit("client_token_rotated", client=name, by="admin-ui", sha256_prefix=digest[:8])
     state.remember({"event": "config", "client_token": name})
     return web.json_response({"ok": True, "client": name, "token": token, "sha256_prefix": digest[:8],
@@ -135,21 +135,21 @@ async def handle_decide(request):
     oder {"body": <Ollama-Body>, "path": "/api/chat"} - dann baut der Router den Kontext wie im Betrieb."""
     d = decision.active()
     if not d:
-        return _bad("decision_engine ist nicht aktiv")
+        return _bad("decision engine is not active")
     b = await read_json(request)
     if b is None:
         return _bad("invalid json")
     engines = None
     if b.get("engine"):
         if b["engine"] not in d.engines:
-            return _bad(f"unbekannte Engine {b['engine']!r}; konfiguriert: {sorted(d.engines)}")
+            return _bad(f"unknown engine {b['engine']!r}; configured: {sorted(d.engines)}")
         engines = [d.engines[b["engine"]]]
     if b.get("body"):
         context, meta = decision.context_from(b["body"], b.get("path") or "/api/chat", d.context_chars)
     else:
         context, meta = str(b.get("context") or "")[: d.context_chars], {}
     if not context:
-        return _bad("context oder body fehlt")
+        return _bad("context or body missing")
     options = [str(o) for o in (b.get("options") or d.options)]
     result = await d.decide(DecisionRequest(context=context, options=options, metadata=meta), engines=engines)
     return web.json_response({**result.as_dict(), "context": context})
@@ -177,7 +177,7 @@ async def handle_config_put(request):
     try:
         config.write_overrides(new)
     except Exception as e:  # noqa: BLE001 - Schema- und YAML-Fehler landen als 400 beim Bediener
-        return _bad(f"Konfiguration ungültig: {e}")
+        return _bad(f"invalid configuration: {e}")
     _after_config_change(b, new)
     return web.json_response({"ok": True, "roles": len(state.CFG.roles), "settings": len(new.get("settings") or {})})
 
@@ -400,7 +400,7 @@ async def handle_loadtest(request):
     if b is None:
         return _bad("invalid json")
     if LOADTEST["running"]:
-        return web.json_response({"error": "es laeuft schon ein Lasttest"}, status=409)
+        return web.json_response({"error": "a load test is already running"}, status=409)
     n = max(1, min(int(b.get("n") or 20), 300))
     conc = max(1, min(int(b.get("concurrency") or 4), 16))
     model = b.get("model") or "standard:latest"
@@ -549,10 +549,10 @@ async def handle_client_auth(request):
             return _bad("invalid json")
         mode = b.get("mode")
         if mode not in ("observe", "enforce"):
-            return web.json_response({"error": "mode muss observe oder enforce sein"}, status=400)
+            return web.json_response({"error": "mode must be observe or enforce"}, status=400)
         if state.CFG.client_auth.get("locked"):
             auth.audit("client_auth_mode_rejected", mode=mode, by="admin-api", reason="locked")
-            return web.json_response({"error": "client_auth.mode ist gesperrt (client_auth.locked in config.yaml) - nur per Deploy aenderbar"}, status=403)
+            return web.json_response({"error": "client_auth.mode is locked (client_auth.locked in config.yaml), change it via deploy"}, status=403)
         state.CLIENT_AUTH_MODE = mode
         auth.audit("client_auth_mode", mode=mode, by="admin-api")
         log.warning("client_auth: Modus zur Laufzeit auf %s gesetzt (dauerhaft nur ueber config.yaml)", mode)

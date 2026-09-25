@@ -150,12 +150,12 @@ def client_allows(request, role, concrete):
     if concrete:
         if c.get("models", True):
             return None
-        reason = f"client {name}: konkrete Modellnamen nicht erlaubt (nur Rollen)"
+        reason = f"client {name}: concrete model names not allowed (roles only)"
     else:
         roles = c.get("roles") or ["*"]
         if "*" in roles or role["name"] in roles or role["exposed"] in roles:
             return None
-        reason = f"client {name}: Rolle {role['name']} nicht erlaubt"
+        reason = f"client {name}: role {role['name']} not allowed"
     _stats_for(name)["forbidden"] += 1
     audit("forbidden", client=name, model=role["exposed"], path=request.path)
     return reason

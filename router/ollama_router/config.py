@@ -483,9 +483,9 @@ def read_overrides():
     return copy.deepcopy(load_yaml(state.CFG.overrides_path, {}) or {})
 
 
-def settings_view():
+def settings_view(lang="de"):
     ov = read_overrides()
-    return settings_mod.view(state.CFG, state.CFG.base(), ov.get("settings") or {})
+    return settings_mod.view(state.CFG, state.CFG.base(), ov.get("settings") or {}, lang=lang)
 
 
 def roles_as_config():
