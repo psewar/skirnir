@@ -116,8 +116,16 @@ func main() {
 	}
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Konfiguration: %v\n", err)
-		os.Exit(1)
+		// Dienst steuern und Zustand zeigen geht auch ohne die Config: seit 0.9.0 duerfen die steuernden Benutzer das
+		// Config-Verzeichnis nicht mehr lesen (nur das Dienst-Steuerrecht) - Standardnamen reichen fuer diese Verben.
+		if os.IsPermission(err) && (verb == "status" || verb == "start" || verb == "stop" || verb == "restart") {
+			fmt.Fprintf(os.Stderr, "(Konfiguration nicht lesbar - Standardwerte: Dienst OllamaRouterAgent, Health 127.0.0.1:10398)\n")
+			cfg = &Config{}
+			cfg.applyDefaults()
+		} else {
+			fmt.Fprintf(os.Stderr, "Konfiguration: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	var verr error
 	switch verb {
