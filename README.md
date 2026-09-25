@@ -423,9 +423,11 @@ Since router 0.2.0 / agent 0.11.0 the technical names follow the product: packag
 `skirnir-router` (`/opt/skirnir-router`, `/etc/skirnir-router`), agent binary `skirnir-agent`, Windows service `SkirnirAgent`
 ("Skirnir Agent"). `deploy.py` moves an existing router installation once (directories, units), and the agent's `setup`
 migrates an existing node (directories, service, relay task). An agent that updated itself under the old file name keeps
-working: old configuration path, service and task names are found as fallbacks until `setup` has run. Frozen on purpose:
-the MQTT base topic `ollama-router`, the discovery node id and the entity ids `ollama_router_*`, because Home Assistant
-history and automations hang on them.
+working: old configuration path, service and task names are found as fallbacks until `setup` has run. The MQTT side moved
+too: base topic `skirnir-router`, discovery node id `skirnir_router`, unique ids `skirnir_router_*`, entity ids `sensor.skirnir_*`;
+the router clears the retained topics of the old names on its first connect. Home Assistant keeps entity registry entries per
+unique id, so custom entity ids of the old entities have to be carried over once (an operator script does that over the
+WebSocket API); recorder history does not carry over.
 
 ## Security model, in short
 

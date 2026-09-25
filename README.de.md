@@ -426,8 +426,10 @@ Seit Router 0.2.0 / Agent 0.11.0 folgen die technischen Namen dem Produkt: Paket
 („Skirnir Agent“). `deploy.py` zieht eine bestehende Router-Installation einmalig um (Verzeichnisse, Units), das `setup` des
 Agenten einen bestehenden Knoten (Verzeichnisse, Dienst, Relay-Aufgabe). Ein Agent, der sich unter dem alten Dateinamen
 selbst aktualisiert hat, läuft weiter: alter Konfigurationspfad, Dienst- und Aufgabenname werden als Rückfall gefunden, bis
-`setup` gelaufen ist. Absichtlich eingefroren: das MQTT-Basisthema `ollama-router`, die Discovery-Node-ID und die
-Entitäts-IDs `ollama_router_*`, weil Historie und Automationen in Home Assistant daran hängen.
+`setup` gelaufen ist. Auch die MQTT-Seite ist umgezogen: Basisthema `skirnir-router`, Discovery-Node-ID `skirnir_router`,
+unique_ids `skirnir_router_*`, Entitäts-IDs `sensor.skirnir_*`; die retained Themen der alten Namen räumt der Router beim ersten
+Connect weg. Home Assistant führt Registereinträge je unique_id, darum müssen angepasste Entitäts-IDs der alten Entitäten einmal
+übertragen werden (Betriebsskript über die WebSocket-API); die Recorder-Historie wandert nicht mit.
 
 ## Sicherheitsmodell, kurz
 

@@ -16,6 +16,10 @@ except ImportError:  # pragma: no cover
 from . import scheduler, state
 from .common import VERSION, log, read_env_value
 
+NODE_ID = "skirnir_router"          # Discovery-Node-Id (homeassistant/<component>/<node_id>/<object_id>/config)
+LEGACY_NODE_ID = "ollama_router"    # bis Router 0.1.9
+LEGACY_BASE = "ollama-router"       # altes base_topic
+
 
 def _usage_today_fields():
     try:
@@ -111,13 +115,17 @@ async def handle_ha(request):
 
 class HAPublisher:
     """Meldet den Router als Geraet 'Skirnir' bei HA an (MQTT-Discovery) und publiziert den Zustand.
-    LWT: ollama-router/status = offline -> alle Entitaeten in HA 'unavailable', sobald der Router stirbt.
-    HA-VERTRAG (eingefroren, auch nach der Umbenennung skirnir-router 2026-09-25): base_topic `ollama-router`, Discovery-Node-Id
-    `ollama_router`, unique_ids/object_ids `ollama_router_*` - daran haengen Entitaets-IDs, Historie und Automationen."""
+    LWT: <base>/status = offline -> alle Entitaeten in HA 'unavailable', sobald der Router stirbt.
+    Namen seit 2026-09-25 (Router 0.2.0): base_topic `skirnir-router`, Discovery-Node-Id `skirnir_router`, unique_ids
+    `skirnir_router_<oid>`, object_ids `skirnir_<oid>` (Entity-IDs sensor.skirnir_*). Die retained Themen der alten Namen
+    (`ollama-router`, `ollama_router`) raeumt sweep_orphans beim ersten Connect weg; HA-seitige Entity-ID-Uebernahme macht
+    das Betriebsskript (Register-Update ueber WebSocket)."""
 
     def __init__(self, cfg):
         self.cfg = cfg
-        self.base = cfg.get("base_topic", "ollama-router")
+        self.base = cfg.get("base_topic", "skirnir-router")
+        self.legacy_cfg = set()   # retained Discovery-Configs unter dem alten Node-Id-Namen (einmalige Aufraeumung)
+        self.legacy_state = set()   # retained Knotenzustaende unter dem alten Basisthema
         self.prefix = cfg.get("discovery_prefix", "homeassistant")
         self.interval = float(cfg.get("interval_s", 10))
         self.client = None
@@ -161,7 +169,8 @@ class HAPublisher:
         with self.seen_lock:
             self.seen = {"cfg": set(), "state": set()}
         client.on_message = self._on_message
-        client.subscribe([(f"{self.prefix}/+/ollama_router/+/config", 1), (f"{self.base}/node/+", 1)])
+        client.subscribe([(f"{self.prefix}/+/{NODE_ID}/+/config", 1), (f"{self.base}/node/+", 1),
+                          (f"{self.prefix}/+/{LEGACY_NODE_ID}/+/config", 1), (f"{LEGACY_BASE}/node/+", 1)])
         self.sweep_at = time.time() + 5
         # Dieser Callback laeuft im Netzwerk-Thread von paho. Discovery und Zustand brauchen den Scheduler und schreiben ins
         # Entscheidungsprotokoll (Loop-Zustand) - deshalb nur merken, loop() publiziert (Review 2026-09-25).
@@ -178,27 +187,30 @@ class HAPublisher:
             return
         p = msg.topic.split("/")
         with self.seen_lock:
-            if len(p) == 5 and p[0] == self.prefix and p[2] == "ollama_router" and p[4] == "config":
+            if len(p) == 5 and p[0] == self.prefix and p[2] == NODE_ID and p[4] == "config":
                 self.seen["cfg"].add((p[1], p[3]))
+            elif len(p) == 5 and p[0] == self.prefix and p[2] == LEGACY_NODE_ID and p[4] == "config":
+                self.legacy_cfg.add(msg.topic)
             elif len(p) == 3 and p[0] == self.base and p[1] == "node":
                 self.seen["state"].add(p[2])
+            elif len(p) == 3 and p[0] == LEGACY_BASE and p[1] == "node":
+                self.legacy_state.add(msg.topic)
 
     def _dev(self):
-        # Geraetename seit 2026-09-16 "Skirnir" (Freyrs Bote; 2026-09-09..16 "Huginn"); identifiers/unique_ids/object_ids bleiben
-        # "ollama_router", damit Entity-IDs, Alarm-Automation und Dashboards weiterlaufen - nur der Anzeigename wandert.
-        return {"identifiers": ["ollama-router"], "name": "Skirnir", "manufacturer": "Skirnir",
-                "model": "ollama-router", "sw_version": VERSION,
+        # Geraet "Skirnir" (seit 2026-09-16; 2026-09-09..16 "Huginn"); identifiers/unique_ids seit 2026-09-25 skirnir-router.
+        return {"identifiers": ["skirnir-router"], "name": "Skirnir", "manufacturer": "Skirnir",
+                "model": "skirnir-router", "sw_version": VERSION,
                 "configuration_url": state.CFG.public_url or None}
 
     def _ent(self, component, oid, name, **extra):
-        payload = {"name": name, "unique_id": f"ollama_router_{oid}", "object_id": f"ollama_router_{oid}",
+        payload = {"name": name, "unique_id": f"skirnir_router_{oid}", "object_id": f"skirnir_{oid}",
                    "state_topic": f"{self.base}/state", "device": self._dev(), **extra}
         if "availability" not in payload:   # HA verbietet availability und availability_topic gemeinsam
             payload["availability_topic"] = f"{self.base}/status"
-        self.client.publish(f"{self.prefix}/{component}/ollama_router/{oid}/config", json.dumps(payload), qos=1, retain=True)
+        self.client.publish(f"{self.prefix}/{component}/{NODE_ID}/{oid}/config", json.dumps(payload), qos=1, retain=True)
 
     def _drop_ent(self, component, oid):
-        self.client.publish(f"{self.prefix}/{component}/ollama_router/{oid}/config", "", qos=1, retain=True)
+        self.client.publish(f"{self.prefix}/{component}/{NODE_ID}/{oid}/config", "", qos=1, retain=True)
 
     def _node_entities(self, name):
         """Die drei Entitaeten eines Knotens als (component, oid, Anzeigename, extra)."""
@@ -257,7 +269,15 @@ class HAPublisher:
             return
         # Abo beenden: gebraucht wurde es nur fuer die zurueckgespielten retained Themen, sonst kaeme ab jetzt
         # jede eigene Zustandsmeldung als Echo zurueck.
-        self.client.unsubscribe([f"{self.prefix}/+/ollama_router/+/config", f"{self.base}/node/+"])
+        self.client.unsubscribe([f"{self.prefix}/+/{NODE_ID}/+/config", f"{self.base}/node/+",
+                                 f"{self.prefix}/+/{LEGACY_NODE_ID}/+/config", f"{LEGACY_BASE}/node/+"])
+        # Umbenennung 2026-09-25: alles Retained unter den alten Namen loeschen (Discovery-Configs, Zustaende, Status). Einmalig -
+        # danach ist unter den alten Themen nichts mehr retained, die Mengen bleiben leer.
+        if self.legacy_cfg or self.legacy_state:
+            for t in sorted(self.legacy_cfg | self.legacy_state) + [f"{LEGACY_BASE}/state", f"{LEGACY_BASE}/status"]:
+                self.client.publish(t, "", qos=1, retain=True)
+            log.info("MQTT: %d retained Themen der alten Namen (%s, %s) geloescht", len(self.legacy_cfg) + len(self.legacy_state), LEGACY_BASE, LEGACY_NODE_ID)
+            self.legacy_cfg, self.legacy_state = set(), set()
         with self.seen_lock:
             seen_cfg, seen_state = self.seen["cfg"], self.seen["state"]
             self.seen = {"cfg": set(), "state": set()}
