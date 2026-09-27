@@ -526,6 +526,8 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "neuere Ollama-Version verfügbar": "newer Ollama release available",
   "geprüft {t}": "checked {t}",
   "Tray-App": "tray app",
+  "Agent ≥ 0.12.1 nötig": "agent ≥ 0.12.1 needed",
+  "Der Agent meldet erst ab 0.12.1, ob er Ollama steuert; bis dahin schickt der Router keine Ollama-Updates": "the agent reports from 0.12.1 on whether it controls Ollama; until then the router sends no Ollama updates",
   "Ollama läuft hier als Tray-App unter dem Benutzer und aktualisiert sich über den eigenen Updater, nicht über den Router": "Ollama runs here as a tray app under the user and updates itself through its own updater, not through the router",
   "freigeben": "approve",
   "löschen": "delete",
@@ -1205,7 +1207,7 @@ async function renderRegistry() {
     const u = n.update || {};
     const ou = n.ollama_update || {};
     const ouState = ou.state ? `<div class="${ou.state === 'failed' || ou.state === 'stalled' ? 'bad' : ou.state === 'done' ? 'ok' : ou.state === 'manual' ? 'muted' : 'warn'}">Ollama ${esc(ou.version || '')}: ${esc(ou.state)}${ou.message ? ' – ' + esc(ou.message) : ''}${ou.ts ? ` <span class="muted">${esc(ou.ts.slice(11))}</span>` : ''}</div>` : '';
-    const ouBtn = n.state === 'approved' && ou.pending && ou.managed !== false && n.connected ? `<button class="small" onclick="nodeOllamaUpdate('${n.fp}', '${esc(ou.available)}')">${t('Ollama auf {v} aktualisieren', { v: esc(ou.available) })}</button>` : '';
+    const ouBtn = n.state === 'approved' && ou.pending && ou.managed === true && n.connected ? `<button class="small" onclick="nodeOllamaUpdate('${n.fp}', '${esc(ou.available)}')">${t('Ollama auf {v} aktualisieren', { v: esc(ou.available) })}</button>` : '';
     const uState = u.state ? `<div class="${u.state === 'failed' || u.state === 'stalled' ? 'bad' : u.state === 'done' ? 'ok' : 'warn'}">Update ${esc(u.version || '')}: ${esc(u.state)}${u.message ? ' – ' + esc(u.message) : ''}${u.ts ? ` <span class="muted">${esc(u.ts.slice(11))}</span>` : ''}</div>` : '';
     const uBtn = n.state === 'approved' && u.pending && n.connected ? `<button class="small" onclick="nodeUpdate('${n.fp}', '${esc(u.available)}')">${t('auf {v} aktualisieren', { v: esc(u.available) })}</button>` : '';
     const btn = n.state === 'pending' ? `<button onclick="nodeAct('${n.fp}','approve')">${t('freigeben')}</button><br><button class="small" onclick="nodeDel('${n.fp}')">${t('löschen')}</button>`
@@ -1215,7 +1217,7 @@ async function renderRegistry() {
     const base = n.learned && n.learned.baseline_gib != null ? `${t('{g} GiB gelernt', { g: n.learned.baseline_gib })} <span class="muted">(${t('{n} Proben', { n: n.learned.samples || 0 })})</span>` : `<span class="muted">${t('noch nichts gelernt')}</span>`;
     tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(n.name)}</b><div class="muted" title="${n.fp}">${n.fp.slice(0, 16)}…${n.connected ? ' · ' + t('verbunden') : ''}</div></td>
       <td>${st}<div class="muted">${t('seit')} ${esc((n.first_seen || '').replace('T', ' '))}${n.remote ? ' · ' + esc(n.remote) : ''}</div></td>
-      <td>${esc(f.hostname || '')}<div class="muted">${esc([f.manufacturer, f.model].filter(Boolean).join(' '))}<br>${esc(f.os || '')}/${esc(f.arch || '')} · Agent ${esc(f.agent_version || '?')}${u.pending ? ` <span class="badge half_open" title="${t('neue Version hinterlegt')}">→ ${esc(u.available)}</span>` : ''} · Ollama ${esc(ou.current || f.ollama_version || '?')}${ou.managed === false ? ` <span class="badge" title="${t('Ollama läuft hier als Tray-App unter dem Benutzer und aktualisiert sich über den eigenen Updater, nicht über den Router')}">${t('Tray-App')}</span>` : ''}${ou.pending ? ` <span class="badge half_open" title="${t('neuere Ollama-Version verfügbar')}">→ ${esc(ou.available)}</span>` : ''}</div></td>
+      <td>${esc(f.hostname || '')}<div class="muted">${esc([f.manufacturer, f.model].filter(Boolean).join(' '))}<br>${esc(f.os || '')}/${esc(f.arch || '')} · Agent ${esc(f.agent_version || '?')}${u.pending ? ` <span class="badge half_open" title="${t('neue Version hinterlegt')}">→ ${esc(u.available)}</span>` : ''} · Ollama ${esc(ou.current || f.ollama_version || '?')}${ou.unmanaged_reason === 'tray' ? ` <span class="badge" title="${t('Ollama läuft hier als Tray-App unter dem Benutzer und aktualisiert sich über den eigenen Updater, nicht über den Router')}">${t('Tray-App')}</span>` : ou.unmanaged_reason === 'agent' && ou.pending ? ` <span class="badge" title="${t('Der Agent meldet erst ab 0.12.1, ob er Ollama steuert; bis dahin schickt der Router keine Ollama-Updates')}">${t('Agent ≥ 0.12.1 nötig')}</span>` : ''}${ou.pending ? ` <span class="badge half_open" title="${t('neuere Ollama-Version verfügbar')}">→ ${esc(ou.available)}</span>` : ''}</div></td>
       <td>${esc(f.gpu || '–')}<div class="muted">${vram}</div></td><td>${esc(f.mac || '–')}<div class="muted">${esc(f.local_ip || '')}</div></td>
       <td>${base}${p.foreign_vram_baseline_gib != null ? `<div class="muted">Policy ${p.foreign_vram_baseline_gib} GiB</div>` : ''}</td>
       <td>${pol}</td><td>${btn}${uBtn ? '<br>' + uBtn : ''}${uState}${ouBtn ? '<br>' + ouBtn : ''}${ouState}</td></tr>`);

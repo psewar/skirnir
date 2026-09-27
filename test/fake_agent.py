@@ -20,7 +20,8 @@ UP_TOKEN = sys.argv[5] if len(sys.argv) > 5 else None
 REQ, RESP, DATA, END, ERR, CANCEL, HB, HBACK = 1, 2, 3, 4, 5, 6, 7, 8
 FACTS = {"hostname": NODE.upper(), "os": "windows", "arch": "amd64", "manufacturer": "Fake", "model": "Testrechner",
          "gpu": "Fake RTX 5090", "vram_total_mib": 32563, "mac": "00:11:22:33:44:55", "local_ip": "127.0.0.1",
-         "ollama_version": "0.11.0", "ollama_url": UPSTREAM, "agent_version": "test"}
+         "ollama_version": "0.11.0", "ollama_url": UPSTREAM, "agent_version": "test",
+         "ollama_managed": os.environ.get("FAKE_OLLAMA_MANAGED", "1") == "1"}   # wie Agent 0.12.1: Ollama ist Kind des Agenten
 
 
 def load_key():
@@ -79,7 +80,7 @@ async def do_ollama_update(ws, session, lock, m):
                                                 "ollama_update": {"version": m.get("version"), "state": state, "message": msg}}).encode())
         out(ollama_update=state, msg=msg)
     try:
-        if m.get("version") == "0.99.7":   # wie ollamaupdate.go auf einem Knoten mit Ollama als Tray-App
+        if not FACTS["ollama_managed"]:   # wie ollamaupdate.go auf einem Knoten mit Ollama als Tray-App
             await report("failed", "Ollama ist kein Kind dieses Agenten (children: ohne ollama.exe) - Update nur von Hand")
             return
         await report("downloading", "0 %")

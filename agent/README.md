@@ -148,7 +148,9 @@ SYSTEM-Profil). Der Router uebernimmt die Rolle des Updaters (`ollamaupdate.go`;
 4. Tausch: Supervisor haelt das Kind an (`Hold`, Prozessbaum samt Modellprozessen), `ollama.exe` und `lib` wandern in eine
    Sicherung, die neuen Dateien an ihren Platz, `Release` startet das Kind sofort neu. `/api/version` muss binnen 3 min die
    Zielversion melden, sonst Rollback auf die Sicherung. Tray-App und Windows-Deinstallationseintrag bleiben alt (kosmetisch).
-5. Stand im Heartbeat (`ollama_update: {state, version, message}`): checking, downloading, extracting, swapping, applied,
+5. Der Agent meldet bei jeder Anmeldung den Fakt `ollama_managed` (0.12.1): true, wenn Ollama eines seiner Kinder ist. Nur dann
+   bietet der Router Ollama-Updates an; bei einer Tray-App unter dem Benutzer zeigt er „Tray-App“ und laesst den Knoten aus.
+6. Stand im Heartbeat (`ollama_update: {state, version, message}`): checking, downloading, extracting, swapping, applied,
    failed; dazu `ollama_version` alle 60 s frisch. Meldet der Knoten die Zielversion, gilt der Auftrag als `done`.
 
 Konfiguration: `ollama_update: {enabled: false}` schaltet es ab, `source:` aendert die Quelle (z. B. ein interner Spiegel

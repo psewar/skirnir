@@ -106,7 +106,7 @@ def main():
         subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
                         "-keyout", "test-key.pem", "-out", "test-cert.pem", "-days", "30", "-subj", "/CN=localhost"],
                        cwd=HERE, check=True, capture_output=True)
-    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl", "metrics.json", "agent-update.pub", "agent/manifest.json", "ollama-latest.json"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
+    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl", "metrics.json", "agent-update.pub", "agent/manifest.json", "ollama-latest.json", "fake-agent-tray.key"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
         try:
             os.remove(os.path.join(HERE, f))
         except FileNotFoundError:
@@ -1295,24 +1295,37 @@ def main():
         ha_o = json.loads(http(C + "/admin/ha")[1])
         check("Ollama-Update: Hash-Widerspruch -> failed, HA-Problem, Version unveraendert, kein Drain", st == 200 and rb.get("state") == "failed" and "SHA-256" in (rb.get("message") or "")
               and any("Ollama-Update auf big fehlgeschlagen" in p for p in ha_o["problems"]) and rb["current"] == "0.99.0" and not state()["nodes"]["big"]["draining"], str(rb) + str(ha_o["problems"]))
-        # Knoten mit Ollama als Tray-App (0.3.2): Agent lehnt mit 'kein Kind dieses Agenten' ab -> Zustand manual, kein HA-Problem,
-        # nicht mehr ausstehend (HA/Metrik), kein Knopf, Auftrag ohne force -> 409, mit force erneut moeglich
-        _rel["version"], _rel["blob"] = "0.99.7", b"fake ollama 0.99.7" * 50
-        _rel["sum"] = hashlib.sha256(_rel["blob"]).hexdigest()
-        http(C + "/admin/ollama-update/check", {})
-        st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
-        for _ in range(60):
-            rb = reg_big()["ollama_update"]
-            if rb.get("version") == "0.99.7" and rb.get("state") in ("manual", "failed", "done"): break
+        # Tray-App-Knoten (0.3.3): der Agent meldet bei der Anmeldung selbst, ob Ollama sein Kind ist (Fakt ollama_managed). Zweiter
+        # Fake-Agent 'tray' mit ollama_managed=false: kein Knopf, kein Auftrag (auch mit force nicht), nicht in HA gezaehlt, kein HA-Problem.
+        from skirnir_router import ollamaupdate as _ou   # reine Funktionen: ohne Fakt (Agent < 0.12.1) keine Auftraege
+        check("Ollama-Update: managed() nur mit Fakt ollama_managed=true; ohne Fakt Grund 'agent', mit false Grund 'tray'",
+              _ou.managed({"facts": {"ollama_managed": True}}) and not _ou.managed({"facts": {}}) and _ou.unmanaged_reason({"facts": {}}) == "agent"
+              and _ou.unmanaged_reason({"facts": {"ollama_managed": False}}) == "tray")
+        logs["agent-tray"] = open(os.path.join(HERE, "fake-agent-tray.log"), "w+")
+        tray = subprocess.Popen([PY, os.path.join(HERE, "fake_agent.py"), "wss://127.0.0.1:21435", "tray", "http://127.0.0.1:21002", os.path.join(HERE, "fake-agent-tray.key")],
+                                stdout=logs["agent-tray"], stderr=subprocess.STDOUT, cwd=HERE, env={**os.environ, "FAKE_OLLAMA_MANAGED": "0"})
+        procs.append(tray)
+        reg_tray = lambda: next((n for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "tray"), None)  # noqa: E731
+        for _ in range(40):
+            if reg_tray(): break
             time.sleep(0.25)
-        ha_o = json.loads(http(C + "/admin/ha")[1])
-        check("Ollama-Update: Tray-App-Knoten -> manual, nicht verwaltet, kein HA-Problem, nicht ausstehend, kein Drain",
-              st == 200 and rb.get("state") == "manual" and rb.get("managed") is False and not any("Ollama-Update auf big" in p for p in ha_o["problems"])
-              and ha_o.get("ollama_updates_pending") == 0 and not state()["nodes"]["big"]["draining"], str(rb) + str(ha_o.get("problems")))
-        st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
-        check("Ollama-Update: Tray-App-Knoten ohne force -> 409", st == 409 and "not a child" in raw.decode(), raw.decode()[:100])
-        st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {"force": True})
-        check("Ollama-Update: mit force erneut angestossen", st == 200, raw.decode()[:100])
+        fp_tray = reg_tray()["fp"]
+        http(C + f"/admin/nodes/{fp_tray}/approve", {"mqtt": False})
+        for _ in range(40):
+            rt = reg_tray()
+            if rt and rt["connected"] and rt["state"] == "approved": break
+            time.sleep(0.25)
+        ot = rt["ollama_update"]
+        check("Ollama-Update: Tray-Knoten meldet ollama_managed=false -> nicht verwaltet (Grund tray), ausstehend, aber nicht in HA gezaehlt",
+              rt["facts"].get("ollama_managed") is False and ot["managed"] is False and ot["unmanaged_reason"] == "tray" and ot["pending"]
+              and "tray" not in json.loads(http(C + "/admin/ha")[1]).get("ollama_updates", {}), str(ot))
+        st, raw = http(C + f"/admin/nodes/{fp_tray}/ollama-update", {})
+        st2, raw2 = http(C + f"/admin/nodes/{fp_tray}/ollama-update", {"force": True})
+        check("Ollama-Update: Tray-Knoten -> 409, auch mit force (der Agent koennte es nicht)", st == 409 and st2 == 409 and "not a child" in raw.decode(), raw.decode()[:100] + raw2.decode()[:60])
+        check("Ollama-Update: Tray-Knoten erzeugt kein HA-Problem zum Ollama-Update", not any("Ollama-Update auf tray" in p for p in json.loads(http(C + "/admin/ha")[1])["problems"]))
+        http(C + f"/admin/nodes/{fp_tray}/revoke", {})
+        http(C + f"/admin/nodes/{fp_tray}", method="DELETE")
+        tray.terminate(); tray.wait()
         st, raw = http(C + "/admin/config", {"settings": {"modes.ollama_update.window_start": "03:00", "modes.ollama_update.window_end": "03:01"}}, method="PUT")
         ou = json.loads(http(C + "/admin/ollama-update")[1])
         check("Ollama-Update: Nachtfenster aus den Einstellungen sichtbar, jetzt ausserhalb", st == 200 and ou["window_start"] == "03:00" and ou["in_window"] is (time.localtime().tm_hour == 3 and time.localtime().tm_min == 0), str({k: ou[k] for k in ("window_start", "window_end", "in_window")}))
