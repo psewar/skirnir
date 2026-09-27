@@ -79,6 +79,9 @@ async def do_ollama_update(ws, session, lock, m):
                                                 "ollama_update": {"version": m.get("version"), "state": state, "message": msg}}).encode())
         out(ollama_update=state, msg=msg)
     try:
+        if m.get("version") == "0.99.7":   # wie ollamaupdate.go auf einem Knoten mit Ollama als Tray-App
+            await report("failed", "Ollama ist kein Kind dieses Agenten (children: ohne ollama.exe) - Update nur von Hand")
+            return
         await report("downloading", "0 %")
         async with session.get(m["url"]) as r:
             data = await r.read()

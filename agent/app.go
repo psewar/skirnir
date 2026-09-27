@@ -74,7 +74,12 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	if p, err := loadProvision(cfg.Identity.Dir); err == nil {
 		a.prov = p
 	}
-	facts := func(ctx context.Context) Facts { return collectFacts(ctx, cfg.Router.URL, cfg.Tunnel.Upstream, gpu) }
+	facts := func(ctx context.Context) Facts {
+		f := collectFacts(ctx, cfg.Router.URL, cfg.Tunnel.Upstream, gpu)
+		m := a.ollamaUp.Managed()
+		f.OllamaManaged = &m
+		return f
+	}
 	a.tunnel = newTunnel(cfg.Router.URL, cfg.Tunnel.Upstream, a.id, a.hb, facts, log)
 	a.tunnel.onStatus = a.onTunnelStatus
 	a.tunnel.onUpdate = a.updater.Handle

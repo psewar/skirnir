@@ -1295,6 +1295,24 @@ def main():
         ha_o = json.loads(http(C + "/admin/ha")[1])
         check("Ollama-Update: Hash-Widerspruch -> failed, HA-Problem, Version unveraendert, kein Drain", st == 200 and rb.get("state") == "failed" and "SHA-256" in (rb.get("message") or "")
               and any("Ollama-Update auf big fehlgeschlagen" in p for p in ha_o["problems"]) and rb["current"] == "0.99.0" and not state()["nodes"]["big"]["draining"], str(rb) + str(ha_o["problems"]))
+        # Knoten mit Ollama als Tray-App (0.3.2): Agent lehnt mit 'kein Kind dieses Agenten' ab -> Zustand manual, kein HA-Problem,
+        # nicht mehr ausstehend (HA/Metrik), kein Knopf, Auftrag ohne force -> 409, mit force erneut moeglich
+        _rel["version"], _rel["blob"] = "0.99.7", b"fake ollama 0.99.7" * 50
+        _rel["sum"] = hashlib.sha256(_rel["blob"]).hexdigest()
+        http(C + "/admin/ollama-update/check", {})
+        st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
+        for _ in range(60):
+            rb = reg_big()["ollama_update"]
+            if rb.get("version") == "0.99.7" and rb.get("state") in ("manual", "failed", "done"): break
+            time.sleep(0.25)
+        ha_o = json.loads(http(C + "/admin/ha")[1])
+        check("Ollama-Update: Tray-App-Knoten -> manual, nicht verwaltet, kein HA-Problem, nicht ausstehend, kein Drain",
+              st == 200 and rb.get("state") == "manual" and rb.get("managed") is False and not any("Ollama-Update auf big" in p for p in ha_o["problems"])
+              and ha_o.get("ollama_updates_pending") == 0 and not state()["nodes"]["big"]["draining"], str(rb) + str(ha_o.get("problems")))
+        st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
+        check("Ollama-Update: Tray-App-Knoten ohne force -> 409", st == 409 and "not a child" in raw.decode(), raw.decode()[:100])
+        st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {"force": True})
+        check("Ollama-Update: mit force erneut angestossen", st == 200, raw.decode()[:100])
         st, raw = http(C + "/admin/config", {"settings": {"modes.ollama_update.window_start": "03:00", "modes.ollama_update.window_end": "03:01"}}, method="PUT")
         ou = json.loads(http(C + "/admin/ollama-update")[1])
         check("Ollama-Update: Nachtfenster aus den Einstellungen sichtbar, jetzt ausserhalb", st == 200 and ou["window_start"] == "03:00" and ou["in_window"] is (time.localtime().tm_hour == 3 and time.localtime().tm_min == 0), str({k: ou[k] for k in ("window_start", "window_end", "in_window")}))

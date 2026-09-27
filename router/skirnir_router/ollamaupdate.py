@@ -35,6 +35,8 @@ RUNNING = ("requested", "checking", "downloading", "extracting", "swapping", "ap
 DRAIN_S = 1800     # laengste Zeit vom Auftrag bis zum Tausch (1,4 GB Download) - so lange keine neuen Anfragen an den Knoten
 STALL_S = 3600     # ohne neuen Stand im Heartbeat gilt der Auftrag als haengend
 RETRY_S = 6 * 3600 # nach failed/stalled erst nach 6 h wieder automatisch probieren
+UNMANAGED_MARK = "kein kind dieses agenten"   # Ablehnung von ollamaupdate.go, wenn Ollama nicht Kind des Agenten ist
+MANUAL_MSG = "Ollama laeuft nicht als Kind des Agenten (Tray-App) und aktualisiert sich ueber den eigenen Updater"
 AGENT_FRESH_S = 600  # vom Agenten gemeldete Ollama-Version hat 10 min Vorrang vor dem Poll (/api/version alle 5 min)
 
 
@@ -143,15 +145,33 @@ def current_version(e):
     return e.get("ollama_version") or (e.get("facts") or {}).get("ollama_version") or None
 
 
+def _unmanaged_failure(u):
+    return u.get("state") in ("failed", "manual") and UNMANAGED_MARK in (u.get("message") or "").lower()
+
+
+def managed(e):
+    """Kann der Agent dieses Knotens Ollama aktualisieren? Agent-Fakt `ollama_managed` (ab Agent 0.12.1) hat Vorrang; sonst gilt
+    ein Knoten als verwaltet, bis sein Agent einen Auftrag mit 'kein Kind dieses Agenten' abgelehnt hat (2026-09-27: ein Knoten mit
+    Ollama als Tray-App unter dem Benutzer - dort aktualisiert Ollamas eigener Updater)."""
+    f = (e.get("facts") or {}).get("ollama_managed")
+    if isinstance(f, bool):
+        return f
+    if e.get("ollama_managed") is False:
+        return False
+    return not _unmanaged_failure(e.get("ollama_update") or {})
+
+
 def update_view(e, now=None):
-    """Fuer /admin/nodes, UI und HA: laufende Version, neueste Version, Auftragsstand."""
+    """Fuer /admin/nodes, UI und HA: laufende Version, neueste Version, Auftragsstand, ob der Agent Ollama verwaltet."""
     now = now or time.time()
     cur = current_version(e)
     avail, _ = available_for(e)
     u = dict(e.get("ollama_update") or {})
     if u.get("state") in RUNNING and now - (u.get("t") or 0) > STALL_S:
         u["state"], u["message"] = "stalled", f"no report for {int((now - u['t']) // 60)} min"
-    return {"current": cur, "available": avail, "pending": bool(avail and cur and _vt(avail) > _vt(cur)),
+    if _unmanaged_failure(u):
+        u["state"], u["message"] = "manual", MANUAL_MSG   # kein Fehler, sondern eine Eigenschaft des Knotens (kein HA-Problem)
+    return {"current": cur, "available": avail, "pending": bool(avail and cur and _vt(avail) > _vt(cur)), "managed": managed(e),
             "auto": bool((e.get("policy") or {}).get("ollama_auto_update")), "version_since": e.get("ollama_version_since"), **u}
 
 
@@ -186,7 +206,10 @@ def note_version(node, version, now=None, source="poll"):
 
 
 def note_hello(e, facts):
-    """Anmeldung eines Agenten: Ollama-Version aus den Fakten uebernehmen, falls das Register noch keine kennt."""
+    """Anmeldung eines Agenten: Ollama-Version aus den Fakten uebernehmen, falls das Register noch keine kennt. Neue Agent-Version
+    = gelerntes 'nicht verwaltet' vergessen (die Konfiguration kann sich mit dem Setup geaendert haben)."""
+    if (facts or {}).get("agent_version") != (e.get("facts") or {}).get("agent_version"):
+        e.pop("ollama_managed", None)
     v = (facts or {}).get("ollama_version")
     if v and not e.get("ollama_version"):
         e["ollama_version"], e["ollama_version_since"] = v, _ts()
@@ -207,6 +230,17 @@ def note_report(node, report, now=None):
         return   # alter Bericht zu einem frueheren Auftrag
     if u.get("state") == "failed" and report["state"] == "failed" and (report.get("message") or "") == (u.get("message") or ""):
         return   # derselbe Fehler, jeden Heartbeat wiederholt
+    if report["state"] == "failed" and UNMANAGED_MARK in (report.get("message") or "").lower():
+        if u.get("state") != "manual":
+            e["ollama_managed"] = False
+            u.update(state="manual", message=MANUAL_MSG, t=now, ts=_ts(now), version=u.get("version") or report.get("version"))
+            e["ollama_update"] = u
+            state.REG.save()
+            state.remember({"event": "ollama_update", "node": node.name, "state": "manual", "version": u.get("version"), "reason": "Tray-App"})
+            state.MQTT_DIRTY.append(True)
+            log.info("node %s: Ollama ist nicht Kind des Agenten (Tray-App) - keine Ollama-Updates ueber den Router", node.name)
+        node.draining_until = 0.0
+        return
     changed = report["state"] != u.get("state") or (report.get("message") or "") != (u.get("message") or "")
     if not changed:
         return
@@ -253,7 +287,7 @@ def pending_nodes(now=None):
         if e.get("state") != "approved":
             continue
         u = update_view(e, now)
-        if u.get("pending"):
+        if u.get("pending") and u.get("managed"):
             out[e["name"]] = {"current": u["current"], "available": u["available"]}
     return out
 
@@ -275,6 +309,8 @@ async def order_update(fp, reason="ui", force=False):
     av = (e.get("facts") or {}).get("agent_version")
     if not agent_capable(av):
         return False, f"agent {av} cannot update Ollama (needs agent 0.12.0 or newer)"
+    if not managed(e) and not force:
+        return False, "Ollama is not a child of this agent (tray app); it updates itself"
     cur = current_version(e)
     if cur == version and not force:
         return False, f"already running {version}"
@@ -288,6 +324,7 @@ async def order_update(fp, reason="ui", force=False):
         return False, f"node is serving {node.inflight} request(s)"
     msg = {"t": "ollama-update", "version": version, "file": f["name"], "url": f["url"], "sha256": f["sha256"], "size": f.get("size", 0)}
     e["ollama_update"] = {"version": version, "state": "requested", "message": "", "t": now, "ts": _ts(now), "by": reason}
+    e.pop("ollama_managed", None)   # erzwungener Versuch: neu lernen
     node.draining_until = now + DRAIN_S
     state.REG.save()
     from .registry import send_ctl
@@ -391,7 +428,7 @@ async def rollout_once(now=None):
             continue
         avail, f = available_for(e)
         cur = current_version(e)
-        if not f or not cur or _vt(avail) <= _vt(cur) or not agent_capable((e.get("facts") or {}).get("agent_version")):
+        if not f or not cur or _vt(avail) <= _vt(cur) or not agent_capable((e.get("facts") or {}).get("agent_version")) or not managed(e):
             continue
         u = e.get("ollama_update") or {}
         if u.get("version") == version and u.get("state") in RUNNING and now - (u.get("t") or 0) < STALL_S:
