@@ -160,6 +160,7 @@ modes:
     enabled: true             # Versionspruefung + Rollout fuer Knoten mit Policy ollama_auto_update
     window_start: "02:00"     # Nachtfenster (Ortszeit des Routers); leer = jederzeit
     window_end: "05:00"
+    timezone: ""              # IANA-Name fuer das Fenster (z. B. Europe/Zurich); leer = Ortszeit des Routers
     canary: ""                # leer = der Kanarienvogel des Agent-Updates
     canary_clean_h: 24
     check_interval_h: 6

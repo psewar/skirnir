@@ -124,6 +124,8 @@ _e("modes.ollama_update.canary", "str", "Kanarienvogel", "Knotenname, der neue O
    label_en="Canary", help_en="node name that gets new Ollama versions first; empty = the agent update's canary")
 _e("modes.ollama_update.canary_clean_h", "float", "... sauber seit h", "so lange muss der Kanarienvogel die Version fahren, bevor die anderen folgen", G, 24, min=0, max=720,
    label_en="... clean for h", help_en="the canary must run the version this long before the others follow")
+_e("modes.ollama_update.timezone", "str", "Zeitzone des Fensters", "IANA-Name, z. B. Europe/Zurich; leer = Ortszeit des Routers (Container laufen oft auf UTC)", G, "",
+   label_en="Window time zone", help_en="IANA name, e.g. Europe/Zurich; empty = router local time (containers often run on UTC)")
 _e("modes.ollama_update.check_interval_h", "float", "Pruefung alle h", "wie oft der Router die neueste Version erfragt", G, 6, min=1, max=168,
    label_en="Check every h", help_en="how often the router asks for the latest version")
 _e("modes.ollama_update.release_url", "str", "Release-Quelle", "GitHub-API des neuesten Releases (tag_name, assets, sha256sum.txt); der Agent laedt von seiner eigenen festen Quelle", G, "https://api.github.com/repos/ollama/ollama/releases/latest",

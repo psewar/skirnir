@@ -265,6 +265,18 @@ def canary_clean(cfg, version, now):
     return now - since >= float(cfg.get("canary_clean_h", 24)) * 3600
 
 
+APP_CONTROL_RETRY_S = 1800
+
+
+def retry_after(u):
+    """Wartezeit nach einem Fehlschlag: 30 min, wenn Smart App Control / WDAC die neue Binary blockte (das Cloud-Urteil ueber eine
+    unsignierte Datei kippt oft binnen Minuten bis Stunden: 2026-09-26 0.11.0 nach 11 min, 0.12.0 nach < 6 h), sonst 6 h."""
+    msg = (u.get("message") or "").lower()
+    if "application control" in msg or "anwendungssteuerung" in msg:
+        return APP_CONTROL_RETRY_S
+    return 6 * 3600
+
+
 async def rollout_loop():
     """Alle 60 s: Knoten mit Policy auto_update auf die Manifest-Version bringen - erst der Kanarienvogel, die anderen
     einer nach dem anderen, sobald der Kanarienvogel die Version lange genug sauber faehrt."""
@@ -295,7 +307,7 @@ async def rollout_once(now=None):
         u = e.get("update") or {}
         if u.get("version") == version and u.get("state") in ("requested", "downloading", "applied") and now - (u.get("t") or 0) < STALL_S:
             continue
-        if u.get("version") == version and u.get("state") in ("failed", "stalled") and now - (u.get("t") or 0) < 6 * 3600:
+        if u.get("version") == version and u.get("state") in ("failed", "stalled") and now - (u.get("t") or 0) < retry_after(u):
             continue   # nach einem Fehlschlag frueh. nach 6 h wieder probieren (oder von Hand)
         is_canary = e["name"] == cfg.get("canary")
         if not is_canary and cfg.get("canary") and not canary_clean(cfg, version, now):

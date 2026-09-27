@@ -199,7 +199,9 @@ def deploy_agent(c, dist_dir=None):
             try:
                 v = subprocess.run([path, "version"], capture_output=True, text=True).stdout.strip()
             except OSError as e:   # Application Control blockiert eine frisch gebaute, unsignierte Exe (2026-09-26) -> --version <v>
-                print(f"Hinweis: {name} laesst sich hier nicht starten ({e.__class__.__name__}) - Version aus --version")
+                print(f"Hinweis: {name} laesst sich hier nicht starten ({e.__class__.__name__}) - Version aus --version. "
+                      "Blockt Smart App Control die neue Datei, lehnt der Kanarienvogel sie zunaechst ebenso ab; der Router versucht es "
+                      "dann alle 30 min wieder, bis das Cloud-Urteil kippt (oder die Datei signiert ist, agent/sign.ps1)")
                 v = None
             if v and version and v != version:
                 print(f"Abbruch: Versionen unterschiedlich ({version} vs {v})"); sys.exit(2)

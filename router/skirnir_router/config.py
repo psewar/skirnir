@@ -77,7 +77,7 @@ SCHEMA = {
         "gpu_guard": {"enabled": None, "throttled_max_inflight": None, "score_penalty": None, "require_fresh_status": None},
         "agent_update": {"enabled": None, "canary": None, "canary_clean_h": None, "public_key": None},
         "ollama_update": {"enabled": None, "canary": None, "canary_clean_h": None, "window_start": None, "window_end": None,
-                          "check_interval_h": None, "release_url": None},
+                          "timezone": None, "check_interval_h": None, "release_url": None},
     },
     "models": {"*": {"weights_gib": None, "kv_gib_per_1k": None, "capabilities": None, "source": None, "note": None, "measured_at": None,
                      "measured_on": None, "vram_gib_8k": None, "vram_gib_32k": None, "partial_offload": None,
@@ -353,8 +353,15 @@ class Config:
                               "canary_clean_h": float(ou.get("canary_clean_h", _d("modes.ollama_update.canary_clean_h"))),
                               "window_start": str(ou.get("window_start", _d("modes.ollama_update.window_start")) or ""),
                               "window_end": str(ou.get("window_end", _d("modes.ollama_update.window_end")) or ""),
+                              "timezone": str(ou.get("timezone", _d("modes.ollama_update.timezone")) or ""),
                               "check_interval_h": float(ou.get("check_interval_h", _d("modes.ollama_update.check_interval_h"))),
                               "release_url": str(ou.get("release_url", _d("modes.ollama_update.release_url")) or "")}
+        if self.ollama_update["timezone"]:
+            import zoneinfo
+            # nur pruefen, wo es eine Zeitzonendatenbank gibt: die lokale Schema-Pruefung von deploy.py laeuft auch auf Windows-Python
+            # ohne tzdata und wuerde sonst jede Zone ablehnen (2026-09-27)
+            if zoneinfo.available_timezones() and self.ollama_update["timezone"] not in zoneinfo.available_timezones():
+                raise ValueError(f"modes.ollama_update.timezone: unbekannte Zeitzone {self.ollama_update['timezone']!r}")
         for k in ("window_start", "window_end"):
             v = self.ollama_update[k]
             if v and not re.match(r"^\d{2}:\d{2}$", v):

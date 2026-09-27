@@ -304,8 +304,28 @@ def agent_capable(agent_version):
     return not t or t >= (0, 12)
 
 
+def _local(cfg, now):
+    """Uhrzeit fuer das Fenster: in `timezone` (z. B. Europe/Zurich), sonst Ortszeit des Routers. Container laufen oft auf UTC -
+    2026-09-26 lief das erste Ollama-Update deshalb um 06:58 Schweizer Zeit statt im Fenster 02:00-05:00."""
+    tz = (cfg.get("timezone") or "").strip()
+    if tz:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        try:
+            return datetime.fromtimestamp(now, ZoneInfo(tz)).timetuple()
+        except Exception as e:  # noqa: BLE001
+            if not _TZ_WARNED:
+                log.warning("ollama-update: Zeitzone %r nicht nutzbar (%s) - Fenster in Ortszeit des Routers", tz, e.__class__.__name__)
+                _TZ_WARNED.append(tz)
+    return time.localtime(now)
+
+
+_TZ_WARNED = []
+
+
 def in_window(cfg, now=None):
-    """Liegt die Ortszeit im Fenster window_start..window_end (auch ueber Mitternacht)? Leeres Fenster = immer."""
+    """Liegt die Uhrzeit (Zeitzone `timezone`, sonst Ortszeit des Routers) im Fenster window_start..window_end (auch ueber
+    Mitternacht)? Leeres Fenster = immer."""
     start, end = (cfg.get("window_start") or "").strip(), (cfg.get("window_end") or "").strip()
     if not start or not end:
         return True
@@ -314,7 +334,7 @@ def in_window(cfg, now=None):
         b = int(end[:2]) * 60 + int(end[3:5])
     except ValueError:
         return True
-    lt = time.localtime(now or time.time())
+    lt = _local(cfg, now or time.time())
     cur = lt.tm_hour * 60 + lt.tm_min
     return a <= cur < b if a <= b else (cur >= a or cur < b)
 
@@ -394,7 +414,8 @@ def status_view(now=None):
     cfg = _cfg()
     return {"latest": {k: LATEST.get(k) for k in ("version", "checked_ts", "error", "source", "files")},
             "enabled": cfg.get("enabled"), "canary": canary_name(cfg), "canary_clean_h": cfg.get("canary_clean_h"),
-            "window_start": cfg.get("window_start"), "window_end": cfg.get("window_end"), "in_window": in_window(cfg, now),
+            "window_start": cfg.get("window_start"), "window_end": cfg.get("window_end"), "timezone": cfg.get("timezone") or "",
+            "in_window": in_window(cfg, now),
             "check_interval_h": cfg.get("check_interval_h"), "pending": pending_nodes(now)}
 
 
