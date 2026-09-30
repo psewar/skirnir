@@ -121,42 +121,62 @@ anders = admin._merge_overrides(cur, {"models": {QWEN: {"weights_gib": 22.5, "kv
 check("UI-Speichern mit geaenderten Zahlen ersetzt (Bediener gewinnt)", anders["models"][QWEN] == {"weights_gib": 22.5, "kv_gib_per_1k": 0.0229})
 
 # --- Grundlast erst, wenn der Speicher wirklich frei ist (Fehler aus 0.3.5 nachgestellt) ---
+class Uhr:
+    """Virtuelle Zeit fuer perf: sie laeuft nur, wenn perf schlaeft. Bis 2026-09-30 lief der Nachbau auf der Wanduhr
+    (Heartbeat 0,2 s, Abfrage 0,5 s, Karte 1,0 s voll): ob die Abfrage bei ~1,0 s noch den vollen oder schon den leeren
+    Heartbeat sah, entschied die Timer-Aufloesung von Windows - die Gegenprobe las in 2 von 3 Laeufen 0,9."""
+
+    def __init__(self, t0=1000.0):
+        self.t = t0
+
+    def time(self):
+        return self.t
+
+    async def sleep(self, s):
+        self.t += s
+        await asyncio.sleep(0)
+
+
 class LangsamFrei:
-    """Heartbeat alle 0,2 s; nach dem Entladen bleibt die Karte 1 s voll (26 GiB), erst dann faellt sie auf 0,9 GiB."""
+    """Heartbeat alle 2 s (Agent-Takt), abgeleitet aus der virtuellen Uhr. Entladen bei t0 (/api/ps ist da schon leer),
+    die Karte bleibt 5 s voll (26,9 GiB) und faellt erst dann auf 0,9 GiB. Nach dem Entladen kommen also zwei gleiche
+    Heartbeats (t0+2, t0+4) bei noch voller Karte - genau das, was 0.3.5 fuer "ruhig" hielt."""
 
-    def __init__(self):
-        self.t0 = time.time()
-        self.vram_used_gib, self.hb_ts = 26.9, time.time()
+    TAKT, VOLL_FUER = 2.0, 5.0
 
-    async def takt(self):
-        while True:
-            await asyncio.sleep(0.2)
-            self.vram_used_gib = 26.9 if time.time() - self.t0 < 1.0 else 0.9
-            self.hb_ts = time.time()
+    def __init__(self, uhr):
+        self.uhr, self.t0 = uhr, uhr.time()
+
+    @property
+    def hb_ts(self):
+        return self.t0 + (self.uhr.time() - self.t0) // self.TAKT * self.TAKT
+
+    @property
+    def vram_used_gib(self):
+        return 26.9 if self.hb_ts - self.t0 < self.VOLL_FUER else 0.9
 
 
-async def grundlast_lesen():
-    k = LangsamFrei()
-    t = asyncio.create_task(k.takt())
+def mit_uhr(lesen):
+    """`lesen(karte, uhr)` gegen eine frisch entladene Karte; perf.time und perf.asyncio.sleep laufen auf der Uhr."""
+    uhr = Uhr()
+
+    class Asyncio:
+        sleep = staticmethod(uhr.sleep)
+
+        def __getattr__(self, name):
+            return getattr(asyncio, name)
+
+    perf.time, perf.asyncio = uhr, Asyncio()
     try:
-        return await perf._empty_used(k, before=26.9, unloaded=21.0, timeout=10)
+        return asyncio.run(lesen(LangsamFrei(uhr), uhr))
     finally:
-        t.cancel()
+        perf.time, perf.asyncio = time, asyncio
 
 
-async def grundlast_alt():   # 0.3.5: nur zwei gleiche Heartbeats abwarten
-    k = LangsamFrei()
-    t = asyncio.create_task(k.takt())
-    try:
-        return await perf._stable_used(k, time.time(), timeout=10)
-    finally:
-        t.cancel()
-
-
-state.CFG.vram_settle_s = 0
-leer_gelesen = asyncio.run(grundlast_lesen())
+state.CFG.vram_settle_s = 0   # das Warten aufs Freiwerden allein muss reichen, nicht der Nachlauf
+leer_gelesen = mit_uhr(lambda k, uhr: perf._empty_used(k, before=26.9, unloaded=21.0, timeout=60))
 check("Grundlast wird erst nach dem Freiwerden gelesen (0,9 statt 26,9 GiB)", abs(leer_gelesen - 0.9) < 0.01, f"{leer_gelesen}")
-alt_gelesen = asyncio.run(grundlast_alt())
+alt_gelesen = mit_uhr(lambda k, uhr: perf._stable_used(k, uhr.time(), timeout=60))   # 0.3.5: zwei gleiche Heartbeats
 check("Gegenprobe: der Weg aus 0.3.5 liest die noch volle Karte (26,9)", abs(alt_gelesen - 26.9) < 0.01, f"{alt_gelesen}")
 
 # --- auf ein fremdes Vorladen warten, das eigene Messmodell nicht (Fehler aus 0.3.6-Lauf 1 nachgestellt) ---
