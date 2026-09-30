@@ -235,16 +235,34 @@ async def _load(node, model, ctx):
 
 
 async def _unload_all(node):
-    """Alles entladen und warten, bis /api/ps leer ist - sonst misst der Zuwachs ein anderes Modell mit."""
-    for m in await _ps_models(node):
+    """Alles entladen und warten, bis /api/ps leer ist - sonst misst der Zuwachs ein anderes Modell mit. Liefert, was
+    /api/ps vorher als size_vram meldete (GiB): so viel muss nvidia-smi danach mindestens freigeben."""
+    geladen = await _ps_models(node)
+    for m in geladen:
         async with nodes.nreq(node, "post", "/api/generate", json={"model": m.get("name"), "keep_alive": 0},
                               timeout=ClientTimeout(total=60)) as r:
             await r.read()
     for _ in range(60):
         if not await _ps_models(node):
-            return
+            return sum(m.get("size_vram", 0) for m in geladen) / GIB
         await asyncio.sleep(1)
     raise RuntimeError("Ollama entlaedt nicht (nach 60 s noch Modelle in /api/ps)")
+
+
+async def _empty_used(node, before, unloaded, timeout=120):
+    """Grundlast nach dem Entladen. /api/ps ist sofort leer, der Speicher wird aber erst Sekunden spaeter frei - zwei
+    gleiche Heartbeats hintereinander bewiesen das nicht (0.3.5: nach dem Entladen von 26 GiB las die Messung "leer" bei
+    noch voller Karte, der erste Messpunkt wurde negativ). Darum erst warten, bis nvidia-smi mindestens 90 % dessen
+    freigegeben hat, was /api/ps vorher meldete, dann die ruhige Belegung ablesen."""
+    if before is not None and unloaded > 0.5:
+        ziel = before - 0.9 * unloaded
+        deadline = time.time() + timeout
+        while node.vram_used_gib is None or node.vram_used_gib > ziel:
+            if time.time() > deadline:
+                raise RuntimeError(f"Speicher wird nach dem Entladen nicht frei ({node.vram_used_gib} GiB, erwartet <= {ziel:.2f})")
+            await asyncio.sleep(0.5)
+    await asyncio.sleep(state.CFG.vram_settle_s)
+    return await _stable_used(node, time.time())
 
 
 async def _stable_used(node, after, timeout=90):
@@ -267,15 +285,54 @@ async def _measure_real(model, node):
     Liefert {ctx: (belegt, ps_size_vram, ps_size)}."""
     res = {}
     for ctx in measure_ctxs(model):
-        state.MEASURING[model]["step"] = f"entlade fuer @{ctx}"
-        await _unload_all(node)
-        await asyncio.sleep(state.CFG.vram_settle_s)
-        leer = await _stable_used(node, time.time())
-        state.MEASURING[model]["step"] = f"lade @{ctx}"
-        entry = await _load(node, model, ctx)
-        voll = await _stable_used(node, time.time())
-        res[ctx] = (voll - leer, entry.get("size_vram", 0) / GIB, entry.get("size", 0) / GIB)
+        for versuch in range(1, MEASURE_TRIES + 1):
+            punkt = await _measure_point(model, node, ctx)
+            if isinstance(punkt, tuple):
+                res[ctx] = punkt
+                break
+            log.info("measure %s@%d on %s: Versuch %d verworfen (%s)", model, ctx, node.name, versuch, punkt)
+        else:
+            raise RuntimeError(f"Messung @{ctx} nach {MEASURE_TRIES} Versuchen nicht sauber: {punkt}")
     return res
+
+
+MEASURE_TRIES = 3
+
+
+def _is_model(node, m, model):
+    want = node.digest_of.get(model)
+    return m.get("name") == model or (want is not None and m.get("digest") == want)
+
+
+async def _others_loading(node, model, timeout=300):
+    """Warten, bis kein ANDERER Ladevorgang laeuft (prewarm, echte Anfrage). 0.3.5: das prewarm nach der vorigen Messung
+    lud qwen3.6 genau dann, als die naechste Messung ihre Grundlast las - /api/ps war noch leer, nichts wurde entladen."""
+    deadline = time.time() + timeout
+    while any(m != model and deadline_m > time.time() for m, (_g, deadline_m) in node.loading.items()):
+        if time.time() > deadline:
+            raise RuntimeError("anderer Ladevorgang endet nicht")
+        await asyncio.sleep(1)
+
+
+async def _measure_point(model, node, ctx):
+    """Ein Messpunkt. Liefert (belegt, ps_vram, ps_size) oder einen Grund, warum er verworfen wurde (dann neu versuchen):
+    ein anderes Modell kam dazwischen, oder der Zuwachs ist kleiner als Ollamas eigene Meldung."""
+    await _others_loading(node, model)
+    state.MEASURING[model]["step"] = f"entlade fuer @{ctx}"
+    vorher = node.vram_used_gib
+    leer = await _empty_used(node, vorher, await _unload_all(node))
+    state.MEASURING[model]["step"] = f"lade @{ctx}"
+    entry = await _load(node, model, ctx)
+    voll = await _stable_used(node, time.time())
+    fremd = [m.get("name") for m in await _ps_models(node) if not _is_model(node, m, model)]
+    if fremd or any(m != model for m in node.loading):
+        return f"anderes Modell geladen: {fremd or list(node.loading)}"
+    belegt, sv = voll - leer, entry.get("size_vram", 0) / GIB
+    # Plausibel: nie weniger als das, was Ollama selbst meldet - sonst war die Grundlast falsch, und der Katalog
+    # bekaeme Unsinn (0.3.5: gemma4:26b "-7,67 GiB" bei 8k). Lieber keine Messung als eine falsche.
+    if belegt < sv - 0.3:
+        return f"unplausibel: nvidia-smi-Zuwachs {belegt:.2f} GiB < /api/ps {sv:.2f} GiB"
+    return belegt, sv, entry.get("size", 0) / GIB
 
 
 async def _measure_ps(model, node):
@@ -289,10 +346,12 @@ async def _measure_ps(model, node):
 
 
 def catalog_entry(res, node_name, real):
-    """Messergebnis {ctx: (belegt, ps_vram, ps_size)} -> Katalog-Eintrag. Punkte mit Teil-Auslagerung in den RAM zaehlen
-    nicht fuer die Gerade (dort misst nvidia-smi zu wenig), bleiben aber als partial_offload sichtbar."""
+    """Messergebnis {ctx: (belegt, ps_vram, ps_size)} -> Katalog-Eintrag. Bei Teil-Auslagerung in den RAM misst
+    nvidia-smi nur den GPU-Teil; der ausgelagerte Rest (size - size_vram) kommt dazu, damit der Katalog den ganzen Bedarf
+    kennt und der Router das Modell bei diesem Kontext nicht mehr fuer passend haelt (0.3.5 liess solche Punkte weg:
+    granite4.2:30b stand danach mit flachen 21 GiB im Katalog, obwohl es bei 32k nicht auf die Karte passt)."""
     partial = sorted(ctx for ctx, (_b, sv, st) in res.items() if sv + 0.05 < st)
-    points = [(ctx, v[0]) for ctx, v in res.items() if ctx not in partial] or [(ctx, v[0]) for ctx, v in res.items()]
+    points = [(ctx, b + (max(0.0, st - sv) if ctx in partial else 0.0)) for ctx, (b, sv, st) in res.items()]
     weights, kv = fit_linear(points)
     e = {"weights_gib": round(weights, 2), "kv_gib_per_1k": round(kv, 4),
          "source": "gemessen (nvidia-smi)" if real else "gemessen", "measured_at": time.strftime("%Y-%m-%d %H:%M"),

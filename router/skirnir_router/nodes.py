@@ -212,7 +212,9 @@ class Node(Breaker):
         daneben noch ein anderes Modell, deckt `max(...)` mit der `/api/ps`-Summe das ab."""
         if not self.loading:
             self.foreign_frozen = self.foreign_vram_gib()   # Stand VOR dem Anspruch einfrieren
-        self.loading[model] = (max(0.0, state.CFG.need_gib(model, ctx, self) - state.CFG.overhead_gib), time.time() + 300)
+        real = state.CFG.real_gib(model, ctx)   # gemessen: ohne Zuschlag, sonst need_gib minus Fit-Zuschlag
+        claim = real if real is not None else max(0.0, state.CFG.need_gib(model, ctx, self) - state.CFG.overhead_gib)
+        self.loading[model] = (claim, time.time() + 300)
 
     def finish_load(self, model):
         """Ladevorgang beendet (auch bei Fehler): Anspruch in einen kurzen Nachlauf umwandeln, damit die Luecke

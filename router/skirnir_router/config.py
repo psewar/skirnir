@@ -477,7 +477,10 @@ class Config:
         if m is not None and m.get("cloud"):
             return 0.0
         if m is not None:
-            return float(m["weights_gib"]) + float(m.get("kv_gib_per_1k", 0)) * ctx / 1000.0 + self.overhead_gib
+            # Gemessen per nvidia-smi (real, seit 0.3.5): das ist der ganze Bedarf. Der Fit-Zuschlag glich nur die zu
+            # kleinen /api/ps-Zahlen aus; die Sicherheit liefert die Reserve im Budget (modes.vram_reserve_gib).
+            extra = 0.0 if m.get("real") else self.overhead_gib
+            return float(m["weights_gib"]) + float(m.get("kv_gib_per_1k", 0)) * ctx / 1000.0 + extra
         if node is not None and node.is_loaded(model):
             return node.loaded_size(model) + 0.5          # schon resident, passt per Definition
         # unbekannt und kalt: Dateigrösse aus /api/tags als Gewichte, KV unbekannt -> 20 % Aufschlag

@@ -9,6 +9,7 @@ leer 0,6 GiB): qwen3.6:35b-a3b belegt real 24,93 / 26,43 / 27,93 GiB bei 131k / 
 Die Gegenproben zeigen, was mit der alten Rechnung (Katalog und Anrechnung aus /api/ps) schiefging: der Wechsel
 131k -> 196k desselben Modells passte real, der Router lehnte ihn ab; und der ungemeldete Rest erschien als fremdes VRAM.
 """
+import asyncio
 import os
 import sys
 import time
@@ -65,7 +66,11 @@ check("Katalog-Eintrag markiert real + haelt beide Messreihen", e["real"] is Tru
 lag = perf.catalog_entry({8192: (27.0, 19.0, 19.0), 32768: (27.6, 19.1, 19.1), 131072: (29.71, 19.23, 19.23),
                           196608: (29.65, 14.17, 19.77)}, "gpu-desktop", real=True)
 check("laguna: 196k als partial_offload gemeldet", lag.get("partial_offload") == [196608], str(lag.get("partial_offload")))
-check("laguna: Gerade ohne den ausgelagerten Punkt (kv > 0)", lag["kv_gib_per_1k"] > 0.01, str(lag))
+check("laguna: ausgelagerter Punkt zaehlt mit dem RAM-Anteil (kv > 0)", lag["kv_gib_per_1k"] > 0.01, str(lag))
+# 0.3.5 liess den ausgelagerten Punkt weg: granite4.2:30b (8k passt, 32k teilweise im RAM) stand mit flachen 21 GiB da
+gra = perf.catalog_entry({8192: (21.21, 20.72, 20.72), 32768: (29.46, 26.1, 28.98)}, "gpu-desktop", real=True)
+bedarf32 = gra["weights_gib"] + gra["kv_gib_per_1k"] * 32.768
+check("granite-Fall: Bedarf bei 32k >= GPU-Teil + RAM-Teil (29,46 + 2,88)", bedarf32 >= 32.3, f"{bedarf32:.2f} {gra}")
 
 # --- Messpunkte: fest + jeder Kontext der Rollen ---
 state.CFG = Cfg({}, {"nacht:latest": {"tiers": [{"model": QWEN, "num_ctx": 196608}]},
@@ -83,6 +88,8 @@ n = knoten(used=25.52)
 check("real_gib bei 131k = 24,93", abs(state.CFG.real_gib(QWEN, 131072) - 24.93) < 0.05, f"{state.CFG.real_gib(QWEN, 131072):.2f}")
 check("geladenes Modell mit echter Belegung angerechnet", abs(n.ollama_vram_gib() - 24.93) < 0.05, f"{n.ollama_vram_gib():.2f}")
 need196 = state.CFG.need_gib(QWEN, 196608, n)
+check("gemessen: Bedarf ohne Fit-Zuschlag (26,43 bei 196k)", abs(need196 - 26.43) < 0.05, f"{need196:.2f}")
+check("ungemessen: Fit-Zuschlag bleibt", abs(Cfg(ALT).need_gib(QWEN, 196608) - (20.6 + 0.001 * 196.608 + 0.8)) < 0.01)
 budget = n.budget_gib(time.time(), QWEN)
 check("Wechsel 131k -> 196k passt (Bedarf <= Budget)", need196 <= budget, f"need {need196:.2f} budget {budget:.2f}")
 check("kein Phantom-Fremd-VRAM bei geladenem Modell", n.foreign_vram_gib() < 0.1, f"{n.foreign_vram_gib():.2f}")
@@ -112,6 +119,67 @@ check("UI-Speichern mit gleichen Zahlen behaelt die Messung", gleich["models"][Q
       and gleich["models"][QWEN].get("vram_real_gib") == {"196608": 26.43})
 anders = admin._merge_overrides(cur, {"models": {QWEN: {"weights_gib": 22.5, "kv_gib_per_1k": 0.0229}}})
 check("UI-Speichern mit geaenderten Zahlen ersetzt (Bediener gewinnt)", anders["models"][QWEN] == {"weights_gib": 22.5, "kv_gib_per_1k": 0.0229})
+
+# --- Grundlast erst, wenn der Speicher wirklich frei ist (Fehler aus 0.3.5 nachgestellt) ---
+class LangsamFrei:
+    """Heartbeat alle 0,2 s; nach dem Entladen bleibt die Karte 1 s voll (26 GiB), erst dann faellt sie auf 0,9 GiB."""
+
+    def __init__(self):
+        self.t0 = time.time()
+        self.vram_used_gib, self.hb_ts = 26.9, time.time()
+
+    async def takt(self):
+        while True:
+            await asyncio.sleep(0.2)
+            self.vram_used_gib = 26.9 if time.time() - self.t0 < 1.0 else 0.9
+            self.hb_ts = time.time()
+
+
+async def grundlast_lesen():
+    k = LangsamFrei()
+    t = asyncio.create_task(k.takt())
+    try:
+        return await perf._empty_used(k, before=26.9, unloaded=21.0, timeout=10)
+    finally:
+        t.cancel()
+
+
+async def grundlast_alt():   # 0.3.5: nur zwei gleiche Heartbeats abwarten
+    k = LangsamFrei()
+    t = asyncio.create_task(k.takt())
+    try:
+        return await perf._stable_used(k, time.time(), timeout=10)
+    finally:
+        t.cancel()
+
+
+state.CFG.vram_settle_s = 0
+leer_gelesen = asyncio.run(grundlast_lesen())
+check("Grundlast wird erst nach dem Freiwerden gelesen (0,9 statt 26,9 GiB)", abs(leer_gelesen - 0.9) < 0.01, f"{leer_gelesen}")
+alt_gelesen = asyncio.run(grundlast_alt())
+check("Gegenprobe: der Weg aus 0.3.5 liest die noch volle Karte (26,9)", abs(alt_gelesen - 26.9) < 0.01, f"{alt_gelesen}")
+
+# --- auf ein fremdes Vorladen warten, das eigene Messmodell nicht (Fehler aus 0.3.6-Lauf 1 nachgestellt) ---
+class LaedtGerade:
+    def __init__(self):
+        self.loading = {"qwen3.6:35b-a3b": (26.4, time.time() + 300), "gemma4:26b": (19.7, time.time() + 300)}
+
+
+async def vorladen_abwarten():
+    k = LaedtGerade()
+
+    async def prewarm_fertig():
+        await asyncio.sleep(1.0)
+        k.loading.pop("qwen3.6:35b-a3b")   # finish_load des prewarm
+    t = asyncio.create_task(prewarm_fertig())
+    t0 = time.time()
+    await perf._others_loading(k, "gemma4:26b", timeout=10)
+    await t
+    return time.time() - t0
+
+
+gewartet = asyncio.run(vorladen_abwarten())
+check("Messung wartet auf ein fremdes Vorladen, nicht auf den eigenen Anspruch", 0.9 <= gewartet < 3, f"{gewartet:.1f}s")
 
 print(f"\n{'OK' if not FAILS else 'FEHLER'}: {len(FAILS)} fehlgeschlagen")
 sys.exit(1 if FAILS else 0)
