@@ -52,6 +52,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a := &App{cfg: cfg, log: log, gpu: gpu, sup: sup, started: time.Now()}
 	a.ctlToken = loadOrCreateControlToken(cfg.path, log)
 	a.hb = newHeartbeat(cfg.Node, gpu, log)
+	a.hb.sup = sup
 	a.guard = newGuard(cfg.GPUGuard, gpu, log)
 	a.hb.guard = a.guard
 	a.updater = newUpdater(cfg.Update, cfg.path, log)

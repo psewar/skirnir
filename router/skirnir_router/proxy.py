@@ -287,6 +287,12 @@ def _backend_body(body, role, tier, ctx, node):
     out["model"] = tier["model"]
     opts = dict(out.get("options") or {})
     if _is_role(role) or "num_ctx" in opts:
+        # Schon mit groesserem Kontext geladen (hoechstens so viel wie die Stufe erlaubt): den nehmen. Ein kleinerer
+        # num_ctx zwingt Modelle ohne Runner-Sharing zum Neuladen (qwen3.8:27b, 2026-09-30: 10 s je Wechsel zwischen einem
+        # Client mit 65k und einem mit 131k), und das VRAM fuer den groesseren Kontext ist ohnehin schon belegt.
+        lc = node.loaded_context(tier["model"]) if hasattr(node, "loaded_context") else None
+        if _is_role(role) and lc and ctx < lc <= tier["num_ctx"]:
+            ctx = lc
         opts["num_ctx"] = ctx
     else:
         # konkretes Modell ohne Kontextangabe: den Kontext nehmen, mit dem es schon geladen ist,

@@ -34,7 +34,8 @@ type childState struct {
 	LastExit  string    `json:"last_exit,omitempty"`
 	NextStart time.Time `json:"next_start,omitempty"`
 	kill      func()
-	held      bool // Hold(): angehalten, kein Neustart bis Release() (Ollama-Update, ollamaupdate.go)
+	held      bool      // Hold(): angehalten, kein Neustart bis Release() (Ollama-Update, ollamaupdate.go)
+	tree      *procTree // Job-Objekt des laufenden Kindes (0.13.0: Grafikspeicher je Kind)
 }
 
 var restartBackoff = []time.Duration{time.Second, 5 * time.Second, 30 * time.Second, 60 * time.Second}
@@ -138,9 +139,11 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 	}
 	// Handle am Ende freigeben; unter Windows beendet das (KILL_ON_JOB_CLOSE) auch, was noch uebrig ist.
 	defer tree.release()
+	defer func() { s.mu.Lock(); st.tree = nil; s.mu.Unlock() }()
 	s.mu.Lock()
 	st.Running, st.Healthy, st.PID, st.Since, st.NextStart = true, sp.HealthTCPPort == 0, cmd.Process.Pid, time.Now(), time.Time{}
 	st.kill = func() { stopChild(cmd, tree) }
+	st.tree = tree
 	s.mu.Unlock()
 	s.log.Infof("supervisor: %s gestartet (PID %d): %s %v", sp.Name, cmd.Process.Pid, sp.Cmd, sp.Args)
 
@@ -213,6 +216,35 @@ func (s *Supervisor) reapTree(name string, t *procTree) {
 	if n > 0 {
 		s.log.Warnf("supervisor: %s: %d verwaiste(r) Prozess(e) im Prozessbaum beendet", name, n)
 	}
+}
+
+// childrenVRAM: Grafikspeicher (MiB) je laufendem Kind ausser Ollama - dessen Anteil kennt der Router aus /api/ps und der
+// Messung, doppelt gezaehlt waere er falsch. nil, wenn nichts zu melden ist oder die Messung nicht geht (nicht Windows).
+func (s *Supervisor) childrenVRAM() map[string]int {
+	s.mu.Lock()
+	trees := make(map[string]*procTree)
+	for name, c := range s.children {
+		if c.Running && c.tree != nil && !isOllamaExe(c.spec.Cmd) {
+			trees[name] = c.tree
+		}
+	}
+	s.mu.Unlock()
+	if len(trees) == 0 {
+		return nil
+	}
+	proz, err := gpuProcessVRAM()
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]int, len(trees))
+	for name, t := range trees {
+		var sum uint64
+		for _, pid := range t.pids() {
+			sum += proz[pid]
+		}
+		out[name] = int(sum >> 20)
+	}
+	return out
 }
 
 // Child liefert eine Kopie des Zustands eines Kindes (fuer MQTT und /health).

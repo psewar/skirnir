@@ -326,6 +326,8 @@ def apply_heartbeat(node, b, now):
     node.vram_free_gib = free / 1024 if free is not None else None
     op = b.get("ollama_proc_mib")
     node.ollama_proc_gib = op / 1024 if op is not None else None
+    kv = b.get("children_vram_mib")   # Agent >= 0.13.0: {kind: MiB} ohne Ollama; fehlt das Feld, gibt es keine solchen Kinder
+    node.children_vram_gib = sum(v for v in kv.values() if isinstance(v, (int, float))) / 1024 if isinstance(kv, dict) else 0.0
     sens = b.get("sensors")   # Agent >= 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z-Werte (unveraendert durchgereicht)
     node.sensors = sens if isinstance(sens, dict) else None
     if isinstance(b.get("update"), dict):   # Agent >= 0.8.0: Zwischenstand eines Update-Auftrags
@@ -357,5 +359,5 @@ def apply_heartbeat(node, b, now):
     if (node.vram_used_gib is not None and node.ollama_vram_claimed_gib() < 0.5 and node.inflight == 0
             and node.gpu_util is not None and node.gpu_util < node.busy_util_threshold()
             and now - node.polled_ok < 2 * state.CFG.poll_s + 1):   # nur mit frischem /api/ps-Wissen (sonst zaehlt ein geladenes Modell als Desktop)
-        node.learn_baseline(now, node.vram_used_gib)
+        node.learn_baseline(now, node.vram_used_gib - node.children_vram_gib)   # die Kinder zieht foreign_vram_gib schon ab
     evaluate(node, now)

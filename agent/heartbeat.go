@@ -18,6 +18,7 @@ type Heartbeat struct {
 	updater  *Updater       // Selbst-Update: Zwischenstand geht mit dem Heartbeat (0.8.0)
 	ollamaUp *OllamaUpdater // Ollama-Update: Zwischenstand (0.12.0)
 	upstream string         // lokales Ollama: Version geht mit dem Heartbeat (0.12.0, alle 60 s frisch)
+	sup      *Supervisor    // 0.13.0: Grafikspeicher der eigenen Kinder (ausser Ollama) als Fakt
 
 	mu         sync.Mutex
 	ovVersion  string
@@ -79,6 +80,11 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	}
 	if v := h.ollamaVersionCached(ctx); v != "" { // 0.12.0: der Router sieht die Ollama-Version sofort, nicht erst beim Poll
 		p["ollama_version"] = v
+	}
+	if h.sup != nil { // 0.13.0: der Router zaehlt diesen Speicher nicht als fremd (sonst wirkt der STT-Dienst wie ein Spiel)
+		if m := h.sup.childrenVRAM(); len(m) > 0 {
+			p["children_vram_mib"] = m
+		}
 	}
 	return p, nil
 }

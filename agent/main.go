@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -105,6 +106,12 @@ func main() {
 		if s.Sensors != nil {
 			b, _ := json.MarshalIndent(s.Sensors, "", "  ")
 			fmt.Printf("sensoren (gpuz=%v):\n%s\n", s.Sensors.GPUZ, b)
+		}
+		// 0.13.0: Grafikspeicher je Prozess (Leistungsindikator) - Grundlage fuer children_vram_mib im Heartbeat
+		if proz, err := gpuProcessVRAM(); err != nil {
+			fmt.Printf("grafikspeicher je prozess: %v\n", err)
+		} else {
+			printGPUProcs(proz)
 		}
 		// GPU-Schutz, Trockenlauf: was der Guard mit den Standardwerten setzen WUERDE (setzt nichts)
 		if lim := g.PowerLimits(); !lim.OK {
@@ -242,5 +249,24 @@ func printHealth(listen string) {
 	}
 	for name, ch := range s.Children {
 		fmt.Printf("Kind %s: laeuft=%v gesund=%v pid=%d neustarts=%d %s\n", name, ch.Running, ch.Healthy, ch.PID, ch.Restarts, ch.LastExit)
+	}
+}
+
+// printGPUProcs: die groessten Belegungen (ab 50 MiB) absteigend, fuer den Diagnose-Befehl `gpu`.
+func printGPUProcs(proz map[uint32]uint64) {
+	type e struct {
+		pid uint32
+		mib uint64
+	}
+	var l []e
+	for pid, b := range proz {
+		if b>>20 >= 50 {
+			l = append(l, e{pid, b >> 20})
+		}
+	}
+	sort.Slice(l, func(i, j int) bool { return l[i].mib > l[j].mib })
+	fmt.Printf("grafikspeicher je prozess (ab 50 MiB, %d Prozesse mit GPU-Speicher):\n", len(proz))
+	for _, x := range l {
+		fmt.Printf("  pid %-7d %6d MiB\n", x.pid, x.mib)
 	}
 }

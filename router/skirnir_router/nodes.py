@@ -126,6 +126,7 @@ class Node(Breaker):
         self.vram_used_gib = None
         self.vram_total_reported_gib = None
         self.ollama_proc_gib = None
+        self.children_vram_gib = 0.0   # Agent >= 0.13.0: Grafikspeicher seiner Kinder ausser Ollama (STT per CUDA), gemeldet
         self.vram_last_gib = 0.0      # Ollama-Belegung beim letzten Poll, um ein Schrumpfen zu erkennen
         self.vram_hold_gib = 0.0      # solange nvidia-smi nachzieht, gilt dieser Wert als Ollama-Belegung
         self.vram_hold_until = 0.0
@@ -256,14 +257,16 @@ class Node(Breaker):
         return a == b or (da is not None and da == db)
 
     def foreign_vram_gib(self):
-        """VRAM, das weder Ollama noch der bekannte Desktop-Grundverbrauch belegt."""
+        """VRAM, das weder Ollama noch die eigenen Kinder des Agenten noch der bekannte Desktop-Grundverbrauch belegt."""
         if self.vram_used_gib is None:
             return 0.0
         if self.ollama_proc_gib is not None:
             ollama = self.ollama_proc_gib
         else:
             ollama = self.ollama_vram_claimed_gib()
-        raw = max(0.0, self.vram_used_gib - ollama - self.baseline_gib())
+        # Die Kinder des Agenten (2026-09-30: Whisper per CUDA, 2,6 GiB) meldet er als Fakt; ohne das galten sie als Spiel und
+        # hoben den Knoten ueber die foreign-Schwelle - mit Desktop + einem Spiel 3,6 GiB fremd, mit Whisper 6.2 GiB.
+        raw = max(0.0, self.vram_used_gib - ollama - self.children_vram_gib - self.baseline_gib())
         # Waehrend eines vom Router ausgeloesten Ladevorgangs deckt der Anspruch (announce_load) das ganze Modell ab, auch
         # solange es noch gar nicht im VRAM liegt - ein Spiel verschwand so 300 s lang aus der Rechnung (gpu-laptop 2026-09-11:
         # fremd 0,0 trotz 2,4 GiB Spiel, Knoten blieb free). Darum gilt mindestens der Wert von vor dem Laden.
@@ -389,7 +392,7 @@ class Node(Breaker):
             "models": sorted(self.models), "loaded": {k: round(v, 2) for k, v in self.loaded.items()},
             "inflight": self.inflight, "gpu_known": bool(self.gpu_known(now)),
             "gpu_util": self.gpu_util, "vram_free_gib": self.vram_free_gib,
-            "vram_used_gib": self.vram_used_gib, "vram_total_gib": self.vram_total_gib, "foreign_vram_gib": round(self.foreign_vram_gib(), 2),
+            "vram_used_gib": self.vram_used_gib, "vram_total_gib": self.vram_total_gib, "foreign_vram_gib": round(self.foreign_vram_gib(), 2), "children_vram_gib": round(self.children_vram_gib, 2),
             "heartbeat_age_s": round(now - self.hb_ts, 1) if self.hb_ts else None,
             "wol": self.wol, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,
             "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
