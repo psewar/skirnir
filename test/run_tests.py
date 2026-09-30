@@ -1298,14 +1298,21 @@ def main():
         check("Ollama-Update: Knoten big zeigt laufende und ausstehende Version", rb["pending"] and rb["available"] == "0.99.0" and bool(rb["current"]), str(rb))
         check("Ollama-Update: Metrik und HA-Sensor zaehlen den ausstehenden Knoten", "skirnir_node_ollama_update_pending{node=\"big\"} 1" in http(C + "/metrics")[1].decode() and json.loads(http(C + "/admin/ha")[1])["ollama_updates_pending"] >= 1)
         st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
-        check("Ollama-Update: Auftrag angenommen, Knoten im Drain", st == 200 and state()["nodes"]["big"]["draining"], raw.decode()[:100])
-        for _ in range(60):
+        check("Ollama-Update: Auftrag angenommen, Knoten bleibt waehrend des Downloads im Routing (Agent 0.15.0 wartet auf Freigabe)",
+              st == 200 and not state()["nodes"]["big"]["draining"], raw.decode()[:100])
+        drained_ready = False
+        for _ in range(80):
             rb = reg_big()["ollama_update"]
+            if rb.get("state") == "ready" and state()["nodes"]["big"]["draining"]:
+                drained_ready = True
             if rb.get("state") in ("done", "failed"): break
             time.sleep(0.25)
+        rlog.seek(0)
+        check("Ollama-Update: erst bei 'ready' aus dem Routing, dann Tausch freigegeben (Knoten leer)",
+              "Ollama-Tausch auf 0.99.0 freigegeben (Knoten leer)" in rlog.read(), f"draining bei ready gesehen: {drained_ready}")
         check("Ollama-Update: Fake-Agent hat geladen, Hash geprueft, gemeldet; Version 0.99.0 im Heartbeat -> done, kein Drain", rb.get("state") == "done" and rb["current"] == "0.99.0" and not rb["pending"] and not state()["nodes"]["big"]["draining"], str(rb))
         evs = [d["state"] for d in state()["decisions"] if d.get("event") == "ollama_update"]
-        check("Ollama-Update: Ereignisse requested -> downloading -> applied -> done", evs[-4:] == ["requested", "downloading", "applied", "done"], str(evs))
+        check("Ollama-Update: Ereignisse requested -> downloading -> ready -> applied -> done", evs[-5:] == ["requested", "downloading", "ready", "applied", "done"], str(evs))
         st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
         check("Ollama-Update: gleiche Version -> 409", st == 409 and "already" in raw.decode(), raw.decode()[:80])
         ha_o = json.loads(http(C + "/admin/ha")[1])

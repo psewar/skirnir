@@ -79,11 +79,13 @@ type OllamaUpdater struct {
 	http       *http.Client
 	verifyWait time.Duration // so lange darf das neue Ollama brauchen, bis /api/version die Zielversion nennt
 	verifyPoll time.Duration
+	swapWait   time.Duration // so lange wartet ein fertig geladenes Update auf die Freigabe des Routers (0.15.0)
+	swapCh     chan string   // Freigabe {"t":"ollama-swap", version} vom Router
 }
 
 func newOllamaUpdater(cfg OllamaUpdateCfg, specs []ChildSpec, sup *Supervisor, upstream string, log *Logger) *OllamaUpdater {
 	u := &OllamaUpdater{cfg: cfg, sup: sup, upstream: upstream, log: log, http: &http.Client{Timeout: 90 * time.Minute},
-		verifyWait: 3 * time.Minute, verifyPoll: 2 * time.Second}
+		verifyWait: 3 * time.Minute, verifyPoll: 2 * time.Second, swapWait: 30 * time.Minute, swapCh: make(chan string, 1)}
 	for _, sp := range specs {
 		if sp.on() && isOllamaExe(sp.Cmd) {
 			u.child, u.dir = sp.Name, filepath.Dir(sp.Cmd)
@@ -104,6 +106,40 @@ func isOllamaExe(cmd string) bool {
 	}
 	b = strings.ToLower(b)
 	return b == "ollama.exe" || b == "ollama"
+}
+
+// SwapGate: der Agent tauscht erst nach Freigabe durch den Router (0.15.0, Fakt ollama_swap_gate). Bis dahin laeuft Ollama
+// waehrend Download und Pruefung normal weiter und bedient Anfragen; erst der Router weiss, wann der Knoten leer ist.
+func (u *OllamaUpdater) SwapGate() bool { return u.Managed() }
+
+// Swap: Freigabe des Routers {"t":"ollama-swap", version}. Wirkt nur auf einen wartenden Auftrag derselben Version.
+func (u *OllamaUpdater) Swap(version string) {
+	if u == nil {
+		return
+	}
+	select {
+	case u.swapCh <- version:
+	default:
+	}
+}
+
+// awaitSwap wartet auf die Freigabe des Routers; ohne sie wird nichts getauscht.
+func (u *OllamaUpdater) awaitSwap(ctx context.Context, version string) error {
+	t := time.NewTimer(u.swapWait)
+	defer t.Stop()
+	for {
+		select {
+		case v := <-u.swapCh:
+			if v == version {
+				return nil
+			}
+			u.log.Warnf("ollama-update: Freigabe fuer %s ignoriert, der Auftrag ist %s", v, version)
+		case <-t.C:
+			return fmt.Errorf("Router gab den Tausch nicht innerhalb %s frei - nichts getauscht, Ollama laeuft unveraendert", u.swapWait)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // Managed: laeuft Ollama als Kind dieses Agenten (dann kann der Router ein Update anstossen)?
@@ -440,6 +476,13 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
+	for drained := false; !drained; { // alte Freigabe aus einem frueheren Auftrag verwerfen
+		select {
+		case <-u.swapCh:
+		default:
+			drained = true
+		}
+	}
 	u.set("checking", o.Version, "sha256sum.txt des Releases")
 	sum, err := u.fetchChecksum(ctx, o.Version, o.File)
 	if err != nil {
@@ -471,6 +514,13 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 	os.Remove(archive)
 	if v, err := u.probe(filepath.Join(newDir, ollamaExeName(o.File))); err != nil || v != o.Version {
 		return fmt.Errorf("entpackte Binary meldet %q statt %s (%v)", v, o.Version, err)
+	}
+	// Bis hier lief Ollama unveraendert weiter. Jetzt meldet der Agent "ready"; der Router nimmt den Knoten aus dem Routing,
+	// wartet, bis keine Anfrage mehr laeuft, und gibt den Tausch frei (2026-10-01: vorher war der Knoten waehrend des ganzen
+	// Downloads gesperrt, und ein Vorwaermen lud ein Modell, das der Tausch gleich wieder beendete).
+	u.set("ready", o.Version, "geladen und geprueft - wartet auf die Freigabe des Routers")
+	if err := u.awaitSwap(ctx, o.Version); err != nil {
+		return err
 	}
 	// Tausch: Kind anhalten (samt Modellprozessen), Dateien umsetzen, Kind wieder freigeben
 	u.set("swapping", o.Version, "Ollama wird angehalten")

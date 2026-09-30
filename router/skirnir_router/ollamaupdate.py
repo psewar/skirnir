@@ -31,8 +31,10 @@ from .common import VERSION, log
 ASSETS = {("windows", "amd64"): "ollama-windows-amd64.zip", ("windows", "arm64"): "ollama-windows-arm64.zip",
           ("linux", "amd64"): "ollama-linux-amd64.tar.zst", ("linux", "arm64"): "ollama-linux-arm64.tar.zst"}
 LATEST = {"version": None, "checked": 0.0, "checked_ts": None, "files": {}, "error": None, "source": None}
-RUNNING = ("requested", "checking", "downloading", "extracting", "swapping", "applied")
-DRAIN_S = 1800     # laengste Zeit vom Auftrag bis zum Tausch (1,4 GB Download) - so lange keine neuen Anfragen an den Knoten
+RUNNING = ("requested", "checking", "downloading", "extracting", "ready", "swapping", "applied")
+DRAIN_S = 1800     # Agenten ohne Freigabe-Schritt (< 0.15.0): vom Auftrag bis zum Tausch keine neuen Anfragen an den Knoten
+SWAP_DRAIN_S = 1800   # ab "ready": so lange darf das Leerwerden dauern, danach bricht der Router ab (Agent wartet 30 min)
+SWAP_WAIT_S = 25 * 60
 STALL_S = 3600     # ohne neuen Stand im Heartbeat gilt der Auftrag als haengend
 RETRY_S = 6 * 3600 # nach failed/stalled erst nach 6 h wieder automatisch probieren
 AGENT_FRESH_S = 600  # vom Agenten gemeldete Ollama-Version hat 10 min Vorrang vor dem Poll (/api/version alle 5 min)
@@ -143,6 +145,53 @@ def current_version(e):
     return e.get("ollama_version") or (e.get("facts") or {}).get("ollama_version") or None
 
 
+def swap_gate(e):
+    """Tauscht der Agent erst nach Freigabe (Fakt `ollama_swap_gate`, Agent >= 0.15.0)? Dann bleibt der Knoten waehrend Download
+    und Pruefung im Routing, und der Router gibt den Tausch frei, sobald keine Anfrage mehr laeuft."""
+    return (e.get("facts") or {}).get("ollama_swap_gate") is True
+
+
+def update_running(node, now=None):
+    """Laeuft auf diesem Knoten gerade ein Ollama-Update (Auftrag bis Neustart)? Dann kein Vorwaermen: der Tausch beendet Ollama."""
+    if state.REG is None or not node.fp:
+        return False
+    u = (state.REG.nodes.get(node.fp) or {}).get("ollama_update") or {}
+    return u.get("state") in RUNNING and (now or time.time()) - (u.get("t") or 0) < STALL_S
+
+
+async def release_swap(node, version):
+    """Nach "ready": Knoten aus dem Routing nehmen, warten, bis keine Anfrage mehr laeuft, dann den Tausch freigeben.
+    Wird der Knoten in SWAP_WAIT_S nicht leer, bricht der Router ab (nichts getauscht, Knoten wieder im Routing)."""
+    node.draining_until = time.time() + SWAP_DRAIN_S
+    try:
+        deadline = time.time() + SWAP_WAIT_S
+        while node.inflight > 0 and time.time() < deadline:
+            await asyncio.sleep(0.5)
+        e = state.REG.nodes.get(node.fp) if state.REG is not None else None
+        u = (e or {}).get("ollama_update") or {}
+        if u.get("version") != version or u.get("state") != "ready":
+            return   # Auftrag ist weiter, abgebrochen oder ersetzt
+        if node.inflight > 0:
+            now = time.time()
+            u.update(state="failed", message=f"Knoten wurde in {SWAP_WAIT_S // 60} min nicht leer ({node.inflight} Anfragen) - nicht getauscht",
+                     t=now, ts=_ts(now))
+            e["ollama_update"] = u
+            state.REG.save()
+            state.remember({"event": "ollama_update", "node": node.name, "state": "failed", "version": version, "reason": u["message"]})
+            state.MQTT_DIRTY.append(True)
+            node.draining_until = 0.0
+            log.warning("node %s: Ollama-Tausch auf %s abgebrochen - Knoten wurde nicht leer", node.name, version)
+            return
+        if node.tunnel is None:
+            log.warning("node %s: Ollama-Tausch auf %s nicht freigegeben - kein Tunnel", node.name, version)
+            return
+        from .registry import send_ctl
+        await send_ctl(node.tunnel, {"t": "ollama-swap", "version": version})
+        log.info("node %s: Ollama-Tausch auf %s freigegeben (Knoten leer)", node.name, version)
+    finally:
+        node.swap_pending = None
+
+
 def managed(e):
     """Aktualisiert der Agent dieses Knotens Ollama? Das meldet der Agent bei jeder Anmeldung selbst (Fakt `ollama_managed`, ab
     Agent 0.12.1: Ollama ist eines seiner Kinder). Ohne den Fakt schickt der Router keine Ollama-Auftraege."""
@@ -200,6 +249,9 @@ def note_version(node, version, now=None, source="poll"):
         state.MQTT_DIRTY.append(True)
         node.draining_until = 0.0
         log.info("node %s: Ollama-Update auf %s abgeschlossen", node.name, version)
+        if state.CFG.prewarm_on_online and node.state == "free":   # das Vorwaermen beim Neustart entfiel, das Update lief noch
+            from . import poll
+            state.spawn(poll.prewarm(node, 0, "nach Ollama-Update"))
 
 
 def note_hello(e, facts):
@@ -223,6 +275,10 @@ def note_report(node, report, now=None):
         return
     if report.get("version") and u.get("version") and report["version"] != u["version"]:
         return   # alter Bericht zu einem frueheren Auftrag
+    if report["state"] == "ready" and swap_gate(e) and getattr(node, "swap_pending", None) != u.get("version"):
+        # jede "ready"-Meldung ohne laufende Freigabe startet eine (auch nach einem Router-Neustart mitten im Warten)
+        node.swap_pending = u.get("version") or report.get("version")
+        state.spawn(release_swap(node, node.swap_pending))
     if u.get("state") == "failed" and report["state"] == "failed" and (report.get("message") or "") == (u.get("message") or ""):
         return   # derselbe Fehler, jeden Heartbeat wiederholt
     changed = report["state"] != u.get("state") or (report.get("message") or "") != (u.get("message") or "")
@@ -311,7 +367,8 @@ async def order_update(fp, reason="ui", force=False):
         return False, f"node is serving {node.inflight} request(s)"
     msg = {"t": "ollama-update", "version": version, "file": f["name"], "url": f["url"], "sha256": f["sha256"], "size": f.get("size", 0)}
     e["ollama_update"] = {"version": version, "state": "requested", "message": "", "t": now, "ts": _ts(now), "by": reason}
-    node.draining_until = now + DRAIN_S
+    if not swap_gate(e):   # alter Agent tauscht sofort nach dem Download: Knoten von Anfang an leeren
+        node.draining_until = now + DRAIN_S
     state.REG.save()
     from .registry import send_ctl
     await send_ctl(node.tunnel, msg)

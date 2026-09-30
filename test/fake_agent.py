@@ -23,7 +23,9 @@ FACTS = {"hostname": NODE.upper(), "os": "windows", "arch": "amd64", "manufactur
          "gpu": "Fake RTX 5090", "vram_total_mib": 32563, "mac": "00:11:22:33:44:55", "local_ip": "127.0.0.1",
          "ollama_version": "0.11.0", "ollama_url": UPSTREAM, "agent_version": "test",
          "ollama_managed": os.environ.get("FAKE_OLLAMA_MANAGED", "1") == "1",   # wie Agent 0.12.1: Ollama ist Kind des Agenten
-         "ollama_push": os.environ.get("FAKE_OLLAMA_PUSH", "1") == "1"}         # wie Agent 0.14.0: meldet den Ollama-Zustand selbst
+         "ollama_push": os.environ.get("FAKE_OLLAMA_PUSH", "1") == "1",         # wie Agent 0.14.0: meldet den Ollama-Zustand selbst
+         "ollama_swap_gate": os.environ.get("FAKE_OLLAMA_SWAP_GATE", "1") == "1"}   # wie Agent 0.15.0: Tausch erst nach Freigabe
+SWAP_GO = {}   # Version -> asyncio.Event, gesetzt von {"t":"ollama-swap"}
 
 
 def load_key():
@@ -90,8 +92,17 @@ async def do_ollama_update(ws, session, lock, m):
             data = await r.read()
             if r.status != 200:
                 raise ValueError(f"Download HTTP {r.status}")
+        await asyncio.sleep(1.5)   # "Download dauert": der Knoten muss in dieser Zeit im Routing bleiben
         if hashlib.sha256(data).hexdigest() != m["sha256"]:
             raise ValueError("SHA-256 stimmt nicht")
+        if FACTS["ollama_swap_gate"]:
+            go = SWAP_GO.setdefault(m["version"], asyncio.Event())
+            await report("ready", "geladen und geprueft - wartet auf die Freigabe des Routers")
+            try:
+                await asyncio.wait_for(go.wait(), 20)
+            except asyncio.TimeoutError:
+                await report("failed", "Router gab den Tausch nicht frei")
+                return
         await report("applied", "Dateien getauscht, Ollama startet neu")
         FACTS["ollama_version"] = m["version"]
         await asyncio.sleep(0.3)
@@ -193,6 +204,8 @@ async def main():
                                 asyncio.create_task(do_update(ws, session, lock, m, sslctx))  # noqa: RUF006
                             if m.get("t") == "ollama-update":
                                 asyncio.create_task(do_ollama_update(ws, session, lock, m))  # noqa: RUF006
+                            if m.get("t") == "ollama-swap":
+                                SWAP_GO.setdefault(m.get("version"), asyncio.Event()).set()
                             continue
                         if msg.type != aiohttp.WSMsgType.BINARY:
                             continue

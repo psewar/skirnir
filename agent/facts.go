@@ -16,20 +16,21 @@ import (
 // Der Router legt damit den Knoten an (Name, GPU, VRAM, MAC fuer Wake-on-LAN) - nichts davon muss von Hand
 // eingetragen werden, und es bleibt aktuell, wenn sich Hardware aendert.
 type Facts struct {
-	Hostname      string `json:"hostname"`
-	OS            string `json:"os"`
-	Arch          string `json:"arch"`
-	Manufacturer  string `json:"manufacturer,omitempty"`
-	Model         string `json:"model,omitempty"`
-	GPU           string `json:"gpu,omitempty"`
-	VRAMTotalMiB  int    `json:"vram_total_mib,omitempty"`
-	MAC           string `json:"mac,omitempty"`
-	LocalIP       string `json:"local_ip,omitempty"`
-	OllamaVersion string `json:"ollama_version,omitempty"`
-	OllamaURL     string `json:"ollama_url"`
-	AgentVersion  string `json:"agent_version"`
-	OllamaManaged *bool  `json:"ollama_managed,omitempty"` // Ollama ist Kind dieses Agenten (Router bietet dann Ollama-Updates an, 0.12.1)
-	OllamaPush    bool   `json:"ollama_push,omitempty"`    // Agent meldet den Ollama-Zustand selbst (Rahmen OLLAMA, 0.14.0)
+	Hostname       string `json:"hostname"`
+	OS             string `json:"os"`
+	Arch           string `json:"arch"`
+	Manufacturer   string `json:"manufacturer,omitempty"`
+	Model          string `json:"model,omitempty"`
+	GPU            string `json:"gpu,omitempty"`
+	VRAMTotalMiB   int    `json:"vram_total_mib,omitempty"`
+	MAC            string `json:"mac,omitempty"`
+	LocalIP        string `json:"local_ip,omitempty"`
+	OllamaVersion  string `json:"ollama_version,omitempty"`
+	OllamaURL      string `json:"ollama_url"`
+	AgentVersion   string `json:"agent_version"`
+	OllamaManaged  *bool  `json:"ollama_managed,omitempty"`   // Ollama ist Kind dieses Agenten (Router bietet dann Ollama-Updates an, 0.12.1)
+	OllamaPush     bool   `json:"ollama_push,omitempty"`      // Agent meldet den Ollama-Zustand selbst (Rahmen OLLAMA, 0.14.0)
+	OllamaSwapGate bool   `json:"ollama_swap_gate,omitempty"` // Ollama-Update tauscht erst nach Freigabe des Routers (0.15.0)
 }
 
 func collectFacts(ctx context.Context, routerURL, upstream string, gpu *GPU) Facts {

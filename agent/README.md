@@ -156,7 +156,11 @@ SYSTEM-Profil). Der Router uebernimmt die Rolle des Updaters (`ollamaupdate.go`;
    mit dem Auftrag: der Router kann nur die Version waehlen, nicht den Code.
 3. Download (ca. 1,4 GB, Fortschritt im Heartbeat) in `<Programme>\.skirnir-ollama-update\`, SHA-256, entpacken (Zip-Slip
    abgefangen), `ollama --version` der entpackten Binary muss die Zielversion nennen. Vorher: dreifacher Archivplatz frei.
-4. Tausch: Supervisor haelt das Kind an (`Hold`, Prozessbaum samt Modellprozessen), `ollama.exe` und `lib` wandern in eine
+4. Freigabe (0.15.0): bis hier laeuft Ollama unveraendert und bedient Anfragen. Der Agent meldet `ready` und wartet bis zu
+   30 min auf `{"t":"ollama-swap", version}`. Der Router nimmt den Knoten erst jetzt aus dem Routing, wartet, bis keine Anfrage
+   mehr laeuft, und gibt frei; ohne Freigabe wird nichts getauscht. Fakt `ollama_swap_gate` in der Anmeldung sagt dem Router,
+   dass der Agent diesen Schritt kennt (aeltere Agenten: Knoten ab dem Auftrag gesperrt, Tausch sofort nach dem Download).
+5. Tausch: Supervisor haelt das Kind an (`Hold`, Prozessbaum samt Modellprozessen), `ollama.exe` und `lib` wandern in eine
    Sicherung, die neuen Dateien an ihren Platz, `Release` startet das Kind sofort neu. `/api/version` muss binnen 3 min die
    Zielversion melden, sonst Rollback auf die Sicherung. Tray-App und Windows-Deinstallationseintrag bleiben alt (kosmetisch).
 5. Der Agent meldet bei jeder Anmeldung den Fakt `ollama_managed` (0.12.1): true, wenn Ollama eines seiner Kinder ist. Nur dann

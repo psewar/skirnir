@@ -173,7 +173,28 @@ func testUpdater(t *testing.T, srv *httptest.Server, dir string) *OllamaUpdater 
 	u.free = func(string) (uint64, error) { return 1 << 40, nil }
 	u.probe = func(p string) (string, error) { return strings.TrimPrefix(readFile(t, p), "neu "), nil }
 	u.verifyWait, u.verifyPoll = 2*time.Second, 100*time.Millisecond
+	u.swapWait = 5 * time.Second
 	return u
+}
+
+// runMitFreigabe spielt den Router: sobald der Auftrag "ready" meldet, kommt die Freigabe. Liefert den Fehler von run und
+// ob "ready" vor dem Tausch gemeldet wurde, waehrend die alten Dateien noch an ihrem Platz lagen.
+func runMitFreigabe(t *testing.T, u *OllamaUpdater, o OllamaUpdateOrder, dir string) (error, bool) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- u.run(o) }()
+	readyVorTausch := false
+	for {
+		select {
+		case err := <-done:
+			return err, readyVorTausch
+		case <-time.After(20 * time.Millisecond):
+			if r := u.Report(); r != nil && r.State == "ready" && !readyVorTausch {
+				readyVorTausch = readFile(t, filepath.Join(dir, "ollama.exe")) == "alt"
+				u.Swap(o.Version)
+			}
+		}
+	}
 }
 
 func TestOllamaUpdateRun(t *testing.T) {
@@ -188,8 +209,12 @@ func TestOllamaUpdateRun(t *testing.T) {
 	u.live = func(context.Context) string {
 		return strings.TrimPrefix(readFile(t, filepath.Join(dir, "ollama.exe")), "neu ")
 	}
-	if err := u.run(OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size}); err != nil {
+	err, ready := runMitFreigabe(t, u, OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size}, dir)
+	if err != nil {
 		t.Fatalf("run: %v", err)
+	}
+	if !ready {
+		t.Fatal("\"ready\" muss vor dem Tausch kommen, solange die alten Dateien noch liegen")
 	}
 	if readFile(t, filepath.Join(dir, "ollama.exe")) != "neu "+ver || readFile(t, filepath.Join(dir, "lib", "ollama", "x.dll")) != "neu" {
 		t.Fatal("neue Dateien nicht eingesetzt")
@@ -204,7 +229,7 @@ func TestOllamaUpdateRun(t *testing.T) {
 		t.Fatalf("Bericht: %+v", r)
 	}
 	// Hash im Auftrag passt nicht zu sha256sum.txt der Quelle -> abgelehnt, nichts angefasst
-	err := u.run(OllamaUpdateOrder{Version: ver, File: archive, Sha256: strings.Repeat("f", 64), Size: size})
+	err = u.run(OllamaUpdateOrder{Version: ver, File: archive, Sha256: strings.Repeat("f", 64), Size: size})
 	if err == nil || !strings.Contains(err.Error(), "widerspricht") {
 		t.Fatalf("falscher Hash: %v", err)
 	}
@@ -219,7 +244,7 @@ func TestOllamaUpdateRollback(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "lib", "ollama", "a.dll"), "alt")
 	u := testUpdater(t, srv, dir)
 	u.live = func(context.Context) string { return "0.34.0" } // das neue Ollama meldet sich nie
-	err := u.run(OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size})
+	err, _ := runMitFreigabe(t, u, OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size}, dir)
 	if err == nil || !strings.Contains(err.Error(), "zurueckgesetzt (true)") {
 		t.Fatalf("Rollback erwartet: %v", err)
 	}
@@ -228,5 +253,41 @@ func TestOllamaUpdateRollback(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "lib", "ollama", "x.dll")); err == nil {
 		t.Fatal("neue lib haette verschwinden muessen")
+	}
+}
+
+// Ohne Freigabe des Routers wird nichts getauscht: Ollama laeuft unveraendert weiter, der Staging-Ordner ist weg.
+func TestOllamaUpdateOhneFreigabe(t *testing.T) {
+	const ver, archive = "0.34.4", "ollama-windows-amd64.zip"
+	srv, sum, size := releaseServer(t, ver, archive)
+	root := t.TempDir()
+	dir := filepath.Join(root, "Ollama")
+	writeFile(t, filepath.Join(dir, "ollama.exe"), "alt")
+	u := testUpdater(t, srv, dir)
+	u.swapWait = 300 * time.Millisecond
+	u.Swap("0.0.1") // alte Freigabe eines frueheren Auftrags: wird zu Beginn verworfen
+	err := u.run(OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size})
+	if err == nil || !strings.Contains(err.Error(), "nicht innerhalb") {
+		t.Fatalf("Zeitueberschreitung erwartet: %v", err)
+	}
+	if readFile(t, filepath.Join(dir, "ollama.exe")) != "alt" {
+		t.Fatal("ohne Freigabe darf nichts getauscht werden")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".skirnir-ollama-update")); err == nil {
+		t.Fatal("Staging-Ordner muss auch nach der Zeitueberschreitung weg sein")
+	}
+	// Freigabe fuer eine andere Version zaehlt nicht
+	u.swapWait = 300 * time.Millisecond
+	go func() {
+		for u.Report() == nil || u.Report().State != "ready" {
+			time.Sleep(10 * time.Millisecond)
+		}
+		u.Swap("9.9.9")
+	}()
+	if err := u.run(OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size}); err == nil {
+		t.Fatal("Freigabe fuer eine andere Version darf nicht tauschen")
+	}
+	if readFile(t, filepath.Join(dir, "ollama.exe")) != "alt" {
+		t.Fatal("falsche Version freigegeben: trotzdem getauscht")
 	}
 }

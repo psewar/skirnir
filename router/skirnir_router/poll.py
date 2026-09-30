@@ -172,6 +172,10 @@ async def prewarm(node, delay, reason, since=None):
     if since is not None and (node.free_at != since or node.state != "free"):
         log.info("prewarm on %s entfaellt (%s): Zustand hat seit dem Planen gewechselt", node.name, reason)
         return
+    if time.time() < node.draining_until or ollamaupdate.update_running(node):
+        # 2026-10-01: waehrend eines Ollama-Updates lud das Vorwaermen qwen3.8 (131k), das der Tausch 30 s spaeter wieder beendete
+        log.info("prewarm on %s entfaellt (%s): Update laeuft", node.name, reason)
+        return
     # Erst den Heartbeat urteilen lassen. Ein frisch (neu) gestarteter Router haelt jeden erreichbaren Knoten zunaechst
     # fuer free; am 2026-09-06 lud er so qwen3.6 in ein von einem Spiel belegtes VRAM (Ueberlauf in den Shared Memory,
     # Spiel ruckelte). Warten, bis GPU-Daten da sind und kein fremdes VRAM anliegt; ohne Agent nach dem Haltefenster weiter.

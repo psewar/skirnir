@@ -63,6 +63,7 @@ type Tunnel struct {
 	onStatus       func(state, node string, p *Provision)
 	onUpdate       func(UpdateOrder)       // Auftrag {"t":"update"} vom Router
 	onOllamaUpdate func(OllamaUpdateOrder) // Auftrag {"t":"ollama-update"} vom Router (0.12.0)
+	onOllamaSwap   func(version string)    // Freigabe {"t":"ollama-swap"} vom Router (0.15.0)
 	ollama         *OllamaWatcher          // lokaler Ollama-Zustand, geht als Rahmen OLLAMA raus (0.14.0); nil = Router pollt
 	ollamaKick     chan struct{}           // sofort vollstaendig senden (Freigabe: vorher verwirft der Router den Rahmen)
 
@@ -266,6 +267,12 @@ func (t *Tunnel) applyStatus(m ctlMsg) {
 	if m.T == "ollama-update" {
 		if t.onOllamaUpdate != nil {
 			t.onOllamaUpdate(OllamaUpdateOrder{Version: m.Version, File: m.File, Sha256: m.Sha256, Size: m.Size})
+		}
+		return
+	}
+	if m.T == "ollama-swap" {
+		if t.onOllamaSwap != nil {
+			t.onOllamaSwap(m.Version)
 		}
 		return
 	}

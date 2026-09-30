@@ -81,12 +81,14 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 		m := a.ollamaUp.Managed()
 		f.OllamaManaged = &m
 		f.OllamaPush = a.ollamaW != nil
+		f.OllamaSwapGate = a.ollamaUp.SwapGate()
 		return f
 	}
 	a.tunnel = newTunnel(cfg.Router.URL, cfg.Tunnel.Upstream, a.id, a.hb, facts, log)
 	a.tunnel.onStatus = a.onTunnelStatus
 	a.tunnel.onUpdate = a.updater.Handle
 	a.tunnel.onOllamaUpdate = a.ollamaUp.Handle
+	a.tunnel.onOllamaSwap = a.ollamaUp.Swap
 	a.ollamaW = newOllamaWatcher(cfg.Tunnel.Upstream, log)
 	a.tunnel.ollama = a.ollamaW
 	if a.prov != nil && a.prov.HeartbeatIntervalS > 0 {

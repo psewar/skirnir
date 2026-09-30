@@ -148,6 +148,7 @@ class Node(Breaker):
         self.last_residency = 0.0
         self.free_since = 0.0         # seit wann ununterbrochen free (gefuehrt von poll.residency_check)
         self.free_at = 0.0            # Zeitpunkt des letzten Wechsels auf free; ein verzoegertes Vorwaermen gilt nur fuer "seinen" Wechsel
+        self.swap_pending = None      # Ollama-Version, deren Tausch der Router gerade freigibt (ollamaupdate.release_swap)
         # Stufe 3: Circuit Breaker (closed -> open nach `failures` Backend-Fehlern im Fenster -> half_open nach open_s:
         # eine Probe, Erfolg = closed, Fehler = wieder open) und Admission (max_inflight aus der Policy, sonst Default)
         self.breaker = "closed"

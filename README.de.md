@@ -352,8 +352,11 @@ Tray-App nicht mehr (er läuft unter dem Desktop-Benutzer, der Installer ist ein
 alle paar Stunden das neueste Ollama-Release und zeigt es je Knoten im Tab *Agenten*; die Policy *Ollama-Auto-Update* je
 Knoten lässt die Rollout-Schleife Knoten im Nachtfenster nachziehen (`modes.ollama_update`, Standard 02:00 bis 05:00
 Ortszeit des Routers), Kanarienvogel zuerst, nur wenn der Knoten frei ist. Der Agent lädt das Release-Archiv (`ollama.exe`
-plus `lib/ollama`, kein Installer) von seiner eigenen festen Quelle, prüft es gegen die `sha256sum.txt` des Releases, hält
-Ollama an, tauscht die Dateien, startet neu und setzt zurück, wenn die neue Version nicht antwortet. Der Router wählt also
+plus `lib/ollama`, kein Installer) von seiner eigenen festen Quelle und prüft es gegen die `sha256sum.txt` des Releases,
+während Ollama weiter Anfragen bedient. Erst dann meldet er *ready*; der Router nimmt den Knoten aus dem Routing, wartet, bis
+keine Anfrage mehr läuft, und gibt den Tausch frei (Agent 0.15.0). Der Agent hält Ollama an, tauscht die Dateien, startet neu
+und setzt zurück, wenn die neue Version nicht antwortet. Während eines Updates wärmt der Router den Knoten nicht vor, danach
+einmal. Der Router wählt also
 nur die Version, nie den Code. Vorerst nur Windows-Knoten; die Linux-Archive sind tar.zst.
 
 **Neuer Windows-Knoten seit Agent 0.10.0:** Agent-Binary aus dem Release laden, doppelklicken, UAC bestätigen, drei Fragen

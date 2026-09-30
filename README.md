@@ -350,8 +350,10 @@ updater no longer applies (it runs under the desktop user, and the installer is 
 Ollama release every few hours and shows it per node in the *Agents* tab; a per-node policy *Ollama auto-update* lets the
 rollout loop update nodes inside a night window (`modes.ollama_update`, default 02:00 to 05:00 router local time), canary
 first, only when the node is free. The agent downloads the release archive (`ollama.exe` plus `lib/ollama`, no installer)
-from its own fixed source, verifies it against the release's `sha256sum.txt`, stops Ollama, swaps the files, restarts it and
-rolls back if the new version does not answer. The router therefore chooses only the version, never the code. Windows nodes
+from its own fixed source and verifies it against the release's `sha256sum.txt` while Ollama keeps serving requests. Only
+then does it report *ready*; the router takes the node out of routing, waits until no request is running and releases the
+swap (agent 0.15.0). The agent stops Ollama, swaps the files, restarts it and rolls back if the new version does not answer.
+While an update runs the router does not prewarm the node, and it prewarms once when the update is done. The router therefore chooses only the version, never the code. Windows nodes
 only for now; Linux archives are tar.zst.
 
 **New Windows node since agent 0.10.0:** download the agent binary from the release, double-click it, confirm the UAC prompt,

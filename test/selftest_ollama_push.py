@@ -55,5 +55,83 @@ poll.apply_ollama_push(n, {"up": True, "rev": 6, "tags": [QWEN_TAG, {"kein": "na
 check("Eintraege ohne Namen fallen weg, Meldung gilt", n.models == {"qwen3.8:27b"} and n.loaded == {} and n.ollama_push_active(now + 5))
 check("frisch bis 45 s, danach wieder Poll", n.ollama_push_active(now + 5 + 44) and not n.ollama_push_active(now + 5 + 46))
 
+# --- Tausch erst nach Freigabe (Router 0.5.0 / Agent 0.15.0): leeren, auf laufende Anfragen warten, dann freigeben
+import asyncio  # noqa: E402
+
+from skirnir_router import ollamaupdate, registry  # noqa: E402
+
+GESENDET = []
+
+
+async def send_ctl(tunnel, msg):
+    GESENDET.append(msg)
+
+
+class Reg:
+    def __init__(self, e):
+        self.nodes = {"fp1": e}
+
+    def save(self):
+        pass
+
+
+registry.send_ctl = send_ctl
+ollamaupdate.SWAP_WAIT_S = 1.5
+
+
+async def tausch_szenario(inflight_endet):
+    GESENDET.clear()
+    k = nodes.Node("gpu-desktop", {"vram_total_gib": 31.8})
+    k.fp, k.tunnel, k.inflight, k.state = "fp1", object(), 1, "free"
+    e = {"name": "gpu-desktop", "facts": {"ollama_swap_gate": True}, "ollama_update": {"version": "0.35.0", "state": "ready", "t": time.time()}}
+    state.REG = Reg(e)
+    t = asyncio.create_task(ollamaupdate.release_swap(k, "0.35.0"))
+    await asyncio.sleep(0.6)
+    vorher = (list(GESENDET), time.time() < k.draining_until)
+    if inflight_endet:
+        k.inflight = 0
+    await t
+    return vorher, list(GESENDET), e["ollama_update"], k
+
+
+(vorher, nachher, u, k) = asyncio.run(tausch_szenario(True))
+check("laufende Anfrage: Knoten aus dem Routing, aber noch keine Freigabe", vorher == ([], True), str(vorher))
+check("Anfrage beendet: Tausch freigegeben", nachher == [{"t": "ollama-swap", "version": "0.35.0"}] and k.swap_pending is None, str(nachher))
+(vorher, nachher, u, k) = asyncio.run(tausch_szenario(False))
+check("Knoten wird nicht leer: keine Freigabe, Auftrag failed, Knoten wieder im Routing",
+      nachher == [] and u["state"] == "failed" and "nicht leer" in u["message"] and time.time() >= k.draining_until, f"{nachher} {u}")
+state.REG = Reg({"name": "gpu-desktop", "facts": {}, "ollama_update": {"version": "0.35.0", "state": "downloading", "t": time.time()}})
+k = nodes.Node("gpu-desktop", {"vram_total_gib": 31.8})
+k.fp = "fp1"
+check("waehrend eines Ollama-Updates kein Vorwaermen (update_running)", ollamaupdate.update_running(k))
+state.REG.nodes["fp1"]["ollama_update"]["state"] = "done"
+check("nach dem Update wieder Vorwaermen erlaubt", not ollamaupdate.update_running(k))
+check("Agent ohne Freigabe-Schritt (< 0.15.0) erkannt", not ollamaupdate.swap_gate({"facts": {}}) and ollamaupdate.swap_gate({"facts": {"ollama_swap_gate": True}}))
+
+# Update erledigt (Agent meldet die Zielversion): einmal vorwaermen, weil das Vorwaermen beim Neustart waehrend des Updates entfiel
+GEWAERMT = []
+
+
+async def prewarm_attrappe(node, delay, reason, since=None):
+    GEWAERMT.append(reason)
+
+
+async def fertig_melden(zustand):
+    GEWAERMT.clear()
+    k = nodes.Node("gpu-desktop", {"vram_total_gib": 31.8})
+    k.fp, k.state = "fp1", zustand
+    state.REG = Reg({"name": "gpu-desktop", "facts": {"ollama_swap_gate": True},
+                     "ollama_update": {"version": "0.35.0", "state": "applied", "t": time.time()}})
+    ollamaupdate.note_version(k, "0.35.0", time.time(), source="agent")
+    await asyncio.sleep(0.05)
+    return state.REG.nodes["fp1"]["ollama_update"]["state"], list(GEWAERMT)
+
+
+poll.prewarm = prewarm_attrappe
+state.CFG.prewarm_on_online = True   # oben fuer die Push-Pruefungen abgeschaltet
+r = asyncio.run(fertig_melden("free"))
+check("Update erledigt, Knoten frei: einmal vorwaermen", r == ("done", ["nach Ollama-Update"]), str(r))
+check("Update erledigt, Knoten belegt (Spiel): nicht vorwaermen", asyncio.run(fertig_melden("busy")) == ("done", []))
+
 print(f"\n{len(FAILS)} failures: {FAILS}")
 sys.exit(1 if FAILS else 0)
