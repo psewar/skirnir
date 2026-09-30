@@ -245,7 +245,7 @@ def render():
     gauge("skirnir_node_vram_used_gib", "used VRAM", [({"node": n.name}, round(n.vram_used_gib, 3) if n.gpu_known(now) and n.vram_used_gib is not None else None) for n in nodes])
     gauge("skirnir_node_vram_total_gib", "total VRAM", [({"node": n.name}, n.vram_total_gib) for n in nodes])
     gauge("skirnir_node_vram_foreign_gib", "foreign VRAM (desktop, game) above the baseline", [({"node": n.name}, round(n.foreign_vram_gib(), 3)) for n in nodes])
-    gauge("skirnir_node_ollama_vram_gib", "VRAM used by Ollama (/api/ps)", [({"node": n.name}, round(n.ollama_vram_gib(), 3)) for n in nodes])
+    gauge("skirnir_node_ollama_vram_gib", "VRAM used by Ollama (measured real footprint where the catalog has it, else /api/ps)", [({"node": n.name}, round(n.ollama_vram_gib(), 3)) for n in nodes])
     gauge("skirnir_node_breaker", "1 for the breaker state", [({"node": n.name, "state": s}, 1 if n.breaker == s else 0) for n in nodes for s in ("closed", "open", "half_open")])
     # Sensoren (Agent >= 0.6.0) und GPU-Schutz (>= 0.7.0)
     sens = lambda n, k: (n.sensors or {}).get(k) if n.gpu_known(now) else None  # noqa: E731

@@ -81,6 +81,8 @@ SCHEMA = {
     },
     "models": {"*": {"weights_gib": None, "kv_gib_per_1k": None, "capabilities": None, "source": None, "note": None, "measured_at": None,
                      "measured_on": None, "vram_gib_8k": None, "vram_gib_32k": None, "partial_offload": None,
+                     # seit 0.3.5: real = weights/kv aus dem nvidia-smi-Zuwachs (nicht aus /api/ps), je Kontext beide Werte
+                     "real": None, "vram_real_gib": None, "vram_ps_gib": None,
                      "cloud": None, "provider_model": None, "price_chf_per_m": None, "context_tokens": None, "reasoning": None}},
     "nodes": {"*": {"ollama": None, "vram_total_gib": None, "wol": None, "weight": None, "mac": None, "foreign_vram_baseline_gib": None,
                     "gpu": None, "ollama_tls_fingerprint": None, "ollama_tls_cert": None, "max_inflight": None}},
@@ -459,6 +461,16 @@ class Config:
                 if n.digest_of.get(cm) == d:
                     return self.models[cm]
         return None
+
+    def real_gib(self, model, ctx):
+        """Echte Belegung (ohne Fit-Zuschlag) eines geladenen Modells bei `ctx`, wenn der Katalog sie gemessen hat
+        (`real: true`, seit 0.3.5), sonst None. /api/ps meldet nur einen Teil: qwen3.6:35b-a3b bei 196k 21,0 GiB,
+        nvidia-smi zeigt 26,4 GiB mehr als mit leerem Ollama (gemessen 2026-09-30). Ohne diese Zahl rechnete der
+        Router geladene Modelle zu klein an - der Rest fiel in die Desktop-Grundlast oder galt als fremdes VRAM."""
+        m = self.catalog_twin(model)
+        if m is None or m.get("cloud") or not m.get("real") or not ctx:
+            return None
+        return float(m["weights_gib"]) + float(m.get("kv_gib_per_1k", 0)) * ctx / 1000.0
 
     def need_gib(self, model, ctx, node=None):
         m = self.catalog_twin(model)

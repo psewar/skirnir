@@ -1071,7 +1071,8 @@ function renderDecisions() {
   $('#decisions').innerHTML = shown.map(d => {
     const ts = d.ts.startsWith(today) ? d.ts.slice(11) : d.ts.slice(5, 10) + ' ' + d.ts.slice(11);
     if (d.event === 'route') return `<div>${ts} <b>${esc(d.role)}</b> → ${d.cloud || String(d.node).startsWith('cloud:') ? '<span class="cloudc">☁ </span>' : ''}${esc(d.node)} · ${esc(d.model)} · tier ${d.tier} · ctx ${d.ctx ?? 'default'} · ${d.warm ? '<span class="ok">warm</span>' : t('kalt')}${d.canary ? ' · 🐤' : ''}${d.reason ? ' · <span class="muted">' + esc(d.reason) + '</span>' : ''}${d.skipped ? ` · <span class="warn">${t('{n} übersprungen', { n: d.skipped })}</span>` : ''}${d.client ? ' · 👥 ' + esc(d.client) : ''}${d.via && d.via !== 'ollama' ? ' · ' + esc(d.via) : ''}</div>`;
-    if (d.event === 'no_node') return `<div class="bad">${ts} <b>${esc(d.role)}</b> → ${t('kein Knoten verfügbar')}</div>`;
+    // gpu_busy (Spiel, fremdes VRAM) ist gewollt und vergeht von selbst -> gelb statt rot; Grund seit Router 0.3.4
+    if (d.event === 'no_node') return `<div class="${d.code === 'gpu_busy' ? 'warn' : 'bad'}">${ts} <b>${esc(d.role)}</b> → ${t('kein Knoten verfügbar')}${d.code ? ' · <b>' + esc(d.code) + '</b>' : ''}${d.detail ? ' · <span class="muted">' + esc(d.detail) + '</span>' : ''}</div>`;
     if (d.event === 'unsatisfiable') return `<div class="bad">${ts} <b>${esc(d.role)}</b> → ${t('keine Stufe kann')}: ${esc(d.reasons || '')}</div>`;
     if (d.event === 'breaker') return `<div class="${d.state === 'closed' ? 'ok' : 'bad'}">${ts} Breaker ${esc(d.node)} → ${esc(d.state)} ${esc(d.reason || '')}</div>`;
     if (d.event === 'agent_update') return `<div class="${d.state === 'failed' || d.state === 'stalled' ? 'bad' : d.state === 'done' ? 'ok' : 'warn'}">${ts} ${t('Agent-Update')} ${esc(d.node)} → ${esc(d.state)} ${esc(d.version || '')} ${esc(d.reason || '')}</div>`;

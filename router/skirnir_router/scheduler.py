@@ -210,3 +210,99 @@ def role_possible_when_free(role):
             if state.CFG.need_gib(t["model"], t["num_ctx"], n) <= n.vram_total_gib - state.CFG.reserve.get("free", 1.0):
                 return True
     return False
+
+
+# --- Warum kein Knoten: Grund-Codes fuer den Client ------------------------------------------------------------------
+# Der Router weiss, warum eine Anfrage keinen Knoten bekommt; der Client soll es nicht aus dem Fehlertext erraten.
+# Anlass 2026-09-29: ein Spiel belegte auf gpu-desktop 5 GiB, qwen3.6@131k passte nicht mehr ins Budget, der Agent-Client bekam nur
+# "no node available" und meldete "model provider failed". Mit Code und Retry-After kann ein Client warten und
+# ehrlich sagen, woran es liegt. Die Codes sind Drahtformat (503-Antwort, /v1/skirnir/availability).
+GPU_BUSY = "gpu_busy"                 # Knoten belegt (Spiel) oder fremdes VRAM nimmt den Platz: voruebergehend
+NODE_OFFLINE = "node_offline"
+NODE_DRAINING = "node_draining"       # Agent-Update laeuft
+NODE_FAILING = "node_failing"         # Breaker offen
+VRAM_FULL = "vram_full"               # Platz fehlt, ohne dass fremdes VRAM schuld ist (Nachlauf, Reserve)
+MODEL_TOO_LARGE = "model_too_large"   # passt auch auf die leere Karte nicht: Konfigurationsfehler, Warten hilft nicht
+MODEL_MISSING = "model_missing"       # kein Knoten hat das Modell
+ATTEMPT_FAILED = "attempt_failed"     # Knoten war Kandidat, der Versuch scheiterte (tried)
+NO_NODE = "no_node"
+
+# Wann ein Client es wieder versuchen soll (Retry-After). Ohne Eintrag: Warten hilft nicht.
+RETRY_AFTER_S = {GPU_BUSY: 30, NODE_DRAINING: 60, NODE_FAILING: 30, VRAM_FULL: 10, ATTEMPT_FAILED: 10, NODE_OFFLINE: 60}
+
+
+def _node_block(n, t, ctx, now):
+    """Grund-Code, warum Knoten `n` die Stufe `t` gerade nicht bedient - oder None (koennte bedienen)."""
+    if n.state == "offline":
+        return NODE_OFFLINE, {}
+    if now < n.draining_until:
+        return NODE_DRAINING, {}
+    if n.state == "busy" and not t["busy_ok"]:
+        return GPU_BUSY, {"busy_reason": n.busy_reason, "gpu_util": n.gpu_util,
+                          "foreign_vram_gib": round(n.foreign_vram_gib(), 2)}
+    if not n.breaker_would_allow(now):
+        return NODE_FAILING, {"breaker": n.breaker}
+    lc = n.loaded_context(t["model"])
+    if n.is_loaded(t["model"]) and (lc is None or lc >= ctx):
+        return None, {}
+    need, budget = state.CFG.need_gib(t["model"], ctx, n), n.budget_gib(now, t["model"])
+    if need <= budget:
+        return None, {}
+    foreign = n.foreign_vram_gib()
+    info = {"need_gib": round(need, 2), "budget_gib": round(budget, 2), "foreign_vram_gib": round(foreign, 2)}
+    if n.vram_total_gib and need > n.vram_total_gib - state.CFG.reserve.get("free", 1.0):
+        return MODEL_TOO_LARGE, info
+    if foreign > 0 and need <= budget + foreign:
+        return GPU_BUSY, dict(info, busy_reason="foreign_vram", gpu_util=n.gpu_util)
+    return VRAM_FULL, info
+
+
+def blockers(tiers, client_ctx, now, exclude=()):
+    """Je lokale Stufe x Knoten mit dem Modell: warum er nicht bedient. Reine Sicht (kein Breaker-Wechsel)."""
+    out = []
+    for i, t in enumerate(tiers):
+        if t.get("cloud"):
+            continue
+        ctx = min(client_ctx, t["num_ctx"]) if client_ctx else t["num_ctx"]
+        for n in state.NODES.values():
+            if t["model"] not in n.models:
+                continue
+            code, info = _node_block(n, t, ctx, now)
+            if code is None:
+                if n.name not in exclude:
+                    continue   # koennte bedienen (z. B. frei geworden): kein Hindernis
+                code = ATTEMPT_FAILED
+            out.append(dict({"tier": i, "model": t["model"], "num_ctx": ctx, "node": n.name, "code": code}, **info))
+    return out
+
+
+def unavailable(tiers, client_ctx, now, exclude=()):
+    """Gesamturteil fuer eine Anfrage ohne Knoten: {code, retry_after_s, blockers, detail}. gpu_busy geht vor, weil es
+    das einzige ist, das von selbst vergeht und das der Mensch am Rechner selbst aufheben kann."""
+    bl = blockers(tiers, client_ctx, now, exclude)
+    codes = [b["code"] for b in bl]
+    if not bl:
+        code = MODEL_MISSING if not any(t["model"] in n.models for t in tiers for n in state.NODES.values()) else NO_NODE
+    elif GPU_BUSY in codes:
+        code = GPU_BUSY
+    elif all(c == NODE_OFFLINE for c in codes):
+        code = NODE_OFFLINE
+    else:
+        code = next(c for c in (ATTEMPT_FAILED, NODE_DRAINING, NODE_FAILING, VRAM_FULL, MODEL_TOO_LARGE, NODE_OFFLINE)
+                    if c in codes)
+    return {"code": code, "retry_after_s": RETRY_AFTER_S.get(code), "blockers": bl, "detail": _detail(code, bl)}
+
+
+def _detail(code, bl):
+    """Kurzer Klartext zum Code (englisch wie alle API-Texte); die Zahlen stehen maschinenlesbar in `blockers`."""
+    b = next((x for x in bl if x["code"] == code), None)
+    if code == GPU_BUSY and b is not None:
+        if b.get("busy_reason") == "foreign_vram" and "need_gib" in b:
+            return (f"GPU busy on {b['node']}: another program uses {b['foreign_vram_gib']:.1f} GiB, "
+                    f"{b['model']} needs {b['need_gib']:.1f} GiB, {b['budget_gib']:.1f} GiB available")
+        return f"GPU busy on {b['node']} ({b.get('busy_reason') or 'busy'}, util {b.get('gpu_util')} %)"
+    if code == MODEL_MISSING:
+        return "no node has this model"
+    if b is not None:
+        return f"{code.replace('_', ' ')} on {b['node']}"
+    return code.replace("_", " ")

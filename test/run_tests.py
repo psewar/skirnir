@@ -259,6 +259,21 @@ def main():
         check("... und zwar auf big (small zu klein für 32k)", d["node"] == "big", d["node"])
         st, txt = chat("gross:latest")
         check("gross bei busy big ohne Fallback -> 503", st == 503, f"{st} {txt[:80]}")
+        # Router 0.3.4: der Client bekommt den Grund als Code + Retry-After, nicht nur "no node available"
+        e503 = json.loads(txt) if st == 503 else {}
+        check("... mit Grund-Code gpu_busy, Retry-After und Hindernis je Knoten", e503.get("code") == "gpu_busy"
+              and LAST_HEADERS.get("Retry-After") == "30" and any(b.get("node") == "big" for b in e503.get("blockers", [])),
+              f"{e503.get('code')} {LAST_HEADERS.get('Retry-After')} {str(e503.get('blockers'))[:120]}")
+        st, raw = http(R + "/v1/chat/completions", {"model": "gross:latest", "messages": [{"role": "user", "content": "hi"}]})
+        oe = json.loads(raw).get("error", {}) if st == 503 else {}
+        check("... OpenAI-Form: error.code gpu_busy, error.retry_after 30", oe.get("code") == "gpu_busy" and oe.get("retry_after") == 30,
+              f"{st} {raw[:160]!r}")
+        st, raw = http(R + "/v1/skirnir/availability/gross:latest")
+        av = json.loads(raw) if st == 200 else {}
+        check("Verfuegbarkeit gross bei busy big: available false, code gpu_busy", av.get("available") is False and av.get("code") == "gpu_busy",
+              f"{st} {raw[:160]!r}")
+        st, raw = http(R + "/v1/skirnir/availability/standard:latest")
+        check("Verfuegbarkeit standard (busy_ok-Stufe): available true", st == 200 and json.loads(raw).get("available") is True, f"{st} {raw[:160]!r}")
         ha = json.loads(http(C + "/admin/ha")[1])
         check("/admin/ha bei busy: gross ist 'limited_by_busy', KEIN Problem", ha["roles"]["gross"]["ready"] is False
               and ha["roles"]["gross"].get("limited_by_busy") is True and "gross" in ha["roles_limited"]

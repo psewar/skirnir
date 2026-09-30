@@ -92,6 +92,11 @@ def evaluate(node, now):
     """Zustandsautomat free <-> busy. Wird bei jedem Poll und jedem Heartbeat aufgerufen."""
     if node.state == "offline":
         return
+    # Waehrend einer Messung (perf.measure_model) ruht er: dort wird absichtlich entladen und geladen, und bis der
+    # Katalog echte Zahlen hat, erschiene Ollamas ungemeldeter Rest als fremdes VRAM - busy + unload_on_busy
+    # wuerden das Messobjekt mitten in der Messung entladen.
+    if any(m.get("node") == node.name for m in state.MEASURING.values()):
+        return
     gpu_known = node.gpu_known(now)
     # Auslastung allein reicht nicht: ein weiterer Ollama-Client (lokaler Worker, Agenten-Framework) belegt kein fremdes
     # VRAM und darf den Knoten nicht "busy" machen. Spiele/Encoder belegen immer Speicher.

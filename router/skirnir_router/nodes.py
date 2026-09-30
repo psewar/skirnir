@@ -165,8 +165,19 @@ class Node(Breaker):
         return self.hb_ts and (now - self.hb_ts) <= state.CFG.hb_stale_s
 
     def ollama_vram_gib(self):
-        """Was `/api/ps` gerade meldet. Fuer das VRAM-Budget: dort zaehlt, was wirklich belegt ist."""
-        return sum(self.loaded.values())
+        """Was Ollama gerade belegt: je geladenes Modell die gemessene echte Belegung bei seinem geladenen Kontext
+        (Katalog `real`, seit 0.3.5), sonst `/api/ps`. Fuer das VRAM-Budget: dort zaehlt, was beim Verdraengen
+        wirklich frei wird - mit der zu kleinen /api/ps-Zahl lehnte der Router einen Kontextwechsel desselben Modells
+        ab, der real passte."""
+        return self._loaded_real_gib()
+
+    def _loaded_real_gib(self):
+        total = 0.0
+        for name, ps_gib in self.loaded.items():
+            d = self.digest_of.get(name)
+            real = state.CFG.real_gib(name, self.loaded_ctx.get(d) if d is not None else None)
+            total += max(ps_gib, real) if real is not None else ps_gib
+        return total
 
     def ollama_vram_claimed_gib(self):
         """Was Ollama beansprucht, inklusive Nachlauf. `/api/ps` (Poll) und die belegte Gesamtmenge aus nvidia-smi
@@ -178,7 +189,7 @@ class Node(Breaker):
         claim = self.load_claim_gib(now)
         if now < self.vram_hold_until:
             claim = max(claim, self.vram_hold_gib)
-        return max(sum(self.loaded.values()), claim)
+        return max(self._loaded_real_gib(), claim)
 
     def hold_vram(self, now, gib):
         """Nachlauf setzen: bis `vram_settle_s` gilt mindestens `gib` als Ollama-Belegung."""
@@ -194,7 +205,8 @@ class Node(Breaker):
         denn genau der langsame Kaltstart ist der gefaehrliche Fall); `finish_load` beendet ihn mit kurzem Nachlauf,
         die Frist faengt einen verlorenen Abschluss ab.
 
-        Erwartet wird, was `/api/ps` nachher als `size_vram` meldet, also `need_gib` OHNE den Fit-Zuschlag - und
+        Erwartet wird die Belegung nach dem Laden, also `need_gib` OHNE den Fit-Zuschlag (seit 0.3.5 bei gemessenen
+        Modellen die echte nvidia-smi-Belegung, sonst was `/api/ps` meldet) - und
         NICHT die aktuelle Belegung plus die neue: Ollama verdraengt beim Laden, die Summe waere fast doppelt so
         hoch wie die Wirklichkeit und wuerde die busy-Erkennung fuer die Dauer des Anspruchs aushebeln. Haelt Ollama
         daneben noch ein anderes Modell, deckt `max(...)` mit der `/api/ps`-Summe das ab."""
@@ -213,8 +225,9 @@ class Node(Breaker):
         return max((gib for gib, deadline in self.loading.values() if now < deadline), default=0.0)
 
     def note_loaded_changed(self, now):
-        """Nach jedem Poll aufrufen: schrumpft die Ollama-Belegung, beginnt der Nachlauf."""
-        cur = sum(self.loaded.values())
+        """Nach jedem Poll aufrufen: schrumpft die Ollama-Belegung, beginnt der Nachlauf (mit der echten Belegung,
+        sonst endete der Nachlauf bei der /api/ps-Zahl und der Rest erschiene kurz als fremdes VRAM)."""
+        cur = self._loaded_real_gib()
         if cur < self.vram_last_gib - 0.05:
             self.hold_vram(now, self.vram_last_gib)
         self.vram_last_gib = cur

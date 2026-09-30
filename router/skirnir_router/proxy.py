@@ -26,9 +26,10 @@ CLIENT_FAULT_STATUSES = (400, 404, 413, 422)     # Cloud-Fehler, die ein anderer
 class _Reject(Exception):
     """Anfrage wird mit HTTP-Status und Klartext abgewiesen (im Format des Clients, siehe `err` in _route)."""
 
-    def __init__(self, status, msg):
+    def __init__(self, status, msg, why=None):
         super().__init__(msg)
         self.status, self.msg = status, msg
+        self.why = why   # scheduler.unavailable(): Grund-Code, Retry-After, Hindernisse je Knoten - fuer den Client
 
 
 def _is_role(role):
@@ -75,7 +76,7 @@ async def _route(request, path, body, shape, err):
         try:
             tier_idx, tier, ctx, node = await acquire.next_candidate()
         except _Reject as e:
-            return err(e.status, e.msg)
+            return err(e.status, e.msg, e.why)
         result = await dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape, req)
         if result is not None:
             if _is_role(role):
@@ -246,8 +247,10 @@ class _Acquire:
         """Kandidaten erschoepft -> einmal Weckversuch, danach 503."""
         node = None if self.woke else scheduler.wakeable_for(self.tiers)
         if node is None:
-            state.remember({"event": "no_node", "role": self.role["name"], "tried": sorted(self.tried)})
-            raise _Reject(503, f"no node available for model '{self.name}'")
+            why = scheduler.unavailable(self.tiers, self.client_ctx, time.time(), self.tried)
+            state.remember({"event": "no_node", "role": self.role["name"], "tried": sorted(self.tried),
+                            "code": why["code"], "detail": why["detail"], "blockers": why["blockers"]})
+            raise _Reject(503, f"no node available for model '{self.name}': {why['detail']}", why)
         self.woke = True
         if not await wol.wake(node):
             raise _Reject(503, f"no node available for model '{self.name}' (wake of {node.name} failed)")
@@ -670,6 +673,31 @@ async def handle_ps(request):
 
 async def handle_version(request):
     return web.json_response({"version": f"0.11.0-router{VERSION}"})
+
+
+async def handle_availability(request):
+    """GET /v1/skirnir/availability/{model}: bekaeme eine Anfrage jetzt einen Knoten? Reine Sicht, laedt nichts, weckt
+    nichts. Fuer Clients, die nach einem gpu_busy warten und wissen wollen, wann es weitergeht (z. B. ein Agent-Plugin,
+    gpu-warten), statt dafuer Probe-Anfragen zu schicken. Kontext wie ohne num_ctx: die volle Stufe."""
+    name = request.match_info["model"]
+    if ":" not in name and name not in state.CFG.roles and f"{name}:latest" in state.CFG.roles:
+        name = f"{name}:latest"
+    role, tiers = scheduler.resolve_tiers(name, {})
+    if role is None:
+        return ollama_error(404, f"model '{name}' not found")
+    denied = auth.client_allows(request, role, concrete=not _is_role(role))
+    if denied:
+        return ollama_error(403, denied)
+    now = time.time()
+    pick = scheduler.choose(role, tiers, None, now, mutate=False)
+    if pick is not None:
+        _i, tier, ctx, node = pick
+        return web.json_response({"model": name, "available": True, "node": node.name, "served_by": tier["model"],
+                                  "num_ctx": ctx, "warm": node.is_loaded(tier["model"])})
+    why = scheduler.unavailable(tiers, None, now)
+    return web.json_response({"model": name, "available": False, "code": why["code"], "detail": why["detail"],
+                              "retry_after_s": why["retry_after_s"], "blockers": why["blockers"],
+                              "wakeable": scheduler.wakeable_for(tiers) is not None})
 
 
 async def handle_forbidden(request):

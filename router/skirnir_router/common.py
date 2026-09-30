@@ -7,7 +7,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.3.3"
+VERSION = "0.3.5"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -55,8 +55,19 @@ INFER_PATHS = {"/api/chat", "/api/generate", "/api/embed", "/api/embeddings"}
 FORBIDDEN_PATHS = {"/api/pull", "/api/push", "/api/create", "/api/copy", "/api/delete"}
 
 
-def ollama_error(status, msg):
-    return web.json_response({"error": msg}, status=status)
+def _why_headers(why):
+    """Retry-After nur, wenn Warten hilft (scheduler.RETRY_AFTER_S) - OpenAI-Clients (z. B. Hermes Agent) richten ihr Backoff danach."""
+    if why and why.get("retry_after_s"):
+        return {"Retry-After": str(int(why["retry_after_s"]))}
+    return None
+
+
+def ollama_error(status, msg, why=None):
+    """`why` (scheduler.unavailable) legt Grund-Code und Hindernisse maschinenlesbar neben den Klartext."""
+    body = {"error": msg}
+    if why:
+        body.update(code=why["code"], retry_after=why.get("retry_after_s"), blockers=why["blockers"])
+    return web.json_response(body, status=status, headers=_why_headers(why))
 
 
 async def read_json(request):
@@ -75,9 +86,14 @@ def safe_node_name(name):
 # Node-RED-MCP (llm-call, ai-agent) und andere OpenAI-Clients. Der Router uebersetzt selbst nach /api/chat und zurueck,
 # damit Rollen, num_ctx pro Tier, keep_alive, Tempo-Statistik und "warm zuerst" genauso gelten wie fuer Ollama-Clients.
 # Ollamas eigenes /v1 wuerde das Modell ohne num_ctx mit OLLAMA_CONTEXT_LENGTH neu laden (HA-Modell weg, 15-20 s).
-def openai_error(status, msg):
-    return web.json_response({"error": {"message": msg, "type": "invalid_request_error" if status < 500 else "api_error",
-                                        "param": None, "code": None}}, status=status)
+def openai_error(status, msg, why=None):
+    """OpenAI-Form: der Grund-Code steht in error.code (wertet z. B. die Fehlerklassifikation von Hermes Agent aus), die Wartezeit in
+    error.retry_after und im Header Retry-After, die Hindernisse je Knoten in error.skirnir.blockers."""
+    e = {"message": msg, "type": "invalid_request_error" if status < 500 else "api_error", "param": None,
+         "code": why["code"] if why else None}
+    if why:
+        e.update(retry_after=why.get("retry_after_s"), skirnir={"blockers": why["blockers"]})
+    return web.json_response({"error": e}, status=status, headers=_why_headers(why))
 
 
 def split_listen(s):

@@ -286,7 +286,17 @@ def _merge_overrides(current, ov):
     """Neue Abschnitte in die bestehenden Overrides einarbeiten: Katalog und Clients ergaenzen, Settings mit null loeschen,
     Loeschlisten anwenden. ValueError = 400 (Modell noch in Rollen, Client aus config.yaml)."""
     if "models" in ov:
-        ov["models"] = {**current.get("models", {}), **ov["models"]}
+        cur_models = current.get("models", {})
+        merged = dict(cur_models)
+        for m, e in ov["models"].items():
+            alt = cur_models.get(m) or {}
+            # Die UI schickt nur Gewichte + KV. Sind sie unveraendert, bleibt der gemessene Eintrag samt real /
+            # vram_real_gib (0.3.5) stehen - sonst verloere jedes Speichern im Katalog-Tab die echte Messung.
+            if (alt.get("real") and not e.get("cloud") and alt.get("weights_gib") == e.get("weights_gib")
+                    and alt.get("kv_gib_per_1k") == e.get("kv_gib_per_1k")):
+                continue
+            merged[m] = e
+        ov["models"] = merged
     if "settings" in ov:
         merged = dict(current.get("settings") or {})
         for k, v in ov["settings"].items():

@@ -193,42 +193,141 @@ async def handle_bench(request):
     return web.json_response({"started": True, "node": node.name, "model": model})
 
 
-async def measure_model(model, node):
-    """Modell bei num_ctx 8192 und 32768 laden, /api/ps auslesen -> weights_gib + kv_gib_per_1k, in roles.yaml speichern.
-    Laeuft nur auf einem freien Knoten ohne laufende Anfragen; verdraengt dabei ggf. warme Modelle (danach prewarm)."""
-    state.MEASURING[model] = {"node": node.name, "step": "start", "started": time.time(), "error": None}
-    node.inflight += 1          # kein busy-Fehlalarm durch unsere eigene GPU-Last, Router waehlt den Knoten nicht fuer anderes
+MEASURE_CTX_FIX = (8192, 32768)   # dazu jeder Kontext, mit dem eine Rolle das Modell laedt
+
+
+def measure_ctxs(model):
+    """Messpunkte: die festen Kontexte plus jeder, mit dem eine Stufe das Modell laedt - gemessen wird dort, wo es
+    laeuft, statt von 32k auf 196k hochzurechnen."""
+    tiers = {int(t["num_ctx"]) for r in state.CFG.roles.values() for t in r["tiers"] if t["model"] == model and not t.get("cloud")}
+    return sorted(set(MEASURE_CTX_FIX) | tiers)
+
+
+def fit_linear(points):
+    """(ctx, gib)-Punkte -> (weights_gib, kv_gib_per_1k) als Ausgleichsgerade; kv nie negativ (Messrauschen)."""
+    xs, ys = [p[0] / 1000.0 for p in points], [p[1] for p in points]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    var = sum((x - mx) ** 2 for x in xs)
+    kv = max(0.0, sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True)) / var) if var > 0 else 0.0
+    return max(0.1, my - kv * mx), kv
+
+
+async def _ps_models(node):
+    async with nodes.nreq(node, "get", "/api/ps", timeout=ClientTimeout(total=10)) as r:
+        return (await r.json()).get("models", [])
+
+
+async def _ps_entry(node, model):
+    want = node.digest_of.get(model)
+    return next((m for m in await _ps_models(node) if m.get("name") == model or (want and m.get("digest") == want)), None)
+
+
+async def _load(node, model, ctx):
+    node.announce_load(model, ctx)
+    body = {"model": model, "keep_alive": "2m", "options": {"num_ctx": ctx}}
+    async with nodes.nreq(node, "post", "/api/generate", json=body, timeout=ClientTimeout(total=900)) as r:
+        if r.status >= 400:
+            raise RuntimeError(f"Ollama {r.status}: {(await r.text())[:200]}")
+    entry = await _ps_entry(node, model)
+    if not entry:
+        raise RuntimeError(f"Modell nach dem Laden nicht in /api/ps (ctx {ctx})")
+    return entry
+
+
+async def _unload_all(node):
+    """Alles entladen und warten, bis /api/ps leer ist - sonst misst der Zuwachs ein anderes Modell mit."""
+    for m in await _ps_models(node):
+        async with nodes.nreq(node, "post", "/api/generate", json={"model": m.get("name"), "keep_alive": 0},
+                              timeout=ClientTimeout(total=60)) as r:
+            await r.read()
+    for _ in range(60):
+        if not await _ps_models(node):
+            return
+        await asyncio.sleep(1)
+    raise RuntimeError("Ollama entlaedt nicht (nach 60 s noch Modelle in /api/ps)")
+
+
+async def _stable_used(node, after, timeout=90):
+    """Belegung laut nvidia-smi (Heartbeat), sobald sie steht: zwei Heartbeats nach `after`, < 0,1 GiB auseinander."""
+    last, last_ts = None, after
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        await asyncio.sleep(0.5)
+        if node.hb_ts and node.hb_ts > last_ts and node.vram_used_gib is not None:
+            if last is not None and abs(node.vram_used_gib - last) < 0.1:
+                return node.vram_used_gib
+            last, last_ts = node.vram_used_gib, node.hb_ts
+    raise RuntimeError("VRAM-Belegung kam nicht zur Ruhe (Heartbeats)")
+
+
+async def _measure_real(model, node):
+    """Seit 0.3.5: je Kontext alles entladen, Grundlast ablesen, laden, Zuwachs laut nvidia-smi = echte Belegung.
+    /api/ps meldet nur einen Teil (qwen3.6:35b-a3b 21,0 statt 26,4 GiB bei 196k, laguna-xs-2.1 19,2 statt 29,7 GiB bei
+    131k - gemessen 2026-09-30); mit diesen Zahlen verrechnete sich der Router bei Budget, fremdem VRAM und Grundlast.
+    Liefert {ctx: (belegt, ps_size_vram, ps_size)}."""
     res = {}
+    for ctx in measure_ctxs(model):
+        state.MEASURING[model]["step"] = f"entlade fuer @{ctx}"
+        await _unload_all(node)
+        await asyncio.sleep(state.CFG.vram_settle_s)
+        leer = await _stable_used(node, time.time())
+        state.MEASURING[model]["step"] = f"lade @{ctx}"
+        entry = await _load(node, model, ctx)
+        voll = await _stable_used(node, time.time())
+        res[ctx] = (voll - leer, entry.get("size_vram", 0) / GIB, entry.get("size", 0) / GIB)
+    return res
+
+
+async def _measure_ps(model, node):
+    """Rueckfall ohne GPU-Werte im Heartbeat (bis 0.3.4 der einzige Weg): /api/ps bei 8k und 32k."""
+    res = {}
+    for ctx in MEASURE_CTX_FIX:
+        state.MEASURING[model]["step"] = f"lade @{ctx}"
+        entry = await _load(node, model, ctx)
+        res[ctx] = (entry.get("size_vram", 0) / GIB, entry.get("size_vram", 0) / GIB, entry.get("size", 0) / GIB)
+    return res
+
+
+def catalog_entry(res, node_name, real):
+    """Messergebnis {ctx: (belegt, ps_vram, ps_size)} -> Katalog-Eintrag. Punkte mit Teil-Auslagerung in den RAM zaehlen
+    nicht fuer die Gerade (dort misst nvidia-smi zu wenig), bleiben aber als partial_offload sichtbar."""
+    partial = sorted(ctx for ctx, (_b, sv, st) in res.items() if sv + 0.05 < st)
+    points = [(ctx, v[0]) for ctx, v in res.items() if ctx not in partial] or [(ctx, v[0]) for ctx, v in res.items()]
+    weights, kv = fit_linear(points)
+    e = {"weights_gib": round(weights, 2), "kv_gib_per_1k": round(kv, 4),
+         "source": "gemessen (nvidia-smi)" if real else "gemessen", "measured_at": time.strftime("%Y-%m-%d %H:%M"),
+         "measured_on": node_name}
+    if real:
+        e.update(real=True, vram_real_gib={str(c): round(v[0], 2) for c, v in sorted(res.items())},
+                 vram_ps_gib={str(c): round(v[1], 2) for c, v in sorted(res.items())})
+    else:
+        e.update(vram_gib_8k=round(res[8192][1], 2), vram_gib_32k=round(res[32768][1], 2))
+    if partial:
+        e["partial_offload"] = partial
+    return e
+
+
+async def measure_model(model, node):
+    """Modell vermessen und den Katalog-Eintrag in roles.yaml schreiben. Mit GPU-Werten im Heartbeat (Agent) echt per
+    nvidia-smi bei jedem genutzten Kontext, sonst wie bis 0.3.4 per /api/ps. Laeuft nur auf einem freien Knoten ohne
+    laufende Anfragen; entlaedt dabei alle Modelle (danach prewarm), der Zustandsautomat ruht so lange (poll.evaluate)."""
+    state.MEASURING[model] = {"node": node.name, "step": "start", "started": time.time(), "error": None}
+    node.inflight += 1          # Router waehlt den Knoten nicht fuer anderes
     try:
-        for ctx in (8192, 32768):
-            state.MEASURING[model]["step"] = f"lade @{ctx}"
-            node.announce_load(model, ctx)
-            body = {"model": model, "keep_alive": "2m", "options": {"num_ctx": ctx}}
-            async with nodes.nreq(node, "post", "/api/generate", json=body, timeout=ClientTimeout(total=900)) as r:
-                if r.status >= 400:
-                    raise RuntimeError(f"Ollama {r.status}: {(await r.text())[:200]}")
-            async with nodes.nreq(node, "get", "/api/ps", timeout=ClientTimeout(total=10)) as r:
-                ps = await r.json()
-            want = node.digest_of.get(model)
-            entry = next((m for m in ps.get("models", []) if m.get("name") == model or (want and m.get("digest") == want)), None)
-            if not entry:
-                raise RuntimeError(f"Modell nach dem Laden nicht in /api/ps (ctx {ctx})")
-            res[ctx] = (entry.get("size_vram", 0) / GIB, entry.get("size", 0) / GIB, entry.get("context_length"))
-        a, b = res[8192][0], res[32768][0]
-        kv = max(0.0, (b - a) / 24.0)
-        weights = max(0.1, a - kv * 8.0)
-        partial = any(sv + 0.05 < st for sv, st, _ in res.values())
+        real = bool(node.gpu_known(time.time()) and node.vram_used_gib is not None)
+        res = await (_measure_real(model, node) if real else _measure_ps(model, node))
+        e = catalog_entry(res, node.name, real)
         ov = config.read_overrides()
         models = dict(ov.get("models", {}))
-        models[model] = {"weights_gib": round(weights, 2), "kv_gib_per_1k": round(kv, 4), "source": "gemessen",
-                         "measured_at": time.strftime("%Y-%m-%d %H:%M"), "measured_on": node.name,
-                         "vram_gib_8k": round(a, 2), "vram_gib_32k": round(b, 2),
-                         **({"partial_offload": True} if partial else {})}
+        models[model] = e
         ov["models"] = models
         config.write_overrides(ov)
-        log.info("measured %s on %s: weights %.2f GiB, kv %.4f GiB/1k (8k=%.2f, 32k=%.2f%s)", model, node.name, weights, kv, a, b,
-                 ", PARTIAL OFFLOAD" if partial else "")
-        state.remember({"event": "measure", "node": node.name, "model": model, "weights_gib": round(weights, 2), "kv_gib_per_1k": round(kv, 4)})
+        teil = f", PARTIAL OFFLOAD bei {e['partial_offload']}" if e.get("partial_offload") else ""
+        log.info("measured %s on %s (%s): weights %.2f GiB, kv %.4f GiB/1k, Punkte %s%s", model, node.name,
+                 "nvidia-smi" if real else "/api/ps", e["weights_gib"], e["kv_gib_per_1k"],
+                 {c: round(v[0], 2) for c, v in sorted(res.items())}, teil)
+        state.remember({"event": "measure", "node": node.name, "model": model, "weights_gib": e["weights_gib"],
+                        "kv_gib_per_1k": e["kv_gib_per_1k"], "real": real})
         state.MEASURING[model]["step"] = "fertig"
     except Exception as e:  # noqa: BLE001
         log.warning("measure %s on %s failed: %s", model, node.name, e)

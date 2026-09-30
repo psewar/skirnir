@@ -22,6 +22,7 @@ def build_apps():
     api.router.add_post("/api/show", proxy.handle_show)
     api.router.add_get("/api/ps", proxy.handle_ps)
     api.router.add_get("/api/version", proxy.handle_version)
+    api.router.add_get("/v1/skirnir/availability/{model}", proxy.handle_availability)   # vor dem /v1-Fangnetz registrieren
     for p in INFER_PATHS:
         api.router.add_post(p, proxy.handle_infer)
     for p in FORBIDDEN_PATHS:
