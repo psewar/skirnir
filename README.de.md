@@ -60,9 +60,12 @@ Stabilitätszusagen; diese README gibt es auf Englisch und Deutsch, die Unter-RE
    └────────────────────────────┘         └──────────────────────┘
 ```
 
-Der Router pollt jeden Knoten alle 5 s (`/api/tags`, `/api/ps`), der Agent meldet alle 2 s GPU-Auslastung und VRAM. Aus beidem
-entsteht je Knoten der Zustand `offline` / `free` / `busy`. Alle Ollama-Aufrufe des Routers laufen durch den Tunnel des Agenten;
-Ollama selbst bleibt auf `localhost`.
+Der Agent meldet den Zustand seines Knotens selbst. Alle 2 s schickt er GPU-Auslastung, VRAM und Sensoren (Heartbeat). Seit
+Agent 0.14.0 beobachtet er ausserdem sein lokales Ollama und meldet installierte Modelle (`/api/tags`), geladene Modelle
+(`/api/ps`) und ob Ollama überhaupt antwortet, sofort bei jeder Änderung und spätestens alle 30 s vollständig. Aus beidem
+entsteht je Knoten der Zustand `offline` / `free` / `busy`. Nur bei Knoten, deren Agent den Ollama-Zustand nicht meldet (ältere
+Agenten, statische Knoten ohne Agent), fragt der Router Ollama weiterhin selbst alle 5 s ab. Alle Ollama-Aufrufe des Routers
+laufen durch den Tunnel des Agenten; Ollama selbst bleibt auf `localhost`.
 
 ## Schnittstellen
 

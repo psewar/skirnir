@@ -298,6 +298,7 @@ async def handle_tunnel_v2(request):
         node = tun.node
         if node is not None and node.tunnel is tun:
             node.tunnel = None
+            node.ollama_push_ts = 0.0   # ohne Tunnel keine Meldungen; nach dem Neuverbinden bis zur ersten Meldung wieder Poll
             log.warning("node %s: Tunnel getrennt", node.name)
             state.remember({"event": "tunnel", "node": node.name, "state": "down"})
             if not node.url and node.state != "offline":

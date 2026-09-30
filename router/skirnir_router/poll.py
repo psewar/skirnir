@@ -23,8 +23,18 @@ async def poll_node(node):
         return
     node.misses = 0
     node.polled_ok = time.time()
-    node.models = {m["name"] for m in tags.get("models", [])}
-    node.model_details = {m["name"]: m for m in tags.get("models", [])}
+    apply_ollama_state(node, tags.get("models", []), ps.get("models", []), time.time())
+    if time.time() - node.version_ts > 300:   # beim Push kommt die Version mit dem Heartbeat
+        node.version_ts = time.time()
+        state.spawn(fetch_version(node))
+
+
+def apply_ollama_state(node, tag_models, ps_models, now):
+    """Ollama-Zustand eines Knotens uebernehmen: installierte (/api/tags) und geladene Modelle (/api/ps), Wechsel offline ->
+    free, Faehigkeiten nachladen, Zustandsautomat. Gemeinsam fuer den Poll des Routers und die Meldung des Agenten
+    (Rahmen OLLAMA, apply_ollama_push)."""
+    node.models = {m["name"] for m in tag_models}
+    node.model_details = {m["name"]: m for m in tag_models}
     if node.models:
         node.last_known_models = set(node.models)
         # ins Register, sonst weiss der Router nach einem Neustart bei schlafendem Knoten nicht, was der kann - und
@@ -32,11 +42,11 @@ async def poll_node(node):
         if node.reg is not None and node.reg.get("models") != sorted(node.models):
             node.reg["models"] = sorted(node.models)
             state.REG.dirty = True
-    node.digest_of = {m["name"]: m.get("digest") for m in tags.get("models", [])}
-    node.loaded = {m["name"]: m.get("size_vram", 0) / GIB for m in ps.get("models", [])}
+    node.digest_of = {m["name"]: m.get("digest") for m in tag_models}
+    node.loaded = {m["name"]: m.get("size_vram", 0) / GIB for m in ps_models}
     node.loaded_digest = {}
     node.loaded_ctx = {}
-    for m in ps.get("models", []):
+    for m in ps_models:
         d = m.get("digest") or node.digest_of.get(m["name"])
         if d:
             node.loaded_digest[d] = m.get("size_vram", 0) / GIB
@@ -44,23 +54,24 @@ async def poll_node(node):
                 node.loaded_ctx[d] = int(m["context_length"])
     if node.state == "offline":
         log.info("node %s -> free (online)", node.name)
-        node.state = "free"
+        node.state, node.free_at = "free", now
         node.breaker_reset()   # Stufe 3: alte Fehler eines abgestuerzten Knotens zaehlen nach dem Neustart nicht mehr
         state.MQTT_DIRTY.append(True)
         if state.CFG.prewarm_on_online:
-            state.spawn(prewarm(node, state.CFG.prewarm_online_delay, "online"))
+            state.spawn(prewarm(node, state.CFG.prewarm_online_delay, "online", since=node.free_at))
     for m in node.models:
         if m not in state.CAPS:
             state.CAPS[m] = None   # in Arbeit, kein Doppel-Fetch
             state.spawn(fetch_caps(node, m))
-    if time.time() - node.version_ts > 300:
-        node.version_ts = time.time()
-        state.spawn(fetch_version(node))
-    now = time.time()
     node.note_loaded_changed(now)
     evaluate(node, now)
-    # Sicherheitsnetz: ein grosses Modell, das trotz busy geladen ist (Race mit einem laufenden Load oder
-    # keep_alive -1 einer Anfrage, die vor dem busy startete), wird nachtraeglich entladen.
+    busy_unload_check(node, now)
+
+
+def busy_unload_check(node, now):
+    """Sicherheitsnetz: ein grosses Modell, das trotz busy geladen ist (Race mit einem laufenden Load oder keep_alive -1 einer
+    Anfrage, die vor dem busy startete), wird nachtraeglich entladen. Zeitgesteuert (unload_on_busy_interval_s), darum auch aus
+    tick_loop jede Sekunde - lief bis 0.3.8 nach jedem Poll; mit dem Ollama-Push kaemen Daten nur noch bei einer Aenderung."""
     if node.state == "busy" and state.CFG.unload_on_busy and now - node.last_busy_unload >= state.CFG.unload_on_busy_interval_s:
         big = [m for m, gib in node.loaded.items() if gib >= 0.5 and not any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models)]
         if big:
@@ -129,8 +140,9 @@ def evaluate(node, now):
             node.state, node.calm_since, node.busy_reason = "free", None, ""
             log.info("node %s -> free (calm)", node.name)
             state.remember({"event": "free", "node": node.name})
+            node.free_at = now
             if state.CFG.prewarm_on_free:
-                state.spawn(prewarm(node, state.CFG.prewarm_free_delay, "free"))
+                state.spawn(prewarm(node, state.CFG.prewarm_free_delay, "free", since=node.free_at))
 
 
 async def unload_big_models(node):
@@ -150,11 +162,16 @@ async def unload_big_models(node):
             log.warning("unload %s on %s failed: %s", m, node.name, e)
 
 
-async def prewarm(node, delay, reason):
+async def prewarm(node, delay, reason, since=None):
     """Rang-1-Modelle der Rollen (in Konfig-Reihenfolge) auf dem Knoten vorladen, soweit sie zusammen ins Budget passen.
-    Ohne das wuerde 'warm zuerst' nach einer Spielphase dauerhaft beim kleinen busy_ok-Modell bleiben."""
+    Ohne das wuerde 'warm zuerst' nach einer Spielphase dauerhaft beim kleinen busy_ok-Modell bleiben.
+    `since` = der Wechsel auf free, fuer den dieses Vorwaermen geplant wurde. Kam seither ein neuer Wechsel (dazwischen busy
+    oder offline), plant der sein eigenes; dieses entfaellt. Vorher feuerte ein altes Vorwaermen kurz nach dem naechsten free."""
     if delay:
         await asyncio.sleep(delay)
+    if since is not None and (node.free_at != since or node.state != "free"):
+        log.info("prewarm on %s entfaellt (%s): Zustand hat seit dem Planen gewechselt", node.name, reason)
+        return
     # Erst den Heartbeat urteilen lassen. Ein frisch (neu) gestarteter Router haelt jeden erreichbaren Knoten zunaechst
     # fuer free; am 2026-09-06 lud er so qwen3.6 in ein von einem Spiel belegtes VRAM (Ueberlauf in den Shared Memory,
     # Spiel ruckelte). Warten, bis GPU-Daten da sind und kein fremdes VRAM anliegt; ohne Agent nach dem Haltefenster weiter.
@@ -210,9 +227,36 @@ async def prewarm(node, delay, reason):
         await unload_big_models(node)
 
 
+def _named(models):
+    """Eintraege aus einer Agenten-Meldung, die wie Ollamas eigene aussehen (dict mit Namen); alles andere faellt weg."""
+    return [m for m in models if isinstance(m, dict) and isinstance(m.get("name"), str)]
+
+
+def apply_ollama_push(node, msg, now):
+    """Ollama-Zustand vom Agenten (Agent >= 0.14.0, Rahmen OLLAMA): bei jeder Aenderung sofort und spaetestens alle 30 s.
+    Solange die Meldung frisch ist, pollt der Router diesen Knoten nicht. `up: false` ist die ausdrueckliche Meldung des
+    Agenten, dass sein Ollama nicht antwortet - der Router muss das nicht mehr aus fehlgeschlagenen Abfragen erschliessen."""
+    if not isinstance(msg, dict) or not isinstance(msg.get("up"), bool):
+        log.warning("node %s: Ollama-Zustand vom Agenten ohne 'up' - verworfen", node.name)
+        return
+    if msg["up"] and not (isinstance(msg.get("tags"), list) and isinstance(msg.get("ps"), list)):
+        log.warning("node %s: Ollama-Zustand vom Agenten ohne tags/ps - verworfen", node.name)
+        return
+    node.ollama_push_ts = now
+    if not msg["up"]:
+        node.ollama_push_error = str(msg.get("error") or "?")[:200]
+        if node.state != "offline":
+            node.go_offline(f"Ollama antwortet nicht laut Agent: {node.ollama_push_error}")
+        return
+    node.ollama_push_error = None
+    apply_ollama_state(node, _named(msg["tags"]), _named(msg["ps"]), now)
+
+
 async def poll_loop():
     while True:
-        await asyncio.gather(*(poll_node(n) for n in state.NODES.values()), return_exceptions=True)
+        now = time.time()
+        # Knoten, deren Agent den Ollama-Zustand frisch meldet, nicht abfragen; aeltere Agenten und statische Knoten weiter
+        await asyncio.gather(*(poll_node(n) for n in state.NODES.values() if not n.ollama_push_active(now)), return_exceptions=True)
         await asyncio.sleep(state.CFG.poll_s)
 
 
@@ -267,6 +311,7 @@ async def tick_loop():
         for n in state.NODES.values():
             evaluate(n, now)
             residency_check(n, now)
+            busy_unload_check(n, now)
         if state.PERF_DIRTY[0] and now - state.PERF_DIRTY[0] >= 10:
             state.PERF_DIRTY[0] = 0.0
             await asyncio.to_thread(perf.perf_save)   # Dateischreiben nicht im Event-Loop
@@ -358,6 +403,6 @@ def apply_heartbeat(node, b, now):
     # fuer immer busy und koennte nie lernen, dass das sein Normalzustand ist.
     if (node.vram_used_gib is not None and node.ollama_vram_claimed_gib() < 0.5 and node.inflight == 0
             and node.gpu_util is not None and node.gpu_util < node.busy_util_threshold()
-            and now - node.polled_ok < 2 * state.CFG.poll_s + 1):   # nur mit frischem /api/ps-Wissen (sonst zaehlt ein geladenes Modell als Desktop)
+            and node.ps_fresh(now)):   # nur mit frischem /api/ps-Wissen (sonst zaehlt ein geladenes Modell als Desktop)
         node.learn_baseline(now, node.vram_used_gib - node.children_vram_gib)   # die Kinder zieht foreign_vram_gib schon ab
     evaluate(node, now)

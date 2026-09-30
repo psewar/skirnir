@@ -162,6 +162,11 @@ def main():
         logs["agent-big"].seek(0); alog = logs["agent-big"].read()
         check("Agent hat Freigabe + Konfigurationspaket erhalten", '"status": "approved"' in alog and '"heartbeat_interval_s"' in alog, alog[-200:])
         check("Heartbeat durch den Tunnel beantwortet", '"hback"' in alog, alog[-160:])
+        for _ in range(20):
+            if state()["nodes"]["big"].get("ollama_source") == "push": break
+            time.sleep(0.5)
+        check("Ollama-Zustand von big kommt per Push vom Agenten, der Router pollt big nicht (Agent 0.14.0)",
+              state()["nodes"]["big"].get("ollama_source") == "push" and "qwen3-coder:30b" in (regbig.get("models") or []), str(state()["nodes"]["big"].get("ollama_source")))
 
         st, raw = http(R + "/api/tags")
         names = [m["name"] for m in json.loads(raw)["models"]]
@@ -186,7 +191,9 @@ def main():
         j = json.loads(txt)
         check("non-stream + Name ohne Tag; ctx nach unten begrenzt", st == 200 and j["model"] == "standard:latest", txt[:100])
         d = route()
-        check("ctx = min(client 8192, tier 65536)", d["ctx"] == 8192, str(d["ctx"]))
+        # seit Router 0.3.7: qwen ist mit 65536 geladen (<= Stufe) -> die Rolle bekommt den geladenen Kontext statt eines Reloads
+        # auf 8192 (qwen3.8 teilt den Runner nicht ueber verschiedene num_ctx; proxy._backend_body, selftest_kontext_teilen.py)
+        check("Rolle mit kleinerem num_ctx nimmt den geladenen Kontext (65536 <= Stufe, kein Reload)", d["ctx"] == 65536, str(d["ctx"]))
 
         time.sleep(1.5)  # Poll holt /api/ps -> qwen geladen
         hb("big", 2, 26600, 6000)   # 5.9 GiB frei: qwen (21.4) passt nur, weil geladenes Ollama-VRAM (20.6) verdrängbar zählt
@@ -194,8 +201,8 @@ def main():
         d = route()
         check("Alias (gleicher Digest) als konkretes Modell -> warm auf big", st == 200 and d["node"] == "big" and d["warm"] is True, str(d))
         logs["big"].seek(0); sent = last_route(logs["big"].read())[-1]
-        # zuletzt wurde qwen mit num_ctx 8192 (non-stream-Test) geladen -> Alias-Request muss 8192 senden, nicht Ollama-Default
-        check("Alias ohne num_ctx uebernimmt geladenen Kontext (8192, kein Reload)", sent["num_ctx"] == 8192, str(sent))
+        # qwen ist weiter mit 65536 geladen (die 8192-Anfrage oben hat ihn mitbenutzt) -> Alias-Request sendet 65536, nicht den Ollama-Default
+        check("Alias ohne num_ctx uebernimmt geladenen Kontext (65536, kein Reload)", sent["num_ctx"] == 65536, str(sent))
         # Fremd-VRAM-Transiente (Modellwechsel): ein einzelner Ausreisser darf nicht busy machen
         hb("big", 5, 30000, 2600); time.sleep(0.6); hb("big", 5, 26600, 6000)
         check("einzelner Fremd-VRAM-Ausreisser bleibt free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["busy_reason"])
@@ -966,6 +973,7 @@ def main():
             if state()["nodes"]["big"]["state"] == "free": break
             time.sleep(0.3)
         check("Tunnel wieder da -> big wieder free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["state"])
+        check("... und meldet den Ollama-Zustand wieder selbst", state()["nodes"]["big"].get("ollama_source") == "push", str(state()["nodes"]["big"].get("ollama_source")))
         check("Tunnel-Ereignisse protokolliert", [d["state"] for d in state()["decisions"] if d["event"] == "tunnel"][-2:] == ["down", "up"])
         st, txt = chat("standard:latest", ctx=16384)
         check("Anfrage durch den neuen Tunnel", st == 200, f"{st} {txt[:60]}")
@@ -975,6 +983,9 @@ def main():
             if state()["nodes"]["big"]["state"] == "offline": break
             time.sleep(0.5)
         check("big offline erkannt", state()["nodes"]["big"]["state"] == "offline")
+        rlog.seek(0)
+        check("... weil der Agent 'Ollama antwortet nicht' meldet (nicht aus fehlgeschlagenen Abfragen erschlossen)",
+              "offline (Ollama antwortet nicht laut Agent" in rlog.read())
         t0 = time.time()
         st, txt = chat("gross:latest")
         dt = time.time() - t0
@@ -1318,7 +1329,7 @@ def main():
               and _ou.unmanaged_reason({"facts": {"ollama_managed": False}}) == "tray")
         logs["agent-tray"] = open(os.path.join(HERE, "fake-agent-tray.log"), "w+")
         tray = subprocess.Popen([PY, os.path.join(HERE, "fake_agent.py"), "wss://127.0.0.1:21435", "tray", "http://127.0.0.1:21002", os.path.join(HERE, "fake-agent-tray.key")],
-                                stdout=logs["agent-tray"], stderr=subprocess.STDOUT, cwd=HERE, env={**os.environ, "FAKE_OLLAMA_MANAGED": "0"})
+                                stdout=logs["agent-tray"], stderr=subprocess.STDOUT, cwd=HERE, env={**os.environ, "FAKE_OLLAMA_MANAGED": "0", "FAKE_OLLAMA_PUSH": "0"})
         procs.append(tray)
         reg_tray = lambda: next((n for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "tray"), None)  # noqa: E731
         for _ in range(40):
@@ -1331,6 +1342,8 @@ def main():
             if rt and rt["connected"] and rt["state"] == "approved": break
             time.sleep(0.25)
         ot = rt["ollama_update"]
+        check("Agent ohne Ollama-Push (vor 0.14.0): der Router pollt ihn weiter", state()["nodes"].get("tray", {}).get("ollama_source") == "poll",
+              str(state()["nodes"].get("tray", {}).get("ollama_source")))
         check("Ollama-Update: Tray-Knoten meldet ollama_managed=false -> nicht verwaltet (Grund tray), ausstehend, aber nicht in HA gezaehlt",
               rt["facts"].get("ollama_managed") is False and ot["managed"] is False and ot["unmanaged_reason"] == "tray" and ot["pending"]
               and "tray" not in json.loads(http(C + "/admin/ha")[1]).get("ollama_updates", {}), str(ot))

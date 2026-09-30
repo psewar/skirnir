@@ -32,6 +32,7 @@ type App struct {
 	guard    *Guard         // GPU-Schutz (guard.go)
 	updater  *Updater       // Selbst-Update (updater.go)
 	ollamaUp *OllamaUpdater // Ollama-Update ueber den Router (ollamaupdate.go, 0.12.0)
+	ollamaW  *OllamaWatcher // Ollama-Zustand beobachten und melden (ollamawatch.go, 0.14.0)
 	rootCtx  context.Context
 	crashed  string // Modul, das mit Panic endete (Run liefert dann einen Fehler, der Dienst startet neu)
 	ctlToken string // Token fuer POST /restart-child (Datei control.token neben der Config; Review 2026-09-25)
@@ -79,12 +80,15 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 		f := collectFacts(ctx, cfg.Router.URL, cfg.Tunnel.Upstream, gpu)
 		m := a.ollamaUp.Managed()
 		f.OllamaManaged = &m
+		f.OllamaPush = a.ollamaW != nil
 		return f
 	}
 	a.tunnel = newTunnel(cfg.Router.URL, cfg.Tunnel.Upstream, a.id, a.hb, facts, log)
 	a.tunnel.onStatus = a.onTunnelStatus
 	a.tunnel.onUpdate = a.updater.Handle
 	a.tunnel.onOllamaUpdate = a.ollamaUp.Handle
+	a.ollamaW = newOllamaWatcher(cfg.Tunnel.Upstream, log)
+	a.tunnel.ollama = a.ollamaW
 	if a.prov != nil && a.prov.HeartbeatIntervalS > 0 {
 		a.tunnel.SetHeartbeatInterval(time.Duration(a.prov.HeartbeatIntervalS * float64(time.Second)))
 	}
@@ -200,6 +204,9 @@ func (a *App) Run(ctx context.Context) error {
 		}()
 	}
 	run("supervisor", a.sup.Run)
+	if a.ollamaW != nil {
+		run("ollama-watch", a.ollamaW.Run)
+	}
 	run("gpu-guard", a.guard.Run)
 	run("health", (&HealthServer{app: a}).Run)
 	if a.proxy != nil {

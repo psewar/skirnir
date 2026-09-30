@@ -1,4 +1,4 @@
-"""Agent -> Router: WebSocket-Tunnel mit Binaerrahmen (REQ/RESP/DATA/END/ERR/CANCEL/HB/HBACK)."""
+"""Agent -> Router: WebSocket-Tunnel mit Binaerrahmen (REQ/RESP/DATA/END/ERR/CANCEL/HB/HBACK/OLLAMA)."""
 
 import asyncio
 import json
@@ -13,6 +13,7 @@ from .common import log
 # Der Agent haelt eine ausgehende WebSocket-Verbindung; der Router schickt seine Ollama-Aufrufe als Streams hindurch.
 # Rahmen: typ(1) | stream_id(4, big endian) | payload. Gegenstueck: agent/tunnel.go, test/fake_agent.py.
 TUN_REQ, TUN_RESP, TUN_DATA, TUN_END, TUN_ERR, TUN_CANCEL, TUN_HB, TUN_HBACK = 1, 2, 3, 4, 5, 6, 7, 8
+TUN_OLLAMA = 9   # Agent -> Router: Ollama-Zustand (installiert, geladen, erreichbar), Agent >= 0.14.0
 
 
 def tun_frame(t, sid, payload=b""):
@@ -187,6 +188,15 @@ class Tunnel:
             else:
                 ack = {"state": "pending", "busy_reason": ""}
             state.spawn(self.send_quiet(tun_frame(TUN_HBACK, 0, json.dumps(ack).encode())))
+            return
+        if t == TUN_OLLAMA:
+            if self.approved and self.node is not None:
+                try:
+                    msg = json.loads(payload)
+                except ValueError:   # Nutzlast eines Agenten: ob sie JSON ist, zeigt erst das Parsen
+                    log.warning("node %s: Ollama-Zustand vom Agenten ist kein JSON", self.node.name)
+                    return
+                poll.apply_ollama_push(self.node, msg, time.time())
             return
         r = self.streams.get(sid)
         if r is None:

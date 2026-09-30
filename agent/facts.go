@@ -29,6 +29,7 @@ type Facts struct {
 	OllamaURL     string `json:"ollama_url"`
 	AgentVersion  string `json:"agent_version"`
 	OllamaManaged *bool  `json:"ollama_managed,omitempty"` // Ollama ist Kind dieses Agenten (Router bietet dann Ollama-Updates an, 0.12.1)
+	OllamaPush    bool   `json:"ollama_push,omitempty"`    // Agent meldet den Ollama-Zustand selbst (Rahmen OLLAMA, 0.14.0)
 }
 
 func collectFacts(ctx context.Context, routerURL, upstream string, gpu *GPU) Facts {

@@ -34,6 +34,7 @@ import (
 //	END    Agent->Router  Antwort fertig
 //	ERR    Agent->Router  Text (Upstream-Fehler)
 //	CANCEL Router->Agent  Anfrage abbrechen
+//	OLLAMA Agent->Router  Ollama-Zustand (JSON OllamaState, stream 0): bei jeder Aenderung und spaetestens alle 30 s (0.14.0)
 //	HB     Agent->Router  Heartbeat (JSON, stream 0)
 //	HBACK  Router->Agent  Antwort auf den Heartbeat (JSON {state,busy_reason}, stream 0)
 const (
@@ -45,7 +46,11 @@ const (
 	tunCancel byte = 6
 	tunHB     byte = 7
 	tunHBAck  byte = 8
+	tunOllama byte = 9
 )
+
+// ollamaResync: so oft geht der Ollama-Zustand auch ohne Aenderung vollstaendig raus (Router haelt ihn 45 s fuer frisch).
+const ollamaResync = 30 * time.Second
 
 type Tunnel struct {
 	url            string
@@ -58,6 +63,8 @@ type Tunnel struct {
 	onStatus       func(state, node string, p *Provision)
 	onUpdate       func(UpdateOrder)       // Auftrag {"t":"update"} vom Router
 	onOllamaUpdate func(OllamaUpdateOrder) // Auftrag {"t":"ollama-update"} vom Router (0.12.0)
+	ollama         *OllamaWatcher          // lokaler Ollama-Zustand, geht als Rahmen OLLAMA raus (0.14.0); nil = Router pollt
+	ollamaKick     chan struct{}           // sofort vollstaendig senden (Freigabe: vorher verwirft der Router den Rahmen)
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -82,7 +89,7 @@ func newTunnel(routerURL, upstream string, id *Identity, hb *Heartbeat, facts fu
 		http: &http.Client{Timeout: 0, Transport: &http.Transport{
 			MaxIdleConns: 64, MaxIdleConnsPerHost: 32, IdleConnTimeout: 90 * time.Second, // Streams laufen parallel zu Ollama; Default haelt nur 2 Leerlauf-Verbindungen
 			DisableCompression: true, ForceAttemptHTTP2: false, ResponseHeaderTimeout: 0}},
-		streams: map[uint32]context.CancelFunc{}, state: "connecting", hbEvery: 3 * time.Second}
+		streams: map[uint32]context.CancelFunc{}, state: "connecting", hbEvery: 3 * time.Second, ollamaKick: make(chan struct{}, 1)}
 }
 
 func (t *Tunnel) SetHeartbeatInterval(d time.Duration) {
@@ -203,6 +210,7 @@ func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 	hbCtx, hbCancel := context.WithCancel(ctx)
 	defer hbCancel()
 	go t.heartbeatLoop(hbCtx, conn)
+	go t.ollamaLoop(hbCtx, conn)
 
 	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	conn.SetPingHandler(func(data string) error { // Router pingt alle 20 s
@@ -285,6 +293,12 @@ func (t *Tunnel) applyStatus(m ctlMsg) {
 	}
 	st, nd := t.state, t.nodeName
 	t.mu.Unlock()
+	if m.State == "approved" {
+		select {
+		case t.ollamaKick <- struct{}{}:
+		default:
+		}
+	}
 	if m.State != "" {
 		t.log.Infof("tunnel: Status %s%s", st, map[bool]string{true: " (" + m.Message + ")", false: ""}[m.Message != ""])
 	}
@@ -312,6 +326,37 @@ func (t *Tunnel) heartbeatLoop(ctx context.Context, conn *websocket.Conn) {
 		case <-ctx.Done():
 			return
 		case <-time.After(d):
+		}
+	}
+}
+
+// ollamaLoop meldet den Ollama-Zustand: zu Beginn jeder Sitzung, bei jeder neuen Revision, nach der Freigabe und spaetestens
+// alle ollamaResync. Der Blick auf die Revision alle 250 ms ist ein Speicherzugriff, keine Abfrage bei Ollama.
+func (t *Tunnel) ollamaLoop(ctx context.Context, conn *websocket.Conn) {
+	if t.ollama == nil {
+		return
+	}
+	var sentRev uint64
+	var sentAt time.Time
+	force := true
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		st, have := t.ollama.Snapshot()
+		if have && (force || st.Rev != sentRev || time.Since(sentAt) >= ollamaResync) {
+			st.TS = time.Now().Unix()
+			b, _ := json.Marshal(st)
+			if err := t.write(conn, tunOllama, 0, b); err != nil {
+				return
+			}
+			sentRev, sentAt, force = st.Rev, time.Now(), false
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.ollamaKick:
+			force = true
+		case <-tick.C:
 		}
 	}
 }

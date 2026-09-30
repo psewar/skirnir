@@ -5,7 +5,7 @@ MQTT-Geraet fuer Home Assistant, Aufsicht ueber lokale KI-Dienste (z. B. einen W
 
 | Datei | Zweck |
 |---|---|
-| `*.go` | `main` (Verben), `app` (Verdrahtung), `config`, `logging`, `gpu` (NVML direkt aus `nvml.dll`, Rueckfall nvidia-smi; `gpu_nvml_windows.go`), `sensors` + `gpuz_*` (Sensoren, GPU-Z), `guard` (GPU-Schutz), `kuerzung` (Kuerzungsmeldung), `heartbeat`, `tunnel`, `identity`, `provision`, `facts`, `updater*` (Selbst-Update), `ollamaupdate*` (Ollama-Update ueber den Router), `proxy` (TLS-Vorschaltstelle), `secrets` (Secret-Store, Universal-Auth-API), `mqtt`, `supervisor` (Kinder + Job-Objekt), `health`, `service` (SCM), `install` |
+| `*.go` | `main` (Verben), `app` (Verdrahtung), `config`, `logging`, `gpu` (NVML direkt aus `nvml.dll`, Rueckfall nvidia-smi; `gpu_nvml_windows.go`), `sensors` + `gpuz_*` (Sensoren, GPU-Z), `guard` (GPU-Schutz), `kuerzung` (Kuerzungsmeldung), `heartbeat`, `tunnel`, `identity`, `provision`, `facts`, `updater*` (Selbst-Update), `ollamaupdate*` (Ollama-Update ueber den Router), `ollamawatch` (Ollama-Zustand melden), `proxy` (TLS-Vorschaltstelle), `secrets` (Secret-Store, Universal-Auth-API), `mqtt`, `supervisor` (Kinder + Job-Objekt), `health`, `service` (SCM), `install` |
 | `build.sh` | Cross-Compile aus WSL: `wsl -e bash -lc '/mnt/c/<workspace>/skirnir/agent/build.sh 0.1.1'` → `dist/skirnir-agent.exe` |
 | `config.example.yaml` | Vorlage fuer neue Rechner **mit Installationsanleitung Windows/Linux im Kopf**; die echte Datei liegt unter `C:\ProgramData\skirnir-agent\config.yaml` |
 | `skirnir-agent.service` | systemd-Unit fuer Linux-Knoten (`run --config /etc/skirnir-agent/config.yaml`) |
@@ -54,6 +54,17 @@ seit 0.9.1 der einzige Weg (der HTTP-Heartbeat mit `router.token` und `tunnel.en
 Router ruft Ollama hindurch auf (`tunnel.upstream`, Standard `http://127.0.0.1:11434`). Keine eingehende Firewall-Regel, kein
 Zertifikat, keine feste IP; Reconnect mit Backoff 1-30 s; `/health` zeigt `tunnel`. Ein neuer Rechner braucht nur die Binary,
 die Config (node, router.url; optional secret_store fuer ein MQTT-Passwort aus dem Secret-Store) und `Install-Service.ps1`.
+
+## Ollama-Zustand melden (0.14.0)
+
+Der Agent fragt sein lokales Ollama (`tunnel.upstream`) jede Sekunde nach den geladenen Modellen (`/api/ps`) und alle 5 s nach
+den installierten (`/api/tags`), direkt auf localhost (`ollamawatch.go`). Aendert sich etwas, geht der Zustand sofort als
+Rahmen `OLLAMA` (Typ 9) durch den Tunnel, sonst spaetestens alle 30 s vollstaendig; ausserdem zu Beginn jeder Sitzung und
+nach der Freigabe. Nutzlast: `{up, error, rev, ts, tags, ps}`, `tags`/`ps` sind Ollamas eigene Eintraege. `expires_at` in
+`/api/ps` zaehlt nicht als Aenderung (wandert mit jeder Anfrage). Nach drei Fehlschlaegen in Folge meldet der Agent
+`up: false` mit Grund; der Router nimmt den Knoten dann sofort aus dem Routing. Solange die Meldungen frisch sind (45 s), pollt
+der Router diesen Knoten nicht mehr; der Fakt `ollama_push` in der Anmeldung sagt ihm, dass der Agent das kann.
+Tests: `ollamawatch_test.go` (Aenderung, nur `expires_at`, neues Modell, drei Fehlschlaege, Erholung, von Anfang an weg).
 
 ## TLS-Vorschaltstelle (0.2.0, Alternative ohne Tunnel)
 

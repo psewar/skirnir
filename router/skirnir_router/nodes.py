@@ -9,6 +9,8 @@ from aiohttp import ClientError, Fingerprint
 from . import config, state
 from .common import log
 
+PUSH_STALE_S = 45   # Agent >= 0.14.0 meldet den Ollama-Zustand bei jeder Aenderung und spaetestens alle 30 s
+
 
 class NodeNotReady(ClientError):
     """TLS-Knoten, dessen Fingerprint noch nicht bekannt ist (kein Heartbeat bisher)."""
@@ -103,6 +105,8 @@ class Node(Breaker):
         self.foreign_baseline_gib = float(spec.get("foreign_vram_baseline_gib", 0))
         self.fp = None      # Fingerprint des Agenten-Schluessels (registrierte Knoten)
         self.polled_ok = 0.0   # letzter erfolgreicher Poll (/api/ps bekannt) - Voraussetzung fuers Baseline-Lernen
+        self.ollama_push_ts = 0.0     # letzte Meldung des Ollama-Zustands durch den Agenten (Rahmen OLLAMA); frisch = kein Poll
+        self.ollama_push_error = None  # Grund, den der Agent fuer "Ollama antwortet nicht" meldet
         self.reg = None     # Eintrag im Knotenregister (nodes.json)
         self.gpu = spec.get("gpu", "")
         # Ollama-Sicht
@@ -143,6 +147,7 @@ class Node(Breaker):
         self.last_used = {}           # Modell -> Zeitpunkt der letzten Anfrage ueber den Router (Residenz-Regel)
         self.last_residency = 0.0
         self.free_since = 0.0         # seit wann ununterbrochen free (gefuehrt von poll.residency_check)
+        self.free_at = 0.0            # Zeitpunkt des letzten Wechsels auf free; ein verzoegertes Vorwaermen gilt nur fuer "seinen" Wechsel
         # Stufe 3: Circuit Breaker (closed -> open nach `failures` Backend-Fehlern im Fenster -> half_open nach open_s:
         # eine Probe, Erfolg = closed, Fehler = wieder open) und Admission (max_inflight aus der Policy, sonst Default)
         self.breaker = "closed"
@@ -368,6 +373,15 @@ class Node(Breaker):
                 "warnungen": g.get("warnungen") or [], "quelle": g.get("quelle"), "hochlast_s": g.get("hochlast_s"),
                 "policy": self.guard_policy, "router_enabled": state.CFG.gpu_guard["enabled"]}
 
+    def ollama_push_active(self, now):
+        """Meldet der Agent den Ollama-Zustand selbst und ist die letzte Meldung frisch? Dann pollt der Router nicht."""
+        return bool(self.ollama_push_ts) and now - self.ollama_push_ts < PUSH_STALE_S
+
+    def ps_fresh(self, now):
+        """Ist bekannt, welche Modelle geladen sind? Push: Aenderungen kommen sofort, frisch solange der Agent meldet.
+        Poll: nur bis kurz nach dem naechsten Takt."""
+        return self.ollama_push_active(now) or now - self.polled_ok < 2 * state.CFG.poll_s + 1
+
     def go_offline(self, why):
         """Knoten aus dem Routing nehmen: Zustand, geladene Modelle, Ladeansprueche und VRAM-Nachlauf zuruecksetzen.
         Eine Stelle fuer Poll-Fehler, Tunnelabriss und Sperre (vorher vier Kopien mit leicht verschiedenem Umfang)."""
@@ -396,5 +410,5 @@ class Node(Breaker):
             "heartbeat_age_s": round(now - self.hb_ts, 1) if self.hb_ts else None,
             "wol": self.wol, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,
             "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
-            "breaker": self.breaker, "max_inflight": self.effective_max_inflight(), "draining": now < self.draining_until,
+            "breaker": self.breaker, "max_inflight": self.effective_max_inflight(), "draining": now < self.draining_until, "ollama_source": "push" if self.ollama_push_active(now) else "poll",
         }

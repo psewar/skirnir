@@ -62,9 +62,12 @@ want to run it, you should know Python, systemd and Ollama.
    └────────────────────────────┘         └──────────────────────┘
 ```
 
-The router polls every node every 5 s (`/api/tags`, `/api/ps`); the agent reports GPU utilisation and VRAM every 2 s. From both
-the router derives the per-node state `offline` / `free` / `busy`. All Ollama calls made by the router go through the agent's
-tunnel; Ollama itself stays on `localhost`.
+The agent reports its node's state itself. Every 2 s it sends GPU utilisation, VRAM and sensors (heartbeat). Since agent
+0.14.0 it also watches its local Ollama and sends the installed models (`/api/tags`), the loaded models (`/api/ps`) and whether
+Ollama answers at all, immediately on every change and in full at least every 30 s. From both the router derives the per-node
+state `offline` / `free` / `busy`. Only for nodes whose agent does not report Ollama's state (older agents, static nodes without
+an agent) does the router still ask Ollama itself every 5 s. All Ollama calls made by the router go through the agent's tunnel;
+Ollama itself stays on `localhost`.
 
 ## Interfaces
 

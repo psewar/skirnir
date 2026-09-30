@@ -10,6 +10,7 @@ import json
 import os
 import ssl
 import sys
+import time
 
 import aiohttp
 from cryptography.hazmat.primitives import serialization
@@ -17,11 +18,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 ROUTER_WS, NODE, UPSTREAM, KEYFILE = sys.argv[1:5]
 UP_TOKEN = sys.argv[5] if len(sys.argv) > 5 else None
-REQ, RESP, DATA, END, ERR, CANCEL, HB, HBACK = 1, 2, 3, 4, 5, 6, 7, 8
+REQ, RESP, DATA, END, ERR, CANCEL, HB, HBACK, OLLAMA = 1, 2, 3, 4, 5, 6, 7, 8, 9
 FACTS = {"hostname": NODE.upper(), "os": "windows", "arch": "amd64", "manufacturer": "Fake", "model": "Testrechner",
          "gpu": "Fake RTX 5090", "vram_total_mib": 32563, "mac": "00:11:22:33:44:55", "local_ip": "127.0.0.1",
          "ollama_version": "0.11.0", "ollama_url": UPSTREAM, "agent_version": "test",
-         "ollama_managed": os.environ.get("FAKE_OLLAMA_MANAGED", "1") == "1"}   # wie Agent 0.12.1: Ollama ist Kind des Agenten
+         "ollama_managed": os.environ.get("FAKE_OLLAMA_MANAGED", "1") == "1",   # wie Agent 0.12.1: Ollama ist Kind des Agenten
+         "ollama_push": os.environ.get("FAKE_OLLAMA_PUSH", "1") == "1"}         # wie Agent 0.14.0: meldet den Ollama-Zustand selbst
 
 
 def load_key():
@@ -98,6 +100,35 @@ async def do_ollama_update(ws, session, lock, m):
         await report("failed", (str(e) or e.__class__.__name__)[:120])
 
 
+async def ollama_watch(ws, session, lock, watch):
+    """Wie ollamawatch.go (Agent 0.14.0): lokales Ollama alle 0,5 s abfragen und den Zustand bei jeder Aenderung, nach der
+    Freigabe und alle 5 s als Rahmen OLLAMA melden; nach zwei Fehlschlaegen in Folge up=false (Agent: drei, der Test ist knapper)."""
+    headers = {"X-Router-Token": UP_TOKEN} if UP_TOKEN else {}
+    tmo = aiohttp.ClientTimeout(total=2)
+    fails, key, sent, msg = 0, None, 0.0, None
+    while True:
+        try:
+            async with session.get(UPSTREAM + "/api/ps", headers=headers, ssl=False, timeout=tmo) as r:
+                ps = (await r.json()).get("models", [])
+            async with session.get(UPSTREAM + "/api/tags", headers=headers, ssl=False, timeout=tmo) as r:
+                tags = (await r.json()).get("models", [])
+            fails, msg = 0, {"up": True, "tags": tags, "ps": ps}
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001  - Netzwerkfehler lassen sich nicht vorab pruefen
+            fails += 1
+            if fails >= 2:
+                msg = {"up": False, "error": (str(e) or e.__class__.__name__)[:120]}
+        if msg is not None:
+            k = json.dumps({**msg, "ps": [{a: b for a, b in m.items() if a != "expires_at"} for m in msg.get("ps", [])]}, sort_keys=True)
+            if watch["force"] or k != key or time.time() - sent >= 5:
+                await send(ws, lock, OLLAMA, 0, json.dumps({**msg, "ts": int(time.time())}).encode())
+                if k != key:
+                    out(ollama="up" if msg["up"] else "down")
+                key, sent, watch["force"] = k, time.time(), False
+        await asyncio.sleep(0.5)
+
+
 def out(**kw):
     print(json.dumps({"agent": NODE, **kw}), flush=True)
 
@@ -147,6 +178,8 @@ async def main():
                     st = json.loads(await ws.receive_str())
                     out(tunnel="up", status=st.get("state"), node=st.get("node"), config=st.get("config"))
                     tasks, lock = {}, asyncio.Lock()
+                    watch = {"force": True}
+                    wtask = asyncio.create_task(ollama_watch(ws, session, lock, watch)) if FACTS["ollama_push"] else None
                     if st.get("state") == "approved":   # ein Heartbeat durch den Tunnel (Leerlaufwerte, 7 GiB = Baseline)
                         await send(ws, lock, HB, 0, json.dumps({"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}).encode())
                     async for msg in ws:
@@ -154,6 +187,7 @@ async def main():
                             m = json.loads(msg.data)
                             out(ctl=m.get("t"), status=m.get("state"), node=m.get("node"), config=m.get("config"))
                             if m.get("state") == "approved":
+                                watch["force"] = True   # vor der Freigabe verwirft der Router den Rahmen
                                 await send(ws, lock, HB, 0, json.dumps({"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}).encode())
                             if m.get("t") == "update":
                                 asyncio.create_task(do_update(ws, session, lock, m, sslctx))  # noqa: RUF006
@@ -169,6 +203,8 @@ async def main():
                             tasks[sid].cancel()
                         elif t == HBACK:
                             out(hback=json.loads(payload))
+                    if wtask is not None:
+                        wtask.cancel()
                     for tk in list(tasks.values()):
                         tk.cancel()
             out(tunnel="down")
