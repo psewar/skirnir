@@ -27,6 +27,9 @@ type OllamaState struct {
 	PS    []json.RawMessage `json:"ps"`
 }
 
+// unsetKey: Vergleichsschluessel vor der ersten Antwort; psKey/rawKey erzeugen ihn nie (leer oder Zeilen mit Umbruch am Ende).
+const unsetKey = "\x00unset"
+
 type OllamaWatcher struct {
 	upstream  string
 	log       *Logger
@@ -49,8 +52,12 @@ func newOllamaWatcher(upstream string, log *Logger) *OllamaWatcher {
 	if upstream == "" {
 		return nil
 	}
+	// Leere Listen statt nil (sonst geht `null` raus) und Vergleichsschluessel, die keine echte Antwort ergibt: die erste Antwort
+	// zaehlt immer als Aenderung, auch wenn nichts geladen ist. 0.14.0 schickte bei leerem /api/ps `ps: null`, der Router
+	// verwarf die Meldung und liess den Knoten offline (2026-09-30).
 	return &OllamaWatcher{upstream: strings.TrimRight(upstream, "/"), log: log, client: &http.Client{Timeout: 3 * time.Second},
-		every: time.Second, tagsEvery: 5 * time.Second, downAfter: 3}
+		every: time.Second, tagsEvery: 5 * time.Second, downAfter: 3, psKey: unsetKey, tagsKey: unsetKey,
+		st: OllamaState{Tags: []json.RawMessage{}, PS: []json.RawMessage{}}}
 }
 
 // Run fragt das lokale Ollama im Takt ab, bis ctx endet.

@@ -237,10 +237,15 @@ def apply_ollama_push(node, msg, now):
     Solange die Meldung frisch ist, pollt der Router diesen Knoten nicht. `up: false` ist die ausdrueckliche Meldung des
     Agenten, dass sein Ollama nicht antwortet - der Router muss das nicht mehr aus fehlgeschlagenen Abfragen erschliessen."""
     if not isinstance(msg, dict) or not isinstance(msg.get("up"), bool):
-        log.warning("node %s: Ollama-Zustand vom Agenten ohne 'up' - verworfen", node.name)
+        node.ollama_push_ts = 0.0   # unbrauchbare Meldung: bis zur naechsten gueltigen wieder Poll, nicht die letzte behalten
+        log.warning("node %s: Ollama-Zustand vom Agenten ohne 'up' - verworfen, Router pollt", node.name)
         return
-    if msg["up"] and not (isinstance(msg.get("tags"), list) and isinstance(msg.get("ps"), list)):
-        log.warning("node %s: Ollama-Zustand vom Agenten ohne tags/ps - verworfen", node.name)
+    # Agent 0.14.0 schickte eine nie gesetzte leere Liste als null (Go: nil-Slice) - gleichbedeutend mit []. Ab 0.14.1 immer [].
+    tags = [] if msg.get("tags") is None else msg.get("tags")
+    ps = [] if msg.get("ps") is None else msg.get("ps")
+    if msg["up"] and not (isinstance(tags, list) and isinstance(ps, list)):
+        node.ollama_push_ts = 0.0
+        log.warning("node %s: Ollama-Zustand vom Agenten ohne gueltige tags/ps - verworfen, Router pollt", node.name)
         return
     node.ollama_push_ts = now
     if not msg["up"]:
@@ -249,7 +254,7 @@ def apply_ollama_push(node, msg, now):
             node.go_offline(f"Ollama antwortet nicht laut Agent: {node.ollama_push_error}")
         return
     node.ollama_push_error = None
-    apply_ollama_state(node, _named(msg["tags"]), _named(msg["ps"]), now)
+    apply_ollama_state(node, _named(tags), _named(ps), now)
 
 
 async def poll_loop():

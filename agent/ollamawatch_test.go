@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -63,6 +64,10 @@ func TestOllamaWatcher(t *testing.T) {
 	if !have || !st.Up || st.Rev != 1 || len(st.Tags) != 1 || len(st.PS) != 0 {
 		t.Fatalf("erste Abfrage: %+v %v", st, have)
 	}
+	// nichts geladen: die Nutzlast muss eine leere Liste tragen, nicht null (0.14.0 schickte "ps":null)
+	if b, _ := json.Marshal(st); !strings.Contains(string(b), `"ps":[]`) || !strings.Contains(string(b), `"tags":[{`) {
+		t.Fatalf("leere Liste als [] erwartet: %s", b)
+	}
 	w.poll(ctx, now)
 	if st, _ = w.Snapshot(); st.Rev != 1 {
 		t.Fatalf("ohne Aenderung keine neue Revision: %d", st.Rev)
@@ -119,6 +124,16 @@ func TestOllamaWatcherDownFromStart(t *testing.T) {
 	st, have := w.Snapshot()
 	if !have || st.Up {
 		t.Fatalf("von Anfang an nicht erreichbar -> nach drei Versuchen meldbar als down: %+v %v", st, have)
+	}
+	if b, _ := json.Marshal(st); strings.Contains(string(b), "null") {
+		t.Fatalf("auch im Zustand down keine null-Listen: %s", b)
+	}
+	// Ollama kommt hoch, nichts geladen und nichts installiert: erste Antwort ist eine Aenderung, beide Listen []
+	f.set("", "", false)
+	w.poll(context.Background(), time.Now())
+	st, _ = w.Snapshot()
+	if b, _ := json.Marshal(st); !st.Up || !strings.Contains(string(b), `"ps":[]`) || !strings.Contains(string(b), `"tags":[]`) {
+		t.Fatalf("nach dem Hochfahren up mit leeren Listen erwartet: %s", b)
 	}
 	if newOllamaWatcher("", quietLogger()) != nil {
 		t.Fatal("ohne Upstream kein Beobachter")
