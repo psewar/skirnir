@@ -10,7 +10,7 @@ import yaml
 
 from . import state
 from . import settings as settings_mod
-from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES
+from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES
 
 
 def _d(path):
@@ -63,7 +63,7 @@ SCHEMA = {
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
                                       "warn_at_percent": None, "region": None, "timeout_s": None, "max_inflight": None, "max_data_class": None}}},
         "openai": {"enabled": None, "default_think": None},
-        "anthropic": {"enabled": None, "keepalive_s": None},
+        "anthropic": {"enabled": None, "keepalive_s": None, "think": None},
         "wol": {"wait_up_s": None, "retry_interval_s": None, "cooldown_s": None, "broadcast_addresses": None},
     },
     "mqtt": {"host": None, "port": None, "tls": None, "username": None, "password": None, "password_env": None, "password_file": None,
@@ -219,6 +219,11 @@ class Config:
         an = r.get("anthropic") or {}
         self.anthropic_enabled = bool(an.get("enabled", True))
         self.anthropic_keepalive_s = float(an.get("keepalive_s", _d("router.anthropic.keepalive_s")))
+        # Denken: auto = wie der Client es verlangt (thinking-Block), on/off = fest. Claude Code verlangt bei jedem Zug
+        # adaptives Denken; qwen3.8 kennt nur an/aus und denkt dann immer.
+        self.anthropic_think = str(an.get("think", _d("router.anthropic.think")))
+        if self.anthropic_think not in THINK_MODES:
+            raise ValueError(f"router.anthropic.think muss eine von {THINK_MODES} sein, nicht {self.anthropic_think!r}")
         # Basic Auth für UI + /admin/*: {user: "pbkdf2:<iter>:<salt_hex>:<hash_hex>"}; leer = offen (nur Tests)
         self.control_users = dict((r.get("control_auth") or {}).get("users") or {})
         # TLS für den Control-Port: {cert: <fullchain.pem>, key: <key.pem>}; fehlt der Block -> Klartext (nur Tests)

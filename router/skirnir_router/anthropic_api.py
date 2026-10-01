@@ -184,7 +184,16 @@ def thinking_shown(b):
     return not (isinstance(t, dict) and t.get("display") == "omitted")
 
 
-def to_native(b):
+def think_for(b, mode):
+    """router.anthropic.think: auto = was der Client verlangt (think_of), on/off = fest."""
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return think_of(b)
+
+
+def to_native(b, think_mode="auto"):
     """Anthropic-Body -> (Ollama-/api/chat-Body, None) oder (None, Klartext fuer 400)."""
     if not b.get("model"):
         return None, "model is required"
@@ -206,7 +215,7 @@ def to_native(b):
     if system:
         msgs = [{"role": "system", "content": system}] + msgs
     native = {"model": b["model"], "messages": msgs, "stream": bool(b.get("stream", False)), "options": options_of(b),
-              "think": think_of(b)}
+              "think": think_for(b, think_mode)}
     if tools:
         native["tools"] = tools
     if "routing" in b:
@@ -402,7 +411,7 @@ async def handle_messages(request):
     b, e = await _body(request)
     if e:
         return e
-    native, err = to_native(b)
+    native, err = to_native(b, state.CFG.anthropic_think)
     if err:
         return anthropic_error(400, err)
     shape = AnthropicShape(b["model"], state.CFG.anthropic_keepalive_s, thinking_shown(b))

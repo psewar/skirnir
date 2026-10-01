@@ -85,6 +85,11 @@ def t_anfrage():
     n, err = A.to_native(cc)
     check("Claude Code: thinking adaptive -> think true, unbekannte Felder (context_management, output_config) stoeren nicht",
           err is None and n["think"] is True and "context_management" not in n and "output_config" not in n, err)
+    off, _ = A.to_native(cc, "off")
+    on, _ = A.to_native(b, "on")
+    auto, _ = A.to_native(b, "auto")
+    check("router.anthropic.think: off schlaegt adaptive, on schlaegt fehlendes thinking, auto folgt dem Client",
+          off["think"] is False and on["think"] is True and auto["think"] is False)
     check("display omitted -> Denktext verschweigen, sonst zeigen",
           A.thinking_shown(cc) is False and A.thinking_shown(b) is True and A.thinking_shown({"thinking": {"type": "enabled"}}) is True)
 

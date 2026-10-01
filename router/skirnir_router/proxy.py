@@ -375,7 +375,7 @@ class _Relay:
         state.remember({"event": "route", "path": self.path, "role": self.role["name"], "tier": self.tier_idx, "model": model,
                         "ctx": self.ctx, "node": node.name, "node_state": node.state, "warm": self.warm, "via": via,
                         "request_id": self.req.request_id, "session_id": self.req.session_id, "client": self.request.get("client"),
-                        "reason": self.req.reason, "skipped": len(self.req.skipped),
+                        "reason": self.req.reason, "skipped": len(self.req.skipped), "think": self.out.get("think"),
                         "canary": bool(self.req.canary) and model == self.req.canary})
 
     def _finish(self):

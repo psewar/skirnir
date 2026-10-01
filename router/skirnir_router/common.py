@@ -7,7 +7,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -99,6 +99,7 @@ def openai_error(status, msg, why=None):
 # Anthropic-Messages-API (Claude Code u. a.), siehe anthropic_api.py. Kein Platz (503 im Router) heisst dort 529
 # overloaded_error: Claude Code wiederholt 529 von selbst, 503 je nach Version nicht.
 ANTHROPIC_OVERLOADED = 529
+THINK_MODES = ("auto", "on", "off")   # router.anthropic.think: dem Client folgen / immer / nie
 ANTHROPIC_ERROR_TYPES = {400: "invalid_request_error", 401: "authentication_error", 403: "permission_error",
                          404: "not_found_error", 413: "request_too_large", 422: "invalid_request_error",
                          429: "rate_limit_error", 529: "overloaded_error"}

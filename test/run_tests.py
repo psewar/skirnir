@@ -1169,11 +1169,23 @@ def main():
                    "output_config": {}, "metadata": {"user_id": "x"}, "messages": [
                        {"role": "user", "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "hi"}]},
                        {"role": "system", "content": [{"type": "text", "text": "Hinweis", "cache_control": {"type": "ephemeral"}}]}]}
+        t_cc = time.time()
         st, raw = http(R + "/v1/messages?beta=true", cc_body, headers=an_hdr)
         names = [e for e, _ in sse_events(raw)]
         logs["small"].seek(0); sent = last_route(logs["small"].read())[-1]
         check("/v1/messages?beta=true in Claude-Code-Form (system im Verlauf, adaptive) -> 200-Stream, think true", st == 200
               and names[0] == "message_start" and names[-1] == "message_stop" and sent["think"] is True, f"{st} {names} {raw[:160]!r}")
+        d = route(t_cc)
+        check("... Entscheidungslog traegt think (Beleg fuer Messlaeufe)", d.get("think") is True, str(d))
+        st_set, _ = http(C + "/admin/config", {"settings": {"router.anthropic.think": "off"}}, method="PUT")
+        t_off = time.time()
+        st, raw = http(R + "/v1/messages?beta=true", cc_body, headers=an_hdr)
+        logs["small"].seek(0); sent = last_route(logs["small"].read())[-1]
+        check("router.anthropic.think off (Einstellung, ohne Neustart): Claude-Code-adaptive -> think false", st_set == 200 and st == 200
+              and sent["think"] is False and route(t_off).get("think") is False, f"{st_set} {st} {sent.get('think')}")
+        st_set, _ = http(C + "/admin/config", {"settings": {"router.anthropic.think": "nein"}}, method="PUT")
+        check("... ungueltiger Wert -> 400", st_set == 400, str(st_set))
+        http(C + "/admin/config", {"settings": {"router.anthropic.think": None}}, method="PUT")
         st, raw = http(R + "/v1/messages", {**an_body, "stream": True, "tools": an_tools,
                                             "messages": [{"role": "user", "content": "wie spaet? [[stream_tool]]"}]}, headers=an_hdr)
         evs = sse_events(raw)

@@ -115,6 +115,11 @@ Kontextprüfung). Claude Code schickt `ANTHROPIC_AUTH_TOKEN` als `Authorization:
 der Router nimmt beides. `anthropic-version` und `anthropic-beta` werden angenommen und nur geloggt.
 `router.anthropic.enabled: false` schaltet die Endpunkte ab.
 
+`router.anthropic.think` (auch in den Einstellungen der UI, wirkt ohne Neustart): `auto` folgt dem `thinking`-Block des
+Clients, `on` und `off` setzen es fest. Claude Code verlangt bei jedem Zug adaptives Denken; ein Modell, das nur an oder aus
+kennt (wie qwen3.8), denkt dann bei jedem Zug, auch beim blossen Lesen einer Datei. Das Entscheidungslog führt `think` je
+Anfrage.
+
 ## Rollen und Stufen
 
 ```yaml

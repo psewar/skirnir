@@ -120,6 +120,11 @@ context check). Claude Code sends `ANTHROPIC_AUTH_TOKEN` as `Authorization: Bear
 router accepts both (see [client identities](#client-identities-on-the-inference-port)). `anthropic-version` and
 `anthropic-beta` are accepted and only logged. `router.anthropic.enabled: false` switches the endpoints off.
 
+`router.anthropic.think` (also in the UI settings, applies without restart): `auto` follows the client's `thinking` block,
+`on` and `off` override it. Claude Code asks for adaptive thinking on every turn, and a model that only knows on or off (such
+as qwen3.8) then thinks on every turn, including trivial ones like reading a file. The decision log records `think` for every
+request.
+
 ## Roles and tiers
 
 ```yaml

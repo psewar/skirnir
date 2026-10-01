@@ -14,7 +14,7 @@ Pfade mit `*` gelten je Eintrag (Cloud-Anbieter, Client) - nur fuer Namen, die c
 import ipaddress
 import re
 
-from .common import DATA_CLASSES_DEFAULT, PRIORITIES  # noqa: E402
+from .common import DATA_CLASSES_DEFAULT, PRIORITIES, THINK_MODES  # noqa: E402
 SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open")
 
 # typ: int | float | bool | str | choice | list | iplist | keep_alive | tristate
@@ -174,6 +174,8 @@ _e("router.openai.default_think", "tristate", "/v1: think ohne Angabe", "false =
    label_en="/v1: think when unspecified", help_en="false = no invisible thinking (default), true = model default, empty = Ollama decides")
 _e("router.anthropic.keepalive_s", "float", "/v1/messages: Ping alle s", "SSE-Ping an Anthropic-Clients, solange der Knoten noch am Prompt rechnet", G, 15,
    min=1, max=120, label_en="/v1/messages: ping every s", help_en="SSE ping to Anthropic clients while the node is still processing the prompt")
+_e("router.anthropic.think", "choice", "/v1/messages: Denken", "auto = wie der Client es verlangt (Claude Code: jeder Zug), on = immer, off = nie", G, "auto",
+   choices=list(THINK_MODES), label_en="/v1/messages: thinking", help_en="auto = as the client asks (Claude Code: every turn), on = always, off = never")
 
 G = "Knoten-Ueberwachung"
 _e("router.ollama_poll_s", "float", "Ollama-Abfrage alle s", "/api/tags + /api/ps", G, 5, min=1, max=300, label_en="Ollama poll every s")
