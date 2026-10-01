@@ -63,6 +63,7 @@ SCHEMA = {
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
                                       "warn_at_percent": None, "region": None, "timeout_s": None, "max_inflight": None, "max_data_class": None}}},
         "openai": {"enabled": None, "default_think": None},
+        "anthropic": {"enabled": None, "keepalive_s": None},
         "wol": {"wait_up_s": None, "retry_interval_s": None, "cooldown_s": None, "broadcast_addresses": None},
     },
     "mqtt": {"host": None, "port": None, "tls": None, "username": None, "password": None, "password_env": None, "password_file": None,
@@ -213,6 +214,11 @@ class Config:
         # think, wenn der Client nichts sagt: false = Antwort ohne unsichtbares Nachdenken (wie HAs AI-Tasks);
         # true = Modell-Default; null = Feld nicht setzen (Ollama entscheidet)
         self.openai_default_think = oa.get("default_think", _d("router.openai.default_think"))
+        # Anthropic-Messages-API /v1/messages (Claude Code). Ping-Abstand, solange der Knoten noch am Prompt rechnet:
+        # Ollama schickt die Kopfzeilen erst mit dem ersten Token, bei 196k Kontext bis ~2 min.
+        an = r.get("anthropic") or {}
+        self.anthropic_enabled = bool(an.get("enabled", True))
+        self.anthropic_keepalive_s = float(an.get("keepalive_s", _d("router.anthropic.keepalive_s")))
         # Basic Auth für UI + /admin/*: {user: "pbkdf2:<iter>:<salt_hex>:<hash_hex>"}; leer = offen (nur Tests)
         self.control_users = dict((r.get("control_auth") or {}).get("users") or {})
         # TLS für den Control-Port: {cert: <fullchain.pem>, key: <key.pem>}; fehlt der Block -> Klartext (nur Tests)

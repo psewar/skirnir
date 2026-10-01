@@ -8,7 +8,8 @@ Skirnir steht vor einer oder mehreren Ollama-Installationen auf GPU-Rechnern und
 **ein** Ollama-Server. Clients fragen nicht nach einem konkreten Modell, sondern nach einer **Rolle** (`standard:latest`,
 `gross:latest`, `code:latest` …); der Router wählt pro Anfrage Knoten, Modell und Kontextgrösse – nach dem, was gerade
 geladen ist, ob die GPU von einem Spiel belegt wird, wie viel VRAM frei ist, wie schnell und wie fehlerfrei ein Modell auf
-einem Knoten zuletzt war. Die Ollama-API bleibt unverändert, dazu kommt eine OpenAI-kompatible Schnittstelle unter `/v1`.
+einem Knoten zuletzt war. Die Ollama-API bleibt unverändert, dazu kommen eine OpenAI-kompatible Schnittstelle unter `/v1`
+und die Anthropic-Messages-API (`/v1/messages`, z. B. für Claude Code).
 
 Gebaut für ein Homelab: Home Assistant, Node-RED und lokale Agenten-Frameworks als Clients, Windows-Gaming-PCs als GPU-Knoten,
 die nicht rund um die Uhr laufen und nicht nur der KI gehören. Der Name: Skirnir ist in der nordischen Mythologie Freyrs Bote,
@@ -45,8 +46,8 @@ Stabilitätszusagen; diese README gibt es auf Englisch und Deutsch, die Unter-RE
 ## Architektur
 
 ```
-  Clients: Home Assistant · Node-RED · OpenAI-kompatible Werkzeuge · Agenten-Frameworks
-      │  https :11434   Ollama-API (/api/*) und OpenAI-API (/v1/*), Client-Identität
+  Clients: Home Assistant · Node-RED · OpenAI-kompatible Werkzeuge · Claude Code · Agenten-Frameworks
+      │  https :11434   Ollama-API (/api/*), OpenAI-API (/v1/*), Anthropic-API (/v1/messages), Client-Identität
       ▼
  ┌────────────────────────── Skirnir (Debian-Container, Python 3.11, aiohttp) ──────────────────────────┐
  │  Rollen & Stufen · Scheduler · Admission · Decision Engine · Cloud-Stufen · Metriken · Usage · Audit │
@@ -73,12 +74,44 @@ laufen durch den Tunnel des Agenten; Ollama selbst bleibt auf `localhost`.
 |---|---|---|
 | **11434** | Ollama-API: `GET /api/tags`, `/api/ps`, `/api/version`, `POST /api/show`; Inferenz `POST /api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings` (Streaming wird durchgereicht, `model` in der Antwort trägt den Rollennamen). `/api/pull`, `push`, `create`, `copy`, `delete` → 403. TLS mit dem eigenen Zertifikat (`api_tls`). | Clients |
 | **11434 `/v1`** | OpenAI-kompatibel: `GET /v1/models`, `POST /v1/chat/completions` (SSE-Streaming, `tools`, `response_format`), `/v1/completions`, `/v1/embeddings`. Der Router übersetzt selbst nach `/api/chat`, damit Rollen, Kontextstufen und `keep_alive` gelten – Ollamas eigenes `/v1` kennt weder `num_ctx` noch `keep_alive`. | OpenAI-Clients |
+| **11434 `/v1/messages`** | Anthropic-Messages-API: `POST /v1/messages` (streamend und nicht), `POST /v1/messages/count_tokens`; `GET /v1/models` antwortet in Anthropic-Form, wenn die Anfrage `anthropic-version` trägt. Übersetzung auf `/api/chat` wie bei `/v1`, siehe [Anthropic-Clients](#anthropic-clients-claude-code). | Claude Code, Anthropic-SDKs |
 | **11435** | Web-UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/nodes`, `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2-Hashes in der Konfiguration, geprüftes Paar 10 min gecacht). | Browser, Skripte, Prometheus |
 | **11435 `/v1/tunnel`** | WebSocket vom Agenten: Anmeldung mit Ed25519-Signatur auf eine Challenge, Heartbeat, Konfigurationspaket, alle Ollama-Aufrufe als multiplexte Streams (REQ/RESP/DATA/END/ERR/CANCEL). | Agent → Router |
 | MQTT 8883 | Discovery und Zustände für Home Assistant (TLS, Passwort aus `secrets.env`). | Router → Broker |
 
 Anfragen dürfen 600 s dauern (`request_timeout_s`). Bricht der Client ab, schliesst der Router die Upstream-Antwort, der Tunnel
 schickt CANCEL, der Agent beendet die Ollama-Anfrage.
+
+## Anthropic-Clients (Claude Code)
+
+Claude Code und die Anthropic-SDKs sprechen die Messages-API. Zeigen sie auf den Router (`ANTHROPIC_BASE_URL=https://router:11434`,
+Modell = eine Rolle wie `code:latest`), bekommen sie dasselbe wie alle anderen Clients: die Stufen der Rolle, `num_ctx` der Stufe
+(oder den grösseren Kontext, mit dem das Modell schon geladen ist), warm zuerst, Warten bei `gpu_busy`, Tool-Call-Rettung,
+Client-Identität, Metriken und Entscheidungslog (`via=anthropic`). Ollamas eigenes `/v1/messages` kann das nicht: es kennt kein
+`num_ctx`, das Modell lädt mit Ollamas Default-Kontext neu und verdrängt den Runner, den alle anderen Clients teilen.
+
+Übersetzt werden `system` (String oder Text-Blöcke, `cache_control` fällt weg), Text- und Base64-Bild-Blöcke (Bild-URLs → 400),
+`tool_use`/`tool_result` (je Ergebnis eine `role: tool`-Nachricht, `tool_name` aus der zugehörigen `tool_use`-id, `is_error` →
+Präfix `Error: `), `tools` mit `input_schema` (Server-Werkzeuge von Anthropic ohne Schema fallen weg), `tool_choice` (`none`
+lässt die Werkzeuge weg, `any`/`tool` werden zum Systemhinweis, erzwingen kann Ollama keinen Aufruf), `max_tokens`,
+`temperature`, `top_p`, `top_k`, `stop_sequences` und `thinking` (`enabled`/`adaptive` → `think: true`, sonst `false`).
+`thinking`-Blöcke im Verlauf gehen nicht an das Modell zurück.
+
+Antworten tragen `id: msg_<Request-ID>` (wie `X-Skirnir-Request-Id`), die angefragte Rolle als `model`, je einen `thinking`-,
+`text`- und pro Aufruf einen `tool_use`-Block und `stop_reason` `tool_use`, `max_tokens` oder `end_turn` (Ollama unterscheidet
+Stop-Sequenz und natürliches Ende nicht). Der Stream folgt Anthropics Ereignisfolge: `message_start`, je Block
+`content_block_start`/`_delta`/`_stop` (Denken endet mit leerem `signature_delta`, ein Tool-Call ist ein `input_json_delta` mit
+den ganzen Argumenten), dann `message_delta` mit den echten Zählern und `message_stop`. Ollama schickt seine Kopfzeilen erst
+mit dem ersten Token, bei 196k Kontext bis zu zwei Minuten; nach `router.anthropic.keepalive_s` (15 s) ohne Antwort öffnet der
+Router den Stream und schickt `ping`-Ereignisse. Ab dann beendet ein scheiternder Knoten den Stream mit einem `error`-Ereignis,
+statt auf den nächsten Kandidaten auszuweichen; schnelle Fehler kommen vorher und behalten den Ausweich.
+
+Fehler in Anthropic-Form `{"type": "error", "error": {"type", "message"}}`. Kein Platz (kein Knoten, `gpu_busy`, `vram_full`,
+Wartefrist) ist **HTTP 529 `overloaded_error`** mit `Retry-After`, wo Warten hilft – Claude Code wiederholt 529 von selbst;
+Grund-Code und Hindernisse stehen in `error.skirnir`. `count_tokens` liefert eine Schätzung (Zeichen je Token wie die
+Kontextprüfung). Claude Code schickt `ANTHROPIC_AUTH_TOKEN` als `Authorization: Bearer` und `ANTHROPIC_API_KEY` als `x-api-key`,
+der Router nimmt beides. `anthropic-version` und `anthropic-beta` werden angenommen und nur geloggt.
+`router.anthropic.enabled: false` schaltet die Endpunkte ab.
 
 ## Rollen und Stufen
 
@@ -208,11 +241,12 @@ E-Mail, IP, URL, lange Zahlen) und mit Gruppen-Hash; echte Rollenwahlen der Clie
 ## Client-Identitäten auf dem Inferenz-Port
 
 `router.client_auth` kennt die Clients und führt sie in zwei Phasen ein: `mode: observe` bedient alles, zählt Unbekannte und
-schreibt sie ins Audit-Log; `mode: enforce` antwortet ohne gültige Identität mit 401 (Ollama- oder OpenAI-Fehlerformat).
+schreibt sie ins Audit-Log; `mode: enforce` antwortet ohne gültige Identität mit 401 (Ollama-, OpenAI- oder Anthropic-Fehlerformat).
 `/` und `/api/version` bleiben frei. `locked: true` verhindert, dass der Modus über UI oder API geändert wird.
 
 Drei Wege, in dieser Reihenfolge: `Authorization: Bearer <token>` (so schickt die HA-Ollama-Integration ihren API-Key, OpenAI-
-Clients ebenso), `Authorization: Basic <client>:<token>` und **Quell-IP** für Clients, die keinen Header senden können
+Clients ebenso; Anthropic-Clients dürfen das Token stattdessen als `x-api-key` schicken), `Authorization: Basic <client>:<token>`
+und **Quell-IP** für Clients, die keinen Header senden können
 (z. B. `node-red-contrib-ollama`, das seinen Key nur an ollama.com schickt). Ein falsches Token fällt nicht auf die IP zurück,
 es zählt als `bad_token`. Tokens sind 256 Bit Zufall, gespeichert wird nur ihr **sha256** – die Prüfung läuft bei jeder Anfrage,
 PBKDF2 wäre hier Selbstsabotage.

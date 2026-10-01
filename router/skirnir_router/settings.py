@@ -172,6 +172,8 @@ _e("router.session_affinity_ttl_s", "float", "Session-Affinitaet s", "routing.se
 _e("router.idempotency_ttl_s", "float", "Idempotency-Cache s", "", G, 600, min=0, max=86400, label_en="Idempotency cache s")
 _e("router.openai.default_think", "tristate", "/v1: think ohne Angabe", "false = kein unsichtbares Nachdenken (Default), true = Modell-Default, leer = Ollama entscheidet", G, False,
    label_en="/v1: think when unspecified", help_en="false = no invisible thinking (default), true = model default, empty = Ollama decides")
+_e("router.anthropic.keepalive_s", "float", "/v1/messages: Ping alle s", "SSE-Ping an Anthropic-Clients, solange der Knoten noch am Prompt rechnet", G, 15,
+   min=1, max=120, label_en="/v1/messages: ping every s", help_en="SSE ping to Anthropic clients while the node is still processing the prompt")
 
 G = "Knoten-Ueberwachung"
 _e("router.ollama_poll_s", "float", "Ollama-Abfrage alle s", "/api/tags + /api/ps", G, 5, min=1, max=300, label_en="Ollama poll every s")

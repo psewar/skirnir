@@ -7,6 +7,7 @@ Merkt sich geladene Modelle mit num_ctx; schreibt jeden Inferenz-Request nach st
 """
 import asyncio
 import json
+import re
 import sys
 
 from aiohttp import web
@@ -25,6 +26,19 @@ KV = {"granite4.2:8b": 0.158, "qwen3-coder:30b": 0.096}   # GiB pro 1k Token Kon
 CAPS = {"qwen3.6:35b-a3b": ["completion", "tools", "thinking"], "local-assist:latest": ["completion", "tools", "thinking"],
         "qwen3-coder:30b": ["completion", "tools", "insert"], "granite4.2:8b": ["completion", "tools", "thinking"],
         "gpt-oss:20b": ["completion", "thinking"]}
+
+
+HOOK_RE = re.compile(r"\[\[(\w+)(?:=([\w.]+))?\]\]")
+
+
+def test_hooks(b):
+    """Testhilfen fuer Wege, die keine eigenen Body-Felder durchreichen (Anthropic-Uebersetzung baut den Body neu):
+    [[name=wert]] in der letzten Nachricht wirkt wie das gleichnamige Body-Feld (sleep_s, fail_status, broken_tool_call,
+    stream_tool)."""
+    msgs = b.get("messages") or []
+    last = msgs[-1].get("content") if msgs and isinstance(msgs[-1], dict) else ""
+    for k, v in HOOK_RE.findall(str(last or "")):
+        b.setdefault(k, v or True)
 
 
 def digest(m): return "d" + ALIAS.get(m, m)
@@ -56,6 +70,7 @@ async def show(req):
 
 async def infer(req):
     b = await req.json()
+    test_hooks(b)
     m = b.get("model")
     if m not in models:
         return web.json_response({"error": f"model '{m}' not found"}, status=404)
@@ -63,10 +78,10 @@ async def infer(req):
         loaded.pop(m, None)
         print(json.dumps({"node": name, "unload": m}), flush=True)
         return web.json_response({"model": m, "done": True})
-    if b.get("fail_status"):   # Testhilfe (Stufe 3): Backend-Fehler vor dem ersten Byte, z. B. 500
-        return web.json_response({"error": "fake failure"}, status=int(b["fail_status"]))
     if b.get("sleep_s"):       # Testhilfe (Stufe 3): lange Anfrage, haelt den Platz auf dem Knoten belegt
         await asyncio.sleep(float(b["sleep_s"]))
+    if b.get("fail_status"):   # Testhilfe (Stufe 3): Backend-Fehler vor dem ersten Byte, z. B. 500 (mit sleep_s: spaet)
+        return web.json_response({"error": "fake failure"}, status=int(b["fail_status"]))
     if b.get("slow_load"):   # Testhilfe: erst nach dieser Zeit in /api/ps - wie ein echter Kaltstart,
         # bei dem nvidia-smi das VRAM schon sieht. Wie echtes Ollama wird das alte Modell VOR dem Laden verdraengt:
         # /api/ps zeigt waehrenddessen keins von beiden (der Fall, der 2026-09-25 zu 503 'no node' fuehrte).
@@ -107,6 +122,18 @@ async def infer(req):
         await resp.write_eof()
         return resp
 
+    if b.get("tools") and b.get("stream_tool") and b.get("stream", True):   # Text, dann der Aufruf am Stueck (wie Ollama)
+        resp = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
+        await resp.prepare(req)
+        for msg in ({"role": "assistant", "content": "Ich schaue nach."},
+                    {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "get_time", "arguments": {"tz": "CET"}}}]}):
+            await asyncio.sleep(delay)
+            await resp.write((json.dumps({"model": m, "message": msg, "done": False}) + "\n").encode())
+        await resp.write((json.dumps({"model": m, "message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop",
+                                      "eval_count": 12, "eval_duration": int(0.2e9), "prompt_eval_count": 40,
+                                      "prompt_eval_duration": int(0.02e9), "load_duration": int(5e6)}) + "\n").encode())
+        await resp.write_eof()
+        return resp
     if b.get("tools") and not b.get("stream", True):   # Tool-Aufruf wie Ollama nativ: arguments als Objekt
         await asyncio.sleep(delay)
         return web.json_response({"model": m, "message": {"role": "assistant", "content": "",

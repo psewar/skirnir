@@ -305,6 +305,11 @@ def _backend_body(body, role, tier, ctx, node):
     return out, ctx
 
 
+async def _awaited(awaitable):
+    """nreq liefert ein awaitbares Objekt (aiohttp oder TunnelRequest), keine Koroutine; als Task braucht es eine."""
+    return await awaitable
+
+
 def _failed_before_first_byte(status):
     """5xx (ausser 501) und 404 sind Knotenprobleme: naechster Kandidat. 4xx und 501 gehen an den Client."""
     return (status >= 500 and status != 501) or status == 404
@@ -331,6 +336,7 @@ class _Relay:
         self.ptoks = self.ctoks = 0  # Stufe 4: Tokens fuer Metriken/Usage
         self.ttft_s = None
         self.info = self.headers = None
+        self.resp = None             # Antwort an den Client, sobald der Stream offen ist (_open_stream)
 
     async def run(self):
         self._begin()
@@ -341,6 +347,8 @@ class _Relay:
         except (*UPSTREAM_ERRORS, ConnectionResetError) as e:
             # Fehler nach dem ersten Byte: nichts mehr zu retten, Verbindung endet
             log.warning("stream from %s aborted: %s", self.node.name, e)
+            if self.resp is not None and hasattr(self.shape, "stream_error"):
+                return await self._end_with_error(502, f"upstream {self.node.name} aborted")
             raise web.HTTPBadGateway(text=json.dumps({"error": f"upstream {self.node.name} aborted"})) from e
         finally:
             self._finish()
@@ -357,6 +365,8 @@ class _Relay:
         via = self.shape.name if self.shape else "ollama"
         self.info = self.req.info(self.role, self.tier_idx, self.tier, self.ctx, node, self.warm, via, self.request.get("client"))
         self.headers = request_mod.headers_for(self.info)
+        if hasattr(self.shape, "bind"):   # Anthropic: Message-ID = Request-ID, model = Name, den der Client kennt
+            self.shape.bind(self.req.request_id, self.exposed)
         request_mod.remember_session(self.req.session_id, node.name, model)
         reason = "loaded" if self.warm else "cold"
         log.info("route %s %s -> tier%d %s ctx=%s node=%s(%s,%s) inflight=%d req=%s%s", self.path, self.role["name"], self.tier_idx,
@@ -404,11 +414,16 @@ class _Relay:
     async def _via_node(self):
         timeout = ClientTimeout(total=state.CFG.request_timeout_s, sock_connect=CONNECT_TIMEOUT_S, sock_read=state.CFG.request_timeout_s)
         try:
-            upstream = await nodes.nreq(self.node, "post", self.path, json=self.out, timeout=timeout)
+            upstream = await self._connect(timeout)
         except UPSTREAM_ERRORS as e:
             log.warning("node %s connect failed: %s", self.node.name, e)
-            return self._fail("timeout" if isinstance(e, asyncio.TimeoutError) else "error", f"connect: {type(e).__name__}")
+            self._fail("timeout" if isinstance(e, asyncio.TimeoutError) else "error", f"connect: {type(e).__name__}")
+            if self.resp is not None:   # Stream schon offen (Keep-alive): kein Ausweich-Kandidat mehr
+                return await self._end_with_error(502, f"upstream {self.node.name} failed: {type(e).__name__}")
+            return None
         async with upstream:
+            if upstream.status >= 400 and self.resp is not None:
+                return await self._late_upstream_error(upstream)
             if _failed_before_first_byte(upstream.status):
                 return await self._node_failed(upstream)
             if upstream.status >= 400:
@@ -416,6 +431,51 @@ class _Relay:
             if not self.stream:
                 return await self._complete_unary(upstream)
             return await self._complete_stream(upstream)
+
+    async def _connect(self, timeout):
+        """Anfrage absetzen und auf die Kopfzeilen des Knotens warten. Ollama schickt sie erst mit dem ersten Token, nach dem
+        Prefill (196k Kontext: bis ~2 min). Clients mit Keep-alive (Anthropic-SSE: Claude Code, Proxys) bekommen darum nach
+        `keepalive_s` ohne Antwort schon den Stream-Anfang und danach Pings; ab dann gibt es keinen Ausweich-Kandidaten mehr.
+        Schnelle Fehler (Verbindung, 5xx) kommen fast immer vorher und behalten den Ausweich."""
+        call = nodes.nreq(self.node, "post", self.path, json=self.out, timeout=timeout)
+        every = getattr(self.shape, "keepalive_s", 0) if self.stream else 0
+        if not every:
+            return await call
+        task = asyncio.ensure_future(_awaited(call))
+        try:
+            while True:
+                done, _pending = await asyncio.wait({task}, timeout=every)
+                if done:
+                    return task.result()   # Upstream-Fehler gehen wie ohne Keep-alive an _via_node
+                await self._open_stream()
+                await self.resp.write(self.shape.ping())
+        finally:
+            if not task.done():   # Client weg (Abbruch dieses Handlers): Anfrage an den Knoten nicht weiterlaufen lassen
+                task.cancel()
+
+    async def _late_upstream_error(self, upstream):
+        """Knoten lehnt ab, nachdem der Stream schon offen ist: Fehler als Ereignis im Stream statt als HTTP-Status."""
+        txt = (await upstream.text())[:500]
+        log.warning("node %s returned %s after keep-alive: %s", self.node.name, upstream.status, txt[:200])
+        if upstream.status == 404:
+            self.node.models.discard(self.model)   # wie _node_failed: Knoten hat das Modell nicht (mehr)
+        elif _failed_before_first_byte(upstream.status):
+            self._fail("error", f"HTTP {upstream.status}")
+        try:
+            j = json.loads(txt)
+        except ValueError:   # Ollama-Fehler sind JSON; was sonst kommt (Proxy, abgeschnitten), geht als Text weiter
+            j = None
+        msg = (j.get("error") if isinstance(j, dict) else None) or txt
+        return await self._end_with_error(upstream.status, f"upstream {self.node.name}: {msg}")
+
+    async def _end_with_error(self, status, msg):
+        """Offenen Stream mit `event: error` schliessen. Ist der Client schon weg, gibt es niemanden mehr zu benachrichtigen."""
+        self.outcome = self.outcome or "error"
+        transport = self.request.transport
+        if transport is not None and not transport.is_closing():
+            await self.resp.write(self.shape.stream_error(status, msg))
+            await self.resp.write_eof()
+        return self.resp
 
     async def _node_failed(self, upstream):
         txt = await upstream.text()
@@ -531,6 +591,8 @@ class _Relay:
             if resp is None:   # noch nichts gesendet -> naechster Kandidat
                 log.warning("%s: %s -> HTTP %s: %s", self.node.name, self.model, e.status, e)
                 return self._fail("error", f"HTTP {e.status}")
+            if hasattr(self.shape, "stream_error"):
+                return await self._end_with_error(502, f"{self.node.name} aborted: {e}")
             raise web.HTTPBadGateway(text=json.dumps({"error": f"{self.node.name} aborted: {e}"})) from e
         if resp is None:   # leerer Stream: trotzdem sauber abschliessen
             resp = await self._open_stream()
@@ -549,8 +611,15 @@ class _Relay:
     # -- Gemeinsames --
 
     async def _open_stream(self):
+        """Stream zum Client oeffnen (einmal; der Keep-alive in _connect kann es frueher tun). Formate mit Kopf-Ereignis
+        (Anthropic: message_start) schicken es sofort."""
+        if self.resp is not None:
+            return self.resp
         resp = web.StreamResponse(status=200, headers={"Content-Type": self.shape.stream_content_type if self.shape else NDJSON, **self.headers})
         await resp.prepare(self.request)
+        self.resp = resp
+        if hasattr(self.shape, "head"):
+            await resp.write(self.shape.head())
         return resp
 
     def _finalize_json(self, j, force_model=False):

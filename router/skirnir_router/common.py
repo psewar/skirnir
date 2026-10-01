@@ -7,7 +7,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -94,6 +94,31 @@ def openai_error(status, msg, why=None):
     if why:
         e.update(retry_after=why.get("retry_after_s"), skirnir={"blockers": why["blockers"]})
     return web.json_response({"error": e}, status=status, headers=_why_headers(why))
+
+
+# Anthropic-Messages-API (Claude Code u. a.), siehe anthropic_api.py. Kein Platz (503 im Router) heisst dort 529
+# overloaded_error: Claude Code wiederholt 529 von selbst, 503 je nach Version nicht.
+ANTHROPIC_OVERLOADED = 529
+ANTHROPIC_ERROR_TYPES = {400: "invalid_request_error", 401: "authentication_error", 403: "permission_error",
+                         404: "not_found_error", 413: "request_too_large", 422: "invalid_request_error",
+                         429: "rate_limit_error", 529: "overloaded_error"}
+
+
+def anthropic_error_body(status, msg, why=None):
+    """(HTTP-Status, Fehlerobjekt, Kopfzeilen) in Anthropic-Form; gemeinsam fuer die Antwort und `event: error` im Stream.
+    Grund-Code, Wartezeit und Hindernisse je Knoten stehen in error.skirnir wie bei OpenAI in error.code/skirnir."""
+    if status == 503:
+        status = ANTHROPIC_OVERLOADED
+    typ = ANTHROPIC_ERROR_TYPES.get(status) or ("api_error" if status >= 500 else "invalid_request_error")
+    e = {"type": typ, "message": msg}
+    if why:
+        e["skirnir"] = {"code": why["code"], "retry_after": why.get("retry_after_s"), "blockers": why["blockers"]}
+    return status, {"type": "error", "error": e}, _why_headers(why)
+
+
+def anthropic_error(status, msg, why=None):
+    status, body, headers = anthropic_error_body(status, msg, why)
+    return web.json_response(body, status=status, headers=headers)
 
 
 def split_listen(s):

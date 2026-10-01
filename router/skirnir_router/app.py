@@ -10,7 +10,7 @@ import sys
 
 from aiohttp import ClientSession, web
 
-from . import admin, agentupdate, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
+from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
 from . import decision
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 
@@ -23,6 +23,9 @@ def build_apps():
     api.router.add_get("/api/ps", proxy.handle_ps)
     api.router.add_get("/api/version", proxy.handle_version)
     api.router.add_get("/v1/skirnir/availability/{model}", proxy.handle_availability)   # vor dem /v1-Fangnetz registrieren
+    if state.CFG.anthropic_enabled:   # Anthropic-Messages-API (Claude Code): eigene Uebersetzung auf /api/chat
+        api.router.add_post("/v1/messages", anthropic_api.handle_messages)
+        api.router.add_post("/v1/messages/count_tokens", anthropic_api.handle_count_tokens)
     for p in INFER_PATHS:
         api.router.add_post(p, proxy.handle_infer)
     for p in FORBIDDEN_PATHS:

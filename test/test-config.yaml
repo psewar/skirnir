@@ -8,6 +8,7 @@ router:
   agent_missing_problem_s: 8
   expose_concrete_models: true
   request_timeout_s: 60
+  anthropic: { keepalive_s: 1 }   # /v1/messages: Ping schon nach 1 s, damit der Test nicht 15 s wartet
   heartbeat_token: "testtoken"
   api_tls: true
   limits: { max_images: 2, max_tools: 8, max_messages: 50 }   # Stufe 1: Request-Groessenlimits (413)

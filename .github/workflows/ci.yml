@@ -27,6 +27,7 @@ jobs:
       - run: python test/selftest_kontext_teilen.py
       - run: python test/selftest_kinder_vram.py
       - run: python test/selftest_ollama_push.py
+      - run: python test/selftest_anthropic_messages.py
 
   go:
     name: Agent vet, test, Windows cross-build

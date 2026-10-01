@@ -275,6 +275,12 @@ def main():
         oe = json.loads(raw).get("error", {}) if st == 503 else {}
         check("... OpenAI-Form: error.code gpu_busy, error.retry_after 30", oe.get("code") == "gpu_busy" and oe.get("retry_after") == 30,
               f"{st} {raw[:160]!r}")
+        st, raw = http(R + "/v1/messages", {"model": "gross:latest", "max_tokens": 16, "messages": [{"role": "user", "content": "hi"}]},
+                       headers={"anthropic-version": "2023-06-01"})
+        ae = json.loads(raw) if raw else {}
+        check("... Anthropic-Form: HTTP 529 overloaded_error, Retry-After 30, error.skirnir.code gpu_busy", st == 529
+              and ae.get("type") == "error" and ae.get("error", {}).get("type") == "overloaded_error"
+              and LAST_HEADERS.get("Retry-After") == "30" and ae["error"].get("skirnir", {}).get("code") == "gpu_busy", f"{st} {raw[:200]!r}")
         st, raw = http(R + "/v1/skirnir/availability/gross:latest")
         av = json.loads(raw) if st == 200 else {}
         check("Verfuegbarkeit gross bei busy big: available false, code gpu_busy", av.get("available") is False and av.get("code") == "gpu_busy",
@@ -1111,6 +1117,87 @@ def main():
         check("Knoten 501 (Modell kann keine Embeddings) -> Fehlertext an den Client, kein 503", st == 501 and "does not support embeddings" in json.loads(raw)["error"]["message"], f"{st} {raw.decode()[:120]}")
         st, raw = http(R + "/api/embed", {"model": "klein", "input": "kein-embedding"})
         check("... auch im Ollama-Format", st == 501 and "does not support embeddings" in json.loads(raw)["error"], f"{st} {raw.decode()[:120]}")
+        # Anthropic-Messages-API (/v1/messages, Claude Code): Uebersetzung auf /api/chat ueber Rolle und Scheduler
+        def sse_events(raw):
+            out = []
+            for frame in raw.decode().split("\n\n"):
+                lines = [l for l in frame.split("\n") if l]
+                if len(lines) >= 2 and lines[0].startswith("event: ") and lines[1].startswith("data: "):
+                    out.append((lines[0][7:], json.loads(lines[1][6:])))
+            return out
+
+        an_hdr = {"anthropic-version": "2023-06-01", "anthropic-beta": "test-beta-2026-10-01"}
+        an_body = {"model": "klein", "max_tokens": 64, "system": [{"type": "text", "text": "Du bist knapp.", "cache_control": {"type": "ephemeral"}}],
+                   "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]}
+        t_an = time.time()
+        st, raw = http(R + "/v1/messages", an_body, headers=an_hdr)
+        am = json.loads(raw)
+        check("/v1/messages non-stream: message mit Rollenname, Text, end_turn, usage, id msg_<request_id>", st == 200
+              and am.get("type") == "message" and am.get("role") == "assistant" and am.get("model") == "klein:latest"
+              and am.get("content") == [{"type": "text", "text": "Hallo von small"}] and am.get("stop_reason") == "end_turn"
+              and am.get("usage") == {"input_tokens": 20, "output_tokens": 30}
+              and am.get("id") == "msg_" + str(LAST_HEADERS.get("X-Skirnir-Request-Id")), raw.decode()[:220])
+        logs["small"].seek(0); sent = last_route(logs["small"].read())[-1]
+        check("... nativ: /api/chat, num_ctx 4096 (Tier), num_predict 64, think false", sent["path"] == "/api/chat" and sent["num_ctx"] == 4096
+              and sent["stream"] is False and sent["options"].get("num_predict") == 64 and sent["think"] is False, str(sent))
+        d = route(t_an)
+        check("... Entscheidung protokolliert mit via=anthropic", d.get("via") == "anthropic" and d.get("model") == "granite4.2:8b", str(d))
+        an_tools = [{"name": "get_time", "description": "Uhrzeit", "input_schema": {"type": "object", "properties": {"tz": {"type": "string"}}}}]
+        st, raw = http(R + "/v1/messages", {**an_body, "tools": an_tools, "messages": [{"role": "user", "content": "wie spaet?"}]}, headers=an_hdr)
+        am = json.loads(raw)
+        tu = [c for c in am.get("content", []) if c.get("type") == "tool_use"]
+        check("/v1/messages Tool-Call: tool_use mit input-Objekt, stop_reason tool_use", st == 200 and am.get("stop_reason") == "tool_use"
+              and len(tu) == 1 and tu[0]["name"] == "get_time" and tu[0]["input"] == {"tz": "CET"} and tu[0]["id"].startswith("toolu_"), raw.decode()[:220])
+        follow = {**an_body, "tools": an_tools, "messages": [
+            {"role": "user", "content": "wie spaet?"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": tu[0]["id"] if tu else "toolu_x", "name": "get_time", "input": {"tz": "CET"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tu[0]["id"] if tu else "toolu_x", "content": "12:00"}]}]}
+        st, raw = http(R + "/v1/messages", {**follow, "tools": []}, headers=an_hdr)
+        check("... Tool-Ergebnis-Runde wird akzeptiert", st == 200 and json.loads(raw).get("content", [{}])[0].get("text") == "Hallo von small", raw.decode()[:160])
+        st, raw = http(R + "/v1/messages", {**an_body, "stream": True}, headers=an_hdr)
+        evs = sse_events(raw)
+        names = [e for e, _ in evs]
+        txt = "".join(d["delta"].get("text", "") for e, d in evs if e == "content_block_delta")
+        check("/v1/messages stream: message_start, Textblock, message_delta mit Zaehlern, message_stop", st == 200
+              and LAST_HEADERS.get("Content-Type", "").startswith("text/event-stream") and names[0] == "message_start"
+              and names[-2:] == ["message_delta", "message_stop"] and txt == "Hallo von small"
+              and evs[-2][1]["usage"] == {"input_tokens": 20, "output_tokens": 30} and evs[-2][1]["delta"]["stop_reason"] == "end_turn",
+              f"{st} {names}")
+        st, raw = http(R + "/v1/messages", {**an_body, "stream": True, "tools": an_tools,
+                                            "messages": [{"role": "user", "content": "wie spaet? [[stream_tool]]"}]}, headers=an_hdr)
+        evs = sse_events(raw)
+        starts = [d["content_block"]["type"] for e, d in evs if e == "content_block_start"]
+        pj = [d["delta"]["partial_json"] for e, d in evs if e == "content_block_delta" and d["delta"]["type"] == "input_json_delta"]
+        check("/v1/messages stream mit Tool: Text- und tool_use-Block, input_json_delta, stop_reason tool_use", st == 200
+              and starts == ["text", "tool_use"] and [json.loads(p) for p in pj] == [{"tz": "CET"}]
+              and evs[-2][1]["delta"]["stop_reason"] == "tool_use", f"{st} {[e for e, _ in evs]}")
+        st, raw = http(R + "/v1/messages", {**an_body, "stream": True, "tools": an_tools,
+                                            "messages": [{"role": "user", "content": "wie spaet? [[broken_tool_call]]"}]}, headers=an_hdr)
+        evs = sse_events(raw)
+        starts = [d["content_block"] for e, d in evs if e == "content_block_start"]
+        check("/v1/messages stream: Tool-Call-Rettung greift (Text-Dialekt -> tool_use, kein Textblock)", st == 200
+              and [b["type"] for b in starts] == ["tool_use"] and starts[0]["name"] == "get_time", f"{st} {[e for e, _ in evs]}")
+        st, raw = http(R + "/v1/messages", {**an_body, "stream": True, "messages": [{"role": "user", "content": "hi [[sleep_s=2.5]]"}]}, headers=an_hdr)
+        names = [e for e, _ in sse_events(raw)]
+        first_block = names.index("content_block_start") if "content_block_start" in names else -1
+        check("/v1/messages stream, langes Prefill: message_start sofort, dann ping, dann Inhalt", st == 200 and names[0] == "message_start"
+              and first_block > 1 and "ping" in names[1:first_block] and names[-1] == "message_stop", str(names))
+        st, raw = http(R + "/v1/messages", {**an_body, "stream": True, "messages": [{"role": "user", "content": "hi [[sleep_s=1.5]] [[fail_status=400]]"}]},
+                       headers=an_hdr)
+        evs = sse_events(raw)
+        check("/v1/messages stream: Knoten lehnt nach dem Keep-alive ab -> event error im Stream", st == 200 and evs and evs[-1][0] == "error"
+              and evs[-1][1]["error"]["type"] == "invalid_request_error" and "fake failure" in evs[-1][1]["error"]["message"], str([e for e, _ in evs]))
+        st, raw = http(R + "/v1/messages/count_tokens", {"model": "klein", "messages": [{"role": "user", "content": "Hallo Welt " * 50}]}, headers=an_hdr)
+        check("/v1/messages/count_tokens -> input_tokens (Schaetzung), nie 404", st == 200 and json.loads(raw).get("input_tokens", 0) > 50, raw.decode()[:100])
+        st, raw = http(R + "/v1/messages", {**an_body, "model": "gibtsnicht"}, headers=an_hdr)
+        check("/v1/messages unbekanntes Modell -> 404 not_found_error", st == 404 and json.loads(raw)["error"]["type"] == "not_found_error", raw.decode()[:120])
+        st, raw = http(R + "/v1/messages", {"model": "klein", "max_tokens": 5}, headers=an_hdr)
+        check("/v1/messages ohne messages -> 400 invalid_request_error", st == 400 and json.loads(raw) == {"type": "error", "error": {
+            "type": "invalid_request_error", "message": "messages is required"}}, raw.decode()[:120])
+        st, raw = http(R + "/v1/models", headers=an_hdr)
+        amod = json.loads(raw)
+        check("/v1/models mit anthropic-version: Anthropic-Form (type model, has_more)", st == 200 and amod.get("has_more") is False
+              and any(m.get("type") == "model" and m.get("id") == "klein:latest" for m in amod.get("data", [])), raw.decode()[:160])
         st, raw = http(R + "/v1/files")
         check("/v1/<unbekannt> -> 404 OpenAI-Fehler", st == 404 and "not supported" in json.loads(raw)["error"]["message"], raw.decode()[:100])
         st, raw = http(C + "/admin/try", {"model": "klein:latest", "prompt": "hi"})
@@ -1177,6 +1264,8 @@ def main():
         check("Bearer-Token identifiziert den Client", st == 200 and t["total"] >= 1 and t["via"] == "bearer", json.dumps(t))
         st, raw = http(R + "/api/tags", headers={"Authorization": "Basic " + base64.b64encode(b"tester:tester-token").decode()})
         check("Basic <client>:<token> identifiziert ebenfalls", st == 200 and ca()["clients"]["tester"]["via"] == "basic")
+        st, raw = http(R + "/api/tags", headers={"x-api-key": "tester-token"})
+        check("x-api-key (Anthropic-Clients) identifiziert ebenfalls", st == 200 and ca()["clients"]["tester"]["via"] == "x-api-key")
         st, raw = http(R + "/api/tags", headers=hdr("voellig-falsch"))
         check("falsches Token zaehlt als bad_token (kein Rueckfall auf die IP)", st == 200
               and any(u["bad_token"] >= 1 for u in ca()["unauthenticated"].values()))

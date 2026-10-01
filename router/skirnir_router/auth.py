@@ -12,7 +12,7 @@ from collections import deque
 from aiohttp import web
 
 from . import state
-from .common import log, ollama_error, openai_error
+from .common import anthropic_error, log, ollama_error, openai_error
 
 
 # ----------------------------------------------------------------------------- Client-Authentifizierung (11434)
@@ -59,7 +59,7 @@ def resolve_client(request):
     """(Client-Name, Weg) oder (None, Grund). Weg: bearer | basic | ip; Grund: bad_token | None (nichts geschickt)."""
     clients = client_auth_cfg().get("clients") or {}
     header = request.headers.get("Authorization", "")
-    token, user = None, None
+    token, user, key_via = None, None, "bearer"
     if header.startswith("Bearer "):
         token = header[7:].strip()
     elif header.startswith("Basic "):
@@ -67,6 +67,9 @@ def resolve_client(request):
             user, _, token = base64.b64decode(header[6:]).decode("utf-8").partition(":")
         except Exception:  # noqa: BLE001
             token = None
+    elif request.headers.get("x-api-key"):
+        # Anthropic-Clients: Claude Code schickt ANTHROPIC_AUTH_TOKEN als Bearer, ANTHROPIC_API_KEY als x-api-key
+        token, key_via = request.headers["x-api-key"].strip(), "x-api-key"
     if token:
         # Router-eigene Identitaet fuer den Selbstaufruf der UI: nur mit dem Start-Zufall UND nur von localhost
         if state.INTERNAL_TOKEN and not user and (request.remote or "") in ("127.0.0.1", "::1") \
@@ -77,7 +80,7 @@ def resolve_client(request):
             if user and name != user:
                 continue
             if c.get("token_sha256") and hmac.compare_digest(h, c["token_sha256"]):
-                return name, ("basic" if user else "bearer")
+                return name, ("basic" if user else key_via)
         return None, "bad_token"
     ip = request.remote or ""
     for name, c in clients.items():
@@ -86,8 +89,15 @@ def resolve_client(request):
     return None, None
 
 
+def error_format(path):
+    """Fehlerform nach Pfad: Anthropic (/v1/messages...), OpenAI (uebriges /v1), sonst Ollama."""
+    if path.startswith("/v1/messages"):
+        return anthropic_error
+    return openai_error if path.startswith("/v1/") else ollama_error
+
+
 def _deny(request, status, msg):
-    resp = (openai_error if request.path.startswith("/v1/") else ollama_error)(status, msg)
+    resp = error_format(request.path)(status, msg)
     if status == 401:
         resp.headers["WWW-Authenticate"] = 'Bearer realm="skirnir-router"'
     return resp

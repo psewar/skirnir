@@ -86,6 +86,9 @@ router:
   openai:                        # OpenAI-kompatibel: /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings
     enabled: true                # (Node-RED node-red-contrib-mcp: Base-URL https://router.example.net:11434/v1, Modell = Rolle)
     default_think: false         # OpenAI-Clients kennen kein think: false = kein unsichtbares Nachdenken (wie HA-AI-Tasks); null = Ollama-Default
+  anthropic:                     # Anthropic-Messages-API: /v1/messages, /v1/messages/count_tokens (Claude Code:
+    enabled: true                #   ANTHROPIC_BASE_URL=https://router.example.net:11434, Modell = Rolle wie code:latest)
+    keepalive_s: 15              # SSE-Ping, solange der Knoten noch am Prompt rechnet (Prefill bei grossem Kontext bis Minuten)
   wol:
     wait_up_s: 90
     retry_interval_s: 20

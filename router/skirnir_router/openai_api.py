@@ -6,7 +6,7 @@ import time
 
 from aiohttp import web
 
-from . import proxy, state
+from . import anthropic_api, proxy, state
 from .common import openai_error, parse_tool_args
 
 
@@ -263,11 +263,15 @@ def oa_model_entry(t):
 
 
 async def handle_oa_models(request):
+    if anthropic_api.wants_anthropic(request):   # gleicher Pfad, Anthropic-Form fuer Claude Code u. a.
+        return anthropic_api.models_response(proxy.tags_list())
     return web.json_response({"object": "list", "data": [oa_model_entry(t) for t in proxy.tags_list()]})
 
 
 async def handle_oa_model(request):
     mid = request.match_info["model"]
+    if anthropic_api.wants_anthropic(request):
+        return anthropic_api.model_response(proxy.tags_list(), mid)
     for t in proxy.tags_list():
         if t["name"] == mid or t["name"] == f"{mid}:latest":
             return web.json_response(oa_model_entry(t))
