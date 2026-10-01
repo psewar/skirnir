@@ -1163,6 +1163,17 @@ def main():
               and names[-2:] == ["message_delta", "message_stop"] and txt == "Hallo von small"
               and evs[-2][1]["usage"] == {"input_tokens": 20, "output_tokens": 30} and evs[-2][1]["delta"]["stop_reason"] == "end_turn",
               f"{st} {names}")
+        # Form wie Claude Code 2.1.284 (Mitschrift 2026-10-01): ?beta=true, role system im Verlauf, thinking adaptive/omitted,
+        # context_management/output_config - die erste Abnahme scheiterte an der system-Rolle mit 400
+        cc_body = {**an_body, "stream": True, "thinking": {"type": "adaptive", "display": "omitted"}, "context_management": {},
+                   "output_config": {}, "metadata": {"user_id": "x"}, "messages": [
+                       {"role": "user", "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "hi"}]},
+                       {"role": "system", "content": [{"type": "text", "text": "Hinweis", "cache_control": {"type": "ephemeral"}}]}]}
+        st, raw = http(R + "/v1/messages?beta=true", cc_body, headers=an_hdr)
+        names = [e for e, _ in sse_events(raw)]
+        logs["small"].seek(0); sent = last_route(logs["small"].read())[-1]
+        check("/v1/messages?beta=true in Claude-Code-Form (system im Verlauf, adaptive) -> 200-Stream, think true", st == 200
+              and names[0] == "message_start" and names[-1] == "message_stop" and sent["think"] is True, f"{st} {names} {raw[:160]!r}")
         st, raw = http(R + "/v1/messages", {**an_body, "stream": True, "tools": an_tools,
                                             "messages": [{"role": "user", "content": "wie spaet? [[stream_tool]]"}]}, headers=an_hdr)
         evs = sse_events(raw)

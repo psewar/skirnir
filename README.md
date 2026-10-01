@@ -97,10 +97,11 @@ with Ollama's default context and pushes out the runner all other clients share.
 | `text` / `image` (base64) blocks | `content` / `images`; image URLs → 400 |
 | `tool_use` (assistant) / `tool_result` (user) | `tool_calls` / one `role: tool` message each, `tool_name` from the matching `tool_use` id; `is_error` → prefix `Error: ` |
 | `thinking` / `redacted_thinking` in the history | dropped |
+| `role: system` inside `messages` (not in the public API, but Claude Code 2.x sends it) | a `system` message at that position |
 | `tools` (`input_schema`) | `tools` as functions; Anthropic server tools without a schema are left out |
 | `tool_choice` | `none` drops the tools; `any` / `tool` become a system hint (Ollama cannot force a call) |
 | `max_tokens`, `temperature`, `top_p`, `top_k`, `stop_sequences` | `num_predict`, `temperature`, `top_p`, `top_k`, `stop` |
-| `thinking: {type: enabled\|adaptive}` | `think: true`; missing or `disabled` → `think: false` |
+| `thinking: {type: enabled\|adaptive}` | `think: true`; missing or `disabled` → `think: false`; `display: omitted` → thinking blocks without text (with `ping` events while the model thinks) |
 
 Responses carry `id: msg_<request id>` (as in `X-Skirnir-Request-Id`), the requested role as `model`, a `thinking`, a `text` and
 one `tool_use` block per call, and `stop_reason` `tool_use`, `max_tokens` or `end_turn` (Ollama does not tell a stop sequence

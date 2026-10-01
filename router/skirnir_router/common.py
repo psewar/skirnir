@@ -7,7 +7,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 

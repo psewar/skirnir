@@ -95,7 +95,9 @@ Client-Identität, Metriken und Entscheidungslog (`via=anthropic`). Ollamas eige
 Präfix `Error: `), `tools` mit `input_schema` (Server-Werkzeuge von Anthropic ohne Schema fallen weg), `tool_choice` (`none`
 lässt die Werkzeuge weg, `any`/`tool` werden zum Systemhinweis, erzwingen kann Ollama keinen Aufruf), `max_tokens`,
 `temperature`, `top_p`, `top_k`, `stop_sequences` und `thinking` (`enabled`/`adaptive` → `think: true`, sonst `false`).
-`thinking`-Blöcke im Verlauf gehen nicht an das Modell zurück.
+`thinking`-Blöcke im Verlauf gehen nicht an das Modell zurück. `role: system` mitten im Verlauf (gibt es in der öffentlichen API
+nicht, Claude Code 2.x schickt es) geht an derselben Stelle als `system`-Nachricht weiter; bei `thinking.display: omitted` kommen
+Denkblöcke ohne Text, solange das Modell denkt mit `ping`-Ereignissen.
 
 Antworten tragen `id: msg_<Request-ID>` (wie `X-Skirnir-Request-Id`), die angefragte Rolle als `model`, je einen `thinking`-,
 `text`- und pro Aufruf einen `tool_use`-Block und `stop_reason` `tool_use`, `max_tokens` oder `end_turn` (Ollama unterscheidet

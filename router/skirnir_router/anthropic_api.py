@@ -10,6 +10,7 @@ Die Uebersetzungsfunktionen sind rein (ohne Router-Zustand) und werden von test/
 
 import json
 import secrets
+import time
 
 from aiohttp import web
 
@@ -73,12 +74,20 @@ def messages_to_native(messages):
     """Verlauf Anthropic -> Ollama. Liefert (Nachrichten, None) oder (None, Klartext fuer 400).
 
     Ein User-Zug mit tool_result-Bloecken wird zu je einer role=tool-Nachricht (in Reihenfolge), sein Text und seine Bilder
-    danach zu einer user-Nachricht. thinking/redacted_thinking im Verlauf gehen nicht an das Modell zurueck."""
+    danach zu einer user-Nachricht. thinking/redacted_thinking im Verlauf gehen nicht an das Modell zurueck.
+
+    role=system mitten im Verlauf kennt die oeffentliche API nicht, Claude Code (2.1.x) schickt sie aber (Hinweise an das
+    Modell nach dem ersten User-Zug, Textbloecke mit cache_control). Sie geht an derselben Stelle als system-Nachricht weiter."""
     out, names = [], {}
     for i, m in enumerate(messages):
-        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant"):
-            return None, f"messages.{i}: role must be 'user' or 'assistant'"
+        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system"):
+            return None, f"messages.{i}: role must be 'user', 'assistant' or 'system'"
         role, content = m["role"], m.get("content")
+        if role == "system":
+            text = text_of(content)
+            if text:
+                out.append({"role": "system", "content": text})
+            continue
         if content is None or isinstance(content, str):
             out.append({"role": role, "content": content or ""})
             continue
@@ -162,9 +171,17 @@ def options_of(b):
 
 
 def think_of(b):
-    """thinking {type: enabled|adaptive} -> denken; fehlt/disabled -> nicht (qwen3.8 dachte sonst immer)."""
+    """thinking {type: enabled|adaptive} -> denken; fehlt/disabled -> nicht (qwen3.8 dachte sonst immer).
+    adaptive (Claude Code 2.1.x) heisst bei Anthropic "das Modell entscheidet"; qwen3.8 denkt ohnehin, also true."""
     t = b.get("thinking")
     return isinstance(t, dict) and t.get("type") in THINK_TYPES
+
+
+def thinking_shown(b):
+    """thinking.display "omitted": der Client will den Denktext nicht (Claude Code zeigt ihn nicht an). Die API liefert dann
+    thinking-Bloecke mit leerem Text; der Router ebenso."""
+    t = b.get("thinking")
+    return not (isinstance(t, dict) and t.get("display") == "omitted")
 
 
 def to_native(b):
@@ -230,10 +247,12 @@ class AnthropicShape:
     stream_content_type = "text/event-stream"
     error = staticmethod(anthropic_error)
 
-    def __init__(self, model, keepalive_s=KEEPALIVE_S):
+    def __init__(self, model, keepalive_s=KEEPALIVE_S, show_thinking=True):
         self.id = "msg_" + secrets.token_hex(12)
         self.model = model
         self.keepalive_s = keepalive_s   # proxy._connect: Ping-Abstand, solange der Knoten noch nichts geschickt hat
+        self.show_thinking = show_thinking   # False bei thinking.display "omitted": Denkbloecke ohne Text
+        self.last_sent = time.monotonic()    # verschwiegenes Denken: ping, damit der Stream nicht minutenlang stumm ist
         self.index = -1
         self.open = None        # Typ des offenen Blocks: thinking | text | None
         self.saw_tools = False
@@ -250,7 +269,7 @@ class AnthropicShape:
         msg = j.get("message") or {}
         content = []
         if msg.get("thinking"):
-            content.append({"type": "thinking", "thinking": msg["thinking"], "signature": ""})
+            content.append({"type": "thinking", "thinking": msg["thinking"] if self.show_thinking else "", "signature": ""})
         if msg.get("content"):
             content.append({"type": "text", "text": msg["content"]})
         tools = tool_blocks(msg.get("tool_calls"))
@@ -297,6 +316,12 @@ class AnthropicShape:
         if self.open != kind:
             out += self._start({"type": kind, kind: ""})
             self.open = kind
+        if kind == "thinking" and not self.show_thinking:
+            # Denktext verschwiegen: Block bleibt (wie bei der API), Deltas nicht. Ohne sie kaeme bei langem Denken
+            # minutenlang nichts beim Client an - darum hoechstens alle keepalive_s ein ping.
+            if not out and time.monotonic() - self.last_sent >= self.keepalive_s:
+                out = self.ping()
+            return out
         field, dtype = ("thinking", "thinking_delta") if kind == "thinking" else ("text", "text_delta")
         return out + sse("content_block_delta", {"type": "content_block_delta", "index": self.index,
                                                  "delta": {"type": dtype, field: text}})
@@ -331,6 +356,8 @@ class AnthropicShape:
             out += self._tool(block)
         if j.get("done") and not self.finished:
             out += self._end(j)
+        if out:
+            self.last_sent = time.monotonic()
         return out
 
     def tail(self):
@@ -378,7 +405,7 @@ async def handle_messages(request):
     native, err = to_native(b)
     if err:
         return anthropic_error(400, err)
-    shape = AnthropicShape(b["model"], state.CFG.anthropic_keepalive_s)
+    shape = AnthropicShape(b["model"], state.CFG.anthropic_keepalive_s, thinking_shown(b))
     return await proxy.route_request(request, "/api/chat", native, shape, anthropic_error)
 
 

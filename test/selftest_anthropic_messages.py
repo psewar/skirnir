@@ -80,6 +80,13 @@ def t_anfrage():
     check("thinking enabled -> think true, stream true", n["think"] is True and n["stream"] is True)
     n, _ = A.to_native({**b, "thinking": {"type": "disabled"}})
     check("thinking disabled -> think false", n["think"] is False)
+    # so schickt es Claude Code 2.1.284 (Mitschrift 2026-10-01)
+    cc = {**b, "thinking": {"type": "adaptive", "display": "omitted"}, "context_management": {}, "output_config": {}}
+    n, err = A.to_native(cc)
+    check("Claude Code: thinking adaptive -> think true, unbekannte Felder (context_management, output_config) stoeren nicht",
+          err is None and n["think"] is True and "context_management" not in n and "output_config" not in n, err)
+    check("display omitted -> Denktext verschweigen, sonst zeigen",
+          A.thinking_shown(cc) is False and A.thinking_shown(b) is True and A.thinking_shown({"thinking": {"type": "enabled"}}) is True)
 
     img = {"model": "m", "max_tokens": 10, "messages": [{"role": "user", "content": [
         {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0K"}},
@@ -107,7 +114,7 @@ def t_anfrage():
 
     for label, body, part in [("ohne model", {"messages": [{"role": "user", "content": "x"}]}, "model is required"),
                               ("ohne messages", {"model": "m"}, "messages is required"),
-                              ("falsche Rolle", {"model": "m", "messages": [{"role": "system", "content": "x"}]}, "role must be"),
+                              ("falsche Rolle", {"model": "m", "messages": [{"role": "tool", "content": "x"}]}, "role must be"),
                               ("unbekannter Block", {"model": "m", "messages": [{"role": "user", "content": [{"type": "audio"}]}]},
                                "not supported")]:
         n, err = A.to_native(body)
@@ -143,6 +150,14 @@ def t_verlauf():
     ]
     check("tool_use/tool_result-Paare, id -> tool_name, is_error-Praefix", out == want, json.dumps(out, ensure_ascii=False))
     check("thinking/redacted_thinking im Verlauf verworfen", "Ich lese beide." not in json.dumps(out) and "xyz" not in json.dumps(out))
+
+    # Claude Code 2.1.284: role system mitten im Verlauf (Textblock mit cache_control) - die oeffentliche API kennt das nicht
+    out, err = A.messages_to_native([
+        {"role": "user", "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]},
+        {"role": "system", "content": [{"type": "text", "text": "Hinweis", "cache_control": {"type": "ephemeral"}}]},
+        {"role": "system", "content": [{"type": "text", "text": ""}]}])
+    check("role system im Verlauf -> system-Nachricht an derselben Stelle, leere faellt weg",
+          err is None and out == [{"role": "user", "content": "a\n\nb"}, {"role": "system", "content": "Hinweis"}], out or err)
 
     out, _ = A.messages_to_native([{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_9", "content": "x"}]}])
     check("tool_result allein -> nur die tool-Nachricht (ohne leere user-Nachricht), ohne bekannten Namen kein tool_name",
@@ -206,6 +221,18 @@ def t_stream():
                          "delta:signature_delta@0", "stop@0", "start:text@1", "delta:text_delta@1", "stop@1",
                          "message_delta", "message_stop"], kinds(evs))
     check("thinking-Block startet leer", evs[1][1]["content_block"] == {"type": "thinking", "thinking": ""})
+
+    s = A.AnthropicShape("code:latest", keepalive_s=3600, show_thinking=False)
+    raw = s.head() + b"".join(s.chunk(c) for c in [part(thinking="geheim "), part(thinking="weiter"), part(content="Antwort"), done()])
+    evs = events(raw)
+    check("display omitted: Denkblock ohne Deltas (nur signature), Text normal",
+          kinds(evs) == ["message_start", "start:thinking@0", "delta:signature_delta@0", "stop@0", "start:text@1",
+                         "delta:text_delta@1", "stop@1", "message_delta", "message_stop"] and b"geheim" not in raw, kinds(evs))
+    s = A.AnthropicShape("code:latest", keepalive_s=0, show_thinking=False)
+    raw = s.head() + b"".join(s.chunk(c) for c in [part(thinking="a"), part(thinking="b"), part(thinking="c"), done()])
+    check("display omitted: langes Denken -> ping statt Stille", kinds(events(raw)).count("ping") == 2, kinds(events(raw)))
+    m = json.loads(A.AnthropicShape("m", show_thinking=False).complete(done(message={"role": "assistant", "thinking": "geheim", "content": "x"})))
+    check("display omitted nicht-streamend: thinking-Block mit leerem Text", m["content"][0] == {"type": "thinking", "thinking": "", "signature": ""})
 
     calls = [{"function": {"name": "read_file", "arguments": {"path": "a.txt"}}},
              {"function": {"name": "read_file", "arguments": {"path": "b.txt"}}}]
