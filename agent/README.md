@@ -168,6 +168,14 @@ SYSTEM-Profil). Der Router uebernimmt die Rolle des Updaters (`ollamaupdate.go`;
 6. Stand im Heartbeat (`ollama_update: {state, version, message}`): checking, downloading, extracting, swapping, applied,
    failed; dazu `ollama_version` alle 60 s frisch. Meldet der Knoten die Zielversion, gilt der Auftrag als `done`.
 
+7. Windows-Eintrag (0.16.0): der Ollama-Installer legt unter *Apps* einen Deinstallationseintrag an, aus dem winget und
+   UniGetUI die installierte Version lesen. Nach jedem Tausch setzt der Agent dort `DisplayVersion` und `DisplayName` auf die
+   neue Version, und er gleicht den Eintrag 30 s nach dem Start und danach stuendlich ab (der Benutzer-Zweig der Registry ist
+   nur geladen, solange der Benutzer angemeldet ist). Gesucht wird in HKLM und allen geladenen Zweigen unter HKEY_USERS nach
+   dem Eintrag, dessen `InstallLocation` der Ollama-Ordner ist; bei einer Tray-Installation fasst der Agent nichts an.
+   Empfehlung fuer Knoten mit Ollama als Kind: `winget pin add --id Ollama.Ollama --blocking`, sonst bietet winget ein neues
+   Release an, bevor der Router es einspielt, und der Installer scheitert am laufenden Dienst-Kind.
+
 Konfiguration: `ollama_update: {enabled: false}` schaltet es ab, `source:` aendert die Quelle (z. B. ein interner Spiegel
 mit derselben Ordnerstruktur `v<version>/<datei>` + `sha256sum.txt`).
 Tests: `ollamaupdate_test.go` (Pruefsummen-Datei, Versionsausgabe, Auftragspruefung, Zip-Slip, Tausch + Rollback, ganzer

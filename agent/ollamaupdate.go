@@ -544,6 +544,7 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 		time.Sleep(u.verifyPoll)
 		if v := u.live(ctx); v == o.Version {
 			u.log.Infof("ollama-update: Ollama laeuft mit %s", v)
+			u.syncRegistration(v) // Windows-Eintrag (Apps, winget) nachfuehren, sonst bietet winget das Release weiter an
 			return nil
 		}
 	}

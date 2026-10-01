@@ -209,6 +209,7 @@ func (a *App) Run(ctx context.Context) error {
 	if a.ollamaW != nil {
 		run("ollama-watch", a.ollamaW.Run)
 	}
+	run("ollama-registrierung", a.ollamaUp.RegistrationLoop) // Windows-Eintrag der Installation mit der laufenden Version abgleichen
 	run("gpu-guard", a.guard.Run)
 	run("health", (&HealthServer{app: a}).Run)
 	if a.proxy != nil {
