@@ -208,6 +208,13 @@ Grössenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_mes
 - **Admission:** höchstens `max_inflight` gleichzeitige Anfragen je Knoten (Policy im Register, Vorgabe 2 – sollte
   `OLLAMA_NUM_PARALLEL` des Knotens entsprechen). Weitere warten im Router; beim Freiwerden gewinnt der beste Rang aus
   Prioritätsklasse und Alter (`aging_s` 30 s, damit Batch nicht verhungert). `max_queue` überschritten → 503 sofort.
+- **Modelle ohne Parallelbetrieb:** `models.<m>.max_parallel` begrenzt die gleichzeitigen Anfragen je Knoten für ein Modell.
+  qwen3.8 (Architektur qwen35) kann in Ollama keine zwei Anfragen zugleich; eine trotzdem geschickte zweite wartet in Ollamas
+  eigener Schlange, und Ollama lädt den Runner neu, sobald die erste fertig ist (5–7 s, Kontext-Checkpoints und Prompt-Cache
+  weg). Mit `max_parallel: 1` wartet die zweite Anfrage stattdessen im Router, mit Priorität, und der Runner bleibt.
+- **Wartebudget je Prioritätsklasse**, wenn die Anfrage kein `deadline_ms` setzt: `max_wait_interactive_s` (60 s; ein
+  Sprachbefehl nach einer Minute ist ohnehin verloren), `max_wait_s` für normal (600 s; Agenten-Anfragen dauern oft Minuten)
+  und `max_wait_batch_s` (1800 s).
 
 ## Auto-Rolle: die Decision Engine
 

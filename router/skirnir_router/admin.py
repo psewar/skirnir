@@ -232,6 +232,10 @@ def _models_from(raw):
         if not m or " " in m:
             raise ValueError(f"ungültiger Modellname {m!r}")
         models[m] = _cloud_model_entry(m, v) if v.get("cloud") else {"weights_gib": float(v["weights_gib"]), "kv_gib_per_1k": float(v.get("kv_gib_per_1k", 0))}
+        if v.get("max_parallel"):   # 0.6.5: Grenze gleichzeitiger Anfragen je Knoten fuer dieses Modell
+            models[m]["max_parallel"] = int(v["max_parallel"])
+            if models[m]["max_parallel"] < 1:
+                raise ValueError(f"Modell {m}: max_parallel muss mindestens 1 sein")
     return models
 
 
@@ -294,6 +298,8 @@ def _merge_overrides(current, ov):
             # vram_real_gib (0.3.5) stehen - sonst verloere jedes Speichern im Katalog-Tab die echte Messung.
             if (alt.get("real") and not e.get("cloud") and alt.get("weights_gib") == e.get("weights_gib")
                     and alt.get("kv_gib_per_1k") == e.get("kv_gib_per_1k")):
+                if "max_parallel" in e:   # 0.6.5: die Messung bleibt, die Grenze aus der UI kommt trotzdem an
+                    merged[m] = {**alt, "max_parallel": e["max_parallel"]}
                 continue
             merged[m] = e
         ov["models"] = merged

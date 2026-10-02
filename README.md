@@ -213,6 +213,13 @@ Size limits before the backend (413): `max_images` 16, `max_tools` 128, `max_mes
 - **Admission:** at most `max_inflight` concurrent requests per node (policy in the registry, default 2 – should match the node's
   `OLLAMA_NUM_PARALLEL`). Further requests wait in the router; when a slot frees up, the best rank from priority class and age
   wins (`aging_s` 30 s so that batch does not starve). `max_queue` exceeded → 503 immediately.
+- **Models without parallel requests:** `models.<m>.max_parallel` caps concurrent requests per node for one model. qwen3.8
+  (architecture qwen35) cannot run two requests at once in Ollama; a second request sent anyway waits in Ollama's own queue,
+  and Ollama then reloads the runner as soon as the first one finishes (5–7 s, context checkpoints and prompt cache lost).
+  With `max_parallel: 1` the second request waits in the router instead, with priority, and the runner stays.
+- **Waiting budget per priority class** when the request sets no `deadline_ms`: `max_wait_interactive_s` (60 s; a voice
+  command that waited a minute is lost anyway), `max_wait_s` for normal (600 s; agent requests often take minutes) and
+  `max_wait_batch_s` (1800 s).
 
 ## Auto role: the decision engine
 

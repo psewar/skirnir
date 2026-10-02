@@ -1200,6 +1200,43 @@ def main():
         starts = [d["content_block"] for e, d in evs if e == "content_block_start"]
         check("/v1/messages stream: Tool-Call-Rettung greift (Text-Dialekt -> tool_use, kein Textblock)", st == 200
               and [b["type"] for b in starts] == ["tool_use"] and starts[0]["name"] == "get_time", f"{st} {[e for e, _ in evs]}")
+        # 0.6.5: Katalog max_parallel - eine zweite Anfrage an dasselbe Modell wartet im Router, nicht in Ollamas Schlange
+        # (Ollama lud bei qwen3.8 sonst den Runner neu, sobald die erste fertig war; 2026-10-02 03:02 zweimal)
+        # Katalog-PUT fuehrt zusammen (Weglassen loescht nicht): zum Zuruecksetzen denselben Eintrag ohne max_parallel schicken
+        granite = {"weights_gib": 4.95, "kv_gib_per_1k": 0.158}
+        st_mp, raw_mp = http(C + "/admin/config", {"models": {"granite4.2:8b": {**granite, "max_parallel": 1}}}, method="PUT")
+        t_mp = time.time()
+        mp = {}
+
+        def mp_los(tag, verzug):
+            time.sleep(verzug)
+            t = time.time()
+            st_, raw_ = http(R + "/api/chat", {"model": "klein", "stream": False,
+                                               "messages": [{"role": "user", "content": f"{tag} [[sleep_s=2]]"}]})
+            mp[tag] = (st_, time.time() - t)
+        ths = [threading.Thread(target=mp_los, args=("eins", 0)), threading.Thread(target=mp_los, args=("zwei", 0.4))]
+        for t_ in ths:
+            t_.start()
+        for t_ in ths:
+            t_.join(30)
+        q_mp = [d for d in state()["decisions"] if d.get("event") == "queued" and d.get("t", 0) >= t_mp]
+        check("max_parallel 1: zweite Anfrage wartet im Router (queued, reason max_parallel), beide 200, nacheinander statt zugleich",
+              st_mp == 200 and mp.get("eins", (0,))[0] == 200 and mp.get("zwei", (0,))[0] == 200 and len(q_mp) == 1
+              and q_mp[0].get("reason") == "max_parallel" and q_mp[0].get("model") == "granite4.2:8b" and mp["zwei"][1] > 3.0,
+              f"{st_mp} {raw_mp[:80]!r} {mp} {q_mp}")
+        st_rs, raw_rs = http(C + "/admin/config", {"models": {"granite4.2:8b": granite}}, method="PUT")
+        check("... Grenze per UI wieder entfernt", st_rs == 200 and not json.loads(http(C + "/admin/config")[1])["models"]["granite4.2:8b"].get("max_parallel"),
+              f"{st_rs} {raw_rs[:100]!r}")
+        t_mp = time.time()
+        mp.clear()
+        ths = [threading.Thread(target=mp_los, args=("drei", 0)), threading.Thread(target=mp_los, args=("vier", 0.4))]
+        for t_ in ths:
+            t_.start()
+        for t_ in ths:
+            t_.join(30)
+        q_mp = [d for d in state()["decisions"] if d.get("event") == "queued" and d.get("t", 0) >= t_mp]
+        check("... ohne max_parallel laufen beide gleichzeitig (kein queued, zweite < 3 s)", not q_mp and mp.get("vier", (0, 9))[1] < 3.0,
+              f"{mp} {q_mp}")
         # Ollama bricht mitten im Stream mit {"error": ...} ab (2026-10-02: kaputtes Werkzeug-XML) - bis 0.6.3 zaehlte das als ok
         t_se = time.time()
         st, raw = http(R + "/api/chat", {"model": "klein", "stream": True, "messages": [{"role": "user", "content": "x [[stream_error]]"}]})

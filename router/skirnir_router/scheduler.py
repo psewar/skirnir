@@ -2,7 +2,7 @@
 
 import time
 
-from . import cloud, perf
+from . import admission, cloud, perf
 from . import request as request_mod
 from . import state
 
@@ -72,7 +72,7 @@ def score(node, model):
     w = state.CFG.score
     s = w["warm"] if node.is_loaded(model) else 0.0
     s -= w["inflight"] * node.inflight
-    if node.inflight >= node.effective_max_inflight():
+    if admission.saturated(node, model):   # Knoten voll oder Modell an seiner max_parallel-Grenze
         s -= w["saturated"]
     gg = state.CFG.gpu_guard   # GPU-Schutz: Knoten in Hochlast/Stufe 2 weichen einem zweiten Knoten, der die Stufe tragen kann
     if gg["enabled"] and node.guard_policy and node.guard_state() in ("hochlast", "gedrosselt"):   # CloudTarget: guard_policy False

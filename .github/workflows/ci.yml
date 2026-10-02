@@ -29,6 +29,7 @@ jobs:
       - run: python test/selftest_ollama_push.py
       - run: python test/selftest_anthropic_messages.py
       - run: python test/selftest_keepalive.py
+      - run: python test/selftest_max_parallel.py
 
   go:
     name: Agent vet, test, Windows cross-build

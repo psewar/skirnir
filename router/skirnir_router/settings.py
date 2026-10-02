@@ -83,8 +83,12 @@ _e("modes.admission.max_inflight_default", "int", "gleichzeitig je Knoten", "Def
    label_en="concurrent per node", help_en="default when the node policy says nothing; should match OLLAMA_NUM_PARALLEL")
 _e("modes.admission.aging_s", "float", "Alterung s", "je so viele Sekunden Wartezeit eine Prioritaetsklasse aufwaerts", G, 30, min=1, max=3600,
    label_en="Aging s", help_en="one priority class up per this many seconds of waiting")
-_e("modes.admission.max_wait_s", "float", "max. Wartezeit s", "laenger wartet niemand (503), wenn die Anfrage keine deadline_ms setzt", G, 120, min=1, max=3600,
-   label_en="max. wait s", help_en="nobody waits longer (503) unless the request sets deadline_ms")
+_e("modes.admission.max_wait_s", "float", "max. Wartezeit s (normal)", "Prioritaet normal wartet hoechstens so lange (503), wenn die Anfrage keine deadline_ms setzt; Agenten-Anfragen dauern oft Minuten", G, 600, min=1, max=7200,
+   label_en="max. wait s (normal)", help_en="priority normal waits at most this long (503) unless the request sets deadline_ms; agent requests often take minutes")
+_e("modes.admission.max_wait_interactive_s", "float", "max. Wartezeit s (interactive)", "Sprachbefehle u. a.: wer so lange wartet, ist ohnehin verloren", G, 60, min=1, max=3600,
+   label_en="max. wait s (interactive)", help_en="voice commands etc.: a request waiting this long is lost anyway")
+_e("modes.admission.max_wait_batch_s", "float", "max. Wartezeit s (batch)", "Nachtlauf, Messungen: darf lange hinter anderen warten", G, 1800, min=1, max=86400,
+   label_en="max. wait s (batch)", help_en="night runs, measurements: may wait long behind others")
 _e("modes.admission.max_queue", "int", "max. Warteschlange", "mehr Wartende -> 503 sofort", G, 64, min=1, max=10000,
    label_en="max. queue", help_en="more waiting -> 503 immediately")
 

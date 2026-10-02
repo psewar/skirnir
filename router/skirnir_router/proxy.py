@@ -193,7 +193,8 @@ class _Acquire:
         self.woke = False
         self.waited_loads = set()   # (Knoten, Modell), auf deren Laden schon gewartet wurde
         self.t_enq = None
-        self.deadline_at = time.time() + (req.deadline_ms / 1000.0 if req.deadline_ms else state.CFG.admission["max_wait_s"])
+        # Wartebudget: deadline_ms des Clients, sonst je Prioritaetsklasse (interactive kurz, batch lang)
+        self.deadline_at = time.time() + (req.deadline_ms / 1000.0 if req.deadline_ms else admission.max_wait_s(req.priority))
 
     async def next_candidate(self):
         while True:
@@ -204,9 +205,9 @@ class _Acquire:
                     continue   # Ladevorgang beendet (oder Frist um): neu waehlen
                 await self._wake_or_reject()
                 continue
-            node = pick[3]
-            if admission.saturated(node):
-                await self._wait_for_slot(node, now)
+            node, model = pick[3], pick[1]["model"]
+            if admission.saturated(node, model):
+                await self._wait_for_slot(node, now, model)
                 continue   # neu waehlen: Platz frei, Knoten weg oder ein anderer inzwischen besser
             if self.t_enq is not None:
                 self.req.queued_ms = (time.time() - self.t_enq) * 1000
@@ -255,20 +256,26 @@ class _Acquire:
         if not await wol.wake(node):
             raise _Reject(503, f"no node available for model '{self.name}' (wake of {node.name} failed)")
 
-    async def _wait_for_slot(self, node, now):
-        """Stufe 3: Knoten voll -> hier warten (mit Prioritaet und Alterung), nicht in Ollamas Schlange ohne Prioritaet."""
+    async def _wait_for_slot(self, node, now, model=None):
+        """Stufe 3: Knoten (oder Modell, max_parallel) voll -> hier warten (mit Prioritaet und Alterung), nicht in Ollamas
+        Schlange ohne Prioritaet - die laedt bei Modellen ohne Parallelbetrieb den Runner neu."""
+        limit = state.CFG.max_parallel(model) if model else None
+        model_full = bool(limit) and node.inflight < node.effective_max_inflight()
         if self.t_enq is None:
             self.t_enq = now
             state.remember({"event": "queued", "role": self.role["name"], "node": node.name, "priority": self.req.priority,
-                            "request_id": self.req.request_id, "inflight": node.inflight})
+                            "request_id": self.req.request_id, "inflight": node.inflight, "model": model,
+                            "reason": "max_parallel" if model_full else "max_inflight"})
         if now >= self.deadline_at:
             waited = round((now - self.t_enq) * 1000)
             state.remember({"event": "admission_timeout", "role": self.role["name"], "node": node.name, "priority": self.req.priority,
-                            "request_id": self.req.request_id, "waited_ms": waited})
-            raise _Reject(503, f"queue deadline exceeded after {waited} ms (priority {self.req.priority}, node {node.name} "
-                               f"has {node.inflight}/{node.effective_max_inflight()} requests running)")
+                            "request_id": self.req.request_id, "waited_ms": waited, "model": model})
+            what = (f"model {model} on {node.name} runs {node.inflight_models[model]}/{limit} requests (no parallel requests)"
+                    if model_full else f"node {node.name} has {node.inflight}/{node.effective_max_inflight()} requests running")
+            raise _Reject(503, f"queue deadline exceeded after {waited} ms (priority {self.req.priority}, {what})")
         try:
-            await admission.wait_for_slot(node, self.req.priority, self.t_enq, self.deadline_at, self.req.request_id, self.role["name"])
+            await admission.wait_for_slot(node, self.req.priority, self.t_enq, self.deadline_at, self.req.request_id, self.role["name"],
+                                          model)
         except admission.QueueFull as e:
             raise _Reject(503, str(e)) from None
 

@@ -55,7 +55,7 @@ modes:
   prewarm: { on_free: true, free_delay_s: 6, on_online: true, online_delay_s: 0, residency_idle_s: 3, residency_check_s: 1 }
   fit_overhead_gib: 0.8
   breaker: { failures: 3, window_s: 60, open_s: 2 }          # Stufe 3 (produktiv open_s 30)
-  admission: { max_inflight_default: 4, aging_s: 30, max_wait_s: 20, max_queue: 16 }
+  admission: { max_inflight_default: 4, aging_s: 30, max_wait_s: 20, max_queue: 16, max_wait_interactive_s: 20, max_wait_batch_s: 20 }
 
 models:
   qwen3.6:35b-a3b: { weights_gib: 20.6, kv_gib_per_1k: 0.001 }

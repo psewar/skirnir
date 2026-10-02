@@ -133,7 +133,7 @@ async def run_shadow(role, s, body, primary_node, request_id):
     try:
         tier = {"model": s["model"], "num_ctx": s["num_ctx"], "busy_ok": s.get("busy_ok", False)}
         ctx, need, cands = scheduler.candidates_for(tier, None, t0)
-        cands = [n for n in cands if not admission.saturated(n)]
+        cands = [n for n in cands if not admission.saturated(n, s["model"])]
         if not cands:
             state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": None, "status": "kein Knoten",
                             "request_id": request_id})

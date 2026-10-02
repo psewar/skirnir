@@ -74,7 +74,8 @@ SCHEMA = {
         "unload_on_busy": None, "unload_on_busy_interval_s": None, "vram_settle_s": None, "fit_overhead_gib": None, "warm_first": None,
         "prewarm": {"on_free": None, "free_delay_s": None, "on_online": None, "online_delay_s": None, "residency_idle_s": None, "residency_check_s": None},
         "score": None, "breaker": {"failures": None, "window_s": None, "open_s": None},
-        "admission": {"max_inflight_default": None, "aging_s": None, "max_wait_s": None, "max_queue": None},
+        "admission": {"max_inflight_default": None, "aging_s": None, "max_wait_s": None, "max_queue": None,
+                      "max_wait_interactive_s": None, "max_wait_batch_s": None},
         "gpu_guard": {"enabled": None, "throttled_max_inflight": None, "score_penalty": None, "require_fresh_status": None},
         "agent_update": {"enabled": None, "canary": None, "canary_clean_h": None, "public_key": None},
         "ollama_update": {"enabled": None, "canary": None, "canary_clean_h": None, "window_start": None, "window_end": None,
@@ -84,7 +85,9 @@ SCHEMA = {
                      "measured_on": None, "vram_gib_8k": None, "vram_gib_32k": None, "partial_offload": None,
                      # seit 0.3.5: real = weights/kv aus dem nvidia-smi-Zuwachs (nicht aus /api/ps), je Kontext beide Werte
                      "real": None, "vram_real_gib": None, "vram_ps_gib": None,
-                     "cloud": None, "provider_model": None, "price_chf_per_m": None, "context_tokens": None, "reasoning": None}},
+                     "cloud": None, "provider_model": None, "price_chf_per_m": None, "context_tokens": None, "reasoning": None,
+                     # seit 0.6.5: hoechstens so viele Anfragen gleichzeitig je Knoten (qwen3.8: 1, Ollama kann qwen35 nicht parallel)
+                     "max_parallel": None}},
     "nodes": {"*": {"ollama": None, "vram_total_gib": None, "wol": None, "weight": None, "mac": None, "foreign_vram_baseline_gib": None,
                     "gpu": None, "ollama_tls_fingerprint": None, "ollama_tls_cert": None, "max_inflight": None}},
     "roles": {"*": {"exposed_as": None, "tiers": [_TIER], "latency_first": None, "priority": None, "canary": _CANARY, "shadow": _CANARY}},
@@ -344,7 +347,10 @@ class Config:
         ad = m.get("admission") or {}
         self.admission = {"max_inflight_default": int(ad.get("max_inflight_default", _d("modes.admission.max_inflight_default"))),
                           "aging_s": float(ad.get("aging_s", _d("modes.admission.aging_s"))),
-                          "max_wait_s": float(ad.get("max_wait_s", _d("modes.admission.max_wait_s"))), "max_queue": int(ad.get("max_queue", _d("modes.admission.max_queue")))}
+                          "max_wait_s": float(ad.get("max_wait_s", _d("modes.admission.max_wait_s"))), "max_queue": int(ad.get("max_queue", _d("modes.admission.max_queue"))),
+                          # Wartebudget je Klasse (admission.max_wait_s): max_wait_s gilt fuer normal
+                          "max_wait_interactive_s": float(ad.get("max_wait_interactive_s", _d("modes.admission.max_wait_interactive_s"))),
+                          "max_wait_batch_s": float(ad.get("max_wait_batch_s", _d("modes.admission.max_wait_batch_s")))}
         # GPU-Schutz (design/gpu-guard.md): der Agent setzt das Power-Limit, der Router reagiert auf dessen Status -
         # Stufe 2 (gedrosselt) deckelt die Parallelitaet, Hochlast kostet Score, Probleme (unverfuegbar, abgewaehlt,
         # Spannung, Temperatur) gehen an HA. require_fresh_status: ohne frischen Status ebenfalls deckeln (kostet
@@ -482,6 +488,12 @@ class Config:
         if m is None or m.get("cloud") or not m.get("real") or not ctx:
             return None
         return float(m["weights_gib"]) + float(m.get("kv_gib_per_1k", 0)) * ctx / 1000.0
+
+    def max_parallel(self, model):
+        """Katalog `max_parallel` (auch ueber den Digest-Zwilling eines Alias) oder None = keine Grenze je Modell."""
+        m = self.catalog_twin(model)
+        v = m.get("max_parallel") if m is not None else None
+        return int(v) if v else None
 
     def need_gib(self, model, ctx, node=None):
         m = self.catalog_twin(model)

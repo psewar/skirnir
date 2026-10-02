@@ -177,9 +177,11 @@ modes:
   admission:                # Admission Control: hoechstens max_inflight Anfragen je Knoten (Policy im Register, sonst Default);
     max_inflight_default: 2 #   weitere warten IM ROUTER mit Prioritaet (routing.priority bzw. roles.<r>.priority: interactive <
     aging_s: 30             #   normal < batch, Client-Kappung ueber client_auth.clients.<c>.max_priority). Alterung: je aging_s
-    max_wait_s: 120         #   Wartezeit eine Klasse aufwaerts, damit batch nicht verhungert. Laenger als max_wait_s (oder
+    max_wait_s: 600         #   Wartezeit eine Klasse aufwaerts, damit batch nicht verhungert. Laenger als max_wait_s (oder
     max_queue: 64           #   routing.deadline_ms) -> 503 mit Klartext. max_inflight sollte OLLAMA_NUM_PARALLEL des Knotens
                             #   entsprechen, sonst wartet der Rest doch wieder ohne Prioritaet in Ollamas eigener Schlange.
+    max_wait_interactive_s: 60   # Wartebudget je Klasse (max_wait_s gilt fuer normal): ein Sprachbefehl nach einer Minute ist verloren,
+    max_wait_batch_s: 1800       #   ein Nachtauftrag darf lange warten. Modelle ohne Parallelbetrieb: models.<m>.max_parallel: 1
 
 # Beispielwerte, gemessen auf einer RTX 5090 (KV f16, flash attention): /api/ps size_vram in GiB
 # bei num_ctx 8192 und 32768; kv_gib_per_1k = Differenz / 24.
