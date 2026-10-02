@@ -131,6 +131,17 @@ class Decider:
         self.capture.record(context, self.options, result.selected, "engine", client, request_id, result.as_dict())
         return result
 
+    def cpu_chain(self):
+        """Kette ohne GPU-Stufe (local_llm laeuft ueber den Router auf einem Knoten): fuer Lagen, in denen ein Modell gerade
+        blockiert ist - die Klassifikation stellte sich sonst selbst hinten an."""
+        return [e for e in self.chain if e.name != "local_llm"]
+
+    async def classify_body(self, body: dict, path: str) -> DecisionResult:
+        """Nur einordnen (Beobachtungsmodus): CPU-Kette, kein Capture, keine Metrik der Auto-Rolle."""
+        context, meta = context_from(body, path, self.context_chars)
+        return await self.decide(DecisionRequest(context=context, options=list(self.options), metadata=meta),
+                                 engines=self.cpu_chain())
+
     async def decide(self, req: DecisionRequest, engines=None) -> DecisionResult:
         """Kette abarbeiten. `engines` = explizite Liste (Auswertung), sonst die konfigurierte Kette."""
         policy = self.policy

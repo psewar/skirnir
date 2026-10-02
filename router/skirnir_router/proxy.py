@@ -12,7 +12,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import admission, auth, cloud, decision, kontextpruefung, metrics, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
+from . import admission, auth, ausweich_beobachtung, cloud, decision, kontextpruefung, metrics, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
 
@@ -71,7 +71,7 @@ async def _route(request, path, body, shape, err):
     except _Reject as e:
         return err(e.status, e.msg)
     req.priority = _priority_for(req, role, request)
-    acquire = _Acquire(name, role, tiers, req, _client_num_ctx(body))
+    acquire = _Acquire(name, role, tiers, req, _client_num_ctx(body), body, path, request.get("client"))
     while True:
         try:
             tier_idx, tier, ctx, node = await acquire.next_candidate()
@@ -187,8 +187,9 @@ class _Acquire:
     """Kandidatenwahl je Versuch: Scheduler fragen, bei vollem Knoten in der Prioritaetsschlange warten, bei
     erschoepften Kandidaten einmal wecken. Merkt sich versuchte Knoten und die Wartezeit fuer routing.queued_ms."""
 
-    def __init__(self, name, role, tiers, req, client_ctx):
+    def __init__(self, name, role, tiers, req, client_ctx, body=None, path=None, client=None):
         self.name, self.role, self.tiers, self.req, self.client_ctx = name, role, tiers, req, client_ctx
+        self.body, self.path, self.client = body, path, client   # fuer den Beobachtungsmodus (ausweich_beobachtung)
         self.tried = set()
         self.woke = False
         self.waited_loads = set()   # (Knoten, Modell), auf deren Laden schon gewartet wurde
@@ -266,6 +267,9 @@ class _Acquire:
             state.remember({"event": "queued", "role": self.role["name"], "node": node.name, "priority": self.req.priority,
                             "request_id": self.req.request_id, "inflight": node.inflight, "model": model,
                             "reason": "max_parallel" if model_full else "max_inflight"})
+            if _is_role(self.role) and self.body is not None:   # 0.6.7: haette eine tiefere freie Stufe gereicht? (nur Protokoll)
+                ausweich_beobachtung.start(self.body, self.path, self.role, self.tiers, self.req, node, model,
+                                           "max_parallel" if model_full else "max_inflight", self.client)
         if now >= self.deadline_at:
             waited = round((now - self.t_enq) * 1000)
             state.remember({"event": "admission_timeout", "role": self.role["name"], "node": node.name, "priority": self.req.priority,
@@ -344,6 +348,7 @@ class _Relay:
         self.ttft_s = None
         self.info = self.headers = None
         self.resp = None             # Antwort an den Client, sobald der Stream offen ist (_open_stream)
+        self.obs_task = None         # 0.6.7: Einordnung im Hintergrund fuer anfragen.jsonl (ausweich_beobachtung, observe_all)
 
     async def run(self):
         self._begin()
@@ -374,6 +379,7 @@ class _Relay:
         self.headers = request_mod.headers_for(self.info)
         if hasattr(self.shape, "bind"):   # Anthropic: Message-ID = Request-ID, model = Name, den der Client kennt
             self.shape.bind(self.req.request_id, self.exposed)
+        self.obs_task = ausweich_beobachtung.begin(self.path, self.out)
         request_mod.remember_session(self.req.session_id, node.name, model)
         reason = "loaded" if self.warm else "cold"
         log.info("route %s %s -> tier%d %s ctx=%s node=%s(%s,%s) inflight=%d req=%s%s", self.path, self.role["name"], self.tier_idx,
@@ -405,6 +411,14 @@ class _Relay:
                                     {**(self.info or {}), "path": self.path, "request_id": self.req.request_id})
         admission.release(node)   # Stufe 3: Platz frei -> bestplatzierten Wartenden wecken
         log.info("done %s node=%s %.1fs%s", self.role["name"], node.name, elapsed, f" {cost:.4f} CHF" if cost else "")
+        ausweich_beobachtung.finish(self.obs_task, {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": self.req.request_id, "client": self.request.get("client"),
+            "role": self.role["name"], "is_role": _is_role(self.role), "model": model, "node": node.name, "path": self.path,
+            "via": self.shape.name if self.shape else "ollama", "stream": self.stream, "priority": self.req.priority,
+            "think": self.out.get("think"), "tools": len(self.out.get("tools") or []), "messages": len(self.out.get("messages") or []),
+            "num_ctx": self.ctx, "warm": self.warm, "queued_s": round(self.req.queued_ms / 1000.0, 2), "duration_s": round(elapsed, 2),
+            "ttft_s": round(self.ttft_s, 2) if self.ttft_s else None, "prompt_tokens": self.ptoks, "output_tokens": self.ctoks,
+            "outcome": self.outcome or "aborted"})
         if not self.warm and not self.is_cloud:
             # frisch geladenes Modell sofort registrieren, nicht erst beim naechsten 5-s-Poll:
             # sonst gilt die naechste Anfrage bis zu 5 s lang faelschlich als Kaltstart

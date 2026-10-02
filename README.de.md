@@ -219,6 +219,15 @@ Grössenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_mes
   kann: zuerst eine freie warme, dann eine freie kalte Stufe, andere Knoten vor dem belegten (nie eine Cloud-Stufe auf
   diesem Weg); im Entscheidungslog steht `reason: ausweichen`. Ist nichts Warmes belegt, entscheidet warm zuerst wie
   bisher; ist keine Stufe frei, wartet die Anfrage innerhalb ihres interactive-Budgets.
+- **Beobachtungsmodus** (`decision_engine.observe_blocked`): muss eine Anfrage an eine Rolle warten, ordnet die Decision Engine
+  sie im Hintergrund ein, nur mit ihrer CPU-Kette (Embedding, TF-IDF, Regeln; nie das LLM, das sich auf genau der GPU
+  anstellen würde, auf die gewartet wird), und das Entscheidungslog hält `decision_observe` fest: Klasse, Sicherheit, die
+  erste freie tiefere Stufe derselben Rolle und `would_fallback` für die Klassen in `observe_light`. Am Routing ändert sich
+  nichts; es soll erst messen, wie oft ein freies kleineres Modell gereicht hätte, bevor der Router danach handelt.
+  `observe_all` geht weiter: Jede Anfrage an `/api/chat` oder `/api/generate` wird beim Start im Hintergrund eingeordnet, und
+  an ihrem Ende hängt der Router eine Zeile an `anfragen.jsonl` neben der Konfiguration (`observe_path`): Klasse, Dauer,
+  Wartezeit, Token, Denken, Zahl der Werkzeuge, Client, Rolle, Ergebnis - keine Prompt-Inhalte. Eigene Datei, damit das
+  Entscheidungslog sein Fenster behält; sie rotiert bei 20 MB. Die Antwort wartet nie auf die Einordnung.
 
 ## Auto-Rolle: die Decision Engine
 

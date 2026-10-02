@@ -133,3 +133,6 @@ decision_engine:               # Auto-Rolle (2026-09-16): Kette Fake-Jevlike (Po
   tfidf: { model_path: ../router/decision-tfidf.json }
   embed: { endpoint: "http://127.0.0.1:21020", model: fake-embed, timeout_s: 2 }
   capture: { enabled: true, path: decisions.jsonl, clients: [tester], anonymize: true, max_context_chars: 400 }
+  observe_blocked: true          # 0.6.7: wartende Anfragen einordnen und protokollieren (decision_observe)
+  observe_light: [standard, assist]
+  observe_all: true              # 0.6.7: jede Anfrage einordnen, Zeile in test/anfragen.jsonl

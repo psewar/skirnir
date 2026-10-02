@@ -224,6 +224,15 @@ Size limits before the backend (413): `max_images` 16, `max_tools` 128, `max_mes
   warm tier, then a free cold one, other nodes before the busy one (never a cloud tier on this path); the decision log shows
   `reason: ausweichen`. Without a busy warm model, warm first decides as before; if no tier is free, the request waits
   within its interactive budget.
+- **Observation mode** (`decision_engine.observe_blocked`): when a request for a role has to wait, the decision engine
+  classifies it in the background with its CPU chain only (embedding, TF-IDF, rules; never the LLM, which would queue on
+  the very GPU being waited for), and the decision log records `decision_observe`: class, confidence, the first free lower
+  tier of the same role and `would_fallback` for the classes in `observe_light`. Routing does not change; the point is to
+  measure how often a free smaller model would have been good enough before letting the router act on it.
+  `observe_all` goes further: every request to `/api/chat` or `/api/generate` is classified in the background when it starts,
+  and when it ends the router appends one line to `anfragen.jsonl` next to the configuration (`observe_path`): class,
+  duration, waiting time, tokens, thinking, tool count, client, role, outcome - no prompt contents. A separate file, so the
+  decision log keeps its window; it rotates at 20 MB. The response never waits for the classification.
 
 ## Auto role: the decision engine
 

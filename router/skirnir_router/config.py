@@ -99,7 +99,13 @@ SCHEMA = {
                         "tfidf": {"model_path": None},
                         "embed": {"endpoint": None, "model": None, "timeout_s": None},
                         "rules": None, "calibration_path": None,
-                        "capture": {"enabled": None, "path": None, "clients": None, "anonymize": None, "max_context_chars": None}},
+                        "capture": {"enabled": None, "path": None, "clients": None, "anonymize": None, "max_context_chars": None},
+                        # 0.6.7: Beobachtungsmodus - wartet eine Anfrage, klassifizieren und protokollieren, ob eine tiefere freie
+                        # Stufe gereicht haette (ausweich_beobachtung.py); observe_light = Klassen, fuer die das in Frage kaeme
+                        "observe_blocked": None, "observe_light": None,
+                        # ... und observe_all: JEDE Anfrage im Hintergrund einordnen, Zeile je Anfrage in observe_path
+                        # (Vorgabe anfragen.jsonl neben config.yaml) - Klasse, Dauer, Token, keine Inhalte
+                        "observe_all": None, "observe_path": None},
 }
 DECISION_ENGINES = ("rules", "jevlike", "local_llm", "tfidf", "embed")
 
@@ -455,6 +461,9 @@ class Config:
             raise ValueError("decision_engine.jevlike.endpoint fehlt, aber jevlike steht in der Kette")
         if "local_llm" in chain and not (de.get("local_llm") or {}).get("model"):
             raise ValueError("decision_engine.local_llm.model fehlt, aber local_llm steht in der Kette")
+        light = [str(o) for o in (de.get("observe_light") or [])]
+        if [o for o in light if o not in options]:
+            raise ValueError(f"decision_engine.observe_light: nur Optionen der Engine ({options}), nicht {light}")
         if "embed" in chain and not (de.get("embed") or {}).get("endpoint"):
             raise ValueError("decision_engine.embed.endpoint fehlt, aber embed steht in der Kette")
         if "tfidf" in chain and not (de.get("tfidf") or {}).get("model_path"):

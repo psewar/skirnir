@@ -23,6 +23,7 @@ test/perf-result.json
 test/locked-config.yaml
 test/decisions.jsonl
 test/events.jsonl
+test/anfragen.jsonl*
 test/metrics.json
 test/agent-update.pub
 test/agent/

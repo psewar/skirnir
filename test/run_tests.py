@@ -1252,6 +1252,18 @@ def main():
               st_mp == 200 and mp.get("eins", (0,))[0] == 200 and mp.get("zwei", (0,))[0] == 200 and len(q_mp) == 1
               and q_mp[0].get("reason") == "max_parallel" and q_mp[0].get("model") == "granite4.2:8b" and mp["zwei"][1] > 3.0,
               f"{st_mp} {raw_mp[:80]!r} {mp} {q_mp}")
+        obs = [d for d in state()["decisions"] if d.get("event") == "decision_observe" and d.get("t", 0) >= t_mp]
+        check("0.6.7 Beobachtungsmodus: wartende Anfrage wird im Hintergrund eingeordnet (decision_observe, CPU-Kette, nur Protokoll)",
+              len(obs) == 1 and obs[0].get("wait_reason") == "max_parallel" and obs[0].get("blocked_model") == "granite4.2:8b"
+              and obs[0].get("class") in ("standard", "gross", "assist", "code") and obs[0].get("engine") != "local_llm"
+              and "would_fallback" in obs[0] and obs[0].get("request_id") == q_mp[0].get("request_id"), str(obs))
+        an_datei = os.path.join(HERE, "anfragen.jsonl")
+        zeilen_an = [json.loads(z) for z in open(an_datei, encoding="utf-8")] if os.path.exists(an_datei) else []
+        mine = [z for z in zeilen_an if q_mp and z.get("request_id") == q_mp[0].get("request_id")]
+        check("0.6.7 observe_all: Zeile je Anfrage in anfragen.jsonl mit Klasse, Dauer, Wartezeit, Token - ohne Inhalte",
+              len(mine) == 1 and mine[0].get("class") in ("standard", "gross", "assist", "code") and mine[0].get("duration_s", 0) > 1.5
+              and mine[0].get("queued_s", 0) > 1.0 and mine[0].get("outcome") == "ok" and "output_tokens" in mine[0]
+              and "zwei" not in json.dumps(mine[0]), f"{len(zeilen_an)} Zeilen, {mine}")
         st_rs, raw_rs = http(C + "/admin/config", {"models": {"granite4.2:8b": granite}}, method="PUT")
         check("... Grenze per UI wieder entfernt", st_rs == 200 and not json.loads(http(C + "/admin/config")[1])["models"]["granite4.2:8b"].get("max_parallel"),
               f"{st_rs} {raw_rs[:100]!r}")
