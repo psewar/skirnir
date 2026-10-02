@@ -237,6 +237,34 @@ def main():
         st, txt = chat("assist:latest")
         d = route()
         check("assist: warmes Modell (tier0 geladen) gewinnt", d["tier"] == 0 and d["warm"] is True, str(d))
+        # 0.6.6: interactive weicht aus, wenn das warme Modell an seiner max_parallel-Grenze belegt ist; normal wartet weiter
+        qwen_kat = {"weights_gib": 20.6, "kv_gib_per_1k": 0.001}
+        st_q, raw_q = http(C + "/admin/config", {"models": {"qwen3.6:35b-a3b": {**qwen_kat, "max_parallel": 1}}}, method="PUT")
+        lang = {}
+        th_l = threading.Thread(target=lambda: lang.update(r=http(R + "/api/chat", {"model": "standard:latest", "stream": False,
+                                                                                    "messages": [{"role": "user", "content": "lang [[sleep_s=3]]"}]})))
+        th_l.start()
+        time.sleep(0.6)
+        t_i = time.time()
+        # num_ctx 4096: granite passt so auch auf small (8 GB; @16384 nicht) - sonst bliebe nur big, und das Ausweichmodell auf big
+        # verschoebe die VRAM-Rechnung der Busy-Tests weiter unten (so passiert beim ersten Lauf)
+        st_i, raw_i = http(R + "/api/chat", {"model": "assist:latest", "stream": False, "options": {"num_ctx": 4096},
+                                             "messages": [{"role": "user", "content": "Licht an"}]})
+        dt_i = time.time() - t_i
+        d_i = route(t_i)
+        check("interactive bei belegtem warmem qwen (max_parallel 1) -> sofort granite auf dem ANDEREN Knoten (ausweichen), kein Warten",
+              st_q == 200 and st_i == 200 and d_i.get("model") == "granite4.2:8b" and d_i.get("reason") == "ausweichen" and dt_i < 2.0
+              and d_i.get("node") == "small",
+              f"{st_q} {st_i} {dt_i:.2f}s {d_i}")
+        t_n = time.time()
+        st_n, raw_n = http(R + "/api/chat", {"model": "standard:latest", "stream": False, "messages": [{"role": "user", "content": "normal"}]})
+        d_n = route(t_n)
+        q_n = [d for d in state()["decisions"] if d.get("event") == "queued" and d.get("t", 0) >= t_n]
+        check("... normal wartet weiter auf das warme qwen (queued max_parallel, dann qwen warm)", st_n == 200
+              and d_n.get("model") == "qwen3.6:35b-a3b" and d_n.get("warm") is True and q_n and q_n[0].get("reason") == "max_parallel",
+              f"{st_n} {d_n} {q_n}")
+        th_l.join(15)
+        http(C + "/admin/config", {"models": {"qwen3.6:35b-a3b": qwen_kat}}, method="PUT")
 
         st, txt = chat("code:latest", ctx=65536)
         d = route()

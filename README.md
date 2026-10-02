@@ -220,6 +220,10 @@ Size limits before the backend (413): `max_images` 16, `max_tools` 128, `max_mes
 - **Waiting budget per priority class** when the request sets no `deadline_ms`: `max_wait_interactive_s` (60 s; a voice
   command that waited a minute is lost anyway), `max_wait_s` for normal (600 s; agent requests often take minutes) and
   `max_wait_batch_s` (1800 s).
+- **Interactive requests do not queue behind a busy warm model** if another local tier can serve right away: first a free
+  warm tier, then a free cold one, other nodes before the busy one (never a cloud tier on this path); the decision log shows
+  `reason: ausweichen`. Without a busy warm model, warm first decides as before; if no tier is free, the request waits
+  within its interactive budget.
 
 ## Auto role: the decision engine
 

@@ -215,6 +215,10 @@ Grössenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_mes
 - **Wartebudget je Prioritätsklasse**, wenn die Anfrage kein `deadline_ms` setzt: `max_wait_interactive_s` (60 s; ein
   Sprachbefehl nach einer Minute ist ohnehin verloren), `max_wait_s` für normal (600 s; Agenten-Anfragen dauern oft Minuten)
   und `max_wait_batch_s` (1800 s).
+- **Interaktive Anfragen warten nicht hinter einem belegten warmen Modell**, wenn eine andere lokale Stufe sofort bedienen
+  kann: zuerst eine freie warme, dann eine freie kalte Stufe, andere Knoten vor dem belegten (nie eine Cloud-Stufe auf
+  diesem Weg); im Entscheidungslog steht `reason: ausweichen`. Ist nichts Warmes belegt, entscheidet warm zuerst wie
+  bisher; ist keine Stufe frei, wartet die Anfrage innerhalb ihres interactive-Budgets.
 
 ## Auto-Rolle: die Decision Engine
 

@@ -114,6 +114,29 @@ def loading_for(tiers, now, exclude=()):
     return None
 
 
+def _interactive_pick(per_tier, req):
+    """Interaktive Anfragen (Sprachbefehle) warten nicht hinter einer laufenden Anfrage, wenn eine andere lokale Stufe sofort
+    bedienen kann. Warm zuerst haelt sonst am belegten warmen Knoten fest: mit max_parallel 1 (qwen3.8, seit 0.6.5) wartete ein
+    Sprachbefehl bis zu 60 s hinter einer minutenlangen Agenten-Anfrage, obwohl auf einem zweiten Knoten eine freie Stufe bereitstand.
+    Reihenfolge: freie warme Stufe (Rangfolge der Stufen), dann freie kalte Stufe. Cloud-Stufen nie (Kosten, Datenklasse -
+    die regelt der normale Weg). None = keine freie Stufe: normal weiter, dann wird am warmen Knoten gewartet."""
+    local = [pt for pt in per_tier if not pt[1].get("cloud")]
+    busy = {n.name for _i, t, _c, _n, cands in local for n in cands if n.is_loaded(t["model"]) and admission.saturated(n, t["model"])}
+    if not busy:
+        return None   # nichts Warmes belegt: der normale Weg (warm zuerst) entscheidet wie bisher
+    # Andere Knoten zuerst: ein Ausweichmodell auf dem belegten Knoten teilte sich die GPU mit der laufenden Anfrage (beide
+    # langsamer) und belegte VRAM, das dem warmen Modell fehlen kann - erst wenn nur er kann, darf er
+    for other_only in (True, False):
+        for warm_only in (True, False):
+            for i, t, ctx, _need, cands in local:
+                free = [n for n in cands if not admission.saturated(n, t["model"]) and (n.is_loaded(t["model"]) or not warm_only)
+                        and (n.name not in busy or not other_only)]
+                if free:
+                    req.reason = "ausweichen"
+                    return i, t, ctx, rank(free, t["model"], req)[0]
+    return None
+
+
 def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
     """Liefert (tier_index, tier, ctx, node) oder None. `req` (request.Routing) filtert Stufen nach Anforderungen,
     bevorzugt Stufen mit gewuenschten Faehigkeiten und haelt eine Session auf ihrem warmen Knoten."""
@@ -150,6 +173,10 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
                     req.reason = "affinity"
                     rank(cands, t["model"], req)
                     return i, t, ctx, n
+    if role.get("latency_first") and req is not None and req.priority == "interactive":
+        pick = _interactive_pick(per_tier, req)
+        if pick is not None:
+            return pick
     if role.get("latency_first"):
         local_cands_seen = False
         for i, t, ctx, _need, cands in per_tier:
