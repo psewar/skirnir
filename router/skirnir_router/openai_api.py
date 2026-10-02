@@ -202,6 +202,12 @@ class OpenAIChatShape:
     def tail(self):
         return b"data: [DONE]\n\n"
 
+    def stream_error(self, status, msg, why=None):
+        """Fehler mitten im Stream (Ollama-Abbruch, Knoten weg): OpenAI-Fehlerobjekt als eigenes SSE-Ereignis, danach [DONE]."""
+        e = {"message": msg, "type": "api_error" if status >= 500 else "invalid_request_error", "param": None,
+             "code": "upstream_error" if status >= 500 else None}
+        return self._sse({"error": e})
+
 
 class OpenAICompletionShape(OpenAIChatShape):
     """Legacy /v1/completions ueber /api/generate: text_completion."""

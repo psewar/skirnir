@@ -34,7 +34,7 @@ HOOK_RE = re.compile(r"\[\[(\w+)(?:=([\w.]+))?\]\]")
 def test_hooks(b):
     """Testhilfen fuer Wege, die keine eigenen Body-Felder durchreichen (Anthropic-Uebersetzung baut den Body neu):
     [[name=wert]] in der letzten Nachricht wirkt wie das gleichnamige Body-Feld (sleep_s, fail_status, broken_tool_call,
-    stream_tool)."""
+    stream_tool, stream_error)."""
     msgs = b.get("messages") or []
     last = msgs[-1].get("content") if msgs and isinstance(msgs[-1], dict) else ""
     for k, v in HOOK_RE.findall(str(last or "")):
@@ -122,6 +122,15 @@ async def infer(req):
         await resp.write_eof()
         return resp
 
+    if b.get("stream_error") and b.get("stream", True):   # Abbruch mitten im Stream, Wortlaut wie Ollama 0.35 am 2026-10-02
+        resp = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
+        await resp.prepare(req)
+        for tok in ["Ich ", "rufe "]:
+            await asyncio.sleep(delay)
+            await resp.write((json.dumps({"model": m, "message": {"role": "assistant", "content": tok}, "done": False}) + "\n").encode())
+        await resp.write((json.dumps({"error": "XML syntax error on line 3: unexpected EOF"}) + "\n").encode())
+        await resp.write_eof()
+        return resp
     if b.get("tools") and b.get("stream_tool") and b.get("stream", True):   # Text, dann der Aufruf am Stueck (wie Ollama)
         resp = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
         await resp.prepare(req)

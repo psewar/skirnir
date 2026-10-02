@@ -531,7 +531,7 @@ class _Relay:
         if self.shape:
             await resp.write(self.shape.tail())
         await resp.write_eof()
-        self.outcome = "ok"
+        self.outcome = self.outcome or "ok"   # ein Fehler mitten im Stream (_stream_error) bleibt ein Fehler
         return resp
 
     def _render_chunks(self, line, rescuer, first_at):
@@ -541,6 +541,8 @@ class _Relay:
             j = json.loads(line)
         except ValueError:
             return None
+        if isinstance(j, dict) and j.get("error") and "message" not in j and not j.get("done"):
+            return self._stream_error(line, str(j["error"]))
         out = b""
         for jj in (rescuer.chunk(j) if rescuer else [j]):
             if "model" in jj:
@@ -551,6 +553,23 @@ class _Relay:
                     jj["routing"] = self.info
             out += (self.shape.chunk(jj) if self.shape else (json.dumps(jj) + "\n").encode()) or b""
         return out
+
+    def _stream_error(self, line, msg):
+        """Ollama bricht eine Antwort mitten im Stream mit {"error": ...} ab - gemessen 2026-10-02: "XML syntax error on line 3:
+        unexpected EOF", das Modell hatte einen Werkzeugaufruf mit kaputtem XML geschrieben, Ollama verwarf die ganze Antwort.
+        Bis 0.6.3 reichte der Router die Zeile durch und zaehlte die Anfrage als ok; jetzt zaehlt sie als Fehler, steht im Log und
+        im Entscheidungsprotokoll, und Fremdformate bekommen ein Fehlerereignis in ihrer Form. Kein Breaker-Fall: der Knoten
+        arbeitet, die Ausgabe des Modells war kaputt."""
+        self.outcome = "error"
+        log.warning("stream from %s: Fehler von Ollama mitten in der Antwort (%s, req=%s): %s", self.node.name, self.model,
+                    self.req.request_id, msg[:200])
+        state.remember({"event": "stream_error", "node": self.node.name, "model": self.model, "role": self.role["name"],
+                        "client": self.request.get("client"), "request_id": self.req.request_id, "error": msg[:200]})
+        if not self.shape:   # Ollama-Clients bekommen die Zeile im Wortlaut, wie von Ollama selbst
+            return line if line.endswith(b"\n") else line + b"\n"
+        if hasattr(self.shape, "stream_error"):
+            return self.shape.stream_error(502, f"upstream {self.node.name}: {msg}")
+        return b""
 
     # -- Cloud (Stufe 5) --
 

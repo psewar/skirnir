@@ -1200,6 +1200,25 @@ def main():
         starts = [d["content_block"] for e, d in evs if e == "content_block_start"]
         check("/v1/messages stream: Tool-Call-Rettung greift (Text-Dialekt -> tool_use, kein Textblock)", st == 200
               and [b["type"] for b in starts] == ["tool_use"] and starts[0]["name"] == "get_time", f"{st} {[e for e, _ in evs]}")
+        # Ollama bricht mitten im Stream mit {"error": ...} ab (2026-10-02: kaputtes Werkzeug-XML) - bis 0.6.3 zaehlte das als ok
+        t_se = time.time()
+        st, raw = http(R + "/api/chat", {"model": "klein", "stream": True, "messages": [{"role": "user", "content": "x [[stream_error]]"}]})
+        zeilen = [json.loads(z) for z in raw.decode().splitlines() if z.strip()]
+        se = [d for d in state()["decisions"] if d.get("event") == "stream_error" and d.get("t", 0) >= t_se]
+        check("Stream-Fehler (Ollama-Format): Fehlerzeile im Wortlaut an den Client, stream_error im Entscheidungslog", st == 200
+              and zeilen and zeilen[-1] == {"error": "XML syntax error on line 3: unexpected EOF"} and len(se) == 1
+              and "XML syntax error" in se[0].get("error", "") and se[0].get("node") == "small", f"{zeilen[-1:]} {se}")
+        st, raw = http(R + "/v1/messages", {**an_body, "stream": True, "messages": [{"role": "user", "content": "x [[stream_error]]"}]},
+                       headers=an_hdr)
+        evs = sse_events(raw)
+        check("Stream-Fehler (Anthropic): event error api_error mit Ollamas Text, danach nichts mehr", st == 200 and evs
+              and evs[-1][0] == "error" and evs[-1][1]["error"]["type"] == "api_error" and "XML syntax error" in evs[-1][1]["error"]["message"],
+              str([e for e, _ in evs]))
+        st, raw = http(R + "/v1/chat/completions", {"model": "klein", "stream": True, "messages": [{"role": "user", "content": "x [[stream_error]]"}]})
+        datas = [l[6:] for l in raw.decode().split("\n") if l.startswith("data: ")]
+        errs = [json.loads(d)["error"] for d in datas if d != "[DONE]" and "error" in json.loads(d)]
+        check("Stream-Fehler (OpenAI): error-Objekt im Stream, [DONE] am Ende", st == 200 and len(errs) == 1
+              and "XML syntax error" in errs[0]["message"] and errs[0]["type"] == "api_error" and datas[-1] == "[DONE]", str(datas[-3:]))
         st, raw = http(R + "/v1/messages", {**an_body, "stream": True, "messages": [{"role": "user", "content": "hi [[sleep_s=2.5]]"}]}, headers=an_hdr)
         names = [e for e, _ in sse_events(raw)]
         first_block = names.index("content_block_start") if "content_block_start" in names else -1
