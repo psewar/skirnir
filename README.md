@@ -81,7 +81,9 @@ Ollama itself stays on `localhost`.
 | MQTT 8883 | Discovery and states for Home Assistant (TLS, password from `secrets.env`). | Router → broker |
 
 Requests may take up to 600 s (`request_timeout_s`). If the client disconnects, the router closes the upstream response, the tunnel
-sends CANCEL and the agent terminates the Ollama request.
+sends CANCEL and the agent terminates the Ollama request. The inference port uses TCP keepalive (first probe after 60 s of
+silence, then every 15 s, dead after 4): a non-streaming request can run for minutes without a single byte, and connection state
+somewhere on the way to the client may expire silently; the probes keep it fresh and make a dead connection show up as an error.
 
 ## Anthropic clients (Claude Code)
 

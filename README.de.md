@@ -80,7 +80,9 @@ laufen durch den Tunnel des Agenten; Ollama selbst bleibt auf `localhost`.
 | MQTT 8883 | Discovery und Zustände für Home Assistant (TLS, Passwort aus `secrets.env`). | Router → Broker |
 
 Anfragen dürfen 600 s dauern (`request_timeout_s`). Bricht der Client ab, schliesst der Router die Upstream-Antwort, der Tunnel
-schickt CANCEL, der Agent beendet die Ollama-Anfrage.
+schickt CANCEL, der Agent beendet die Ollama-Anfrage. Der Inferenz-Port nutzt TCP-Keepalive (erste Probe nach 60 s Stille, dann
+alle 15 s, nach 4 ohne Antwort tot): Eine Anfrage ohne Stream kann minutenlang ohne ein Byte laufen, und irgendwo auf dem Weg zum
+Client verfällt der Verbindungszustand sonst still. Die Proben halten ihn frisch und lassen eine tote Verbindung als Fehler auffallen.
 
 ## Anthropic-Clients (Claude Code)
 

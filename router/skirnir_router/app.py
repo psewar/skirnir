@@ -5,6 +5,7 @@ import logging
 import os
 import secrets
 import signal
+import socket
 import ssl
 import sys
 
@@ -13,6 +14,24 @@ from aiohttp import ClientSession, web
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
 from . import decision
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
+
+# TCP-Keepalive auf dem API-Port: erste Probe nach 60 s Stille, dann alle 15 s, nach 4 unbeantworteten gilt die Verbindung als tot
+KEEPALIVE = (("TCP_KEEPIDLE", 60), ("TCP_KEEPINTVL", 15), ("TCP_KEEPCNT", 4))
+
+
+def keepalive_socket(listen):
+    """Lauschender Socket mit TCP-Keepalive. Anlass 2026-10-01: eine Anfrage ohne Stream rechnete 6,6 min, so lange floss kein
+    Byte; der Verbindungszustand auf dem Weg zum Client (WSL mirrored) verfiel still, die fertige Antwort kam nie an, und der
+    Router zaehlte sie als ok. Die Proben halten den Zustand auf dem Weg frisch und lassen tote Verbindungen als Fehler auffallen.
+    Linux uebertraegt die Optionen auf jede angenommene Verbindung (selftest_keepalive.py prueft das); wo es TCP_KEEP* nicht gibt
+    (Windows-Testbetrieb), bleibt es bei SO_KEEPALIVE mit den Vorgaben des Systems."""
+    h, p = split_listen(listen)
+    sock = socket.create_server((h, p))
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    for name, wert in KEEPALIVE:
+        if hasattr(socket, name):
+            sock.setsockopt(socket.IPPROTO_TCP, getattr(socket, name), wert)
+    return sock
 
 
 def build_apps():
@@ -108,13 +127,17 @@ async def main(cfg_path):
         log.warning("Basic Auth ohne TLS: Passwoerter gehen im Klartext ueber das Netz (control_tls setzen)")
     if state.CFG.api_tls and ctl_ssl is None:
         raise SystemExit("api_tls: true braucht control_tls (Zertifikat)")
-    for app, listen, sslctx in ((api, state.CFG.listen, ctl_ssl if state.CFG.api_tls else None), (ctl, state.CFG.control_listen, ctl_ssl)):
+    for app, listen, sslctx, keepalive in ((api, state.CFG.listen, ctl_ssl if state.CFG.api_tls else None, True),
+                                           (ctl, state.CFG.control_listen, ctl_ssl, False)):
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         h, p = split_listen(listen)
-        await web.TCPSite(runner, h, p, ssl_context=sslctx).start()
+        if keepalive:   # API-Port: lange Anfragen ohne Stream (Minuten ohne Byte) - siehe keepalive_socket
+            await web.SockSite(runner, keepalive_socket(listen), ssl_context=sslctx).start()
+        else:           # Control-Port: Tunnel hat eigene Heartbeats, UI/Admin-Anfragen sind kurz
+            await web.TCPSite(runner, h, p, ssl_context=sslctx).start()
         runners.append(runner)
-        log.info("listening on %s://%s:%d", "https" if sslctx else "http", h, p)
+        log.info("listening on %s://%s:%d%s", "https" if sslctx else "http", h, p, " (TCP-Keepalive)" if keepalive else "")
     tasks = [asyncio.create_task(poll.poll_loop()), asyncio.create_task(poll.tick_loop()), asyncio.create_task(agentupdate.rollout_loop()),
              asyncio.create_task(ollamaupdate.rollout_loop())]
     ha_pub = None
