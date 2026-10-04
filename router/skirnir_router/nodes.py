@@ -346,6 +346,10 @@ class Node(Breaker):
     def busy_util_threshold(self):
         return self.busy_util_pct if self.busy_util_pct is not None else state.CFG.busy_util
 
+    def busy_exit_util_threshold(self):
+        """Hysterese: unter dieser Auslastung darf ein busy-Knoten wieder free werden - nie hoeher als seine Eintrittsschwelle."""
+        return min(state.CFG.busy_exit_util, self.busy_util_threshold())
+
     def busy_foreign_threshold(self):
         return self.busy_foreign_pol if self.busy_foreign_pol is not None else state.CFG.busy_foreign_gib
 

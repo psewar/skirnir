@@ -123,7 +123,13 @@ def evaluate(node, now):
     foreign_now = gpu_known and node.foreign_vram_gib() >= node.busy_foreign_threshold()
     node.foreign_since = (node.foreign_since or now) if foreign_now else None
     foreign = node.foreign_since is not None and (now - node.foreign_since) >= state.CFG.foreign_sustain
-    trigger = hot_long or foreign
+    # Hysterese (0.6.8): busy BLEIBEN ist leichter als busy WERDEN. Bis 0.6.7 musste ein busy-Knoten die Eintrittsbedingung
+    # (Auslastung ueber der Schwelle, ohne Unterbrechung ueber sustain_s) dauernd erfuellen - ein Spiel mit 31-44 % Last bei
+    # 40 % Schwelle flatterte so alle 20-60 s zwischen busy und free (gpu-laptop, 2026-10-04). Solange das Spiel fremdes VRAM
+    # haelt und die Last ueber der Austrittsschwelle liegt, bleibt der Knoten busy; Ladebildschirme darunter deckt below_for_s ab.
+    keep = (node.state == "busy" and gpu_known and node.gpu_util is not None and node.gpu_util >= node.busy_exit_util_threshold()
+            and node.foreign_vram_gib() >= state.CFG.util_requires_foreign_gib)
+    trigger = hot_long or foreign or keep
     if trigger:
         node.calm_since = None
         if node.state == "free":

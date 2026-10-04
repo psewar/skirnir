@@ -146,6 +146,10 @@ _e("modes.busy_enter.or_foreign_vram_gib", "float", "ODER fremdes VRAM GiB", "ue
 _e("modes.busy_enter.foreign_sustain_s", "float", "... anhaltend s", "", G, 15, min=0, max=3600, label_en="... sustained s")
 _e("modes.busy_exit.below_for_s", "float", "Ruhe bis free s", "so lange muss es ruhig sein, bis der Knoten wieder free ist", G, 30, min=0, max=3600,
    label_en="Quiet until free s", help_en="it must stay quiet this long before the node is free again")
+_e("modes.busy_exit.gpu_util_pct", "float", "busy bleibt ueber GPU-Auslastung %",
+   "Hysterese: einmal busy, gilt der Rechner als beschaeftigt, solange die Auslastung ueber diesem Wert liegt und fremdes VRAM belegt ist (hoechstens die Eintrittsschwelle)",
+   G, 20, min=0, max=100, label_en="busy stays above GPU load %",
+   help_en="hysteresis: once busy, the machine counts as busy while the load stays above this value and foreign VRAM is in use (at most the entry threshold)")
 _e("modes.unload_on_busy", "bool", "Modelle bei busy entladen", "", G, True, label_en="Unload models when busy")
 _e("modes.unload_on_busy_interval_s", "float", "Entlade-Sicherheitsnetz alle s", "", G, 30, min=1, max=3600, label_en="Unload safety net every s")
 _e("modes.vram_settle_s", "float", "VRAM-Nachlauf s", "bis nvidia-smi einen Unload nachvollzogen hat", G, 8, min=0, max=120,

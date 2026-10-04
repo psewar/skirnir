@@ -151,7 +151,10 @@ roles:
   catalogue (`models:`), measured with the UI button **Measure** (loads at 8k and 32k, reads `/api/ps`) or estimated.
 - **Busy.** A node is `busy` when foreign VRAM (used − Ollama − desktop baseline) exceeds the threshold or the GPU is loaded
   without router requests. Then only `busy_ok` tiers run; non-`busy_ok` models are unloaded every 30 s. The desktop baseline is
-  learned per node (median of hourly means while the GPU is quiet) and capped by a policy value.
+  learned per node (median of hourly means while the GPU is quiet) and capped by a policy value. Leaving `busy` is easier
+  than entering it (hysteresis): the node stays busy while the load is above `busy_exit.gpu_util_pct` (20 %) and foreign VRAM
+  is in use, and only after `below_for_s` of quiet does it become free - a light game hovering around the entry threshold
+  otherwise flipped the node every few seconds.
 - **Prewarm.** After coming online and after `busy → free` the router preloads the rank-1 models of the roles, as many as fit
   into VRAM together. A **residency rule** brings back an evicted rank-1 model once the evictor has not been requested for
   5 min – otherwise "warm first" would stay stuck on the fallback tier forever.

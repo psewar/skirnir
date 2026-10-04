@@ -147,6 +147,9 @@ roles:
 - **Busy.** Ein Knoten ist `busy`, wenn fremdes VRAM (belegt − Ollama − Desktop-Grundverbrauch) über der Schwelle liegt oder die
   GPU ohne Router-Anfragen ausgelastet ist. Dann laufen nur `busy_ok`-Stufen; nicht-`busy_ok`-Modelle werden alle 30 s entladen.
   Der Desktop-Grundverbrauch wird je Knoten gelernt (Median der Stundenmittel bei ruhiger GPU) und durch einen Policy-Wert gedeckelt.
+  `busy` zu verlassen ist schwerer als hineinzukommen (Hysterese): Der Knoten bleibt busy, solange die Auslastung über
+  `busy_exit.gpu_util_pct` (20 %) liegt und fremdes VRAM belegt ist, und wird erst nach `below_for_s` Ruhe wieder free - ein
+  leichtes Spiel um die Eintrittsschwelle schaltete den Knoten sonst alle paar Sekunden um.
 - **Prewarm.** Nach dem Online-Gehen und nach `busy → free` lädt der Router die Rang-1-Modelle der Rollen wieder vor, so viele
   zusammen ins VRAM passen. Eine **Residenz-Regel** holt ein verdrängtes Rang-1-Modell zurück, wenn der Verdränger 5 min nicht
   mehr gefragt wurde – sonst bliebe „warm zuerst“ dauerhaft auf der Ausweichstufe hängen.

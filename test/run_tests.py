@@ -338,6 +338,17 @@ def main():
                 break
         check("busy-Sicherheitsnetz: nachtraeglich geladenes grosses Modell wird wieder entladen", after > before and state()["nodes"]["big"]["state"] == "busy",
               f"unloads {before} -> {after}, state {state()['nodes']['big']['state']}")
+        # 0.6.8 Hysterese: ein Spiel mit Last zwischen Austritts- (20 %) und Eintrittsschwelle (40 %) und wenig fremdem VRAM
+        # (1,8 GiB: unter or_foreign_vram_gib 3.0, ueber util_requires_foreign_gib 1.0) haelt busy laenger als below_for_s (2 s)
+        # Ausgangspunkt ist die Rechnung des Routers selbst (belegt - fremd = Ollama + Kinder + Grundverbrauch); die Summe der
+        # geladenen Modelle traf es nicht (erster Lauf: fremd 0,0, Ollama-Prozess zaehlt mehr als die Modellgroessen)
+        nb = state()["nodes"]["big"]
+        used_spiel = int((nb["vram_used_gib"] - nb["foreign_vram_gib"] + 1.8) * 1024)
+        for _ in range(6):
+            hb("big", 25, used_spiel, 32607 - used_spiel); time.sleep(0.7)
+        nb = state()["nodes"]["big"]
+        check("Hysterese: Spiel mit 25 % Last und ~1,8 GiB fremdem VRAM haelt busy (free erst unter 20 %), kein Flattern",
+              nb["state"] == "busy", f"{nb['state']} util {nb['gpu_util']} fremd {nb['foreign_vram_gib']} geladen {nb.get('loaded')}")
         # busy vorbei: Heartbeats bis der Knoten free ist, dann SOFORT weiter (die naechste Pruefung muss vor dem
         # prewarm-on-free liegen, der 6 s nach dem Wechsel startet)
         for _ in range(12):

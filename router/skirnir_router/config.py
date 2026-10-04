@@ -70,7 +70,7 @@ SCHEMA = {
              "base_topic": None, "discovery_prefix": None, "interval_s": None},
     "modes": {
         "busy_enter": {"gpu_util_pct": None, "sustain_s": None, "util_requires_foreign_gib": None, "or_foreign_vram_gib": None, "foreign_sustain_s": None},
-        "busy_exit": {"below_for_s": None}, "vram_reserve_gib": {"free": None, "busy": None}, "keep_alive": {"free": None, "busy": None},
+        "busy_exit": {"below_for_s": None, "gpu_util_pct": None}, "vram_reserve_gib": {"free": None, "busy": None}, "keep_alive": {"free": None, "busy": None},
         "unload_on_busy": None, "unload_on_busy_interval_s": None, "vram_settle_s": None, "fit_overhead_gib": None, "warm_first": None,
         "prewarm": {"on_free": None, "free_delay_s": None, "on_online": None, "online_delay_s": None, "residency_idle_s": None, "residency_check_s": None},
         "score": None, "breaker": {"failures": None, "window_s": None, "open_s": None},
@@ -321,6 +321,9 @@ class Config:
         self.foreign_sustain = float(be.get("foreign_sustain_s", _d("modes.busy_enter.foreign_sustain_s")))
         self.util_requires_foreign_gib = float(be.get("util_requires_foreign_gib", _d("modes.busy_enter.util_requires_foreign_gib")))
         self.busy_exit_s = float((m.get("busy_exit") or {}).get("below_for_s", _d("modes.busy_exit.below_for_s")))
+        # Hysterese (0.6.8): einmal busy, bleibt der Knoten busy, solange die Auslastung ueber dieser Schwelle liegt UND fremdes
+        # VRAM belegt ist (util_requires_foreign_gib) - ein Spiel mit 31-44 % Last flatterte sonst um die Eintrittsschwelle
+        self.busy_exit_util = float((m.get("busy_exit") or {}).get("gpu_util_pct", _d("modes.busy_exit.gpu_util_pct")))
         reserve = m.get("vram_reserve_gib") or {"free": _d("modes.vram_reserve_gib.free"), "busy": _d("modes.vram_reserve_gib.busy")}
         self.reserve = {k: float(v) for k, v in reserve.items()}
         self.keep_alive = m.get("keep_alive") or {"free": _d("modes.keep_alive.free"), "busy": _d("modes.keep_alive.busy")}
