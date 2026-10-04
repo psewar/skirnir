@@ -134,6 +134,29 @@ def validate_schema(c, schema=SCHEMA, path=""):
     return errs
 
 
+# Groessenangaben eines Katalogeintrags gehoeren zusammen: eine Messung (UI, perf) liefert sie als Einheit, und neue Gewichte mit
+# einer alten Messung (real, vram_real_gib) zu mischen hiesse, die alte Messung fuer die neuen Werte auszugeben.
+SIZING_FIELDS = ("weights_gib", "kv_gib_per_1k", "real", "vram_real_gib", "vram_ps_gib", "vram_gib_8k", "vram_gib_32k",
+                 "measured_at", "measured_on", "partial_offload")
+
+
+def merge_models(base, overlay):
+    """Katalog aus config.yaml + roles.yaml, je Modell Feld fuer Feld (0.6.9). Bis 0.6.8 ersetzte ein roles.yaml-Eintrag den aus
+    config.yaml ganz - max_parallel aus config.yaml galt fuer qwen3.8 nicht, weil roles.yaml eine Messung des Modells hielt
+    (2026-10-02). Bringt der Overlay-Eintrag Groessenangaben mit, ersetzen sie die der Basis als Einheit (SIZING_FIELDS);
+    alle anderen Felder (max_parallel, capabilities, note, ...) bleiben aus der Basis, wenn der Overlay sie nicht setzt."""
+    out = dict(base)
+    for m, e in overlay.items():
+        b = base.get(m)
+        if not isinstance(b, dict) or not isinstance(e, dict):
+            out[m] = e
+            continue
+        if any(f in e for f in SIZING_FIELDS):
+            b = {k: v for k, v in b.items() if k not in SIZING_FIELDS}
+        out[m] = {**b, **e}
+    return out
+
+
 class Config:
     """config.yaml (kommentiert, per deploy) + roles.yaml (von der UI geschrieben, überschreibt roles/models/expose)."""
 
@@ -155,7 +178,7 @@ class Config:
                 base = c.get("roles") or {}
                 c["roles"] = {name: {**(base.get(name) or {}), **(r or {})} for name, r in (v or {}).items()}
             elif k == "models":
-                c.setdefault("models", {}).update(v)
+                c["models"] = merge_models(c.get("models") or {}, v or {})
             elif k == "expose_concrete_models":
                 c["router"]["expose_concrete_models"] = bool(v)
         # Clients aus der UI (neue Clients, rotierte Secrets): je Client ueber den config.yaml-Eintrag gelegt, Felder einzeln

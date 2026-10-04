@@ -161,7 +161,9 @@ roles:
 
 Rollen, Katalog und die meisten Laufzeit-Einstellungen sind in der UI editierbar; die UI schreibt eine Override-Datei
 `roles.yaml` neben die `config.yaml`, die Deploys überlebt. Ports, TLS, Basic-Auth, Identitäten, Anbieter-Endpunkte und
-Egress-Allowlist bleiben bewusst Deploy-Sache.
+Egress-Allowlist bleiben bewusst Deploy-Sache. Katalogeinträge aus beiden Dateien werden Feld für Feld zusammengeführt:
+Eine Messung in `roles.yaml` ersetzt die Größenangaben (Gewichte, KV, Messwerte) als Einheit, andere Felder aus der
+`config.yaml` wie `max_parallel` oder Fähigkeits-Overrides gelten weiter.
 
 ## Der Client beschreibt, der Router entscheidet
 

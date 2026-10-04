@@ -166,7 +166,9 @@ roles:
 
 Roles, catalogue and most runtime settings are editable in the UI; the UI writes an override file `roles.yaml` next to
 `config.yaml` that survives deploys. Ports, TLS, Basic Auth, identities, provider endpoints and the egress allowlist remain
-deploy matters on purpose.
+deploy matters on purpose. Catalogue entries from both files are merged field by field: a measurement in `roles.yaml`
+replaces the size fields (weights, KV, measured values) as a unit, while other fields from `config.yaml` such as
+`max_parallel` or capability overrides keep applying.
 
 ## The client describes, the router decides
 

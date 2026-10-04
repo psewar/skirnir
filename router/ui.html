@@ -1030,7 +1030,10 @@ function renderModelCharts(last, col) {   // hiess renderModels und verdeckte di
   const active = Object.entries(LIVE.models).filter(([, a]) => a.some(v => v > 0)).sort((a, b) => (last(b[1]) || 0) - (last(a[1]) || 0) || b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0));
   const totalNow = active.reduce((a, [, v]) => a + (last(v) || 0), 0);
   $('#lv-models').innerHTML = active.length ? active.map(([m, v], i) => `<span style="color:${col(i)}">● ${esc(m)} <b>${totalNow ? Math.round(100 * (last(v) || 0) / totalNow) + ' %' : '–'}</b> <span class="muted">${fmtN(last(v) || 0)}/min</span></span>`).join('') : `<span class="muted">${t('noch keine Anfragen im 30-s-Fenster')}</span>`;
-  stacked('#ch-models', active.map(([, v], i) => ({ v, c: col(i) })));
+  // Ohne Anfragen in den letzten 10 Minuten nur Ueberschrift + Legendenzeile: die leere Zeichenflaeche belegte sonst eine
+  // ganze Zeile ohne Information (kay, 2026-10-04). Erst sichtbar machen, dann zeichnen - cv() misst die Groesse am Element.
+  $('#ch-models').style.display = active.length ? '' : 'none';
+  if (active.length) stacked('#ch-models', active.map(([, v], i) => ({ v, c: col(i) })));
   donut('#ch-model-share', groupBy('skirnir_requests_total', 'model'));
   donut('#ch-model-tokens', groupBy('skirnir_tokens_total', 'model', l => l.kind === 'completion'));
 }
