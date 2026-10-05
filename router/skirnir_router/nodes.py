@@ -131,6 +131,13 @@ class Node(Breaker):
         self.vram_total_reported_gib = None
         self.ollama_proc_gib = None
         self.children_vram_gib = 0.0   # Agent >= 0.13.0: Grafikspeicher seiner Kinder ausser Ollama (STT per CUDA), gemeldet
+        # Agent >= 0.17.0: Spiel und Hauptspeicher als Fakt (poll.apply_heartbeat). game None = Agent meldet es nicht
+        # (zu alt / Linux ohne Erkennung) - dann gilt wie bisher nur fremdes VRAM und GPU-Last.
+        self.game = None              # {"running", "name", "via", ...} vom Agenten
+        self.game_since = None        # seit wann der Router das Spiel ununterbrochen sieht (busy erst nach game_sustain_s)
+        self.memory = None            # {"ram_available_gib", "commit_free_gib", ...} vom Agenten
+        self.mem_low_count = 0        # so viele Heartbeats in Folge unter der Grenze
+        self.mem_pressure = False     # Speicherdruck: nichts kalt laden, nicht vorwaermen (das Geladene antwortet weiter)
         self.vram_last_gib = 0.0      # Ollama-Belegung beim letzten Poll, um ein Schrumpfen zu erkennen
         self.vram_hold_gib = 0.0      # solange nvidia-smi nachzieht, gilt dieser Wert als Ollama-Belegung
         self.vram_hold_until = 0.0
@@ -416,4 +423,5 @@ class Node(Breaker):
             "wol": self.wol, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,
             "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
             "breaker": self.breaker, "max_inflight": self.effective_max_inflight(), "draining": now < self.draining_until, "ollama_source": "push" if self.ollama_push_active(now) else "poll",
+            "game": self.game, "memory": self.memory, "memory_pressure": self.mem_pressure,   # Agent >= 0.17.0
         }

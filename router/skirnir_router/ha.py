@@ -56,7 +56,12 @@ def ha_snapshot(now=None):
                          "vram_free_gib": round(n.vram_free_gib, 2) if (n.gpu_known(now) and n.vram_free_gib is not None) else None,
                          "vram_total_gib": n.vram_total_gib, "loaded": sorted(n.loaded), "models": sorted(n.models),
                          "inflight": n.inflight, "agent": bool(n.gpu_known(now)), "gpu_guard": n.guard_view(now),
-                         "ollama_version": n.ollama_version}
+                         "ollama_version": n.ollama_version,
+                         # Agent >= 0.17.0: Spiel und Hauptspeicher (None = meldet der Agent nicht)
+                         "game": (n.game or {}).get("name") if (n.game or {}).get("running") else None,
+                         "game_reported": n.game is not None, "memory_pressure": n.mem_pressure,
+                         "ram_available_gib": (n.memory or {}).get("ram_available_gib"),
+                         "commit_free_gib": (n.memory or {}).get("commit_free_gib")}
     pending = [e["name"] for e in (state.REG.nodes.values() if state.REG else []) if e.get("state") == "pending"]
     problems = []
     if not online:
@@ -244,6 +249,13 @@ class HAPublisher:
              dict(unit_of_measurement="%", icon="mdi:expansion-card", **numeric("gpu_util"))),
             ("sensor", f"node_{oid}_vram_free", f"{name} VRAM frei",
              dict(unit_of_measurement="GiB", device_class="data_size", icon="mdi:memory", **numeric("vram_free_gib"))),
+            # Agent >= 0.17.0: Spiel und Hauptspeicher als Fakt (Router 0.7.0)
+            ("sensor", f"node_{oid}_game", f"{name} Spiel",
+             dict(state_topic=nt, value_template="{{ value_json.game if value_json.game else 'keins' }}", icon="mdi:gamepad-variant")),
+            ("sensor", f"node_{oid}_ram_free", f"{name} RAM frei",
+             dict(unit_of_measurement="GiB", device_class="data_size", icon="mdi:memory", **numeric("ram_available_gib"))),
+            ("sensor", f"node_{oid}_commit_free", f"{name} Commit frei",
+             dict(unit_of_measurement="GiB", device_class="data_size", icon="mdi:memory", **numeric("commit_free_gib"))),
         ]
 
     def sync_node_discovery(self):

@@ -19,6 +19,7 @@ type Heartbeat struct {
 	ollamaUp *OllamaUpdater // Ollama-Update: Zwischenstand (0.12.0)
 	upstream string         // lokales Ollama: Version geht mit dem Heartbeat (0.12.0, alle 60 s frisch)
 	sup      *Supervisor    // 0.13.0: Grafikspeicher der eigenen Kinder (ausser Ollama) als Fakt
+	game     *GameWatch     // 0.17.0: laufendes Spiel als Fakt (spiel.go)
 
 	mu         sync.Mutex
 	ovVersion  string
@@ -85,6 +86,12 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 		if m := h.sup.childrenVRAM(); len(m) > 0 {
 			p["children_vram_mib"] = m
 		}
+	}
+	if h.game != nil { // 0.17.0: Spiel und Hauptspeicher - der Router macht den Knoten busy bzw. laedt nichts kalt nach
+		p["game"] = h.game.Fact()
+	}
+	if m, ok := memoryFact(); ok {
+		p["memory"] = m
 	}
 	return p, nil
 }

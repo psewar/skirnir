@@ -150,6 +150,14 @@ roles:
   `busy` zu verlassen ist schwerer als hineinzukommen (Hysterese): Der Knoten bleibt busy, solange die Auslastung über
   `busy_exit.gpu_util_pct` (20 %) liegt und fremdes VRAM belegt ist, und wird erst nach `below_for_s` Ruhe wieder free - ein
   leichtes Spiel um die Eintrittsschwelle schaltete den Knoten sonst alle paar Sekunden um.
+- **Spiel und Hauptspeicher als Fakt (Agent 0.17.0, Windows).** Der Agent meldet, ob ein Spiel läuft (Prozesspfad in einer
+  Steam-Bibliothek oder im Installationsordner eines bekannten Spieleverlags; ist der Pfad nicht lesbar, über den Namen
+  eines grossen Programms in so einem Ordner), und den freien Hauptspeicher (verfügbarer RAM und freier Commit). Ein
+  laufendes Spiel macht den Knoten nach `busy_enter.game_sustain_s` (10 s) `busy`, auch wenn es kaum VRAM belegt, und hält
+  ihn nach dem Ende noch `busy_exit.game_quiet_s` (60 s). Liegen verfügbarer RAM oder freier Commit `memory_pressure.polls`
+  Heartbeats lang (2) unter `memory_pressure.min_free_gib` (8 GiB), steht der Knoten unter Speicherdruck: nichts wird kalt
+  geladen, kein Prewarm; geladene Modelle antworten weiter, entladen wird nichts. Grund-Code `memory_pressure` mit
+  `Retry-After` 60 s. `skirnir-agent spiel` zeigt, was der Agent erkennt.
 - **Prewarm.** Nach dem Online-Gehen und nach `busy → free` lädt der Router die Rang-1-Modelle der Rollen wieder vor, so viele
   zusammen ins VRAM passen. Eine **Residenz-Regel** holt ein verdrängtes Rang-1-Modell zurück, wenn der Verdränger 5 min nicht
   mehr gefragt wurde – sonst bliebe „warm zuerst“ dauerhaft auf der Ausweichstufe hängen.

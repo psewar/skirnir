@@ -129,12 +129,20 @@ def evaluate(node, now):
     # haelt und die Last ueber der Austrittsschwelle liegt, bleibt der Knoten busy; Ladebildschirme darunter deckt below_for_s ab.
     keep = (node.state == "busy" and gpu_known and node.gpu_util is not None and node.gpu_util >= node.busy_exit_util_threshold()
             and node.foreign_vram_gib() >= state.CFG.util_requires_foreign_gib)
-    trigger = hot_long or foreign or keep
+    # Spiel als Fakt vom Agenten (0.7.0 / Agent 0.17.0): belegt unabhaengig von VRAM und Last - Diablo IV bekam neben
+    # qwen3.8@196k kaum VRAM und lastete die GPU kaum aus, trotzdem lief es (RAM 94 %). Kurz nach dem Start erst nach
+    # game_sustain_s (Launcher-Blitzer), danach haelt es den Knoten busy, bis das Spiel weg ist.
+    game = (state.CFG.busy_game and node.game_since is not None
+            and (node.state == "busy" or now - node.game_since >= state.CFG.game_sustain))
+    trigger = hot_long or foreign or keep or game
     if trigger:
         node.calm_since = None
+        if game and node.state == "busy" and node.busy_reason != "game":
+            node.busy_reason = "game"   # Grund nachziehen: ein Spiel ist die genaueste Erklaerung
+            state.MQTT_DIRTY.append(True)
         if node.state == "free":
             node.state = "busy"
-            node.busy_reason = "gpu_util" if hot_long else "foreign_vram"
+            node.busy_reason = "game" if game else ("gpu_util" if hot_long else "foreign_vram")
             log.info("node %s -> busy (%s util=%s foreign=%.1fGiB)", node.name, node.busy_reason,
                      node.gpu_util, node.foreign_vram_gib())
             state.remember({"event": "busy", "node": node.name, "reason": node.busy_reason})
@@ -142,7 +150,9 @@ def evaluate(node, now):
                 state.spawn(unload_big_models(node))
     elif node.state == "busy":
         node.calm_since = node.calm_since or now
-        if (now - node.calm_since) >= state.CFG.busy_exit_s:
+        # Nach einem Spiel laenger warten (Neustart des Spiels, Wechsel Launcher -> Spiel), sonst laedt prewarm dazwischen
+        quiet = max(state.CFG.busy_exit_s, state.CFG.game_exit_s) if node.busy_reason == "game" else state.CFG.busy_exit_s
+        if (now - node.calm_since) >= quiet:
             node.state, node.calm_since, node.busy_reason = "free", None, ""
             log.info("node %s -> free (calm)", node.name)
             state.remember({"event": "free", "node": node.name})
@@ -195,6 +205,11 @@ async def prewarm(node, delay, reason, since=None):
         await asyncio.sleep(1)
     if node.state != "free" or node.foreign_since is not None:
         log.info("prewarm on %s uebersprungen (%s): fremdes VRAM %.1f GiB", node.name, reason, node.foreign_vram_gib())
+        return
+    if node.mem_pressure or node.game_since is not None:
+        # Agent >= 0.17.0: Hauptspeicher knapp oder Spiel gemeldet (z. B. noch im game_sustain-Fenster) - kein Laden, das
+        # den Speicher weiter fuellt; nach Spielende erst, wenn auch der Speicherdruck vorbei ist (kein Laden-Entladen-Pingpong)
+        log.info("prewarm on %s uebersprungen (%s): %s", node.name, reason, "Speicherdruck" if node.mem_pressure else "Spiel laeuft")
         return
     now = time.time()
     # Budget = Karte minus Reserve minus dem, was WIRKLICH fremd ist (Desktop-Grundverbrauch + fremdes VRAM); Ollamas eigene
@@ -363,6 +378,44 @@ async def handle_heartbeat(request):
     return web.json_response(hb_ack(node))
 
 
+def note_game_memory(node, b, now):
+    """Agent >= 0.17.0 meldet ein laufendes Spiel und den Hauptspeicher als Fakt (kays Regel: Zustand melden statt aus
+    Nebenwirkungen erraten). Anlass 2026-10-04: Diablo IV + qwen3.8@196k -> RAM 94 %, freier Commit 1,8 GB, ~900 Hard
+    Faults/s; der Knoten blieb free, weil Diablo kaum VRAM bekam (kein fremdes VRAM) und der Router RAM nicht kannte.
+    Fehlt ein Block, meldet der Agent es nicht (aelter, Linux ohne Spielerkennung): dann bleibt es beim alten Verhalten."""
+    g = b.get("game")
+    if isinstance(g, dict) and g.get("supported", True):
+        was = bool((node.game or {}).get("running"))
+        node.game = {k: g.get(k) for k in ("running", "name", "via", "since") if g.get(k) is not None}
+        running = bool(g.get("running"))
+        if running and node.game_since is None:
+            node.game_since = now
+        elif not running:
+            node.game_since = None
+        if running != was:
+            log.info("node %s: Spiel %s%s", node.name, "laeuft" if running else "beendet", f" ({g.get('name')})" if running else "")
+            state.remember({"event": "game", "node": node.name, "running": running, "name": g.get("name") if running else None})
+            state.MQTT_DIRTY.append(True)
+    elif g is None:
+        node.game, node.game_since = None, None
+    m = b.get("memory")
+    if not isinstance(m, dict):
+        node.memory, node.mem_low_count, node.mem_pressure = None, 0, False
+        return
+    node.memory = {k: m.get(k) for k in ("ram_available_gib", "commit_free_gib", "ram_total_gib", "commit_limit_gib") if m.get(k) is not None}
+    grenze = state.CFG.memory_pressure["min_free_gib"]
+    knapp = any(isinstance(m.get(k), (int, float)) and m[k] < grenze for k in ("ram_available_gib", "commit_free_gib"))
+    node.mem_low_count = node.mem_low_count + 1 if knapp else 0
+    druck = node.mem_low_count >= state.CFG.memory_pressure["polls"]
+    if druck != node.mem_pressure:
+        node.mem_pressure = druck
+        log.info("node %s: Speicherdruck %s (RAM frei %s GiB, Commit frei %s GiB, Grenze %s GiB)", node.name,
+                 "beginnt" if druck else "vorbei", m.get("ram_available_gib"), m.get("commit_free_gib"), grenze)
+        state.remember({"event": "memory_pressure", "node": node.name, "on": druck, "ram_available_gib": m.get("ram_available_gib"),
+                        "commit_free_gib": m.get("commit_free_gib")})
+        state.MQTT_DIRTY.append(True)
+
+
 def hb_ack(node):
     """Antwort auf einen Heartbeat (HTTP und Tunnel): Urteil des Routers plus ob er den GPU-Schutz dieses Knotens beachtet."""
     return {"state": node.state, "busy_reason": node.busy_reason,
@@ -388,6 +441,7 @@ def apply_heartbeat(node, b, now):
     node.ollama_proc_gib = op / 1024 if op is not None else None
     kv = b.get("children_vram_mib")   # Agent >= 0.13.0: {kind: MiB} ohne Ollama; fehlt das Feld, gibt es keine solchen Kinder
     node.children_vram_gib = sum(v for v in kv.values() if isinstance(v, (int, float))) / 1024 if isinstance(kv, dict) else 0.0
+    note_game_memory(node, b, now)   # Agent >= 0.17.0: Spiel und Hauptspeicher als Fakt
     sens = b.get("sensors")   # Agent >= 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z-Werte (unveraendert durchgereicht)
     node.sensors = sens if isinstance(sens, dict) else None
     if isinstance(b.get("update"), dict):   # Agent >= 0.8.0: Zwischenstand eines Update-Auftrags

@@ -33,6 +33,7 @@ type App struct {
 	updater  *Updater       // Selbst-Update (updater.go)
 	ollamaUp *OllamaUpdater // Ollama-Update ueber den Router (ollamaupdate.go, 0.12.0)
 	ollamaW  *OllamaWatcher // Ollama-Zustand beobachten und melden (ollamawatch.go, 0.14.0)
+	game     *GameWatch     // Spielerkennung (spiel.go, 0.17.0)
 	rootCtx  context.Context
 	crashed  string // Modul, das mit Panic endete (Run liefert dann einen Fehler, der Dienst startet neu)
 	ctlToken string // Token fuer POST /restart-child (Datei control.token neben der Config; Review 2026-09-25)
@@ -54,6 +55,8 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.ctlToken = loadOrCreateControlToken(cfg.path, log)
 	a.hb = newHeartbeat(cfg.Node, gpu, log)
 	a.hb.sup = sup
+	a.game = newGameWatch(log)
+	a.hb.game = a.game
 	a.guard = newGuard(cfg.GPUGuard, gpu, log)
 	a.hb.guard = a.guard
 	a.updater = newUpdater(cfg.Update, cfg.path, log)
@@ -211,6 +214,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	run("ollama-registrierung", a.ollamaUp.RegistrationLoop) // Windows-Eintrag der Installation mit der laufenden Version abgleichen
 	run("gpu-guard", a.guard.Run)
+	run("spiel", a.game.Run)
 	run("health", (&HealthServer{app: a}).Run)
 	if a.proxy != nil {
 		run("ollama-proxy", a.proxy.Run)

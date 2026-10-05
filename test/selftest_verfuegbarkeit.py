@@ -35,11 +35,12 @@ class Knoten:
     """Nur was _node_block liest. budget_gib wie Node.budget_gib: freies VRAM + Ollamas eigenes - Reserve."""
 
     def __init__(self, name, models, st="free", free=30.0, total=31.8, foreign=0.0, loaded=(), breaker="closed",
-                 draining_until=0.0, busy_reason="", gpu_util=0):
+                 draining_until=0.0, busy_reason="", gpu_util=0, game=None, memory=None, mem_pressure=False):
         self.name, self.models, self.state = name, set(models), st
         self.vram_free_gib, self.vram_total_gib, self._foreign = free, total, foreign
         self.loaded = {m: 20.0 for m in loaded}
         self.breaker, self.draining_until, self.busy_reason, self.gpu_util = breaker, draining_until, busy_reason, gpu_util
+        self.game, self.memory, self.mem_pressure = game, memory, mem_pressure
 
     def foreign_vram_gib(self):
         return self._foreign
@@ -93,6 +94,21 @@ check("passt nie -> model_too_large ohne Retry-After", u["code"] == S.MODEL_TOO_
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], st="busy", free=25.0, foreign=4.3, busy_reason="gpu_util", gpu_util=65))
 u = S.unavailable(NACHT, None, 0)
 check("busy durch gpu_util -> gpu_busy", u["code"] == S.GPU_BUSY and u["blockers"][0]["busy_reason"] == "gpu_util", str(u))
+
+# --- Agent >= 0.17.0: Spiel als Fakt -> gpu_busy nennt das Spiel ---
+knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], st="busy", busy_reason="game", game={"name": "Diablo IV.exe"}))
+u = S.unavailable(NACHT, None, 0)
+check("busy durch Spiel -> gpu_busy mit Spielname", u["code"] == S.GPU_BUSY and u["blockers"][0].get("game") == "Diablo IV.exe"
+      and "Diablo IV.exe" in u["detail"], str(u))
+
+# --- Speicher knapp: kalt laden gesperrt, warm geladen bleibt bedienbar ---
+knapp = {"ram_available_gib": 2.5, "commit_free_gib": 1.8, "ram_total_gib": 64.0}
+knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=30.0, memory=knapp, mem_pressure=True))
+u = S.unavailable(NACHT, None, 0)
+check("Speicher knapp + kalt -> memory_pressure mit Zahlen", u["code"] == S.MEMORY_PRESSURE
+      and u["blockers"][0].get("commit_free_gib") == 1.8 and "ram_total_gib" not in u["blockers"][0], str(u))
+knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=30.0, memory=knapp, mem_pressure=True, loaded=["qwen3.6:35b-a3b"]))
+check("Speicher knapp + warm geladen -> kein Hindernis", S.blockers(NACHT, None, 0) == [])
 
 # --- busy_ok-Stufe laeuft trotz busy: kein Hindernis ---
 knoten(Knoten("gpu-desktop", ["klein:8b"], st="busy", free=25.0))

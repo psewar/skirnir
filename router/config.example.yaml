@@ -119,12 +119,18 @@ modes:
                                      # und die gelernte Baseline kann darunter liegen. Ein Spiel belegt deutlich mehr;
                                      # sparsamere GPU-Last faengt der Auslastungspfad oben ab.
     foreign_sustain_s: 15            # ... wenn es so lange anhält (Modellwechsel erzeugt kurze Fehlmessungen)
+    game: true                       # Agent >= 0.17.0 meldet ein laufendes Spiel: Knoten busy, auch ohne fremdes VRAM/Last
+    game_sustain_s: 10               # ... wenn das Spiel so lange laeuft (Launcher-Blitzer ignorieren)
   busy_exit:
-    below_for_s: 15               # so lange muss Ruhe herrschen, bis der Knoten wieder free ist.
+    game_quiet_s: 60                 # nach Spielende so lange busy bleiben (Spielneustart/Ladebildschirm ueberbruecken)
+    below_for_s: 15              # so lange muss Ruhe herrschen, bis der Knoten wieder free ist.
                                   # Das ist die eigentliche Wartezeit nach dem Spielen - NICHT die Abtastrate
                                   # (ausgewertet wird bei jedem Heartbeat). Kuerzer = schneller wieder nutzbar,
                                   # aber ein Spiel in einem Ladebildschirm gilt frueher als beendet und der
                                   # prewarm (free_delay_s) legt wieder ein Modell ins VRAM.
+  memory_pressure:                # Agent >= 0.17.0 meldet verfuegbaren RAM und freien Commit
+    min_free_gib: 8               #   knapp = einer der beiden Werte unter dieser Grenze ...
+    polls: 2                      #   ... so viele Heartbeats in Folge: kein Kaltladen, kein Prewarm, nichts entladen
   vram_reserve_gib:
     free: 1.0
     busy: 2.0

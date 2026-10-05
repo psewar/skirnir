@@ -155,6 +155,14 @@ roles:
   than entering it (hysteresis): the node stays busy while the load is above `busy_exit.gpu_util_pct` (20 %) and foreign VRAM
   is in use, and only after `below_for_s` of quiet does it become free - a light game hovering around the entry threshold
   otherwise flipped the node every few seconds.
+- **Game and memory as facts (agent 0.17.0, Windows).** The agent reports whether a game is running (process path under a
+  Steam library or the install folder of a known game publisher; by the name of a large program in such a folder when
+  the path is not readable) and the free main memory (available RAM and free commit). A running game makes the node `busy`
+  after `busy_enter.game_sustain_s` (10 s), even when it uses little VRAM, and keeps it busy for `busy_exit.game_quiet_s`
+  (60 s) after it ends. When available RAM or free commit stays below `memory_pressure.min_free_gib` (8 GiB) for
+  `memory_pressure.polls` heartbeats (2), the node is under memory pressure: nothing is loaded cold and no prewarm runs,
+  loaded models keep answering and nothing is unloaded. Reason code `memory_pressure` with `Retry-After` 60 s.
+  `skirnir-agent spiel` prints what the agent detects.
 - **Prewarm.** After coming online and after `busy → free` the router preloads the rank-1 models of the roles, as many as fit
   into VRAM together. A **residency rule** brings back an evicted rank-1 model once the evictor has not been requested for
   5 min – otherwise "warm first" would stay stuck on the fallback tier forever.

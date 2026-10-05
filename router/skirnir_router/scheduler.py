@@ -59,6 +59,8 @@ def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
             # und die Folgeanfrage lief auf der Ausweichstufe des anderen Knotens.
             out.append(n)
             continue
+        if n.mem_pressure:   # Agent >= 0.17.0: Hauptspeicher knapp - nichts kalt laden (das Geladene oben antwortet weiter)
+            continue
         if need > n.budget_gib(now, tier["model"]):
             continue
         out.append(n)
@@ -252,10 +254,12 @@ VRAM_FULL = "vram_full"               # Platz fehlt, ohne dass fremdes VRAM schu
 MODEL_TOO_LARGE = "model_too_large"   # passt auch auf die leere Karte nicht: Konfigurationsfehler, Warten hilft nicht
 MODEL_MISSING = "model_missing"       # kein Knoten hat das Modell
 ATTEMPT_FAILED = "attempt_failed"     # Knoten war Kandidat, der Versuch scheiterte (tried)
+MEMORY_PRESSURE = "memory_pressure"   # Agent >= 0.17.0: Hauptspeicher knapp, der Router laedt dort nichts kalt
 NO_NODE = "no_node"
 
 # Wann ein Client es wieder versuchen soll (Retry-After). Ohne Eintrag: Warten hilft nicht.
-RETRY_AFTER_S = {GPU_BUSY: 30, NODE_DRAINING: 60, NODE_FAILING: 30, VRAM_FULL: 10, ATTEMPT_FAILED: 10, NODE_OFFLINE: 60}
+RETRY_AFTER_S = {GPU_BUSY: 30, NODE_DRAINING: 60, NODE_FAILING: 30, VRAM_FULL: 10, ATTEMPT_FAILED: 10, NODE_OFFLINE: 60,
+                 MEMORY_PRESSURE: 60}
 
 
 def _node_block(n, t, ctx, now):
@@ -265,13 +269,17 @@ def _node_block(n, t, ctx, now):
     if now < n.draining_until:
         return NODE_DRAINING, {}
     if n.state == "busy" and not t["busy_ok"]:
-        return GPU_BUSY, {"busy_reason": n.busy_reason, "gpu_util": n.gpu_util,
-                          "foreign_vram_gib": round(n.foreign_vram_gib(), 2)}
+        info = {"busy_reason": n.busy_reason, "gpu_util": n.gpu_util, "foreign_vram_gib": round(n.foreign_vram_gib(), 2)}
+        if n.busy_reason == "game" and n.game:
+            info["game"] = n.game.get("name")
+        return GPU_BUSY, info
     if not n.breaker_would_allow(now):
         return NODE_FAILING, {"breaker": n.breaker}
     lc = n.loaded_context(t["model"])
     if n.is_loaded(t["model"]) and (lc is None or lc >= ctx):
         return None, {}
+    if n.mem_pressure:   # wie candidates_for: nichts kalt laden, solange der Hauptspeicher knapp ist
+        return MEMORY_PRESSURE, {k: v for k, v in (n.memory or {}).items() if k in ("ram_available_gib", "commit_free_gib")}
     need, budget = state.CFG.need_gib(t["model"], ctx, n), n.budget_gib(now, t["model"])
     if need <= budget:
         return None, {}
@@ -315,7 +323,7 @@ def unavailable(tiers, client_ctx, now, exclude=()):
     elif all(c == NODE_OFFLINE for c in codes):
         code = NODE_OFFLINE
     else:
-        code = next(c for c in (ATTEMPT_FAILED, NODE_DRAINING, NODE_FAILING, VRAM_FULL, MODEL_TOO_LARGE, NODE_OFFLINE)
+        code = next(c for c in (ATTEMPT_FAILED, NODE_DRAINING, NODE_FAILING, MEMORY_PRESSURE, VRAM_FULL, MODEL_TOO_LARGE, NODE_OFFLINE)
                     if c in codes)
     return {"code": code, "retry_after_s": RETRY_AFTER_S.get(code), "blockers": bl, "detail": _detail(code, bl)}
 
@@ -327,7 +335,12 @@ def _detail(code, bl):
         if b.get("busy_reason") == "foreign_vram" and "need_gib" in b:
             return (f"GPU busy on {b['node']}: another program uses {b['foreign_vram_gib']:.1f} GiB, "
                     f"{b['model']} needs {b['need_gib']:.1f} GiB, {b['budget_gib']:.1f} GiB available")
+        if b.get("busy_reason") == "game":
+            return f"GPU busy on {b['node']}: a game is running" + (f" ({b['game']})" if b.get("game") else "")
         return f"GPU busy on {b['node']} ({b.get('busy_reason') or 'busy'}, util {b.get('gpu_util')} %)"
+    if code == MEMORY_PRESSURE and b is not None:
+        return (f"memory pressure on {b['node']}: {b.get('ram_available_gib')} GiB RAM and {b.get('commit_free_gib')} GiB commit "
+                f"free, the router loads nothing there")
     if code == MODEL_MISSING:
         return "no node has this model"
     if b is not None:

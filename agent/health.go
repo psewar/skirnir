@@ -103,6 +103,8 @@ type Snapshot struct {
 	Proxy     *ProxyStatus          `json:"ollama_proxy,omitempty"`
 	Tunnel    *TunnelStatus         `json:"tunnel,omitempty"`
 	Children  map[string]childState `json:"children"`
+	Game      GameFact              `json:"game"`
+	Memory    *MemFact              `json:"memory,omitempty"`
 }
 
 func (a *App) snapshot() Snapshot {
@@ -113,6 +115,10 @@ func (a *App) snapshot() Snapshot {
 		s.GPUError = err.Error()
 	}
 	s.Guard = a.guard.Status()
+	s.Game = a.game.Fact()
+	if m, ok := memoryFact(); ok {
+		s.Memory = &m
+	}
 	s.Update = a.updater.Report()
 	if age := a.gpu.RelayAge(); age > 0 {
 		s.GPUZRelay = age.Round(time.Second).String()

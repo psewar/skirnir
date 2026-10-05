@@ -37,6 +37,7 @@ func usage() {
   mqtt-clear    retained Discovery-Configs dieses Geraets loeschen (Testgeraete aufraeumen)
   gpu           Messquelle (NVML/nvidia-smi) und alle Sensoren einmal ausgeben, GPU-Z eingeschlossen
   gpuz-relay    GPU-Z-Sensoren aus der Anmeldesitzung an den Dienst reichen (Windows; Aufgabe bei Anmeldung)
+  spiel         Spielerkennung und Hauptspeicher einmal ausgeben (Spielordner, Programmnamen, Treffer)
   version
 
   Standard-Config: %s
@@ -121,6 +122,10 @@ func main() {
 			fmt.Printf("gpu-guard (Trockenlauf, Standardwerte): Limit aktuell %.0f W, Standard %.0f W, erlaubt %.0f-%.0f W -> Dauerlimit %.0f W (80 %%), Stufe 2 %.0f W (70 %%)\n",
 				lim.Cur, lim.Def, lim.Min, lim.Max, dauer, stufe2)
 		}
+		return
+	}
+	if verb == "spiel" { // 0.17.0: dieselbe Erkennung wie das Modul, einmal - ohne Konfiguration
+		probeGame()
 		return
 	}
 	if verb == "gpuz-relay" { // Anmeldesitzung -> Dienst (gpuz_windows.go); Konfiguration nur fuer den Health-Port

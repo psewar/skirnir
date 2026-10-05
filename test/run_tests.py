@@ -1005,6 +1005,55 @@ def main():
             hb("big", 5, int(base_b * 1024), int(32607 - base_b * 1024)); time.sleep(0.7)
         check("Policy zurueck auf global: big wieder free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["state"])
 
+        # Router 0.7.0 / Agent 0.17.0: Spiel und Hauptspeicher als Fakt. Anlass 2026-10-04: Diablo IV neben qwen3.8@196k -> RAM 94 %,
+        # Knoten blieb free (kaum fremdes VRAM, keine Last). Ein gemeldetes Spiel macht busy, unabhaengig von VRAM und Last.
+        viel = {"ram_available_gib": 30.0, "commit_free_gib": 40.0, "ram_total_gib": 63.4, "commit_limit_gib": 132.0}
+        spiel = {"supported": True, "running": True, "name": "Diablo IV.exe", "via": "pfad"}
+        ruhig = (int(base_b * 1024), int(32607 - base_b * 1024))
+        for _ in range(4):   # game_sustain_s 1 im Test
+            hb("big", 5, *ruhig, game=spiel, memory=viel); time.sleep(0.6)
+        nb = state()["nodes"]["big"]
+        check("Agent meldet Spiel -> big busy mit Grund 'game', obwohl kein fremdes VRAM und kaum Last",
+              nb["state"] == "busy" and nb["busy_reason"] == "game" and (nb.get("game") or {}).get("name") == "Diablo IV.exe",
+              f"{nb['state']} {nb['busy_reason']} {nb.get('game')} fremd {nb.get('foreign_vram_gib')}")
+        st, raw = http(R + "/v1/skirnir/availability/gross:latest")
+        av = json.loads(raw) if st == 200 else {}
+        bl = [b for b in av.get("blockers", []) if b.get("node") == "big"]
+        check("... Verfuegbarkeit: gpu_busy mit busy_reason game und Spielname, Klartext nennt das Spiel", av.get("code") == "gpu_busy"
+              and bl and bl[0].get("busy_reason") == "game" and bl[0].get("game") == "Diablo IV.exe" and "game" in av.get("detail", ""),
+              f"{st} {str(av)[:240]}")
+        hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=viel); time.sleep(1.2)
+        hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=viel)
+        check("... Spiel beendet: busy bleibt waehrend game_quiet_s (Neustart ueberbruecken)", state()["nodes"]["big"]["state"] == "busy",
+              state()["nodes"]["big"]["state"])
+        for _ in range(8):
+            hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=viel); time.sleep(0.6)
+            if state()["nodes"]["big"]["state"] == "free":
+                break
+        check("... danach free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["state"])
+        # Speicherdruck: nichts kalt laden, nicht vorwaermen - das Geladene antwortet weiter, nichts wird entladen
+        knapp = dict(viel, ram_available_gib=2.5, commit_free_gib=1.8)
+        nb = state()["nodes"]["big"]; sm = state()["nodes"].get("small", {})
+        kalt = next((m for m in nb["models"] if m not in nb["loaded"] and m not in (sm.get("models") or [])), None)
+        geladen_vorher = dict(nb["loaded"])
+        t_mp2 = time.time()
+        for _ in range(3):   # polls 2
+            hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=knapp); time.sleep(0.5)
+        nb = state()["nodes"]["big"]
+        ev = [d for d in state()["decisions"] if d.get("event") == "memory_pressure" and d.get("t", 0) >= t_mp2]
+        check("Speicherdruck (RAM 2,5 / Commit 1,8 GiB, 2 Heartbeats) -> memory_pressure, Knoten bleibt free, nichts entladen",
+              nb["memory_pressure"] is True and nb["state"] == "free" and ev and ev[0].get("on") is True
+              and set(nb["loaded"]) == set(geladen_vorher), f"{nb['memory_pressure']} {nb['state']} {ev} {nb['loaded']} vorher {geladen_vorher}")
+        if kalt:
+            st, raw = http(R + f"/v1/skirnir/availability/{kalt}")
+            av = json.loads(raw) if st == 200 else {}
+            check(f"... kaltes Modell ({kalt}) wird nicht geladen: available false, code memory_pressure",
+                  av.get("available") is False and av.get("code") == "memory_pressure", f"{st} {str(av)[:200]}")
+        for _ in range(2):
+            hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=viel); time.sleep(0.4)
+        check("... Speicher wieder frei -> memory_pressure vorbei", state()["nodes"]["big"]["memory_pressure"] is False,
+              str(state()["nodes"]["big"].get("memory")))
+
         # Tunnel weg (Agent stirbt) -> big sofort offline; Agent zurueck -> big wieder free
         agent.terminate(); agent.wait()
         for _ in range(10):

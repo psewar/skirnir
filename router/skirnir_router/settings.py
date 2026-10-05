@@ -150,6 +150,18 @@ _e("modes.busy_exit.gpu_util_pct", "float", "busy bleibt ueber GPU-Auslastung %"
    "Hysterese: einmal busy, gilt der Rechner als beschaeftigt, solange die Auslastung ueber diesem Wert liegt und fremdes VRAM belegt ist (hoechstens die Eintrittsschwelle)",
    G, 20, min=0, max=100, label_en="busy stays above GPU load %",
    help_en="hysteresis: once busy, the machine counts as busy while the load stays above this value and foreign VRAM is in use (at most the entry threshold)")
+_e("modes.busy_enter.game", "bool", "Spiel macht busy", "Agent >= 0.17.0 meldet ein laufendes Spiel: der Knoten wird busy, unabhaengig von VRAM und Last",
+   G, True, label_en="Game makes busy", help_en="agent >= 0.17.0 reports a running game: the node becomes busy regardless of VRAM and load")
+_e("modes.busy_enter.game_sustain_s", "float", "... Spiel seit s", "Launcher-Blitzer nicht werten", G, 10, min=0, max=600,
+   label_en="... game running for s", help_en="ignore launcher blips")
+_e("modes.busy_exit.game_quiet_s", "float", "nach Spielende free nach s", "Spielneustart/Launcherwechsel ueberbruecken, bevor vorgewaermt wird",
+   G, 60, min=0, max=3600, label_en="free after game ends, s", help_en="bridge game restarts/launcher switches before prewarming")
+_e("modes.memory_pressure.min_free_gib", "float", "Speicherdruck unter GiB frei",
+   "RAM- oder Commit-frei darunter (Agent >= 0.17.0): nichts kalt laden, nicht vorwaermen; Geladenes antwortet weiter",
+   G, 8, min=0, max=512, step=0.5, label_en="Memory pressure below GiB free",
+   help_en="RAM or commit free below this (agent >= 0.17.0): no cold loads, no prewarm; loaded models keep answering")
+_e("modes.memory_pressure.polls", "int", "... Heartbeats in Folge", "Ladespitzen ignorieren", G, 2, min=1, max=100,
+   label_en="... heartbeats in a row", help_en="ignore load spikes")
 _e("modes.unload_on_busy", "bool", "Modelle bei busy entladen", "", G, True, label_en="Unload models when busy")
 _e("modes.unload_on_busy_interval_s", "float", "Entlade-Sicherheitsnetz alle s", "", G, 30, min=1, max=3600, label_en="Unload safety net every s")
 _e("modes.vram_settle_s", "float", "VRAM-Nachlauf s", "bis nvidia-smi einen Unload nachvollzogen hat", G, 8, min=0, max=120,

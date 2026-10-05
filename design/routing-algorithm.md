@@ -31,7 +31,11 @@ free     <- Ollama erreichbar, nicht busy
 busy     <- (gpu_util_pct >= busy_enter.gpu_util_pct  seit sustain_s
              UND inflight[node] == 0 während des ganzen Fensters)
             ODER foreign_vram >= or_foreign_vram_gb
+            ODER Agent meldet ein Spiel seit busy_enter.game_sustain_s (0.7.0)
 busy -> free   erst wenn beide Bedingungen busy_exit.below_for_s lang nicht erfüllt
+               (Grund game: busy_exit.game_quiet_s nach dem Spielende, falls laenger)
+Speicherdruck  RAM verfuegbar oder Commit frei < memory_pressure.min_free_gib, memory_pressure.polls
+               Heartbeats lang: kein Kaltladen, kein Prewarm, nichts entladen (Zustand bleibt free/busy)
 ```
 Warum `inflight == 0`: Ollama-Last, die der Router selbst erzeugt hat, darf den
 Knoten nicht als "fremd belegt" erscheinen lassen. Fremde Ollama-Nutzung (z. B. direkt

@@ -44,8 +44,9 @@ router:
     broadcast_addresses: ["127.0.0.1"]
 
 modes:
-  busy_enter: { gpu_util_pct: 40, sustain_s: 2, or_foreign_vram_gib: 3.0, util_requires_foreign_gib: 1.0, foreign_sustain_s: 2 }
-  busy_exit: { below_for_s: 2 }
+  busy_enter: { gpu_util_pct: 40, sustain_s: 2, or_foreign_vram_gib: 3.0, util_requires_foreign_gib: 1.0, foreign_sustain_s: 2, game: true, game_sustain_s: 1 }
+  busy_exit: { below_for_s: 2, game_quiet_s: 3 }
+  memory_pressure: { min_free_gib: 8, polls: 2 }
   vram_reserve_gib: { free: 1.0, busy: 2.0 }
   keep_alive: { free: -1, busy: 5m }
   unload_on_busy: true

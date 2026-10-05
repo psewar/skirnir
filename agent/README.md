@@ -66,6 +66,21 @@ nach der Freigabe. Nutzlast: `{up, error, rev, ts, tags, ps}`, `tags`/`ps` sind 
 der Router diesen Knoten nicht mehr; der Fakt `ollama_push` in der Anmeldung sagt ihm, dass der Agent das kann.
 Tests: `ollamawatch_test.go` (Aenderung, nur `expires_at`, neues Modell, drei Fehlschlaege, Erholung, von Anfang an weg).
 
+## Spiel und Hauptspeicher melden (0.17.0)
+
+Der Heartbeat traegt zwei Bloecke, damit der Router nicht aus fremdem VRAM raten muss, ob jemand spielt:
+
+- `game: {supported, running, name, via, since, folders}`: alle 5 s prueft das Modul `spiel`, ob ein Prozess aus einem
+  Spielordner laeuft. Spielordner sind die Steam-Bibliotheken (`libraryfolders.vdf`, Steam-Ort aus der Registry) und die
+  Installationsorte von Spielen bekannter Verlage aus den Deinstallationseintraegen (HKLM 64/32 Bit und jeder geladene
+  Benutzer-Zweig), ohne Launcher. Ist der Pfad eines Prozesses nicht lesbar (Anti-Cheat), zaehlt sein Name, wenn eine
+  .exe >= 20 MB mit diesem Namen bis Tiefe 3 in einem Spielordner liegt (ohne Allerweltsnamen wie `launcher`, `updater`,
+  `crashpad_handler`). Den Index baut der Agent alle 6 h neu. `via` ist `pfad` oder `name`. Linux: `supported: false`.
+- `memory: {ram_available_gib, ram_total_gib, commit_free_gib, commit_limit_gib}` aus `GlobalMemoryStatusEx`; Linux meldet
+  nur RAM (`MemAvailable`), weil der Commit dort bei Ueberbuchung keine Grenze ist.
+
+Was der Router damit macht (busy-Grund `game`, Speicherdruck): siehe README, Abschnitt Busy. Beides steht auch in `/health`.
+
 ## TLS-Vorschaltstelle (0.2.0, Alternative ohne Tunnel)
 
 `ollama_proxy` startet einen HTTPS-Reverse-Proxy vor dem lokalen Ollama (Standard 0.0.0.0:11443 → 127.0.0.1:11434).
@@ -84,6 +99,7 @@ skirnir-agent.exe start|stop|restart      ohne UAC (Installer setzt das Steuerre
 skirnir-agent.exe install|uninstall       Admin
 skirnir-agent.exe check-config | mqtt-clear | version
 skirnir-agent.exe gpu                     Messquelle und alle Sensoren einmal ausgeben (auch GPU-Z, falls es laeuft)
+skirnir-agent.exe spiel                   Spielerkennung und Hauptspeicher einmal ausgeben (Ordner, Programmnamen, Treffer)
 ```
 
 `/health` auf `127.0.0.1:10398`: GPU, Heartbeat (Router-Urteil), MQTT, Kinder. `POST /restart-child?name=stt` startet ein Kind neu.
