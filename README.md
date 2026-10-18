@@ -586,10 +586,9 @@ isolation uses the authenticated client, never a supplied session ID. Token cred
 are required even in observe mode; IP-only access is denied. `routing.session_id`
 continues to mean node/model affinity only. Existing inference/streaming is unchanged.
 
-This is PR 1's explicit `client-managed` persistence foundation. Hermes retains its
-own compaction/memory behavior. Automatic `skirnir-managed` context, compaction and
-Hindsight recall/retention follow in separate PRs. See the [API, configuration,
-migration, rollback and test guide](design/session-store.md).
+`client-managed` keeps explicit event persistence; Hermes retains its own compaction
+and memory behavior. See the [API, configuration, migration, rollback and test
+guide](design/session-store.md).
 
 
 ## Optional Hindsight memory
@@ -609,3 +608,19 @@ double processing. See [configuration, API contract and limitations](design/hind
 Public changes are checked for common identifying/secret patterns in CI, with manual
 privacy review required by [repository guidance](AGENTS.md). Examples/tests use only
 synthetic data; connection values and real memory data must stay outside the repository.
+
+
+## Optional managed session context
+
+Enable `router.context_manager` alongside the Session Store and explicitly create a
+`skirnir-managed` session to persist delta-only native/OpenAI/Anthropic chat requests.
+Model-dependent budgets, immutable extractive compaction versions, exact system/tool
+history and versioned task checkpoints bound the active context. Original events
+remain available through paginated history and scoped search. Snapshots export active
+context with version/provenance; running processes and tools are not resumed.
+
+Default remains off. Client-managed sessions and stateless forwarding keep their
+behavior. Managed inference is currently local only and text/tool only; protected
+context that cannot fit fails explicitly. Completed responses are committed before
+a normal success response/stream terminal is sent. See [setup, delta/retry contract,
+limits and migration/rollback](design/managed-context.md).

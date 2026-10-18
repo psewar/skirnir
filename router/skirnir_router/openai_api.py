@@ -39,7 +39,7 @@ def oa_usage(j):
     return {"prompt_tokens": p, "completion_tokens": c, "total_tokens": p + c}
 
 
-def oa_messages_to_native(msgs):
+def oa_messages_to_native(msgs, preserve_tool_ids=False):
     out = []
     for m in msgs or []:
         if not isinstance(m, dict):
@@ -68,8 +68,11 @@ def oa_messages_to_native(msgs):
                 fn = (tc or {}).get("function") or {}
                 tcs.append({"function": {"name": fn.get("name", ""), "arguments": parse_tool_args(fn.get("arguments", {}))}})
             n["tool_calls"] = tcs
-        if m.get("role") == "tool" and m.get("name"):
-            n["tool_name"] = m["name"]
+        if m.get("role") == "tool":
+            if m.get("name"):
+                n["tool_name"] = m["name"]
+            if preserve_tool_ids and m.get("tool_call_id"):
+                n["tool_call_id"] = m["tool_call_id"]
         out.append(n)
     return out
 
@@ -118,7 +121,7 @@ def oa_format(b):
 
 
 def oa_chat_to_native(b):
-    native = {"model": b.get("model"), "messages": oa_messages_to_native(b.get("messages")),
+    native = {"model": b.get("model"), "messages": oa_messages_to_native(b.get("messages"), preserve_tool_ids=isinstance(b.get("routing"), dict) and bool(b["routing"].get("session"))),
               "stream": bool(b.get("stream", False)), "options": oa_options(b)}
     if b.get("tools"):
         native["tools"] = b["tools"]

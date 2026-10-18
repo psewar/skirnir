@@ -15,6 +15,18 @@ router:
   # Optionaler expliziter Session-Speicher; normale Inferenz und routing.session_id bleiben unveraendert.
   # pip install -r router/requirements-session.txt; DSN nur per Service-Environment/Secret setzen.
   # Backend-/Pool-Aenderungen erfordern Neustart. Siehe design/session-store.md.
+  # Optional managed text/tool sessions; explicit routing.session required.
+  # Read design/managed-context.md before enabling. No database use by ordinary inference.
+  context_manager:
+    enabled: false
+    reserve_tokens: 1024
+    safety_tokens: 256
+    tail_messages: 8
+    summary_bytes: 2048
+    max_history_bytes: 2097152
+    max_history_messages: 4096
+    max_response_bytes: 1048576
+    lease_s: 90
   session_store:
     enabled: false
     dsn_env: SKIRNIR_SESSION_DSN

@@ -1,7 +1,8 @@
 # Optional persistent sessions (PR 1)
 
 Skirnir can store **explicit client events** in PostgreSQL. It never records ordinary
-inference requests automatically. Default: off, no database or `asyncpg` dependency.
+inference requests automatically. For separately enabled, explicit `skirnir-managed`
+inference, see [managed context](managed-context.md). Default: off, no database or `asyncpg` dependency.
 OpenAI, Anthropic, Ollama, streaming and tool-call translation are unchanged.
 
 `routing.session_id` remains an arbitrary **affinity key**, with its existing TTL.
@@ -52,7 +53,7 @@ size: integer 1–50, minimum <= maximum; timeout: finite 0.1–60 seconds. Unkn
 invalid types, literal DSN keys and malformed environment variable names are rejected.
 Startup checks connectivity and migrates before accepting requests. Explicitly enabled
 but broken database/driver/secret configuration fails startup with a redacted message.
-At runtime, database errors return 503 only on session operations. Inference never
+At runtime, database errors return 503 only on session operations. Ordinary inference never
 calls this store and continues independently of runtime database availability.
 
 Session endpoints require valid **Bearer, Basic client-token or x-api-key credentials**
@@ -133,19 +134,14 @@ fixed operation and status labels (`skirnir_session_requests_total` and
 `skirnir_session_duration_seconds`); no principals, project names, IDs, contents,
 DSNs or credentials are added to those labels or database error logs.
 
-## Following PRs
+## Related optional components
 
-- **PR 2:** Hindsight REST adapter, authoritative specification check, explicit bank
-  read/write scopes, local/cloud data policies, bounded asynchronous retention,
-  untrusted retrieval context and fail-open policy. No recall/retain happens here.
-- **PR 3:** explicit `skirnir-managed` mode, inference integration, per-model context
-  budgets, append-only compaction versions and reconstructible handoffs. PR 1 rejects
-  `skirnir-managed` rather than promising automatic context assembly prematurely.
-
-Hermes continues managing its own conversation/compaction and memory provider. It
-may explicitly write/export history and task checkpoints through this API; PR 1 does
-not install a Hermes plugin or duplicate any Hermes/Hindsight processing. Raw session
-history, future compacted context and external long-term knowledge remain separate.
+[Hindsight memory](hindsight-memory.md) supplies separately granted recall/retention.
+[Managed context](managed-context.md) supplies explicit managed inference, model
+budgets, immutable compaction and active-context handoffs. Both remain opt-in.
+Hermes continues to manage its own conversation/compaction and memory provider;
+explicit storage does not install a Hermes plugin or duplicate that processing.
+Raw history, compacted context and external long-term knowledge remain separate.
 
 ## Verification
 
@@ -161,4 +157,4 @@ PostgreSQL 16 service and exercises real transactions, concurrent/idempotent wri
 owner isolation through HTTP, restart persistence, bounded reads, archive/delete,
 timeout/cancellation rollback, migration rollback and redacted failures. Tests use
 synthetic owners and remove their sessions; never point them at production data.
-Compaction and memory-outage behavior is tested when PR 2/3 implement it.
+Managed compaction and memory-outage tests are documented in the related guides.

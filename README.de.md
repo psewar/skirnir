@@ -588,10 +588,9 @@ eine Session-ID erteilt keine Berechtigung. Token-Zugangsdaten sind auch im
 observe-Modus erforderlich, IP-only-Zugriff ist ausgeschlossen. `routing.session_id`
 bleibt ausschliesslich Knoten-/Modell-Affinitaet. Inferenz und Streaming bleiben gleich.
 
-PR 1 liefert den Speicher fuer explizite `client-managed`-Ereignisse. Hermes verwaltet
-Compaction und Memory weiterhin selbst. Automatischer `skirnir-managed`-Kontext,
-Compaction und Hindsight folgen separat. [API, Konfiguration, Migration,
-Rollback und Tests (Englisch)](design/session-store.md).
+`client-managed` speichert weiterhin nur explizite Ereignisse. Hermes verwaltet
+Compaction und Memory selbst. [API, Konfiguration, Migration, Rollback und Tests
+(Englisch)](design/session-store.md).
 
 
 ## Optionales Hindsight Memory
@@ -613,3 +612,21 @@ CI prueft neue Zeilen auf gaengige identifizierende Angaben und Secrets; die
 [Repository-Vorgaben](AGENTS.md) verlangen zusaetzlich eine manuelle Datenschutzpruefung.
 Tests und Beispiele nutzen synthetische Daten. Echte Verbindungswerte und Memory-Daten
 gehoeren nicht ins Repository.
+
+
+## Optionaler verwalteter Session-Kontext
+
+`router.context_manager` wird zusammen mit dem Session Store aktiviert. Explizit als
+`skirnir-managed` angelegte Sessions speichern neue Nachrichten aus dem bestehenden
+Ollama-/OpenAI-/Anthropic-Chatpfad. Clients senden nur neue Nachrichten. Modellabhaengige
+Budgets und unveraenderliche, extraktive Compaction-Versionen begrenzen den aktiven
+Kontext. Systemvorgaben, Tool-Aufrufe und Ergebnisse bleiben exakt; Ziele und offene
+Arbeit werden in separaten Task-Checkpoints versioniert. Der Rohverlauf bleibt ueber
+paginierte History und geschuetzte Suche verfuegbar. Snapshots enthalten aktiven Kontext,
+Version und Herkunft; laufende Prozesse und Tools werden nicht wiederhergestellt.
+
+Standard bleibt aus; `client-managed` und zustandslose Weiterleitung behalten ihr
+Verhalten. Verwaltete Inferenz unterstuetzt zunaechst lokale Text-/Tool-Modelle.
+Passt geschuetzter Kontext nicht ins Zielfenster, wird die Anfrage abgewiesen.
+Erfolg wird erst nach dauerhafter Speicherung der vollstaendigen Antwort gemeldet.
+[Einrichtung, Delta-/Retry-Vertrag, Grenzen und Migration/Rollback (Englisch)](design/managed-context.md).

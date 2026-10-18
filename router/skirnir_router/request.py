@@ -23,6 +23,7 @@ import secrets
 import time
 
 from . import cloud, state
+from .managed import parse as parse_session_request
 from .memory_config import parse_memory_request
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES
 
@@ -30,7 +31,7 @@ KNOWN_CAPS = ("completion", "tools", "vision", "thinking", "structured", "embedd
 # Ollama meldet diese nicht als Faehigkeit; sie gelten, solange der Katalog nichts anderes sagt
 DEFAULT_TRUE = {"structured", "completion"}
 ROUTING_KEYS = {"require", "prefer", "min_context", "session_id", "request_id", "priority", "deadline_ms", "idempotency_key",
-                "execution", "data_class", "memory"}
+                "execution", "data_class", "memory", "session"}
 EXECUTIONS = ("auto", "local", "cloud")   # Stufe 5: auto = Rollenreihenfolge, local = Opt-out, cloud = Cloud-Stufen zuerst
 MAX_ID_LEN = 128
 REQUEST_ID_BYTES = 6   # "skirnir-" + 12 Hex-Zeichen: eindeutig genug fuer Log und Entscheidungsprotokoll, kurz genug zum Abtippen
@@ -131,6 +132,8 @@ class Routing:
         self.data_class = None
         self.data_class_effective = None
         self.cloud_block = None    # Grund, warum diese Anfrage nicht in die Cloud darf (gilt fuer alle Cloud-Stufen)
+        self.session = None
+        self.memory_context = None
         self.memory = None
         self.memory_scope = None
         self.decision = None       # Decision Engine: Ergebnis (as_dict), wenn die Auto-Rolle angefragt wurde
@@ -222,6 +225,7 @@ def parse(body, path, headers=None):
             if dc not in classes:
                 raise ValueError(f"routing.data_class must be one of {', '.join(classes)}")
             r.data_class = dc
+        r.session = parse_session_request(rb.get("session"))
         r.memory = parse_memory_request(rb.get("memory"))
         r.explicit = True
     r.require |= implicit_caps(body, path)
