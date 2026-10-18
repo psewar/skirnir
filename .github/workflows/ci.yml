@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements-dev.txt
+      - run: pip install -r requirements-dev.txt -r test/requirements-hindsight.txt
       - run: ruff check .
       - run: python router/router.py --check router/config.example.yaml --pure
       - run: python test/selftest_kontextpruefung.py
@@ -36,6 +36,8 @@ jobs:
       - run: python test/selftest_sessions.py
       - run: python test/selftest_memory.py
       - run: python test/selftest_context.py
+      - run: python test/selftest_interoperability.py
+      - run: python test/benchmark_context.py
       - name: Check added lines for common public-data leaks
         if: github.event_name == 'pull_request'
         env:
@@ -68,6 +70,7 @@ jobs:
       - run: pip install -r router/requirements-session.txt
       - run: python test/integration_sessions.py
       - run: python test/integration_context.py
+      - run: python test/integration_interoperability.py
 
   go:
     name: Agent vet, test, Windows cross-build

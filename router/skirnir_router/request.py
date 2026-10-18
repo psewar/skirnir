@@ -134,6 +134,8 @@ class Routing:
         self.cloud_block = None    # Grund, warum diese Anfrage nicht in die Cloud darf (gilt fuer alle Cloud-Stufen)
         self.session = None
         self.memory_context = None
+        self.memory_items = []
+        self.context_sensitive = False
         self.memory = None
         self.memory_scope = None
         self.decision = None       # Decision Engine: Ergebnis (as_dict), wenn die Auto-Rolle angefragt wurde

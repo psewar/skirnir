@@ -4,6 +4,7 @@ import ipaddress
 import json
 import os
 import time
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from aiohttp import ClientError, ClientSession, ClientTimeout, DummyCookieJar, TCPConnector
@@ -44,11 +45,12 @@ class HindsightClient:
         self.http = ClientSession(timeout=ClientTimeout(total=cfg.timeout_s), headers=headers, trust_env=False,
                                   cookie_jar=DummyCookieJar(), connector=TCPConnector(limit=cfg.max_inflight))
         self.slots = asyncio.Semaphore(cfg.max_inflight)
+        self.healthy = None
 
     async def close(self):
         await self.http.close()
 
-    async def post(self, bank, suffix, payload, *, missing_empty=False):
+    async def post(self, bank, suffix, payload, *, missing_empty=False, authorize=None):
         started, outcome = time.monotonic(), "error"
         try:
             if not bank.startswith("skirnir-") or len(bank) != 72 or any(c not in "0123456789abcdef" for c in bank[8:]):
@@ -56,6 +58,8 @@ class HindsightClient:
             for attempt in range(self.cfg.retries + 1):
                 try:
                     async with asyncio.timeout(self.cfg.timeout_s), self.slots:
+                        if authorize is not None:
+                            authorize()
                         async with self.http.post(self.endpoint + "/v1/default/banks/" + bank + "/memories" + suffix,
                                                   json=payload, allow_redirects=False) as response:
                             if response.status == 404 and missing_empty:
@@ -83,17 +87,62 @@ class HindsightClient:
         except (ValueError, RecursionError):
             raise MemoryUnavailable from None
         finally:
+            self.healthy = outcome in ("success", "empty")
             operation = "recall" if suffix else "retain"
             metrics._counter("skirnir_memory_http_total", {"operation": operation, "outcome": outcome})
             metrics._hist("skirnir_memory_http_seconds", {"operation": operation}, metrics.DURATION_BUCKETS, time.monotonic() - started)
 
-    async def recall(self, bank, query):
-        return await self.post(bank, "/recall", {"query": query, "budget": "low", "max_tokens": self.cfg.recall_max_tokens}, missing_empty=True)
+    async def recall(self, bank, query, *, types=None, authorize=None):
+        payload = {"query": query, "budget": "low", "max_tokens": self.cfg.recall_max_tokens}
+        if types is not None:
+            payload["types"] = types
+        return await self.post(bank, "/recall", payload, missing_empty=True, authorize=authorize)
 
-    async def retain(self, bank, content, operation_id, *, confirmed):
+    async def retain(self, bank, content, operation_id, *, confirmed, provenance=None, authorize=None):
+        origin = {"kind": "confirmed_information" if confirmed else "assistant_derivation",
+                  "origin_client": "unspecified", "observed_at": datetime.now(timezone.utc).isoformat(), "version": operation_id}
+        origin.update(provenance or {})
         result = await self.post(bank, "", {"async": True, "operation_id": operation_id, "items": [{
             "content": content, "document_id": operation_id,
             "context": "Client-confirmed knowledge" if confirmed else "Unverified assistant response; not confirmed facts",
-            "metadata": {"source": "client" if confirmed else "assistant", "confirmed": str(confirmed).lower()}}]})
+            "metadata": {**origin, "source": "client" if confirmed else "assistant", "confirmed": str(confirmed).lower()}}]}, authorize=authorize)
         if result.get("operation_id") != operation_id:
             raise MemoryUnavailable("Hindsight deployment did not acknowledge the idempotent async operation")
+
+
+    async def control(self, bank, path, method="GET", authorize=None):
+        self.healthy = False
+        if not bank.startswith("skirnir-") or len(bank) != 72 or any(c not in "0123456789abcdef" for c in bank[8:]):
+            raise MemoryUnavailable
+        try:
+            async with asyncio.timeout(self.cfg.timeout_s), self.slots:
+                if authorize is not None:
+                    authorize()
+                async with self.http.request(method, self.endpoint + "/v1/default/banks/" + bank + path, allow_redirects=False) as response:
+                    if response.status == 404:
+                        self.healthy = True
+                        return {"status": "not_found"} if method == "GET" else {"deleted": True}
+                    if response.status != 200:
+                        raise MemoryUnavailable
+                    data = bytearray()
+                    async for chunk in response.content.iter_chunked(8192):
+                        data.extend(chunk)
+                        if len(data) > self.cfg.max_response_bytes:
+                            raise MemoryUnavailable
+                    value = json.loads(data)
+                    if not isinstance(value, dict):
+                        raise MemoryUnavailable
+                    self.healthy = True
+                    return value
+        except (ClientError, OSError, TimeoutError, ValueError, RecursionError):
+            raise MemoryUnavailable from None
+
+    async def operation(self, bank, operation_id, *, authorize=None):
+        from uuid import UUID
+        ident = str(UUID(operation_id))
+        return await self.control(bank, "/operations/" + ident, authorize=authorize)
+
+    async def delete_document(self, bank, document_id, *, authorize=None):
+        from uuid import UUID
+        ident = str(UUID(document_id))
+        return await self.control(bank, "/documents/" + ident, "DELETE", authorize=authorize)

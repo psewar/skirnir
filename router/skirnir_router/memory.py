@@ -18,6 +18,7 @@ from aiohttp import web
 from . import auth, cloud, metrics, session_api, state
 from .hindsight import HindsightClient, MemoryUnavailable, endpoint_from_env
 from .memory_config import HindsightConfig
+from .session_types import SessionUnavailable, SessionConflict, SessionCapacity
 
 SERVICE_KEY = "skirnir_memory_service"
 CONFIG_KEY = "skirnir_hindsight_config"
@@ -47,28 +48,40 @@ class Scope:
     read: bool
     write: bool
     allow_cloud: bool
+    shared_scope: str = ""
+    delete: bool = False
+    strategy: str = "legacy"
 
 
 def settings():
     return getattr(state.CFG, "hindsight", HindsightConfig())
 
 
-def scope_for(request, project, *, read=False, write=False):
+def scope_for(request, project, *, read=False, write=False, explicit=False):
     principal, via = auth.resolve_client(request)
     if not principal or via not in ("bearer", "basic", "x-api-key") or principal != request.get("client"):
         raise MemoryUnauthenticated("memory requires authenticated client credentials")
-    return scope_for_principal(principal, project, read=read, write=write)
+    return scope_for_principal(principal, project, read=read, write=write, explicit=explicit)
 
 
-def scope_for_principal(principal, project, *, read=False, write=False):
+def scope_for_principal(principal, project, *, read=False, write=False, explicit=False):
     spec = (auth.client_auth_cfg().get("clients") or {}).get(principal) or {}
     policy = spec.get("memory") or {}
     grant = (policy.get("projects") or {}).get(project)
-    if policy.get("owner", "client") != "skirnir" or not grant:
+    strategy = policy.get("strategy", "legacy")
+    if strategy == "off" or not grant or (policy.get("owner", "client") != "skirnir" and not (explicit and strategy == "manual")):
         raise MemoryDenied("memory is not managed by the router for this client/project")
     if (read and not grant.get("read")) or (write and not grant.get("write")):
         raise MemoryDenied("memory scope not granted")
-    return Scope(principal, project, grant["data_class"], bool(grant.get("read")), bool(grant.get("write")), bool(grant.get("allow_cloud")))
+    if write and cloud.class_index(spec.get("data_class") or state.CFG.cloud["default_data_class"]) > cloud.class_index(grant["data_class"]):
+        raise MemoryDenied("client data class exceeds memory scope")
+    shared = grant.get("scope", "")
+    shared_policy = getattr(state.CFG, "memory_scopes", {}).get(shared) if shared else None
+    if shared and (not shared_policy or shared_policy["data_class"] != grant["data_class"]):
+        raise MemoryDenied("shared scope unavailable or classification changed")
+    allow_cloud = bool(grant.get("allow_cloud")) and (not shared or shared_policy["allow_cloud"])
+    return Scope(principal, project, grant["data_class"], bool(grant.get("read")), bool(grant.get("write")), allow_cloud,
+                 shared, bool(grant.get("delete")), strategy)
 
 
 def rejected_content(content, cfg):
@@ -87,6 +100,8 @@ class MemoryService:
         self.queue = asyncio.Queue(maxsize=cfg.queue_size)
         self.seen = OrderedDict()
         self.worker = None
+        self.outbox = None
+        self.wakeup = asyncio.Event()
 
     def active(self):
         # Endpoint/pool settings are restart-only. Never send queued work under a
@@ -94,17 +109,23 @@ class MemoryService:
         return settings() == self.cfg and self.cfg.enabled
 
     def bank(self, scope):
-        identity = json.dumps(["v1", scope.principal, scope.project, scope.data_class], separators=(",", ":")).encode()
+        identity = json.dumps((["shared-v1", scope.shared_scope, scope.data_class] if scope.shared_scope else
+                               ["v1", scope.principal, scope.project, scope.data_class]), separators=(",", ":")).encode()
         return "skirnir-" + hmac.new(self.key, identity, hashlib.sha256).hexdigest()
 
     def operation(self, scope, event_id):
-        raw = hmac.new(self.key, (self.bank(scope) + "\0" + event_id).encode(), hashlib.sha256).digest()
+        identity = self.bank(scope) + "\0" + (scope.principal + "\0" if scope.shared_scope else "") + event_id
+        raw = hmac.new(self.key, identity.encode(), hashlib.sha256).digest()
         return str(UUID(bytes=raw[:16], version=5))
 
     def current(self, scope, *, read=False, write=False):
-        return self.active() and scope_for_principal(scope.principal, scope.project, read=read, write=write) == scope
+        return self.active() and scope_for_principal(scope.principal, scope.project, read=read, write=write, explicit=True) == scope
 
-    async def recall(self, scope, query):
+    def guard(self, scope, *, read=False, write=False):
+        if not self.current(scope, read=read, write=write):
+            raise MemoryDenied("memory policy changed before dispatch")
+
+    async def recall(self, scope, query, *, types=None, byte_budget=None):
         if not self.current(scope, read=True):
             raise MemoryDenied("memory policy changed")
         if not isinstance(query, str) or not query.strip():
@@ -115,7 +136,7 @@ class MemoryService:
             count("recall", "filtered")
             return []
         try:
-            result = await self.client.recall(self.bank(scope), query)
+            result = await self.client.recall(self.bank(scope), query, types=types, authorize=lambda: self.guard(scope, read=True))
             if not self.current(scope, read=True):
                 raise MemoryDenied("memory policy changed")
             values = result.get("results")
@@ -128,13 +149,30 @@ class MemoryService:
             for fact in values[:100]:
                 if not isinstance(fact, dict):
                     continue
+                if self.cfg.recall_min_score > 0:
+                    score = (fact.get("scores") or {}).get("reranker") if isinstance(fact.get("scores"), dict) else None
+                    if type(score) not in (int, float) or not self.cfg.recall_min_score <= score <= 1:
+                        continue
                 source, content = fact.get("id"), fact.get("text")
                 if not isinstance(source, str) or not 1 <= len(source) <= 128 or any(ord(c) < 32 for c in source):
                     continue
-                if not isinstance(content, str) or rejected_content(content, self.cfg):
+                if not isinstance(content, str) or rejected_content(content, self.cfg) or rejected_content(source, self.cfg):
                     continue
                 candidate = {"source": source, "text": content}
-                if len(packed([*items, candidate]).encode()) <= self.cfg.recall_max_tokens:
+                metadata = fact.get("metadata")
+                if isinstance(metadata, dict):
+                    # Server-authored provenance survives Hindsight extraction. It is
+                    # still untrusted data and never proof that a statement is true.
+                    allowed = ("kind", "confirmed", "origin_client", "observed_at", "source_refs", "version", "supersedes")
+                    clean = {k: str(metadata[k])[:256] for k in allowed if k in metadata}
+                    if rejected_content(json.dumps(clean), self.cfg):
+                        continue
+                    if clean:
+                        candidate["provenance"] = clean
+                for key in ("created_at", "updated_at"):
+                    if isinstance(fact.get(key), str):
+                        candidate[key] = fact[key][:64]
+                if len(packed([*items, candidate]).encode()) <= min(self.cfg.recall_max_tokens, byte_budget if byte_budget is not None else self.cfg.recall_max_tokens):
                     items.append(candidate)
                 if len(items) == 10:
                     break
@@ -145,7 +183,23 @@ class MemoryService:
                 raise
             return []
 
-    def enqueue(self, scope, event_id, content, *, confirmed):
+    def validate_retain(self, scope, event_id, content):
+        session_api.text(event_id, "event_id")
+        if not self.cfg.retention_enabled or not self.current(scope, write=True):
+            raise MemoryDenied("retention is disabled or policy changed")
+        if not isinstance(content, str) or not content.strip() or len(content.encode()) > self.cfg.max_content_bytes:
+            raise ValueError("retention content is empty or too large")
+        if rejected_content(content, self.cfg):
+            raise MemoryDenied("retention content rejected by sensitive-data filter")
+        return self.operation(scope, event_id)
+
+    async def submit(self, scope, event_id, content, *, confirmed, provenance=None):
+        if self.outbox is not None:
+            from .memory_outbox import submit
+            return await submit(self, scope, event_id, content, confirmed, provenance)
+        return self.enqueue(scope, event_id, content, confirmed=confirmed, provenance=provenance)
+
+    def enqueue(self, scope, event_id, content, *, confirmed, provenance=None):
         if not self.cfg.retention_enabled or not self.current(scope, write=True):
             raise MemoryDenied("retention is disabled or policy changed")
         if not isinstance(content, str) or not content.strip() or len(content.encode()) > self.cfg.max_content_bytes:
@@ -154,13 +208,17 @@ class MemoryService:
             count("retain", "filtered")
             raise MemoryDenied("retention content rejected by sensitive-data filter")
         operation = self.operation(scope, event_id)
-        fingerprint = hashlib.sha256(json.dumps([content, confirmed]).encode()).hexdigest()
+        from .memory_gateway import provenance as make_provenance
+        origin = provenance or make_provenance({}, scope.principal, confirmed=confirmed)
+        if rejected_content(json.dumps(origin), self.cfg):
+            raise MemoryDenied("sensitive provenance")
+        fingerprint = hashlib.sha256(json.dumps([content, confirmed, origin], sort_keys=True).encode()).hexdigest()
         if operation in self.seen:
             if self.seen[operation] != fingerprint:
                 raise MemoryConflict("event_id already used for different content")
             return operation
         try:
-            self.queue.put_nowait((scope, operation, content, confirmed))
+            self.queue.put_nowait((scope, operation, content, confirmed, origin))
         except asyncio.QueueFull:
             count("retain", "queue_full")
             raise MemoryUnavailable from None
@@ -171,12 +229,16 @@ class MemoryService:
         return operation
 
     async def run_worker(self):
+        if self.outbox is not None:
+            from .memory_outbox import run
+            await run(self)
+            return
         while True:
-            scope, operation, content, confirmed = await self.queue.get()
+            scope, operation, content, confirmed, origin = await self.queue.get()
             success = False
             try:
                 if self.current(scope, write=True):
-                    await self.client.retain(self.bank(scope), content, operation, confirmed=confirmed)
+                    await self.client.retain(self.bank(scope), content, operation, confirmed=confirmed, provenance=origin, authorize=lambda scope=scope: self.guard(scope, write=True))
                     success = True
                     count("retain", "accepted")
                 else:
@@ -220,6 +282,11 @@ async def lifecycle(app):
             raise RuntimeError("memory requires a stable namespace key (at least 32 bytes) and a valid optional API token")
         endpoint = endpoint_from_env(cfg)
         service = MemoryService(cfg, key, HindsightClient(endpoint, token, cfg))
+        if cfg.outbox_enabled:
+            service.outbox = app.get(session_api.STORE_KEY)
+            if service.outbox is None:
+                await service.client.close()
+                raise RuntimeError("persistent memory outbox requires an available session store")
         service.worker = asyncio.create_task(service.run_worker())
     app[SERVICE_KEY] = service
     try:
@@ -234,6 +301,8 @@ def register(app):
     app.cleanup_ctx.append(lifecycle)
     app.router.add_post(PREFIX + "/recall", handle_recall)
     app.router.add_post(PREFIX + "/retain", handle_retain)
+    from .memory_gateway import register
+    register(app)
 
 
 async def _api(request, write):
@@ -242,25 +311,30 @@ async def _api(request, write):
         return session_api.fail(404, "memory is disabled (backend changes require restart)")
     try:
         data = await session_api.body(request)
-        allowed = ("project", "event_id", "content", "confirmed") if write else ("project", "query")
-        session_api.fields(data, allowed, allowed)
+        allowed = ("project", "event_id", "content", "confirmed", "provenance") if write else ("project", "query")
+        session_api.fields(data, allowed, ("project", "event_id", "content", "confirmed") if write else allowed)
         project = session_api.text(data["project"], "project")
-        scope = scope_for(request, project, read=not write, write=write)
+        scope = scope_for(request, project, read=not write, write=write, explicit=True)
         if not write:
             return web.json_response({"items": await service.recall(scope, data["query"]), "trusted": False}, headers={"Cache-Control": "no-store"})
         event_id = session_api.text(data["event_id"], "event_id")
         if data["confirmed"] is not True:
             raise ValueError("only explicitly confirmed client knowledge may be retained through this endpoint")
-        operation = service.enqueue(scope, event_id, data["content"], confirmed=True)
-        return web.json_response({"operation_id": operation, "state": "queued"}, status=202, headers={"Cache-Control": "no-store"})
+        from .memory_gateway import provenance
+        origin = provenance(data.get("provenance", {}), scope.principal, confirmed=True)
+        operation = await service.submit(scope, event_id, data["content"], confirmed=True, provenance=origin)
+        result_state = (await service.outbox.outbox_get(scope.principal, UUID(operation)))["state"] if service.outbox is not None else "queued"
+        return web.json_response({"operation_id": operation, "state": result_state, "durable": service.outbox is not None}, status=202, headers={"Cache-Control": "no-store"})
     except MemoryUnauthenticated:
         return auth._deny(request, 401, "memory requires authenticated client credentials")
     except MemoryDenied:
         return session_api.fail(403, "memory access or content policy denied")
     except MemoryConflict:
         return session_api.fail(409, "event_id conflict")
-    except MemoryUnavailable:
+    except (MemoryUnavailable, SessionUnavailable, SessionCapacity):
         return session_api.fail(503, "memory unavailable; retain may be retried with the same event_id")
+    except SessionConflict:
+        return session_api.fail(409, "event_id conflict")
     except (ValueError, UnicodeError, RecursionError):
         return session_api.fail(400, "invalid memory request")
     except web.HTTPRequestEntityTooLarge:
@@ -276,6 +350,18 @@ async def handle_retain(request):
 
 
 async def prepare(request, path, body, req):
+    policy = (auth.client_auth_cfg().get("clients", {}).get(request.get("client")) or {}).get("memory") or {}
+    strategy = policy.get("strategy", "legacy")
+    if strategy == "off":
+        if req.memory:
+            raise MemoryDenied("memory strategy is off")
+        return
+    if req.memory and (policy.get("owner", "client") != "skirnir" or strategy == "manual"):
+        raise MemoryDenied("this client owns memory processing or uses manual tools only")
+    if not req.memory and path == "/api/chat" and strategy in ("auto", "hybrid"):
+        req.memory = {"project": policy["default_project"], "recall": True,
+                      "retain": strategy == "auto" and policy.get("auto_retain", False),
+                      "event_id": req.session["event_id"] if req.session else req.request_id}
     if not req.memory:
         return
     if path != "/api/chat":
@@ -284,6 +370,9 @@ async def prepare(request, path, body, req):
     if service is None or not service.active():
         raise MemoryUnavailable
     spec = req.memory
+    turn = request.get("skirnir_managed_turn")
+    if turn is not None and turn.context["session"]["project"] != spec["project"]:
+        raise MemoryDenied("session and memory projects must match")
     scope = scope_for(request, spec["project"], read=spec["recall"], write=spec["retain"])
     if spec["retain"] and not service.cfg.retention_enabled:
         raise MemoryDenied("retention disabled")
@@ -307,6 +396,7 @@ async def prepare(request, path, body, req):
         if isinstance(query, str):
             items = await service.recall(scope, query)
             if items:
+                req.memory_items = items
                 req.memory_context = {"role": "user", "content": packed(items)}
                 body["messages"] = [*messages[:-1], req.memory_context, messages[-1]]
 
@@ -347,6 +437,8 @@ class Capture:
             self.invalid = not self.done
 
     def finish(self, outcome):
+        if self.service.outbox is not None:
+            return  # Awaited persistent flush is performed by the relay.
         transport = self.request.transport
         if outcome != "ok" or transport is None or transport.is_closing() or self.invalid or not self.done or not "".join(self.parts).strip():
             count("retain", "incomplete_or_ineligible")
@@ -354,4 +446,18 @@ class Capture:
         try:
             self.service.enqueue(self.scope, self.event_id, "".join(self.parts), confirmed=False)
         except (MemoryDenied, MemoryUnavailable, MemoryConflict, ValueError):
+            count("retain", "not_queued")
+
+
+    async def flush(self, outcome):
+        if self.service.outbox is None:
+            return
+        transport = self.request.transport
+        if outcome != "ok" or transport is None or transport.is_closing() or self.invalid or not self.done or not "".join(self.parts).strip():
+            return
+        try:
+            from .memory_gateway import provenance
+            await self.service.submit(self.scope, self.event_id, "".join(self.parts), confirmed=False,
+                                      provenance=provenance({}, self.scope.principal, confirmed=False))
+        except (MemoryDenied, MemoryUnavailable, MemoryConflict, SessionUnavailable, SessionConflict, SessionCapacity, ValueError):
             count("retain", "not_queued")

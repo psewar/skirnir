@@ -1,0 +1,3 @@
+# Optional integration-test dependency, matching the official Hermes plugin floor.
+# No embedded server/model is installed; tests use only synthetic loopback HTTP.
+hindsight-client>=0.10.1,<1

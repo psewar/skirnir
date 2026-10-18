@@ -100,3 +100,8 @@ def nachher(geschaetzt, angekommen, ctx, info):
     state.MQTT_EVENTS.append({"event_type": "kontext_gekuerzt", **state.KUERZUNGEN["letzte"]})
     del state.MQTT_EVENTS[:-20]
     return True
+
+
+def conservative_bound(body):
+    """Reusable text/tool byte bound; excludes model-specific image token costs."""
+    return _obergrenze(body)

@@ -630,3 +630,11 @@ Verhalten. Verwaltete Inferenz unterstuetzt zunaechst lokale Text-/Tool-Modelle.
 Passt geschuetzter Kontext nicht ins Zielfenster, wird die Anfrage abgewiesen.
 Erfolg wird erst nach dauerhafter Speicherung der vollstaendigen Antwort gemeldet.
 [Einrichtung, Delta-/Retry-Vertrag, Grenzen und Migration/Rollback (Englisch)](design/managed-context.md).
+
+## Optionales gemeinsames Gedächtnis und Agent-Übergaben
+
+Serverseitig freigegebene Memory Scopes, eine persistente PostgreSQL-Outbox,
+signierte Agent-Übergaben und Session-Suche erweitern das optionale Context Gateway.
+Neue Strategien, Tool-Reduktion, automatische Checkpoints und Aufbewahrungsregeln
+bleiben standardmässig aus. Private Bank-IDs und bestehende Inferenz-Clients bleiben
+kompatibel. Siehe [Aktivierung, Hermes-Anbindung, API und Rollback](design/shared-memory-interoperability.de.md).

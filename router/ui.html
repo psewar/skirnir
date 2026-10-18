@@ -91,6 +91,8 @@
 </nav>
 <main id="main" data-active="uebersicht">
   <section class="wide" data-tab="uebersicht">
+    <h2>Context Gateway / Memory</h2>
+    <div class="tiles" id="context-services"><span class="muted">Status wird geladen / loading status</span></div>
     <h2>Live <span class="muted" style="font-weight:normal">– aus <code>/metrics</code> alle 3 s; Verläufe der letzten 10 Minuten entstehen im Browser, „gesamt“ = seit Beginn der Aufzeichnung (metrics.json, überlebt Neustarts), Tage aus usage.json</span></h2>
     <div class="tiles" id="live">
       <div class="tile"><h4>Anfragen / min</h4><div class="big" id="lv-rpm">–</div><canvas class="spark" id="sp-rpm"></canvas></div>
@@ -1241,10 +1243,26 @@ async function nodeAct(fp, action) { try { await api(`/admin/nodes/${fp}/${actio
 async function nodePolicy(fp, pol) { if (document.activeElement) document.activeElement.blur(); try { await api(`/admin/nodes/${fp}/policy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pol) }); } catch (e) { alert(e.message); } await refresh(); }
 async function nodeDel(fp) { if (!confirm(t('Registereintrag löschen?'))) return; try { await api(`/admin/nodes/${fp}`, { method: 'DELETE' }); } catch (e) { alert(e.message); } await refresh(); }
 
+async function renderContextServices() {
+  try {
+    const s = await api('/admin/context');
+    const root = document.getElementById('context-services');
+    root.replaceChildren();
+    for (const name of ['session_store', 'context_manager', 'hindsight', 'outbox']) {
+      const tile = document.createElement('div'); tile.className = 'tile';
+      const label = document.createElement('h4'); label.textContent = name.replaceAll('_', ' ');
+      const value = document.createElement('div'); value.textContent = s[name] || 'unknown';
+      tile.append(label, value); root.append(tile);
+    }
+    const counts = document.createElement('div'); counts.className = 'tile';
+    counts.textContent = 'Outbox: ' + Object.entries(s.outbox_counts || {}).map(([k,v]) => k + ': ' + v).join(' · ');
+    root.append(counts);
+  } catch (_) { document.getElementById('context-services').textContent = 'Status unavailable'; }
+}
 let TICK = 0;
-async function refresh() { STATE = await api(decisionsUrl()); await loadMetrics(); sampleLive(); renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderOps(); renderDecisions();
+async function refresh() { STATE = await api(decisionsUrl()); await loadMetrics(); await renderContextServices(); sampleLive(); renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderOps(); renderDecisions();
   if (!dirty && (++TICK % 5 === 0)) { CFG = await api('/admin/config?lang=' + LANG); renderModels(); } }   // Konfiguration aendert sich selten: alle 15 s statt 3 s
-async function load() { CFG = await api('/admin/config?lang=' + LANG); STATE = await api(decisionsUrl()); await loadMetrics(); sampleLive(); dirty = false; renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderModels(); renderRoles(); renderSettings(); renderClients(); renderOps(); renderDecisions(); $('#msg').textContent = ''; }
+async function load() { CFG = await api('/admin/config?lang=' + LANG); STATE = await api(decisionsUrl()); await loadMetrics(); await renderContextServices(); sampleLive(); dirty = false; renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderModels(); renderRoles(); renderSettings(); renderClients(); renderOps(); renderDecisions(); $('#msg').textContent = ''; }
 // Rollen-Editor setzt nur `dirty`; Tab-Punkt daraus ableiten (Einstellungen/Katalog pflegen ihre Punkte selbst)
 $('#roles').addEventListener('change', () => { rolesDirty = true; markDirty(); });
 $('#roles').addEventListener('click', e => { if (e.target.tagName === 'BUTTON') { rolesDirty = true; setTimeout(markDirty, 0); } });

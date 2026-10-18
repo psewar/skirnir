@@ -12,6 +12,16 @@ router:
     namespace_key_env: SKIRNIR_MEMORY_NAMESPACE_KEY
     fail_open: true
     retention_enabled: false
+    # New features remain off. See design/shared-memory-interoperability.md (EN/DE).
+    gateway_enabled: false
+    outbox_enabled: false       # requires enabled session_store + hindsight
+    outbox_attempts: 5
+    outbox_backoff_s: 2
+    outbox_lease_s: 120
+    outbox_capacity: 1024
+    outbox_retention_days: 0    # 0 = disabled; terminal payload scrub, keep replay tombstones
+    recall_min_score: 0.0
+  memory_scopes: {}             # server-controlled shared scopes; private HMAC IDs stay unchanged
   # Optionaler expliziter Session-Speicher; normale Inferenz und routing.session_id bleiben unveraendert.
   # pip install -r router/requirements-session.txt; DSN nur per Service-Environment/Secret setzen.
   # Backend-/Pool-Aenderungen erfordern Neustart. Siehe design/session-store.md.
@@ -27,12 +37,22 @@ router:
     max_history_messages: 4096
     max_response_bytes: 1048576
     lease_s: 90
+    optimize_recall: false
+    recall_budget_percent: 20
+    reduce_tool_results: false
+    tool_result_bytes: 1024
+    auto_checkpoints: false
   session_store:
     enabled: false
     dsn_env: SKIRNIR_SESSION_DSN
     min_pool_size: 1
     max_pool_size: 5
     timeout_s: 5
+    handoff_enabled: false
+    handoff_key_env: SKIRNIR_HANDOFF_KEY
+    retention_days: 0
+    archived_retention_days: 0
+    maintenance_interval_s: 300
   listen: 0.0.0.0:11434
   control_listen: 0.0.0.0:11435
   public_url: https://router.example.net:11435
@@ -94,6 +114,9 @@ router:
       # example-client:
       #   memory:
       #     owner: skirnir
+      #     strategy: legacy       # off/manual/auto/hybrid; auto/hybrid need default_project
+      #     default_project: example-project
+      #     auto_retain: false      # opt-in only with auto; provider output stays unconfirmed
       #     projects:
       #       example-project: {read: true, write: false, data_class: personal, allow_cloud: false}
       # Session-Zugriff wird separat je authentifiziertem Client freigegeben:

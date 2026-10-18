@@ -12,7 +12,7 @@ import sys
 from aiohttp import ClientSession, web
 
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
-from . import decision, memory, session_api
+from . import decision, memory, session_api, context_ops
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 
 # TCP-Keepalive auf dem API-Port: erste Probe nach 60 s Stille, dann alle 15 s, nach 4 unbeantworteten gilt die Verbindung als tot
@@ -38,6 +38,7 @@ def build_apps():
     api = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[auth.client_auth_middleware])
     session_api.register(api)
     memory.register(api)
+    api.cleanup_ctx.append(context_ops.lifecycle)
     api.router.add_get("/", proxy.handle_root)
     api.router.add_get("/api/tags", proxy.handle_tags)
     api.router.add_post("/api/show", proxy.handle_show)
@@ -59,6 +60,8 @@ def build_apps():
         api.router.add_post("/v1/embeddings", openai_api.handle_oa_embeddings)
         api.router.add_route("*", "/v1/{rest:.*}", openai_api.handle_oa_unknown)
     ctl = web.Application(middlewares=[auth.basic_auth_middleware])
+    ctl[context_ops.API_KEY] = api
+    ctl.router.add_get("/admin/context", context_ops.handle)
     ctl.router.add_get("/", admin.handle_ui)
     ctl.router.add_get(r"/{name:(skirnir\.png|favicon\.png|favicon\.ico)}", admin.handle_asset)
     ctl.router.add_post("/v1/heartbeat/{node}", poll.handle_heartbeat)   # Heartbeat-Einspeisung mit heartbeat_token (Tests, Diagnose)

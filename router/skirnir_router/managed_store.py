@@ -77,13 +77,20 @@ class ManagedStore:
             await conn.execute("""UPDATE skirnir_sessions.turns SET state='failed' WHERE owner=$1 AND session_id=$2
                 AND lease=$3 AND state='pending'""", owner, session_id, lease)
 
-    async def finish_turn(self, owner, session_id, lease, message):
+    async def finish_turn(self, owner, session_id, lease, message, checkpoint=None):
         async with self.connection() as conn, conn.transaction():
             turn = await self._lease(conn, owner, session_id, lease)
             seq = await conn.fetchval("SELECT COALESCE(MAX(seq),0)+1 FROM skirnir_sessions.events WHERE owner=$1 AND session_id=$2", owner, session_id)
             eid = "managed:" + hashlib.sha256(turn["event_id"].encode()).hexdigest() + ":answer"
             await conn.execute("""INSERT INTO skirnir_sessions.events(owner,session_id,seq,event_id,kind,payload)
                 VALUES($1,$2,$3,$4,'message',$5)""", owner, session_id, seq, eid, message)
+            if checkpoint is not None:
+                previous = await conn.fetchrow("""SELECT version,payload FROM skirnir_sessions.events WHERE owner=$1 AND session_id=$2
+                    AND kind='checkpoint' ORDER BY version DESC LIMIT 1""", owner, session_id)
+                if previous is None or previous["payload"] != checkpoint:
+                    version = previous["version"] + 1 if previous else 1
+                    await conn.execute("""INSERT INTO skirnir_sessions.events(owner,session_id,seq,event_id,kind,version,payload)
+                        VALUES($1,$2,$3,$4,'checkpoint',$5,$6)""", owner, session_id, seq + 1, eid + ":checkpoint", version, checkpoint)
             await conn.execute("UPDATE skirnir_sessions.turns SET state='completed' WHERE owner=$1 AND session_id=$2 AND lease=$3", owner, session_id, lease)
 
     async def _context(self, conn, owner, sid, cfg, extra=()):
@@ -112,7 +119,10 @@ class ManagedStore:
         protected = [row["seq"] for row in messages if any(t["input_start_seq"] <= row["seq"] <= t["input_end_seq"] for t in unresolved)]
         turn = await conn.fetchrow("""SELECT event_id,state,input_end_seq,created_at FROM skirnir_sessions.turns
             WHERE owner=$1 AND session_id=$2 ORDER BY input_end_seq DESC,created_at DESC LIMIT 1""", owner, sid)
-        return {"session": session, "compaction": compaction, "checkpoint": checkpoint, "messages": messages,
+        scopes = await conn.fetch("SELECT payload FROM skirnir_sessions.session_memory_scopes WHERE owner=$1 AND session_id=$2 ORDER BY project LIMIT 257", owner, sid)
+        if len(scopes) > 256:
+            raise SessionCapacity("too many scope references")
+        return {"memory_scopes": [r["payload"] for r in scopes], "session": session, "compaction": compaction, "checkpoint": checkpoint, "messages": messages,
                 "last_turn": record(turn) if turn else None, "protected_sequences": protected}
 
     async def context(self, owner, session_id, cfg):
