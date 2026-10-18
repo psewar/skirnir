@@ -571,3 +571,24 @@ kein Mass für das Tempo. Neu messen, wenn Ollama, Treiber oder KV-Cache-Typ wec
 
 [MIT](LICENSE). Die Modelle, die Skirnir verteilt, und die eingebundenen Fremdprojekte (Jevlike, multilingual-e5-small,
 Ollama) haben ihre eigenen Lizenzen.
+
+
+## Optionaler persistenter Session-Speicher
+
+Die API `/v1/skirnir/sessions` kann explizit uebermittelte Client-Ereignisse in
+PostgreSQL speichern. Sie ist **standardmaessig deaktiviert**; bestehende Installationen
+benoetigen weder Datenbank noch zusaetzliche Abhaengigkeiten. Aktivierung ueber
+`router.session_store`, Installation von `router/requirements-session.txt`, DSN aus
+der konfigurierten Environment-Variable und Freigabe von `session_projects` je Client.
+
+Unterstuetzt werden Session-Metadaten/Status, unveraenderliche Nachrichten,
+idempotente Event-IDs, paginierter Verlauf, versionierte Task-Checkpoints sowie
+explizite Session-Loeschung. Die authentifizierte Clientidentitaet bestimmt den Owner;
+eine Session-ID erteilt keine Berechtigung. Token-Zugangsdaten sind auch im
+observe-Modus erforderlich, IP-only-Zugriff ist ausgeschlossen. `routing.session_id`
+bleibt ausschliesslich Knoten-/Modell-Affinitaet. Inferenz und Streaming bleiben gleich.
+
+PR 1 liefert den Speicher fuer explizite `client-managed`-Ereignisse. Hermes verwaltet
+Compaction und Memory weiterhin selbst. Automatischer `skirnir-managed`-Kontext,
+Compaction und Hindsight folgen separat. [API, Konfiguration, Migration,
+Rollback und Tests (Englisch)](design/session-store.md).

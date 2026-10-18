@@ -9,6 +9,7 @@ import time
 import yaml
 
 from . import state
+from .session_config import parse_session_config
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES
 
@@ -53,11 +54,12 @@ SCHEMA = {
         "ollama_poll_s": None, "heartbeat_interval_s": None, "heartbeat_stale_s": None, "offline_after_misses": None,
         "agent_missing_problem_s": None, "expose_concrete_models": None, "request_timeout_s": None,
         "toolcall_rescue": None,
+        "session_store": {"enabled": None, "dsn_env": None, "min_pool_size": None, "max_pool_size": None, "timeout_s": None},
         "limits": {"max_images": None, "max_tools": None, "max_messages": None}, "session_affinity_ttl_s": None,
         "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
-                                          "cloud": None, "data_class": None, "note": None, "token_rotated": None, "created": None}}},
+                                          "cloud": None, "data_class": None, "session_projects": None, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None,
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
@@ -214,6 +216,7 @@ class Config:
         r = c["router"]
         self._parse_router(r)
         self._parse_client_auth(r.get("client_auth") or {})
+        self.session_store = parse_session_config(r.get("session_store"))
         self._parse_cloud(r.get("cloud") or {})
         self.mqtt = c.get("mqtt") or None   # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
         self._parse_wol(r.get("wol") or {})
@@ -283,6 +286,11 @@ class Config:
             th = (spec.get("token_sha256") or "").strip().lower()
             if th and (len(th) != 64 or any(ch not in "0123456789abcdef" for ch in th)):
                 raise ValueError(f"client_auth.clients.{name}.token_sha256 muss 64 Hex-Zeichen sein")
+            projects = spec.get("session_projects", [])
+            if not isinstance(projects, list) or any(not isinstance(p, str) or not p.strip() or len(p) > 128
+                                                     or any(ord(ch) < 32 for ch in p) for p in projects):
+                raise ValueError("client_auth session_projects must be a list of nonempty project names (max 128 characters)")
+            spec["session_projects"] = projects
             spec["token_sha256"] = th
             spec["ip"] = [str(x) for x in (spec.get("ip") or [])]
             spec["roles"] = [str(x) for x in (spec.get("roles") or ["*"])]

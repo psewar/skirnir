@@ -570,3 +570,23 @@ measure of speed. Re-measure when Ollama, driver or KV cache type change.
 
 [MIT](LICENSE). The models Skirnir distributes and the third-party projects involved (Jevlike, multilingual-e5-small, Ollama)
 have their own licenses.
+
+
+## Optional persistent session API
+
+The router can persist explicit client events in PostgreSQL using an opt-in session
+API at `/v1/skirnir/sessions`. It is **disabled by default** and adds no dependency
+or service requirement to existing installations. Enable `router.session_store`,
+install `router/requirements-session.txt`, supply the DSN through the configured
+environment variable, and grant `session_projects` to individual authenticated clients.
+
+The API supports session metadata/status, append-only messages, idempotent event IDs,
+paginated history, versioned task checkpoints and explicit session deletion. Owner
+isolation uses the authenticated client, never a supplied session ID. Token credentials
+are required even in observe mode; IP-only access is denied. `routing.session_id`
+continues to mean node/model affinity only. Existing inference/streaming is unchanged.
+
+This is PR 1's explicit `client-managed` persistence foundation. Hermes retains its
+own compaction/memory behavior. Automatic `skirnir-managed` context, compaction and
+Hindsight recall/retention follow in separate PRs. See the [API, configuration,
+migration, rollback and test guide](design/session-store.md).
