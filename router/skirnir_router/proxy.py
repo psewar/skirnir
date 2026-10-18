@@ -12,7 +12,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import admission, auth, ausweich_beobachtung, cloud, decision, kontextpruefung, metrics, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
+from . import admission, auth, ausweich_beobachtung, cloud, decision, kontextpruefung, metrics, memory, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
 
@@ -50,7 +50,10 @@ async def route_request(request, path, body, shape=None, err=ollama_error):
     """Modell aufloesen (Rolle oder konkret), Knoten waehlen, Anfrage durchreichen. `shape` formt die Antwort
     (None = Ollama-Format 1:1, sonst z. B. OpenAI), `err` baut Fehlerantworten im Format des Clients.
     Stufe 6: mit Idempotency-Key (nur ohne Stream) liefert eine Wiederholung die gecachte Antwort."""
-    key = ops.idem_key(request, body, path)
+    # Memory requests must recheck live credentials/project policy on every call.
+    # Do not put scoped recall results into the legacy unscoped response cache.
+    rb = body.get("routing")
+    key = None if isinstance(rb, dict) and rb.get("memory") else ops.idem_key(request, body, path)
     if not key:
         return await _route(request, path, body, shape, err)
     cached = await ops.idem_wait(key)
@@ -79,7 +82,7 @@ async def _route(request, path, body, shape, err):
             return err(e.status, e.msg, e.why)
         result = await dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape, req)
         if result is not None:
-            if _is_role(role):
+            if _is_role(role) and not req.memory:
                 ops.maybe_shadow(role, body, node, req)   # Stufe 6: Schattenlauf nach der Antwort, Client merkt nichts
             return result
         # None = Fehler vor dem ersten Byte -> naechster Kandidat
@@ -107,6 +110,21 @@ async def _prepare(request, path, body):
     denied = auth.client_allows(request, role, concrete=not _is_role(role))
     if denied:
         raise _Reject(403, denied)
+    try:
+        await memory.prepare(request, path, body, req)
+    except memory.MemoryUnauthenticated:
+        raise _Reject(401, "memory requires authenticated client credentials") from None
+    except memory.MemoryDenied:
+        raise _Reject(403, "memory access or data policy denied") from None
+    except memory.MemoryUnavailable:
+        raise _Reject(503, "memory unavailable") from None
+    except ValueError:
+        raise _Reject(400, "invalid memory request") from None
+    # Recall changes the actual prompt, so limits/cloud scans must see the augmented body.
+    if req.memory:
+        too_big = request_mod.check_limits(body)
+        if too_big:
+            raise _Reject(413, too_big)
     tiers = _with_canary(role, tiers, req)
     tiers = _cloud_ordered(request, body, tiers, req)
     _ensure_satisfiable(name, role, tiers, req)
@@ -348,11 +366,21 @@ class _Relay:
         self.ttft_s = None
         self.info = self.headers = None
         self.resp = None             # Antwort an den Client, sobald der Stream offen ist (_open_stream)
+        self.memory_capture = memory.Capture(request, req, body) if req.memory and req.memory["retain"] else None
         self.obs_task = None         # 0.6.7: Einordnung im Hintergrund fuer anfragen.jsonl (ausweich_beobachtung, observe_all)
 
     async def run(self):
         self._begin()
         try:
+            if self.req.memory:
+                service = self.request.app.get(memory.SERVICE_KEY)
+                try:
+                    allowed = service is not None and service.current(self.req.memory_scope, read=self.req.memory["recall"], write=self.req.memory["retain"])
+                except memory.MemoryDenied:
+                    allowed = False
+                if not allowed:
+                    self.outcome = "error"
+                    return self.shape.error(403, "memory policy changed") if self.shape else ollama_error(403, "memory policy changed")
             if self.is_cloud:   # Stufe 5: Anbieter statt Knoten
                 return await self._via_cloud()
             return await self._via_node()
@@ -392,6 +420,8 @@ class _Relay:
                         "canary": bool(self.req.canary) and model == self.req.canary})
 
     def _finish(self):
+        if self.memory_capture is not None:
+            self.memory_capture.finish(self.outcome)
         node, model = self.node, self.model
         node.inflight -= 1
         node.inflight_models[model] -= 1
@@ -528,6 +558,8 @@ class _Relay:
             if isinstance(j, dict):
                 if self.rescue:
                     self._rescue_unary(j)
+                if self.memory_capture is not None:
+                    self.memory_capture.observe(j)
                 self._record_stats(j, ttft=None)
                 data = self._finalize_json(j)
             else:
@@ -564,6 +596,8 @@ class _Relay:
             return None
         if isinstance(j, dict) and j.get("error") and "message" not in j and not j.get("done"):
             return self._stream_error(line, str(j["error"]))
+        if self.memory_capture is not None:
+            self.memory_capture.observe(j)
         out = b""
         for jj in (rescuer.chunk(j) if rescuer else [j]):
             if "model" in jj:
@@ -609,6 +643,8 @@ class _Relay:
             log.warning("%s connect failed: %s", self.node.name, e)
             return self._fail("timeout" if isinstance(e, asyncio.TimeoutError) else "error", f"connect: {type(e).__name__}")
         if not self.stream:
+            if self.memory_capture is not None:
+                self.memory_capture.observe(result)
             self.ptoks, self.ctoks = cinfo["p_tok"], cinfo["c_tok"]
             self.outcome = "ok"
             return web.Response(status=200, body=self._finalize_json(result, force_model=True), content_type="application/json", headers=self.headers)
@@ -619,6 +655,8 @@ class _Relay:
         resp = None
         try:
             async for j in chunks:
+                if self.memory_capture is not None:
+                    self.memory_capture.observe(j)
                 if resp is None:
                     resp = await self._open_stream()
                 j["model"] = self.exposed

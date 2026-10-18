@@ -592,3 +592,24 @@ PR 1 liefert den Speicher fuer explizite `client-managed`-Ereignisse. Hermes ver
 Compaction und Memory weiterhin selbst. Automatischer `skirnir-managed`-Kontext,
 Compaction und Hindsight folgen separat. [API, Konfiguration, Migration,
 Rollback und Tests (Englisch)](design/session-store.md).
+
+
+## Optionales Hindsight Memory
+
+Ein standardmaessig deaktivierter Hindsight-REST-Adapter ergaenzt gezielten Recall und
+bewusste asynchrone Retention, unabhaengig vom Session Store. Bestehende Clients bleiben
+unveraendert. Service-URL, Token und stabiler Namespace-Schluessel kommen aus dem
+Environment; Client-/Projekt-Policies vergeben getrennte Lese-/Schreibrechte.
+
+Explizites `routing.memory` nutzt den bestehenden nativen/OpenAI-/Anthropic-Chatpfad.
+Erinnerungen werden begrenzt, mit Quellen versehen und als nicht vertrauenswuerdige
+User-Daten eingefuegt. Cloud-Nutzung ist pro Memory-Projekt standardmaessig gesperrt.
+Retention ist separat aus; unvollstaendige Streams, Tool-Workflows und erkannte sensible
+Inhalte werden ausgeschlossen. Hermes mit eigenem Memory-Provider behaelt
+`memory.owner: client`, damit keine doppelte Verarbeitung erfolgt.
+[Konfiguration, API und Grenzen (Englisch)](design/hindsight-memory.md).
+
+CI prueft neue Zeilen auf gaengige identifizierende Angaben und Secrets; die
+[Repository-Vorgaben](AGENTS.md) verlangen zusaetzlich eine manuelle Datenschutzpruefung.
+Tests und Beispiele nutzen synthetische Daten. Echte Verbindungswerte und Memory-Daten
+gehoeren nicht ins Repository.
