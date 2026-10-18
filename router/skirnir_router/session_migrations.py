@@ -59,6 +59,45 @@ CREATE TABLE skirnir_sessions.compactions (
     PRIMARY KEY (owner, session_id, version),
     FOREIGN KEY (owner, session_id) REFERENCES skirnir_sessions.sessions(owner, id) ON DELETE CASCADE
 );
+""", """
+ALTER TABLE skirnir_sessions.sessions ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now();
+CREATE INDEX sessions_discovery ON skirnir_sessions.sessions(owner,updated_at DESC,id DESC);
+CREATE INDEX sessions_project_status ON skirnir_sessions.sessions(owner,project,status,updated_at DESC,id DESC);
+CREATE FUNCTION skirnir_sessions.touch_session() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE skirnir_sessions.sessions SET updated_at=clock_timestamp() WHERE owner=NEW.owner AND id=NEW.session_id;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER events_touch AFTER INSERT ON skirnir_sessions.events FOR EACH ROW EXECUTE FUNCTION skirnir_sessions.touch_session();
+CREATE TRIGGER compactions_touch AFTER INSERT ON skirnir_sessions.compactions FOR EACH ROW EXECUTE FUNCTION skirnir_sessions.touch_session();
+CREATE TABLE skirnir_sessions.handoff_imports (
+    owner text NOT NULL, event_id text NOT NULL, fingerprint text NOT NULL, session_id uuid NOT NULL,
+    PRIMARY KEY(owner,event_id),
+    FOREIGN KEY(owner,session_id) REFERENCES skirnir_sessions.sessions(owner,id) ON DELETE CASCADE
+);
+CREATE TABLE skirnir_sessions.session_memory_scopes (
+    owner text NOT NULL, session_id uuid NOT NULL, project text NOT NULL, payload jsonb NOT NULL,
+    PRIMARY KEY(owner,session_id,project),
+    FOREIGN KEY(owner,session_id) REFERENCES skirnir_sessions.sessions(owner,id) ON DELETE CASCADE
+);
+CREATE TABLE skirnir_sessions.memory_outbox (
+    operation_id uuid PRIMARY KEY,
+    owner text NOT NULL,
+    project text NOT NULL,
+    scope jsonb NOT NULL,
+    fingerprint text NOT NULL,
+    delete_requested boolean NOT NULL DEFAULT false,
+    payload jsonb,
+    state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','processing','accepted','dead','revoked','cancelled','delete_pending','deleted')),
+    attempts integer NOT NULL DEFAULT 0,
+    available_at timestamptz NOT NULL DEFAULT now(),
+    lease uuid,
+    lease_until timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX outbox_pending ON skirnir_sessions.memory_outbox(available_at,created_at) WHERE state IN ('pending','processing','delete_pending');
+CREATE INDEX outbox_owner ON skirnir_sessions.memory_outbox(owner,operation_id);
 """)
 
 

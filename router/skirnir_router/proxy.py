@@ -53,7 +53,9 @@ async def route_request(request, path, body, shape=None, err=ollama_error):
     # Memory requests must recheck live credentials/project policy on every call.
     # Do not put scoped recall results into the legacy unscoped response cache.
     rb = body.get("routing")
-    key = None if isinstance(rb, dict) and (rb.get("memory") or rb.get("session")) else ops.idem_key(request, body, path)
+    policy = (auth.client_auth_cfg().get("clients", {}).get(request.get("client")) or {}).get("memory") or {}
+    scoped = (isinstance(rb, dict) and (rb.get("memory") or rb.get("session"))) or policy.get("strategy") in ("auto", "hybrid", "manual")
+    key = None if scoped else ops.idem_key(request, body, path)
     if not key:
         return await _route(request, path, body, shape, err)
     cached = await ops.idem_wait(key)
@@ -96,7 +98,7 @@ async def _route_inner(request, path, body, shape, err):
             return err(e.status, e.msg, e.why)
         result = await dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape, req)
         if result is not None:
-            if _is_role(role) and not req.memory and not req.session:
+            if _is_role(role) and not req.context_sensitive:
                 ops.maybe_shadow(role, body, node, req)   # Stufe 6: Schattenlauf nach der Antwort, Client merkt nichts
             return result
         # None = Fehler vor dem ersten Byte -> naechster Kandidat
@@ -111,6 +113,8 @@ async def _prepare(request, path, body):
         req = request_mod.parse(body, path, request.headers)   # Stufe 1: routing-Block, abgeleitete Anforderungen
     except ValueError as e:
         raise _Reject(400, str(e)) from None
+    policy = (auth.client_auth_cfg().get("clients", {}).get(request.get("client")) or {}).get("memory") or {}
+    req.context_sensitive = bool(req.memory or req.session or policy.get("strategy") in ("auto", "hybrid", "manual"))
     too_big = request_mod.check_limits(body)
     if too_big:
         raise _Reject(413, too_big)
@@ -303,7 +307,7 @@ class _Acquire:
             state.remember({"event": "queued", "role": self.role["name"], "node": node.name, "priority": self.req.priority,
                             "request_id": self.req.request_id, "inflight": node.inflight, "model": model,
                             "reason": "max_parallel" if model_full else "max_inflight"})
-            if _is_role(self.role) and self.body is not None and not self.req.session:   # 0.6.7: haette eine tiefere freie Stufe gereicht? (nur Protokoll)
+            if _is_role(self.role) and self.body is not None and not self.req.context_sensitive:   # 0.6.7: haette eine tiefere freie Stufe gereicht? (nur Protokoll)
                 ausweich_beobachtung.start(self.body, self.path, self.role, self.tiers, self.req, node, model,
                                            "max_parallel" if model_full else "max_inflight", self.client)
         if now >= self.deadline_at:
@@ -395,6 +399,7 @@ class _Relay:
         self.info = self.headers = None
         self.resp = None             # Antwort an den Client, sobald der Stream offen ist (_open_stream)
         self.memory_capture = memory.Capture(request, req, body) if req.memory and req.memory["retain"] else None
+        self.context_sensitive = req.context_sensitive
         self.managed_turn = request.get(managed.KEY)
         self.managed_capture = managed.AssistantCapture(self.managed_turn.cfg.max_response_bytes) if self.managed_turn else None
         self.obs_task = None         # 0.6.7: Einordnung im Hintergrund fuer anfragen.jsonl (ausweich_beobachtung, observe_all)
@@ -427,7 +432,11 @@ class _Relay:
                 return await self._end_with_error(502, f"upstream {self.node.name} aborted")
             raise web.HTTPBadGateway(text=json.dumps({"error": f"upstream {self.node.name} aborted"})) from e
         finally:
-            self._finish()
+            try:
+                if self.memory_capture is not None:
+                    await self.memory_capture.flush(self.outcome)
+            finally:
+                self._finish()
 
     # -- Buchfuehrung --
 
@@ -443,7 +452,7 @@ class _Relay:
         self.headers = request_mod.headers_for(self.info)
         if hasattr(self.shape, "bind"):   # Anthropic: Message-ID = Request-ID, model = Name, den der Client kennt
             self.shape.bind(self.req.request_id, self.exposed)
-        self.obs_task = None if self.managed_turn else ausweich_beobachtung.begin(self.path, self.out)
+        self.obs_task = None if self.context_sensitive else ausweich_beobachtung.begin(self.path, self.out)
         request_mod.remember_session(self.req.session_id, node.name, model)
         reason = "loaded" if self.warm else "cold"
         log.info("route %s %s -> tier%d %s ctx=%s node=%s(%s,%s) inflight=%d req=%s%s", self.path, self.role["name"], self.tier_idx,
@@ -543,7 +552,7 @@ class _Relay:
     async def _late_upstream_error(self, upstream):
         """Knoten lehnt ab, nachdem der Stream schon offen ist: Fehler als Ereignis im Stream statt als HTTP-Status."""
         txt = (await upstream.text())[:500]
-        log.warning("node %s returned %s after keep-alive: %s", self.node.name, upstream.status, "managed response redacted" if self.managed_turn else txt[:200])
+        log.warning("node %s returned %s after keep-alive: %s", self.node.name, upstream.status, "context response redacted" if self.context_sensitive else txt[:200])
         if upstream.status == 404:
             self.node.models.discard(self.model)   # wie _node_failed: Knoten hat das Modell nicht (mehr)
         elif _failed_before_first_byte(upstream.status):
@@ -567,7 +576,7 @@ class _Relay:
 
     async def _node_failed(self, upstream):
         txt = await upstream.text()
-        log.warning("node %s returned %s before first byte: %s", self.node.name, upstream.status, "managed response redacted" if self.managed_turn else txt[:200])
+        log.warning("node %s returned %s before first byte: %s", self.node.name, upstream.status, "context response redacted" if self.context_sensitive else txt[:200])
         if upstream.status == 404:
             self.node.models.discard(self.model)   # Knoten hat das Modell nicht (mehr); kein Breaker-Fall
             return None
@@ -683,10 +692,11 @@ class _Relay:
         im Entscheidungsprotokoll, und Fremdformate bekommen ein Fehlerereignis in ihrer Form. Kein Breaker-Fall: der Knoten
         arbeitet, die Ausgabe des Modells war kaputt."""
         self.outcome = "error"
+        safe_message = "context response redacted" if self.context_sensitive else msg[:200]
         log.warning("stream from %s: Fehler von Ollama mitten in der Antwort (%s, req=%s): %s", self.node.name, self.model,
-                    self.req.request_id, msg[:200])
+                    self.req.request_id, safe_message)
         state.remember({"event": "stream_error", "node": self.node.name, "model": self.model, "role": self.role["name"],
-                        "client": self.request.get("client"), "request_id": self.req.request_id, "error": msg[:200]})
+                        "client": self.request.get("client"), "request_id": self.req.request_id, "error": safe_message})
         if not self.shape:   # Ollama-Clients bekommen die Zeile im Wortlaut, wie von Ollama selbst
             return line if line.endswith(b"\n") else line + b"\n"
         if hasattr(self.shape, "stream_error"):
@@ -809,7 +819,7 @@ class _Relay:
 
     def _note_lost(self, stream, content=None):
         """Unbekannter Dialekt: fuer den Client verloren, aber nicht mehr stumm."""
-        sample = f": {(content or '').replace(chr(10), ' ')[:120]}" if content and not self.managed_turn else ""
+        sample = f": {(content or '').replace(chr(10), ' ')[:120]}" if content and not self.context_sensitive else ""
         log.warning("tool-call VERLOREN (Dialekt unbekannt%s): %s req=%s%s", ", stream" if stream else "", self.model,
                     self.req.request_id, sample)
         state.remember({"event": "toolcall_lost", "node": self.node.name, "model": self.model, "stream": stream,

@@ -7,6 +7,7 @@ are exact pins. If they cannot fit, reject rather than silently discard them.
 import copy
 import json
 
+from . import kontextpruefung
 from .session_types import SessionCapacity, SessionConflict
 
 
@@ -46,7 +47,7 @@ def estimate(body, messages):
     # Serialized UTF-8 bytes plus conservative chat/tool template overhead.
     prompt = {k: body[k] for k in ("tools", "format", "system", "prompt", "suffix") if k in body}
     prompt["messages"] = messages
-    return len(encoded(prompt)) + 64 * len(messages) + (256 if body.get("tools") else 0)
+    return max(kontextpruefung.conservative_bound(prompt), len(encoded(prompt)) + 64 * len(messages) + (256 if body.get("tools") else 0))
 
 
 def project(context, body, budget, cfg, model, ephemeral=None, max_messages=None):
@@ -59,21 +60,36 @@ def project(context, body, budget, cfg, model, ephemeral=None, max_messages=None
     while start > 0 and rows[start]["payload"].get("role") != "user":
         start -= 1
     old = context.get("compaction")
+    reduced = []
+    eligible = completed_results(context) if cfg.reduce_tool_results else set()
     pins = copy.deepcopy(old["payload"]["pinned"]) if old else []
     excerpts = [old["payload"]["summary"]] if old else []
     protected = set(context.get("protected_sequences", ()))
     for row in rows[:start]:
         if pinned(row["payload"]) or row["seq"] in protected:
-            pins.append(row)
+            pins.append(copy.deepcopy(row))
         else:
             excerpts.append(f"seq {row['seq']} {row['payload']['role']}: " + str(row["payload"].get("content", ""))[:512])
+    for entry in pins:
+        if entry["seq"] in eligible and entry["seq"] not in protected:
+            message = entry["payload"]
+            content = message.get("content", "")
+            if isinstance(content, str) and len(content.encode()) > cfg.tool_result_bytes:
+                # Only older complete pairs; retain call ID/name and an explicit
+                # source reference. The raw event is never changed.
+                message["content"] = content.encode()[:cfg.tool_result_bytes].decode("utf-8", "ignore") + (
+                    f"\n[Reduced completed tool result, unverified; original event sequence {entry['seq']}.]")
+                reduced.append(entry["seq"])
     if not excerpts:
-        raise SessionCapacity("protected context exceeds target model budget")
+        if reduced:
+            excerpts = ["Older completed tool results were reduced. Consult original events for exact content."]
+        else:
+            raise SessionCapacity("protected context exceeds target model budget")
     through = rows[start - 1]["seq"] if start else (old["through_seq"] if old else 0)
     summary = "\n".join(excerpts).encode()[-cfg.summary_bytes:].decode("utf-8", errors="ignore")
     payload = {"schema_version": 1, "algorithm": "extractive-v1", "summary": summary, "pinned": pins,
                "provenance": {"model": model, "prompt_budget": budget,
-                              "previous_version": old["version"] if old else None}}
+                              "previous_version": old["version"] if old else None, "reduced_tool_sequences": reduced}}
     candidate = {**context, "messages": rows[start:], "compaction": {"payload": payload, "through_seq": through}}
     # Shrinking a previous version also handles switching to a smaller model.
     while True:
@@ -111,3 +127,17 @@ def tool_delta(context, messages):
     if pending:
         raise SessionConflict("all pending tool calls need results before continuing inference")
     return result
+
+
+def completed_results(context):
+    """Sequences of results with preceding canonical calls, across prior pins/tail."""
+    rows = list(context["compaction"]["payload"]["pinned"]) if context.get("compaction") else []
+    rows += context["messages"]
+    pending, results = set(), set()
+    for row in sorted(rows, key=lambda r: r["seq"]):
+        message = row["payload"]
+        pending.update(call["id"] for call in message.get("tool_calls") or [])
+        if message.get("role") in ("tool", "function") and message.get("tool_call_id") in pending:
+            pending.remove(message["tool_call_id"])
+            results.add(row["seq"])
+    return results

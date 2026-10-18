@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from . import auth, cloud, metrics, session_api, state
 from .context_config import ContextConfig
-from .context_manager import compose, encoded, project
+from .context_manager import compose, encoded, estimate, project
 from .session_store import SessionCapacity, SessionConflict, SessionNotFound, SessionUnavailable
 
 KEY = "skirnir_managed_turn"
@@ -153,8 +153,33 @@ class Turn:
         budget = ctx - output - self.cfg.safety_tokens
         if budget <= 0:
             raise SessionCapacity("output and safety reserves exceed target context")
-        messages, compacted = project(self.context, body, budget, self.cfg, tier["model"], self.req.memory_context, state.CFG.limits["max_messages"])
+        from . import memory
+        ephemeral = self.req.memory_context
+        items = list(self.req.memory_items)
+        if self.cfg.optimize_recall and ephemeral:
+            while items and len(memory.packed(items).encode()) > budget * self.cfg.recall_budget_percent // 100:
+                items.pop()
+            ephemeral = {"role": "user", "content": memory.packed(items)} if items else None
+        before = estimate(body, compose(self.context, ephemeral))
+        while True:
+            try:
+                messages, compacted = project(self.context, body, budget, self.cfg, tier["model"], ephemeral, state.CFG.limits["max_messages"])
+                break
+            except SessionCapacity:
+                if not self.cfg.optimize_recall or not items:
+                    raise
+                items.pop()
+                ephemeral = {"role": "user", "content": memory.packed(items)} if items else None
+        used = estimate(body, messages)
+        for part, value in (("prompt_budget", budget), ("estimated_prompt", used), ("output_reserve", output),
+                            ("recall", len(ephemeral["content"].encode()) if ephemeral else 0)):
+            metrics._hist("skirnir_context_tokens", {"part": part}, (256, 1024, 4096, 16384, 65536, 262144), value)
+        if self.req.memory_scope is not None:
+            scope = self.req.memory_scope
+            await self.store.remember_memory_scope(self.owner, self.sid, self.lease,
+                {"project": scope.project, "shared_scope": scope.shared_scope, "data_class": scope.data_class})
         if compacted:
+            metrics._hist("skirnir_compaction_saved_tokens", {}, (0, 256, 1024, 4096, 16384, 65536), max(0, before - used))
             version = await self.store.compact(self.owner, self.sid, self.lease, compacted["through_seq"], compacted["payload"])
             self.context["compaction"] = version
             self.context["messages"] = [row for row in self.context["messages"] if row["seq"] > version["through_seq"]]
@@ -171,7 +196,26 @@ class Turn:
         transport = self.request.transport
         if transport is None or transport.is_closing():
             raise ManagedError(502, "managed response interrupted; raw input retained")
-        await self.store.finish_turn(self.owner, self.sid, self.lease, capture.message)
+        checkpoint = None
+        if self.cfg.auto_checkpoints:
+            previous = self.context.get("checkpoint")
+            checkpoint = dict(previous["payload"]) if previous else {"schema_version": 1, "goals": [], "open_steps": [], "artifacts": []}
+            checkpoint["last_result"] = "Assistant tool calls observed; results unverified" if capture.message.get("tool_calls") else "Assistant response completed; external work unverified"
+            marker = "[Skirnir] Resolve outstanding tool calls; results are unverified"
+            steps = list(checkpoint.get("open_steps", []))
+            if (checkpoint.get("provenance") or {}).get("source") == "skirnir-observed":
+                steps = [s for s in steps if s != marker]
+            if capture.message.get("tool_calls") and marker not in steps:
+                steps.append(marker)
+            checkpoint["open_steps"] = steps
+            checkpoint["provenance"] = {"source": "skirnir-observed", "resumable_execution": False}
+            from .memory import rejected_content, settings as memory_settings
+            if rejected_content(encoded(checkpoint).decode(), memory_settings()):
+                checkpoint = None
+        if checkpoint is None:
+            await self.store.finish_turn(self.owner, self.sid, self.lease, capture.message)
+        else:
+            await self.store.finish_turn(self.owner, self.sid, self.lease, capture.message, checkpoint=checkpoint)
         self.finished = True
         metrics._counter("skirnir_context_events_total", {"operation": "turn", "outcome": "completed"})
 

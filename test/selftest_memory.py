@@ -77,7 +77,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertTrue(config.validate_schema(raw))
 
 
-class MemoryHttpTests(unittest.IsolatedAsyncioTestCase):
+class MemoryHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.previous = state.CFG, state.CLIENT_AUTH_MODE, state.SESSION
         state.CLIENT_AUTH_MODE = None
@@ -95,6 +95,10 @@ class MemoryHttpTests(unittest.IsolatedAsyncioTestCase):
         server = web.Application()
         server.router.add_post("/v1/default/banks/{bank}/memories/recall", self.fake_recall)
         server.router.add_post("/v1/default/banks/{bank}/memories", self.fake_retain)
+        server.router.add_get("/v1/default/banks/{bank}/operations/{operation}", self.fake_operation)
+        server.router.add_delete("/v1/default/banks/{bank}/documents/{document}", self.fake_delete)
+        self.operation_state = "completed"
+        self.deleted_documents = []
         self.hindsight = TestServer(server)
         await self.hindsight.start_server()
         self.env = patch.dict(os.environ, {"SKIRNIR_HINDSIGHT_URL": str(self.hindsight.make_url("/")),
@@ -153,6 +157,13 @@ class MemoryHttpTests(unittest.IsolatedAsyncioTestCase):
             return web.Response(status=503)
         return web.json_response({"operation_id": data["operation_id"], "async": True})
 
+    async def fake_operation(self, request):
+        return web.json_response({"operation_id": request.match_info["operation"], "status": self.operation_state})
+
+    async def fake_delete(self, request):
+        self.deleted_documents.append((request.match_info["bank"], request.match_info["document"]))
+        return web.json_response({"memory_units_deleted": 1})
+
     async def fake_inference(self, request):
         data = await request.json()
         self.upstream_bodies.append(data)
@@ -187,6 +198,9 @@ class MemoryHttpTests(unittest.IsolatedAsyncioTestCase):
         await self.service.queue.join()
         return r
 
+
+
+class MemoryHttpTests(MemoryHarness):
     async def test_protocol_and_bank_isolation(self):
         for token in ("client-a", "client-b"):
             r = await self.call(token=token)
@@ -250,7 +264,11 @@ class MemoryHttpTests(unittest.IsolatedAsyncioTestCase):
         for retained in self.operations.values():
             item = retained["items"][0]
             self.assertEqual(item["content"], "Synthetic answer.")
-            self.assertEqual(item["metadata"], {"source": "assistant", "confirmed": "false"})
+            self.assertEqual(item["metadata"]["source"], "assistant")
+            self.assertEqual(item["metadata"]["confirmed"], "false")
+            self.assertEqual(item["metadata"]["kind"], "assistant_derivation")
+            self.assertEqual(item["metadata"]["origin_client"], "client-a")
+            self.assertIn("observed_at", item["metadata"])
             self.assertEqual(item["document_id"], retained["operation_id"])
 
     async def test_explicit_cloud_policy_and_both_cloud_capture_paths(self):

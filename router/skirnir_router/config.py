@@ -9,7 +9,8 @@ import time
 import yaml
 
 from . import state
-from .session_config import parse_session_config
+from .session_config import SessionConfig, parse_session_config
+from .shared_config import parse_scopes
 from .context_config import ContextConfig, parse_context_config
 from .memory_config import HindsightConfig, parse_hindsight, parse_client_memory
 from . import settings as settings_mod
@@ -56,14 +57,15 @@ SCHEMA = {
         "ollama_poll_s": None, "heartbeat_interval_s": None, "heartbeat_stale_s": None, "offline_after_misses": None,
         "agent_missing_problem_s": None, "expose_concrete_models": None, "request_timeout_s": None,
         "toolcall_rescue": None,
+        "memory_scopes": {"*": {"data_class": None, "allow_cloud": None}},
         "hindsight": {k: None for k in HindsightConfig.__dataclass_fields__},
         "context_manager": {k: None for k in ContextConfig.__dataclass_fields__},
-        "session_store": {"enabled": None, "dsn_env": None, "min_pool_size": None, "max_pool_size": None, "timeout_s": None},
+        "session_store": {k: None for k in SessionConfig.__dataclass_fields__},
         "limits": {"max_images": None, "max_tools": None, "max_messages": None}, "session_affinity_ttl_s": None,
         "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
-                                          "cloud": None, "data_class": None, "session_projects": None, "memory": {"owner": None, "projects": {"*": {"read": None, "write": None, "data_class": None, "allow_cloud": None}}}, "note": None, "token_rotated": None, "created": None}}},
+                                          "cloud": None, "data_class": None, "session_projects": None, "session_handoff_from": None, "memory": {"owner": None, "strategy": None, "default_project": None, "auto_retain": None, "projects": {"*": {"read": None, "write": None, "delete": None, "scope": None, "data_class": None, "allow_cloud": None}}}, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None,
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
@@ -226,8 +228,19 @@ class Config:
             raise ValueError("context_manager requires session_store.enabled")
         self._parse_cloud(r.get("cloud") or {})
         self.hindsight = parse_hindsight(r.get("hindsight"))
+        self.memory_scopes = parse_scopes(r.get("memory_scopes"), self.cloud["data_classes"])
+        if self.hindsight.outbox_enabled and not (self.hindsight.enabled and self.session_store.enabled):
+            raise ValueError("persistent memory outbox requires enabled hindsight and session_store")
         for client in self.client_auth["clients"].values():
+            sources = client.get("session_handoff_from", [])
+            if not isinstance(sources, list) or any(not isinstance(v, str) or v not in self.client_auth["clients"] for v in sources):
+                raise ValueError("session_handoff_from must list configured principals")
             client["memory"] = parse_client_memory(client.get("memory"), self.cloud["data_classes"])
+            for grant in client["memory"]["projects"].values():
+                if grant["scope"]:
+                    shared = self.memory_scopes.get(grant["scope"])
+                    if not shared or shared["data_class"] != grant["data_class"]:
+                        raise ValueError("shared scope classification must match the project grant")
         self.mqtt = c.get("mqtt") or None   # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
         self._parse_wol(r.get("wol") or {})
         self._parse_modes(c["modes"])

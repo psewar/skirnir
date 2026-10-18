@@ -259,6 +259,13 @@ def render():
     gauge("skirnir_model_loaded_gib", "loaded models and their VRAM", [({"node": n.name, "model": m}, round(g, 3)) for n in nodes for m, g in n.loaded.items()])
     adm = admission.view()
     gauge("skirnir_admission_waiting", "waiting requests per node", [({"node": k}, v) for k, v in adm["by_node"].items()] or [({}, 0)])
+    from .context_ops import snapshot
+    services = snapshot()
+    gauge("skirnir_context_backend_available", "1 = last known healthy, 0 = disabled/unknown/unavailable",
+          [({"backend": k}, 1 if services.get(k) == "available" else 0) for k in ("session_store", "hindsight", "outbox")])
+    gauge("skirnir_memory_outbox_jobs", "durable outbox counts, refreshed every ten seconds",
+          [({"status": k}, (services.get("outbox_counts") or {}).get(k, 0)) for k in
+           ("pending", "processing", "accepted", "dead", "revoked", "cancelled", "delete_pending", "deleted")])
     gauge("skirnir_sessions", "active session affinities", [({}, len(state.SESSIONS))])
     rows = []
     for _exposed, role in state.CFG.roles.items():

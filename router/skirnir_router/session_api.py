@@ -22,6 +22,8 @@ async def lifecycle(app):
     cfg = app[CONFIG_KEY]
     store = None
     if cfg.enabled:
+        if cfg.handoff_enabled and len(os.environ.get(cfg.handoff_key_env, "").encode()) < 32:
+            raise RuntimeError("session handoffs require a signing key of at least 32 bytes")
         dsn = os.environ.get(cfg.dsn_env)
         if not dsn:
             raise RuntimeError("session store requires its configured DSN environment variable")
@@ -41,13 +43,16 @@ def register(app):
     app[CONFIG_KEY] = getattr(state.CFG, "session_store", SessionConfig())
     app.cleanup_ctx.append(lifecycle)
     app.router.add_post(PREFIX, handle, name="session-create")
+    app.router.add_get(PREFIX, handle, name="session-list")
+    app.router.add_post(PREFIX + "/import", handle, name="session-handoff-imported")
+    app.router.add_get(PREFIX + "/{session_id}/checkpoints/latest", handle, name="session-latest-checkpoint")
     app.router.add_get(PREFIX + "/{session_id}", handle, name="session-get")
     app.router.add_patch(PREFIX + "/{session_id}", handle, name="session-update")
     app.router.add_delete(PREFIX + "/{session_id}", handle, name="session-delete")
     for resource in ("messages", "checkpoints"):
         app.router.add_get(PREFIX + "/{session_id}/" + resource, handle, name="session-read-" + resource)
         app.router.add_post(PREFIX + "/{session_id}/" + resource, handle, name="session-append-" + resource)
-    for resource in ("compactions", "snapshot", "search"):
+    for resource in ("compactions", "snapshot", "search", "handoff"):
         app.router.add_get(PREFIX + "/{session_id}/" + resource, handle, name="session-" + resource)
 
 
@@ -78,7 +83,7 @@ async def body(request):
         def invalid_constant(_):
             raise ValueError("non-finite JSON number")
         value = json.loads(data, parse_constant=invalid_constant)
-    except (ValueError, UnicodeError, RecursionError):
+    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
         raise ValueError("body must contain valid JSON") from None
     if not isinstance(value, dict):
         raise ValueError("body must be an object")
@@ -136,6 +141,8 @@ async def handle(request):
             response = fail(404, "session store disabled (configuration changes require restart)")
         else:
             response = await dispatch(request, action)
+    except PermissionError:
+        response = fail(403, "session handoff or project permission denied")
     except SessionCapacity:
         response = fail(413, "session working set exceeds configured limit")
     except SessionNotFound:
@@ -144,7 +151,7 @@ async def handle(request):
         response = fail(409, str(exc))
     except SessionUnavailable:
         response = fail(503, "session store unavailable; retry with the same event_id")
-    except (ValueError, UnicodeError, RecursionError):
+    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
         response = fail(400, "invalid session request")
     except web.HTTPRequestEntityTooLarge:
         response = fail(413, "session body exceeds 1 MiB")
@@ -167,6 +174,17 @@ async def dispatch(request, action):
     store = request.app[STORE_KEY]
     if store is None:
         raise SessionUnavailable
+    if action in ("list", "handoff-imported"):
+        from . import session_exchange
+        if action == "list":
+            return await session_exchange.discover(request, store, principal)
+        try:
+            response = await session_exchange.import_package(request, store, principal)
+        except BaseException:
+            session_exchange.count("import", "error")
+            raise
+        session_exchange.count("import", "ok")
+        return response
     if action == "create":
         data = await body(request)
         fields(data, ("project", "metadata", "mode"), ("project",))
@@ -206,6 +224,18 @@ async def dispatch(request, action):
         if "metadata" in data and not isinstance(data["metadata"], dict):
             raise ValueError("metadata must be an object")
         return web.json_response(await store.update(principal, session_id, data.get("status"), data.get("metadata")))
+    if action == "handoff":
+        from . import session_exchange
+        try:
+            package = await session_exchange.export(store, principal, session_id)
+        except BaseException:
+            session_exchange.count("export", "error")
+            raise
+        session_exchange.count("export", "ok")
+        return web.json_response(package)
+    if action == "latest-checkpoint":
+        context = await store.context(principal, session_id, getattr(state.CFG, "context_manager", ContextConfig()))
+        return web.json_response({"checkpoint": context["checkpoint"], "resumable_execution": False})
     if action in ("compactions", "snapshot", "search"):
         return await context_resource(request, store, principal, session_id, action)
     kind = "message" if action.endswith("messages") else "checkpoint"
