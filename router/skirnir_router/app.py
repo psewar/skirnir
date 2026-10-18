@@ -12,7 +12,7 @@ import sys
 from aiohttp import ClientSession, web
 
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
-from . import decision
+from . import decision, session_api
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 
 # TCP-Keepalive auf dem API-Port: erste Probe nach 60 s Stille, dann alle 15 s, nach 4 unbeantworteten gilt die Verbindung als tot
@@ -36,6 +36,7 @@ def keepalive_socket(listen):
 
 def build_apps():
     api = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[auth.client_auth_middleware])
+    session_api.register(api)
     api.router.add_get("/", proxy.handle_root)
     api.router.add_get("/api/tags", proxy.handle_tags)
     api.router.add_post("/api/show", proxy.handle_show)

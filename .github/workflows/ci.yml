@@ -31,6 +31,33 @@ jobs:
       - run: python test/selftest_keepalive.py
       - run: python test/selftest_max_parallel.py
       - run: python test/selftest_katalog_merge.py
+      - run: python test/selftest_sessions.py
+
+  sessions-postgres:
+    name: Session store PostgreSQL integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: skirnir_test
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: skirnir_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U skirnir_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SKIRNIR_TEST_SESSION_DSN: postgresql://skirnir_test:test-only@127.0.0.1:5432/skirnir_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r router/requirements-session.txt
+      - run: python test/integration_sessions.py
 
   go:
     name: Agent vet, test, Windows cross-build

@@ -1,0 +1,3 @@
+# Install only when router.session_store.enabled is true.
+-r requirements.txt
+asyncpg>=0.29,<1
