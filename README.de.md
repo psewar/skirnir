@@ -638,3 +638,5 @@ signierte Agent-Übergaben und Session-Suche erweitern das optionale Context Gat
 Neue Strategien, Tool-Reduktion, automatische Checkpoints und Aufbewahrungsregeln
 bleiben standardmässig aus. Private Bank-IDs und bestehende Inferenz-Clients bleiben
 kompatibel. Siehe [Aktivierung, Hermes-Anbindung, API und Rollback](design/shared-memory-interoperability.de.md).
+
+Betriebliche Verbesserungen: [Memory-Zuverlässigkeit, Recovery und echte Smoke-Tests](design/memory-reliability.de.md).

@@ -13,7 +13,10 @@ from . import metrics
 
 
 class MemoryUnavailable(Exception):
-    pass
+    def __init__(self, message=None, *, kind="unavailable"):
+        super().__init__(message or "memory backend unavailable")
+        self.kind = kind if kind in ("unavailable", "upstream_auth", "upstream_rejected", "protocol", "timeout", "transport", "remote_pending") else "unavailable"
+
 
 
 class _Retryable(Exception):
@@ -68,7 +71,7 @@ class HindsightClient:
                             if response.status in (429, 500, 502, 503, 504):
                                 raise _Retryable
                             if response.status not in (200, 201, 202):
-                                raise MemoryUnavailable
+                                raise MemoryUnavailable(kind="upstream_auth" if response.status in (401, 403) else "upstream_rejected")
                             data = bytearray()
                             async for chunk in response.content.iter_chunked(8192):
                                 data.extend(chunk)
@@ -79,13 +82,13 @@ class HindsightClient:
                                 raise MemoryUnavailable
                             outcome = "success"
                             return result
-                except (_Retryable, ClientError, OSError, TimeoutError):
+                except (_Retryable, ClientError, OSError, TimeoutError) as exc:
                     if attempt == self.cfg.retries:
-                        raise MemoryUnavailable from None
+                        raise MemoryUnavailable(kind="timeout" if isinstance(exc, TimeoutError) else "transport" if isinstance(exc, (ClientError, OSError)) else "unavailable") from None
                     await asyncio.sleep(0.05)
             raise MemoryUnavailable
         except (ValueError, RecursionError):
-            raise MemoryUnavailable from None
+            raise MemoryUnavailable(kind="protocol") from None
         finally:
             self.healthy = outcome in ("success", "empty")
             operation = "recall" if suffix else "retain"
@@ -98,16 +101,17 @@ class HindsightClient:
             payload["types"] = types
         return await self.post(bank, "/recall", payload, missing_empty=True, authorize=authorize)
 
-    async def retain(self, bank, content, operation_id, *, confirmed, provenance=None, authorize=None):
+    async def retain(self, bank, content, operation_id, *, confirmed, provenance=None, shared_observations=False, authorize=None):
         origin = {"kind": "confirmed_information" if confirmed else "assistant_derivation",
                   "origin_client": "unspecified", "observed_at": datetime.now(timezone.utc).isoformat(), "version": operation_id}
         origin.update(provenance or {})
         result = await self.post(bank, "", {"async": True, "operation_id": operation_id, "items": [{
             "content": content, "document_id": operation_id,
+            **({"observation_scopes": "shared"} if shared_observations else {}),
             "context": "Client-confirmed knowledge" if confirmed else "Unverified assistant response; not confirmed facts",
             "metadata": {**origin, "source": "client" if confirmed else "assistant", "confirmed": str(confirmed).lower()}}]}, authorize=authorize)
         if result.get("operation_id") != operation_id:
-            raise MemoryUnavailable("Hindsight deployment did not acknowledge the idempotent async operation")
+            raise MemoryUnavailable(kind="protocol")
 
 
     async def control(self, bank, path, method="GET", authorize=None):
@@ -123,7 +127,7 @@ class HindsightClient:
                         self.healthy = True
                         return {"status": "not_found"} if method == "GET" else {"deleted": True}
                     if response.status != 200:
-                        raise MemoryUnavailable
+                        raise MemoryUnavailable(kind="upstream_auth" if response.status in (401, 403) else "upstream_rejected")
                     data = bytearray()
                     async for chunk in response.content.iter_chunked(8192):
                         data.extend(chunk)
@@ -134,8 +138,8 @@ class HindsightClient:
                         raise MemoryUnavailable
                     self.healthy = True
                     return value
-        except (ClientError, OSError, TimeoutError, ValueError, RecursionError):
-            raise MemoryUnavailable from None
+        except (ClientError, OSError, TimeoutError, ValueError, RecursionError) as exc:
+            raise MemoryUnavailable(kind="timeout" if isinstance(exc, TimeoutError) else "protocol" if isinstance(exc, (ValueError, RecursionError)) else "transport") from None
 
     async def operation(self, bank, operation_id, *, authorize=None):
         from uuid import UUID

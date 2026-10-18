@@ -172,6 +172,80 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         await self.store.fail_turn(self.owner, active_id, turn["lease"])
         self.assertEqual((await self.store.cleanup(10, 5, 0))["sessions"], 1)
 
+    async def test_per_owner_capacity_is_atomic_and_does_not_block_other_clients(self):
+        async def submit():
+            return await self.store.outbox_put(uuid4(), self.scope, self.payload, "synthetic", 10, owner_capacity=2)
+        values = await asyncio.gather(*(submit() for _ in range(6)), return_exceptions=True)
+        self.assertEqual(sum(isinstance(v, dict) for v in values), 2)
+        self.assertEqual(sum(isinstance(v, SessionCapacity) for v in values), 4)
+        scope = {**self.scope, 'principal': self.other}
+        await self.store.outbox_put(uuid4(), scope, self.payload, 'synthetic-other', 10, owner_capacity=2)
+        self.assertEqual((await self.store.outbox_counts())['pending'], 3)
+
+    async def test_retry_preserves_uuid_and_total_attempts_and_old_retry_keys(self):
+        await self.put()
+        claim = await self.store.outbox_claim(120, 1)
+        await self.store.outbox_finish(self.operation, UUID(claim['lease']), 'dead', error='timeout')
+        first = await self.store.outbox_retry(self.owner, self.operation, 'recovery-1', self.scope, 10)
+        self.assertEqual(first['attempts'], 1)
+        self.assertEqual(first['retry_base'], 1)
+        self.assertEqual(first['retry_rounds'], 1)
+        replay = await self.store.outbox_retry(self.owner, self.operation, 'recovery-1', self.scope, 10)
+        self.assertEqual(replay['retry_rounds'], 1)
+        with self.assertRaises(SessionConflict):
+            await self.store.outbox_cancel(self.owner, self.operation)
+        claim = await self.store.outbox_claim(120, 1)
+        self.assertEqual(claim['attempts'], 2)
+        await self.store.outbox_finish(self.operation, UUID(claim['lease']), 'dead', error='timeout')
+        await self.store.outbox_retry(self.owner, self.operation, 'recovery-2', self.scope, 10)
+        replay = await self.store.outbox_retry(self.owner, self.operation, 'recovery-1', self.scope, 10)
+        self.assertEqual(replay['retry_rounds'], 2)
+        self.assertEqual(replay['operation_id'], str(self.operation))
+
+    async def test_retry_rejects_foreign_cancelled_purged_and_changed_bank(self):
+        await self.put()
+        claim = await self.store.outbox_claim(120, 1)
+        await self.store.outbox_finish(self.operation, UUID(claim['lease']), 'dead')
+        with self.assertRaises(SessionNotFound):
+            await self.store.outbox_retry(self.other, self.operation, 'one', self.scope, 10)
+        with self.assertRaises(SessionConflict):
+            await self.store.outbox_retry(self.owner, self.operation, 'one', {**self.scope, '__bank': 'changed'}, 10)
+        async with self.store.pool.acquire() as conn:
+            await conn.execute("UPDATE skirnir_sessions.memory_outbox SET payload=NULL WHERE operation_id=$1", self.operation)
+        with self.assertRaises(SessionConflict):
+            await self.store.outbox_retry(self.owner, self.operation, 'one', self.scope, 10)
+
+    async def test_totals_remain_exact_on_transitions_and_transaction_rollback(self):
+        await self.put()
+        self.assertGreaterEqual(await self.store.outbox_oldest(), 0)
+        claim = await self.store.outbox_claim(120, 5)
+        self.assertEqual((await self.store.outbox_counts())['processing'], 1)
+        async with self.store.pool.acquire() as conn:
+            transaction = conn.transaction()
+            await transaction.start()
+            await conn.execute("DELETE FROM skirnir_sessions.memory_outbox WHERE operation_id=$1", self.operation)
+            await transaction.rollback()
+        self.assertEqual((await self.store.outbox_counts())['processing'], 1)
+        await self.store.outbox_finish(self.operation, UUID(claim['lease']), 'accepted')
+        self.assertEqual((await self.store.outbox_counts())['accepted'], 1)
+        self.assertNotIn('processing', await self.store.outbox_counts())
+        self.assertEqual(await self.store.outbox_oldest(), 0)
+
+    async def test_compacted_tombstone_keeps_binding_and_deletion_is_not_unsent(self):
+        await self.put()
+        claim = await self.store.outbox_claim(120, 5)
+        await self.store.outbox_finish(self.operation, UUID(claim['lease']), 'accepted')
+        async with self.store.pool.acquire() as conn:
+            await conn.execute("UPDATE skirnir_sessions.memory_outbox SET updated_at=clock_timestamp()-interval '20 days' WHERE operation_id=$1", self.operation)
+        await self.store.cleanup(0, 0, 10)
+        row = await self.store.outbox_get(self.owner, self.operation)
+        self.assertEqual(row['scope'], {'__bank': self.scope['__bank']})
+        await self.store.outbox_delete(self.owner, self.operation, self.scope)
+        row = await self.store.outbox_get(self.owner, self.operation)
+        self.assertEqual(row['state'], 'delete_pending')
+        self.assertEqual(row['attempts'], 1)
+        self.assertEqual(row['retry_base'], 1)
+
 
 @unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
 class DurableHttpTests(MemoryHarness):

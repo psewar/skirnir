@@ -263,6 +263,8 @@ def render():
     services = snapshot()
     gauge("skirnir_context_backend_available", "1 = last known healthy, 0 = disabled/unknown/unavailable",
           [({"backend": k}, 1 if services.get(k) == "available" else 0) for k in ("session_store", "hindsight", "outbox")])
+    gauge("skirnir_memory_outbox_oldest_seconds", "age of oldest active durable operation",
+          [({}, services.get("outbox_oldest_seconds", 0))])
     gauge("skirnir_memory_outbox_jobs", "durable outbox counts, refreshed every ten seconds",
           [({"status": k}, (services.get("outbox_counts") or {}).get(k, 0)) for k in
            ("pending", "processing", "accepted", "dead", "revoked", "cancelled", "delete_pending", "deleted")])

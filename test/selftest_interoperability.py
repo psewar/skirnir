@@ -123,7 +123,7 @@ class SharedGatewayTests(MemoryHarness):
                     return copy.deepcopy(job)
             return None
 
-        async def finish(operation, lease, status, delay):
+        async def finish(operation, lease, status, delay, error=None):
             self.jobs[str(operation)]["state"] = status
         store.outbox_put.side_effect = put
         store.outbox_get.side_effect = get

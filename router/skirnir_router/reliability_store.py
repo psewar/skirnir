@@ -5,7 +5,7 @@ from .session_types import SessionConflict, SessionNotFound, SessionCapacity, re
 
 
 class ReliabilityStore:
-    async def outbox_put(self, operation, scope, payload, fingerprint, capacity):
+    async def outbox_put(self, operation, scope, payload, fingerprint, capacity, owner_capacity=0):
         async with self.connection() as conn, conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock(7365471202492)")
             old = await conn.fetchrow("SELECT * FROM skirnir_sessions.memory_outbox WHERE operation_id=$1", operation)
@@ -13,17 +13,17 @@ class ReliabilityStore:
                 if old["owner"] != scope["principal"] or old["fingerprint"] != fingerprint:
                     raise SessionConflict("event_id already used for different memory content")
                 return record(old)
-            size = await conn.fetchval("SELECT count(*) FROM skirnir_sessions.memory_outbox WHERE state IN ('pending','processing','delete_pending')")
-            if size >= capacity:
-                raise SessionCapacity("memory outbox full")
+            await self._outbox_capacity(conn, scope["principal"], capacity, owner_capacity)
             row = await conn.fetchrow("""INSERT INTO skirnir_sessions.memory_outbox(operation_id,owner,project,scope,payload,fingerprint)
                 VALUES($1,$2,$3,$4,$5,$6) RETURNING *""", operation, scope["principal"], scope["project"], scope, payload, fingerprint)
             return record(row)
 
     async def outbox_claim(self, lease_s, max_attempts):
         async with self.connection() as conn, conn.transaction():
-            await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state='dead',updated_at=clock_timestamp()
-                WHERE state='processing' AND lease_until<clock_timestamp() AND attempts>=$1""", max_attempts)
+            await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state='dead',last_error='lease_expired',updated_at=clock_timestamp()
+                WHERE operation_id IN (SELECT operation_id FROM skirnir_sessions.memory_outbox
+                    WHERE state='processing' AND lease_until<clock_timestamp() AND attempts-retry_base>=$1
+                    ORDER BY lease_until FOR UPDATE SKIP LOCKED LIMIT 100)""", max_attempts)
             row = await conn.fetchrow("""SELECT * FROM skirnir_sessions.memory_outbox
                 WHERE (state IN ('pending','delete_pending') AND available_at<=clock_timestamp()) OR (state='processing' AND lease_until<clock_timestamp())
                 ORDER BY available_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1""")
@@ -35,14 +35,16 @@ class ReliabilityStore:
                 WHERE operation_id=$1 RETURNING *""", row["operation_id"], lease, lease_s)
             return record(row)
 
-    async def outbox_finish(self, operation, lease, status, delay=0):
+    async def outbox_finish(self, operation, lease, status, delay=0, error=None):
+        if error not in (None, "unavailable", "upstream_auth", "upstream_rejected", "protocol", "timeout", "transport", "remote_pending", "policy_changed"):
+            raise ValueError("invalid diagnostic category")
         if status not in ('accepted', 'dead', 'revoked', 'pending', 'deleted', 'delete_pending'):
             raise ValueError("invalid outbox completion")
         async with self.connection() as conn:
             result = await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state=$3,lease=NULL,lease_until=NULL,
                 available_at=clock_timestamp()+$4*interval '1 second',updated_at=clock_timestamp(),
-                payload=CASE WHEN $3 IN ('deleted','revoked') THEN NULL ELSE payload END
-                WHERE operation_id=$1 AND lease=$2 AND state='processing' AND lease_until>clock_timestamp()""", operation, lease, status, delay)
+                last_error=$5,payload=CASE WHEN $3 IN ('deleted','revoked') THEN NULL ELSE payload END
+                WHERE operation_id=$1 AND lease=$2 AND state='processing' AND lease_until>clock_timestamp()""", operation, lease, status, delay, error)
             if result == 'UPDATE 0':
                 raise SessionConflict("outbox lease lost")
 
@@ -65,7 +67,7 @@ class ReliabilityStore:
 
     async def outbox_counts(self):
         async with self.connection() as conn:
-            rows = await conn.fetch("SELECT state,count(*) AS count FROM skirnir_sessions.memory_outbox GROUP BY state")
+            rows = await conn.fetch("SELECT state,jobs AS count FROM skirnir_sessions.outbox_totals WHERE jobs>0")
             return {r["state"]: r["count"] for r in rows}
 
     async def cleanup(self, session_days, archived_days, outbox_days):
@@ -79,7 +81,7 @@ class ReliabilityStore:
             for row in rows:
                 await conn.execute("DELETE FROM skirnir_sessions.sessions WHERE owner=$1 AND id=$2", row['owner'], row['id'])
             # Keep idempotency tombstones. Removing IDs could resurrect deleted knowledge.
-            result = await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET payload=NULL
+            result = await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET payload=NULL,scope=jsonb_build_object('__bank',scope->>'__bank')
                 WHERE operation_id IN (SELECT operation_id FROM skirnir_sessions.memory_outbox
                     WHERE $1>0 AND payload IS NOT NULL AND state IN ('accepted','dead','revoked','cancelled','deleted')
                     AND updated_at<clock_timestamp()-$1*interval '1 day' ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 100)""", outbox_days)
@@ -98,5 +100,39 @@ class ReliabilityStore:
             if row["attempts"] == 0 or row["state"] == 'cancelled':
                 await conn.execute("UPDATE skirnir_sessions.memory_outbox SET state='deleted',payload=NULL,updated_at=clock_timestamp() WHERE operation_id=$1", operation)
             else:
-                await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state='delete_pending',scope=$2,attempts=0,
+                await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state='delete_pending',scope=$2,retry_base=attempts,
                     delete_requested=true,available_at=clock_timestamp(),updated_at=clock_timestamp() WHERE operation_id=$1""", operation, scope)
+
+
+    async def _outbox_capacity(self, conn, owner, capacity, owner_capacity):
+        size = await conn.fetchval("SELECT COALESCE(sum(jobs),0) FROM skirnir_sessions.outbox_totals WHERE state IN ('pending','processing','delete_pending')")
+        if size >= capacity:
+            raise SessionCapacity("memory outbox full")
+        if owner_capacity:
+            size = await conn.fetchval("SELECT count(*) FROM skirnir_sessions.memory_outbox WHERE owner=$1 AND state IN ('pending','processing','delete_pending')", owner)
+            if size >= owner_capacity:
+                raise SessionCapacity("client outbox capacity reached")
+
+    async def outbox_oldest(self):
+        async with self.connection() as conn:
+            value = await conn.fetchval("SELECT EXTRACT(EPOCH FROM clock_timestamp()-created_at) FROM skirnir_sessions.memory_outbox WHERE state IN ('pending','processing','delete_pending') ORDER BY created_at LIMIT 1")
+            return max(0, float(value or 0))
+
+    async def outbox_retry(self, owner, operation, retry_id, scope, capacity, owner_capacity=0):
+        async with self.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(7365471202492)")
+            row = await conn.fetchrow("SELECT * FROM skirnir_sessions.memory_outbox WHERE owner=$1 AND operation_id=$2 FOR UPDATE", owner, operation)
+            if not row:
+                raise SessionNotFound
+            if retry_id in row['retry_ids']:
+                return record(row)
+            if row['state'] != 'dead' or row['retry_rounds'] >= 3 or (row['payload'] is None and not row['delete_requested']):
+                raise SessionConflict("only retained dead-letter payloads or failed deletions can be retried; maximum three rounds")
+            if row['scope'].get('__bank') != scope.get('__bank'):
+                raise SessionConflict("operation bank binding changed")
+            await self._outbox_capacity(conn, owner, capacity, owner_capacity)
+            return record(await conn.fetchrow("""UPDATE skirnir_sessions.memory_outbox SET state=$3,scope=$4,
+                retry_ids=retry_ids || jsonb_build_array($5::text),retry_base=attempts,retry_rounds=retry_rounds+1,last_error=NULL,
+                available_at=clock_timestamp(),updated_at=clock_timestamp(),lease=NULL,lease_until=NULL
+                WHERE owner=$1 AND operation_id=$2 RETURNING *""", owner, operation,
+                'delete_pending' if row['delete_requested'] else 'pending', scope, retry_id))

@@ -18,6 +18,8 @@ router:
     outbox_attempts: 5
     outbox_backoff_s: 2
     outbox_lease_s: 120
+    outbox_workers: 1           # optional bounded parallel claims; HTTP max_inflight still applies
+    outbox_client_capacity: 0   # 0 = old global-only admission; e.g. 128 reserves room for other clients
     outbox_capacity: 1024
     outbox_retention_days: 0    # 0 = disabled; terminal payload scrub, keep replay tombstones
     recall_min_score: 0.0
@@ -41,6 +43,7 @@ router:
     recall_budget_percent: 20
     reduce_tool_results: false
     tool_result_bytes: 1024
+    tool_result_strategy: prefix # optional head_tail keeps final errors in older completed results
     auto_checkpoints: false
   session_store:
     enabled: false

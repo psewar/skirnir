@@ -37,6 +37,8 @@ jobs:
       - run: python test/selftest_memory.py
       - run: python test/selftest_context.py
       - run: python test/selftest_interoperability.py
+      - run: python test/selftest_reliability.py
+      - run: python test/integration_live_memory.py
       - run: python test/benchmark_context.py
       - name: Check added lines for common public-data leaks
         if: github.event_name == 'pull_request'

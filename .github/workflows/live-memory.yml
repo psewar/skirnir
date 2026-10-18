@@ -1,0 +1,75 @@
+name: Opt-in real Hindsight memory smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Official Hindsight image tag or digest (pin a digest for reproducibility)
+        required: true
+        default: ghcr.io/vectorize-io/hindsight:latest
+      provider:
+        description: Hindsight extraction LLM provider for synthetic test data
+        required: true
+      model:
+        description: Extraction model available to the test-only API key
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  live-memory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: skirnir_test
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: skirnir_test
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U skirnir_test" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SKIRNIR_RUN_LIVE_MEMORY_TEST: '1'
+      SKIRNIR_LIVE_POSTGRES_ENV: '1'
+      SKIRNIR_TEST_HINDSIGHT_URL: http://127.0.0.1:8888
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: skirnir_test
+      PGPASSWORD: test-only
+      PGDATABASE: skirnir_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r router/requirements-session.txt -r test/requirements-hindsight.txt
+      - name: Start isolated Hindsight with synthetic extraction only
+        env:
+          LIVE_IMAGE: ${{ inputs.image }}
+          HINDSIGHT_API_LLM_API_KEY: ${{ secrets.SKIRNIR_LIVE_TEST_LLM_KEY }}
+          HINDSIGHT_API_LLM_PROVIDER: ${{ inputs.provider }}
+          HINDSIGHT_API_LLM_MODEL: ${{ inputs.model }}
+        run: |
+          test -n "$HINDSIGHT_API_LLM_API_KEY" || { echo 'Missing test-only model key'; exit 1; }
+          case "$LIVE_IMAGE" in ghcr.io/vectorize-io/hindsight:*|ghcr.io/vectorize-io/hindsight@sha256:*) ;; *) echo 'Only the official image is allowed'; exit 1;; esac
+          docker run --detach --name skirnir-live-memory --publish 127.0.0.1:8888:8888 \
+            --env HINDSIGHT_API_LLM_API_KEY --env HINDSIGHT_API_LLM_PROVIDER --env HINDSIGHT_API_LLM_MODEL "$LIVE_IMAGE" > /dev/null
+          python - <<'PY'
+          import time, urllib.request
+          for _ in range(180):
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:8888/health', timeout=2) as response:
+                      if response.status == 200:
+                          break
+              except OSError:
+                  pass
+              time.sleep(2)
+          else:
+              raise SystemExit('Isolated Hindsight did not become ready')
+          PY
+      - run: python test/integration_live_memory.py
+      - name: Destroy isolated service; do not publish model or container logs
+        if: always()
+        run: docker rm --force --volumes skirnir-live-memory > /dev/null 2>&1 || true

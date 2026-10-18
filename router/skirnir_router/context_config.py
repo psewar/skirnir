@@ -17,6 +17,7 @@ class ContextConfig:
     recall_budget_percent: int = 20
     reduce_tool_results: bool = False
     tool_result_bytes: int = 1024
+    tool_result_strategy: str = "prefix"
     auto_checkpoints: bool = False
 
 
@@ -30,6 +31,8 @@ def parse_context_config(raw):
     for k in ("enabled", "optimize_recall", "reduce_tool_results", "auto_checkpoints"):
         if type(values[k]) is not bool:
             raise ValueError(f"context_manager.{k} must be boolean")
+    if values["tool_result_strategy"] not in ("prefix", "head_tail"):
+        raise ValueError("tool_result_strategy must be prefix or head_tail")
     ranges = {"recall_budget_percent": (1, 50), "tool_result_bytes": (128, 65536), "reserve_tokens": (1, 131072), "safety_tokens": (128, 131072), "tail_messages": (2, 256),
               "summary_bytes": (256, 65536), "max_history_bytes": (4096, 16777216),
               "max_history_messages": (16, 65536), "max_response_bytes": (1024, 16777216), "lease_s": (15, 3600)}
