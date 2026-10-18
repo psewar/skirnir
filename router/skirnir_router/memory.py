@@ -163,8 +163,8 @@ class MemoryService:
                 if isinstance(metadata, dict):
                     # Server-authored provenance survives Hindsight extraction. It is
                     # still untrusted data and never proof that a statement is true.
-                    allowed = ("kind", "confirmed", "origin_client", "observed_at", "source_refs", "version", "supersedes")
-                    clean = {k: str(metadata[k])[:256] for k in allowed if k in metadata}
+                    from .provenance import recall_metadata
+                    clean = recall_metadata(metadata)
                     if rejected_content(json.dumps(clean), self.cfg):
                         continue
                     if clean:
@@ -193,10 +193,10 @@ class MemoryService:
             raise MemoryDenied("retention content rejected by sensitive-data filter")
         return self.operation(scope, event_id)
 
-    async def submit(self, scope, event_id, content, *, confirmed, provenance=None):
+    async def submit(self, scope, event_id, content, *, confirmed, provenance=None, shared_observations=False):
         if self.outbox is not None:
             from .memory_outbox import submit
-            return await submit(self, scope, event_id, content, confirmed, provenance)
+            return await submit(self, scope, event_id, content, confirmed, provenance, shared_observations)
         return self.enqueue(scope, event_id, content, confirmed=confirmed, provenance=provenance)
 
     def enqueue(self, scope, event_id, content, *, confirmed, provenance=None):

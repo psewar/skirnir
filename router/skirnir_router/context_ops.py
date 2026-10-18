@@ -19,7 +19,7 @@ async def poll(api):
     cfg = state.CFG.session_store
     store = api.get(session_api.STORE_KEY)
     STATUS.update(session_store="disabled", context_manager="enabled" if state.CFG.context_manager.enabled else "disabled",
-                  hindsight="disabled", outbox="disabled", outbox_counts={}, checked_at=int(time.time()))
+                  hindsight="disabled", outbox="disabled", outbox_counts={}, outbox_oldest_seconds=0, checked_at=int(time.time()))
     if cfg.enabled and store is not None:
         try:
             await store.health()
@@ -33,6 +33,8 @@ async def poll(api):
         if service.outbox is not None:
             try:
                 STATUS["outbox_counts"] = await service.outbox.outbox_counts()
+                age = await service.outbox.outbox_oldest()
+                STATUS["outbox_oldest_seconds"] = age if isinstance(age, (int, float)) else 0
                 STATUS["outbox"] = "available"
             except SessionUnavailable:
                 STATUS["outbox"] = "unavailable"
@@ -59,8 +61,9 @@ async def maintenance(api):
 
 async def lifecycle(api):
     task = None
-    STATUS.update(session_store="disabled", context_manager="disabled", hindsight="disabled", outbox="disabled", outbox_counts={})
+    STATUS.update(session_store="disabled", context_manager="disabled", hindsight="disabled", outbox="disabled", outbox_counts={}, outbox_oldest_seconds=0)
     if state.CFG.session_store.enabled or memory.settings().enabled:
+        await poll(api)
         task = asyncio.create_task(maintenance(api))
     try:
         yield
@@ -71,5 +74,5 @@ async def lifecycle(api):
 
 
 async def handle(request):
-    await poll(request.app[API_KEY])
+    # Maintenance refreshes status; UI refreshes never scan the outbox ledger.
     return web.json_response(snapshot(), headers={"Cache-Control": "no-store"})

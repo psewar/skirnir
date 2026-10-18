@@ -42,6 +42,7 @@ def register(app):
     app.router.add_get(memory.PREFIX + "/operations/{operation_id}", handle)
     app.router.add_delete(memory.PREFIX + "/operations/{operation_id}", handle)
     app.router.add_post(memory.PREFIX + "/operations/{operation_id}/delete", handle)
+    app.router.add_post(memory.PREFIX + "/operations/{operation_id}/retry", handle)
 
 
 async def handle(request):
@@ -92,6 +93,23 @@ async def dispatch(request):
                 raise memory.MemoryDenied
             await service.outbox.outbox_cancel(principal, operation)
             return web.json_response({"operation_id": str(operation), "state": "cancelled", "upstream_deleted": False})
+        if request.method == "POST" and request.path.endswith("/retry"):
+            data = await session_api.body(request)
+            session_api.fields(data, ("retry_id",), ("retry_id",))
+            retry_id = session_api.text(data["retry_id"], "retry_id")
+            deleting = row.get("delete_requested", False)
+            if deleting:
+                if not scope.delete:
+                    raise memory.MemoryDenied
+            else:
+                service.guard(scope, write=True)
+                if not service.cfg.retention_enabled or (row.get("payload") and memory.rejected_content(json.dumps(row["payload"]), service.cfg)):
+                    raise memory.MemoryDenied
+            from dataclasses import asdict
+            result = await service.outbox.outbox_retry(principal, operation, retry_id,
+                {**asdict(scope), "__bank": service.bank(scope)}, service.cfg.outbox_capacity, service.cfg.outbox_client_capacity)
+            service.wakeup.set()
+            return web.json_response({"operation_id": str(operation), "state": result["state"], "durable": True}, status=202)
         if request.method == "POST":
             if not scope.delete:
                 raise memory.MemoryDenied
@@ -106,6 +124,8 @@ async def dispatch(request):
         if row["state"] == "accepted":
             upstream = await service.client.operation(service.bank(scope), str(operation), authorize=lambda: service.guard(scope))
             result["upstream_status"] = upstream.get("status", "unknown")
+        for field in ("last_error", "retry_rounds"):
+            result[field] = row.get(field)
         result["action"] = "delete" if row.get("delete_requested") else "retain"
         if gateway and result.get("upstream_status") == "not_found":
             return session_api.fail(404, "upstream operation no longer available")
@@ -149,8 +169,10 @@ async def dispatch(request):
         raise ValueError("gateway accepts one bounded text item per operation")
     item = items[0]
     session_api.fields(item, ("content", "document_id", "context", "metadata", "timestamp", "tags", "update_mode", "resolve_entities", "entities", "observation_scopes", "strategy"), ("content",))
-    if any(item.get(k) is not None for k in ("entities", "observation_scopes", "strategy")) or item.get("resolve_entities", True) is not True or item.get("tags"):
+    if any(item.get(k) is not None for k in ("entities", "strategy")) or item.get("resolve_entities", True) is not True or item.get("tags"):
         raise ValueError("unsupported gateway retain extraction options")
+    if item.get("observation_scopes") not in (None, "shared"):
+        raise ValueError("unsupported gateway observation scope")
     if item.get("update_mode") not in (None, "replace"):
         raise ValueError("append is not supported by this gateway")
     # Untrusted provider metadata cannot promote transcript/assistant output to truth.
@@ -164,7 +186,7 @@ async def dispatch(request):
     # versions remain distinct evidence, not destructive edits of shared facts.
     event = str(UUID(data["operation_id"])) if data.get("operation_id") else hashlib.sha256(
         json.dumps([doc, content], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    operation = await service.submit(scope, event, content, confirmed=False, provenance=origin)
+    operation = await service.submit(scope, event, content, confirmed=False, provenance=origin, shared_observations=item.get("observation_scopes") == "shared")
     # Official SDKs deserialize RetainResponse only for HTTP 200. async=true
     # still means admission, not completed extraction; our REST API uses 202.
     return web.json_response({"success": True, "bank_id": alias, "items_count": 1, "operation_id": operation,

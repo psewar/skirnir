@@ -98,6 +98,34 @@ CREATE TABLE skirnir_sessions.memory_outbox (
 );
 CREATE INDEX outbox_pending ON skirnir_sessions.memory_outbox(available_at,created_at) WHERE state IN ('pending','processing','delete_pending');
 CREATE INDEX outbox_owner ON skirnir_sessions.memory_outbox(owner,operation_id);
+""", """
+ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN last_error text;
+ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN retry_ids jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN retry_base integer NOT NULL DEFAULT 0;
+ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN retry_rounds integer NOT NULL DEFAULT 0;
+CREATE INDEX outbox_owner_active ON skirnir_sessions.memory_outbox(owner)
+    WHERE state IN ('pending','processing','delete_pending');
+CREATE INDEX outbox_active_created ON skirnir_sessions.memory_outbox(created_at)
+    WHERE state IN ('pending','processing','delete_pending');
+CREATE INDEX outbox_payload_expiry ON skirnir_sessions.memory_outbox(updated_at)
+    WHERE payload IS NOT NULL AND state IN ('accepted','dead','revoked','cancelled','deleted');
+CREATE TABLE skirnir_sessions.outbox_totals(state text PRIMARY KEY, jobs bigint NOT NULL CHECK(jobs>=0));
+INSERT INTO skirnir_sessions.outbox_totals SELECT state,count(*) FROM skirnir_sessions.memory_outbox GROUP BY state;
+CREATE FUNCTION skirnir_sessions.count_outbox() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP='UPDATE' AND OLD.state=NEW.state THEN RETURN NULL; END IF;
+    PERFORM pg_advisory_xact_lock(7365471202493);
+    IF TG_OP IN ('DELETE','UPDATE') THEN
+        UPDATE skirnir_sessions.outbox_totals SET jobs=jobs-1 WHERE state=OLD.state;
+    END IF;
+    IF TG_OP IN ('INSERT','UPDATE') THEN
+        INSERT INTO skirnir_sessions.outbox_totals VALUES(NEW.state,1)
+        ON CONFLICT(state) DO UPDATE SET jobs=skirnir_sessions.outbox_totals.jobs+1;
+    END IF;
+    RETURN NULL;
+END $$;
+CREATE TRIGGER outbox_totals AFTER INSERT OR DELETE OR UPDATE OF state ON skirnir_sessions.memory_outbox
+    FOR EACH ROW EXECUTE FUNCTION skirnir_sessions.count_outbox();
 """)
 
 

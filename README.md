@@ -632,3 +632,5 @@ handoffs and session discovery extend the existing optional context gateway. New
 strategies, tool-result reduction, automatic checkpoints and retention remain off
 by default. Private bank IDs and existing inference clients stay compatible.
 See the [activation, Hermes integration, API and rollback guide](design/shared-memory-interoperability.md).
+
+Operational improvements: [memory reliability, recovery and live smoke tests](design/memory-reliability.md).

@@ -14,7 +14,7 @@ def digest(payload):
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
-async def submit(service, scope, event_id, content, confirmed, provenance=None):
+async def submit(service, scope, event_id, content, confirmed, provenance=None, shared_observations=False):
     operation = service.validate_retain(scope, event_id, content)
     from .memory import rejected_content, MemoryDenied
     from .memory_gateway import provenance as make_provenance
@@ -22,7 +22,9 @@ async def submit(service, scope, event_id, content, confirmed, provenance=None):
     if rejected_content(json.dumps(origin), service.cfg):
         raise MemoryDenied("sensitive provenance")
     payload = {"content": content, "confirmed": confirmed, "provenance": origin}
-    await service.outbox.outbox_put(UUID(operation), {**asdict(scope), "__bank": service.bank(scope)}, payload, digest(payload), service.cfg.outbox_capacity)
+    if shared_observations:
+        payload["shared_observations"] = True
+    await service.outbox.outbox_put(UUID(operation), {**asdict(scope), "__bank": service.bank(scope)}, payload, digest(payload), service.cfg.outbox_capacity, **({"owner_capacity": service.cfg.outbox_client_capacity} if service.cfg.outbox_client_capacity else {}))
     service.wakeup.set()
     return operation
 
@@ -34,7 +36,7 @@ async def step(service):
         return False
     scope = Scope(**{k: v for k, v in row["scope"].items() if k in Scope.__dataclass_fields__})
     operation, lease = UUID(row["operation_id"]), UUID(row["lease"])
-    status, delay = "revoked", 0
+    status, delay, error = "revoked", 0, "policy_changed"
     try:
         if service.bank(scope) != row["scope"].get("__bank"):
             raise MemoryDenied("namespace binding changed")
@@ -43,24 +45,31 @@ async def step(service):
             if service.current(scope) and scope.delete:
                 upstream = await service.client.operation(service.bank(scope), str(operation), authorize=lambda: service.guard(scope))
                 if upstream.get("status") != "completed":
-                    raise MemoryUnavailable
+                    raise MemoryUnavailable(kind="remote_pending")
                 await service.client.delete_document(service.bank(scope), str(operation), authorize=lambda: service.guard(scope))
-                status = "deleted"
+                status, error = "deleted", None
         elif service.cfg.retention_enabled and service.current(scope, write=True) and not rejected_content(payload["content"], service.cfg):
             await service.client.retain(service.bank(scope), payload["content"], str(operation),
-                                        confirmed=payload["confirmed"], provenance=payload.get("provenance"), authorize=lambda: service.guard(scope, write=True))
-            status = "accepted"
+                                        confirmed=payload["confirmed"], provenance=payload.get("provenance"), **({"shared_observations": True} if payload.get("shared_observations") else {}), authorize=lambda: service.guard(scope, write=True))
+            status, error = "accepted", None
     except MemoryDenied:
         status = "revoked"
-    except MemoryUnavailable:
-        status = "dead" if row["attempts"] >= service.cfg.outbox_attempts else ("delete_pending" if row.get("delete_requested") else "pending")
-        delay = min(3600, service.cfg.outbox_backoff_s * 2 ** min(row["attempts"] - 1, 12))
-    await service.outbox.outbox_finish(operation, lease, status, delay)
+    except MemoryUnavailable as exc:
+        error = exc.kind
+        status = "dead" if row["attempts"] - row.get("retry_base", 0) >= service.cfg.outbox_attempts else ("delete_pending" if row.get("delete_requested") else "pending")
+        delay = min(3600, service.cfg.outbox_backoff_s * 2 ** min(row["attempts"] - row.get("retry_base", 0) - 1, 12))
+    await service.outbox.outbox_finish(operation, lease, status, delay, error=error)
     count("outbox", status)
     return True
 
 
 async def run(service):
+    async with asyncio.TaskGroup() as group:
+        for _ in range(service.cfg.outbox_workers):
+            group.create_task(consume(service))
+
+
+async def consume(service):
     while True:
         try:
             if service.active() and await step(service):

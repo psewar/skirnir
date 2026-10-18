@@ -28,6 +28,8 @@ class HindsightConfig:
     outbox_backoff_s: int = 2
     outbox_lease_s: int = 120
     outbox_capacity: int = 1024
+    outbox_workers: int = 1
+    outbox_client_capacity: int = 0
     outbox_retention_days: int = 0
     gateway_enabled: bool = False
 
@@ -44,7 +46,7 @@ def parse_hindsight(raw):
     for k in ("endpoint_env", "api_key_env", "namespace_key_env"):
         if not isinstance(values[k], str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", values[k]):
             raise ValueError(f"hindsight.{k} must name an environment variable")
-    ranges = {"outbox_attempts": (1, 20), "outbox_backoff_s": (1, 3600), "outbox_lease_s": (90, 3600),
+    ranges = {"outbox_workers": (1, 16), "outbox_client_capacity": (0, 100000), "outbox_attempts": (1, 20), "outbox_backoff_s": (1, 3600), "outbox_lease_s": (90, 3600),
               "outbox_capacity": (1, 100000), "outbox_retention_days": (0, 36500), "retries": (0, 2), "recall_max_tokens": (256, 4096), "max_query_bytes": (64, 1024),
               "max_response_bytes": (1024, 262144), "max_inflight": (1, 16), "queue_size": (1, 256), "max_content_bytes": (256, 16384)}
     for k, (low, high) in ranges.items():

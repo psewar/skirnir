@@ -60,7 +60,11 @@ def project(context, body, budget, cfg, model, ephemeral=None, max_messages=None
     while start > 0 and rows[start]["payload"].get("role") != "user":
         start -= 1
     old = context.get("compaction")
-    reduced = []
+    prior_provenance = old["payload"].get("provenance", {}) if old else {}
+    same_reduction = (prior_provenance.get("tool_result_strategy") == cfg.tool_result_strategy
+                      and prior_provenance.get("tool_result_bytes") == cfg.tool_result_bytes)
+    already_reduced = set(prior_provenance.get("reduced_tool_sequences", [])) if same_reduction else set()
+    reduced = sorted(already_reduced)
     eligible = completed_results(context) if cfg.reduce_tool_results else set()
     pins = copy.deepcopy(old["payload"]["pinned"]) if old else []
     excerpts = [old["payload"]["summary"]] if old else []
@@ -71,13 +75,18 @@ def project(context, body, budget, cfg, model, ephemeral=None, max_messages=None
         else:
             excerpts.append(f"seq {row['seq']} {row['payload']['role']}: " + str(row["payload"].get("content", ""))[:512])
     for entry in pins:
-        if entry["seq"] in eligible and entry["seq"] not in protected:
+        if entry["seq"] in eligible and entry["seq"] not in protected and entry["seq"] not in already_reduced:
             message = entry["payload"]
             content = message.get("content", "")
             if isinstance(content, str) and len(content.encode()) > cfg.tool_result_bytes:
                 # Only older complete pairs; retain call ID/name and an explicit
                 # source reference. The raw event is never changed.
-                message["content"] = content.encode()[:cfg.tool_result_bytes].decode("utf-8", "ignore") + (
+                data = content.encode()
+                excerpt = data[:cfg.tool_result_bytes].decode("utf-8", "ignore")
+                if cfg.tool_result_strategy == "head_tail":
+                    half = cfg.tool_result_bytes // 2
+                    excerpt = data[:half].decode("utf-8", "ignore") + "\n[Middle omitted.]\n" + data[-half:].decode("utf-8", "ignore")
+                message["content"] = excerpt + (
                     f"\n[Reduced completed tool result, unverified; original event sequence {entry['seq']}.]")
                 reduced.append(entry["seq"])
     if not excerpts:
@@ -89,7 +98,8 @@ def project(context, body, budget, cfg, model, ephemeral=None, max_messages=None
     summary = "\n".join(excerpts).encode()[-cfg.summary_bytes:].decode("utf-8", errors="ignore")
     payload = {"schema_version": 1, "algorithm": "extractive-v1", "summary": summary, "pinned": pins,
                "provenance": {"model": model, "prompt_budget": budget,
-                              "previous_version": old["version"] if old else None, "reduced_tool_sequences": reduced}}
+                              "previous_version": old["version"] if old else None, "reduced_tool_sequences": reduced,
+                              "tool_result_strategy": cfg.tool_result_strategy, "tool_result_bytes": cfg.tool_result_bytes}}
     candidate = {**context, "messages": rows[start:], "compaction": {"payload": payload, "through_seq": through}}
     # Shrinking a previous version also handles switching to a smaller model.
     while True:
