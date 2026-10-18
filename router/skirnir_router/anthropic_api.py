@@ -48,7 +48,7 @@ def image_data(block):
     return None, f"image source type {src.get('type')!r} is not supported by the router (only base64)"
 
 
-def _tool_result(block, names):
+def _tool_result(block, names, preserve_tool_ids=False):
     """tool_result -> eine Ollama-Nachricht role=tool. Der Werkzeugname kommt aus dem passenden tool_use im Verlauf."""
     content = block.get("content")
     text = text_of(content)
@@ -62,6 +62,8 @@ def _tool_result(block, names):
     if block.get("is_error"):
         text = TOOL_ERROR_PREFIX + text
     msg = {"role": "tool", "content": text}
+    if preserve_tool_ids and block.get("tool_use_id"):
+        msg["tool_call_id"] = block["tool_use_id"]
     name = names.get(block.get("tool_use_id"))
     if name:
         msg["tool_name"] = name
@@ -70,7 +72,7 @@ def _tool_result(block, names):
     return msg, None
 
 
-def messages_to_native(messages):
+def messages_to_native(messages, preserve_tool_ids=False):
     """Verlauf Anthropic -> Ollama. Liefert (Nachrichten, None) oder (None, Klartext fuer 400).
 
     Ein User-Zug mit tool_result-Bloecken wird zu je einer role=tool-Nachricht (in Reihenfolge), sein Text und seine Bilder
@@ -107,7 +109,7 @@ def messages_to_native(messages):
                 names[b.get("id")] = b.get("name") or ""
                 calls.append({"function": {"name": b.get("name") or "", "arguments": parse_tool_args(b.get("input"))}})
             elif typ == "tool_result" and role == "user":
-                msg, err = _tool_result(b, names)
+                msg, err = _tool_result(b, names, preserve_tool_ids)
                 if err:
                     return None, f"messages.{i}.content.{j}: {err}"
                 tool_msgs.append(msg)
@@ -201,7 +203,7 @@ def to_native(b, think_mode="auto"):
         return None, "messages is required"
     if b.get("max_tokens") is not None and not isinstance(b["max_tokens"], int):
         return None, "max_tokens must be an integer"
-    msgs, err = messages_to_native(b["messages"])
+    msgs, err = messages_to_native(b["messages"], preserve_tool_ids=isinstance(b.get("routing"), dict) and bool(b["routing"].get("session")))
     if err:
         return None, err
     tools = tools_to_native(b.get("tools"))
@@ -240,7 +242,7 @@ def tool_blocks(native_calls):
     out = []
     for tc in native_calls or []:
         fn = (tc or {}).get("function") or {}
-        out.append({"type": "tool_use", "id": tool_id(), "name": fn.get("name") or "",
+        out.append({"type": "tool_use", "id": tc.get("id") or tool_id(), "name": fn.get("name") or "",
                     "input": parse_tool_args(fn.get("arguments"))})
     return out
 

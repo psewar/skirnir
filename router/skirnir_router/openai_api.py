@@ -39,7 +39,7 @@ def oa_usage(j):
     return {"prompt_tokens": p, "completion_tokens": c, "total_tokens": p + c}
 
 
-def oa_messages_to_native(msgs):
+def oa_messages_to_native(msgs, preserve_tool_ids=False):
     out = []
     for m in msgs or []:
         if not isinstance(m, dict):
@@ -68,8 +68,11 @@ def oa_messages_to_native(msgs):
                 fn = (tc or {}).get("function") or {}
                 tcs.append({"function": {"name": fn.get("name", ""), "arguments": parse_tool_args(fn.get("arguments", {}))}})
             n["tool_calls"] = tcs
-        if m.get("role") == "tool" and m.get("name"):
-            n["tool_name"] = m["name"]
+        if m.get("role") == "tool":
+            if m.get("name"):
+                n["tool_name"] = m["name"]
+            if preserve_tool_ids and m.get("tool_call_id"):
+                n["tool_call_id"] = m["tool_call_id"]
         out.append(n)
     return out
 
@@ -118,7 +121,7 @@ def oa_format(b):
 
 
 def oa_chat_to_native(b):
-    native = {"model": b.get("model"), "messages": oa_messages_to_native(b.get("messages")),
+    native = {"model": b.get("model"), "messages": oa_messages_to_native(b.get("messages"), preserve_tool_ids=isinstance(b.get("routing"), dict) and bool(b["routing"].get("session"))),
               "stream": bool(b.get("stream", False)), "options": oa_options(b)}
     if b.get("tools"):
         native["tools"] = b["tools"]
@@ -305,6 +308,15 @@ async def handle_oa_chat(request):
         return e
     if not isinstance(b.get("messages"), list) or not b["messages"]:
         return openai_error(400, "messages is required")
+    if isinstance(b.get("routing"), dict) and b["routing"].get("session"):
+        # Do not silently drop unsupported OpenAI image/audio parts during native
+        # translation: managed raw history must contain all accepted input.
+        for message in b["messages"]:
+            if not isinstance(message, dict):
+                return openai_error(400, "managed messages must be objects")
+            content = message.get("content")
+            if isinstance(content, list) and any(not isinstance(part, dict) or part.get("type") != "text" for part in content):
+                return openai_error(400, "managed sessions support text content only")
     native = oa_chat_to_native(b)
     return await proxy.route_request(request, "/api/chat", native, OpenAIChatShape(_include_usage(b)), openai_error)
 

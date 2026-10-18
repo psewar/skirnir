@@ -307,7 +307,8 @@ async def prepare(request, path, body, req):
         if isinstance(query, str):
             items = await service.recall(scope, query)
             if items:
-                body["messages"] = [*messages[:-1], {"role": "user", "content": packed(items)}, messages[-1]]
+                req.memory_context = {"role": "user", "content": packed(items)}
+                body["messages"] = [*messages[:-1], req.memory_context, messages[-1]]
 
 
 class Capture:

@@ -10,6 +10,7 @@ import yaml
 
 from . import state
 from .session_config import parse_session_config
+from .context_config import ContextConfig, parse_context_config
 from .memory_config import HindsightConfig, parse_hindsight, parse_client_memory
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES
@@ -56,6 +57,7 @@ SCHEMA = {
         "agent_missing_problem_s": None, "expose_concrete_models": None, "request_timeout_s": None,
         "toolcall_rescue": None,
         "hindsight": {k: None for k in HindsightConfig.__dataclass_fields__},
+        "context_manager": {k: None for k in ContextConfig.__dataclass_fields__},
         "session_store": {"enabled": None, "dsn_env": None, "min_pool_size": None, "max_pool_size": None, "timeout_s": None},
         "limits": {"max_images": None, "max_tools": None, "max_messages": None}, "session_affinity_ttl_s": None,
         "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
@@ -219,6 +221,9 @@ class Config:
         self._parse_router(r)
         self._parse_client_auth(r.get("client_auth") or {})
         self.session_store = parse_session_config(r.get("session_store"))
+        self.context_manager = parse_context_config(r.get("context_manager"))
+        if self.context_manager.enabled and not self.session_store.enabled:
+            raise ValueError("context_manager requires session_store.enabled")
         self._parse_cloud(r.get("cloud") or {})
         self.hindsight = parse_hindsight(r.get("hindsight"))
         for client in self.client_auth["clients"].values():

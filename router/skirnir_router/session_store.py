@@ -1,4 +1,4 @@
-"""Persistence boundary for explicit client events; never called by inference.
+"""Persistence boundary for explicit events and opt-in managed inference.
 
 Owner is supplied by authenticated server code. No method performs an unscoped
 session lookup. Messages and checkpoint versions are immutable until deletion.
@@ -11,41 +11,29 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from .session_migrations import migrate
-
-
-class SessionNotFound(Exception):
-    pass
-
-
-class SessionConflict(Exception):
-    pass
-
-
-class SessionUnavailable(Exception):
-    pass
+from .session_types import SessionNotFound, SessionConflict, SessionUnavailable, SessionCapacity, record
+from .managed_store import ManagedStore
 
 
 class SessionStore(Protocol):
-    async def create(self, owner: str, project: str, data_class: str, metadata: dict) -> dict: ...
+    async def create(self, owner: str, project: str, data_class: str, metadata: dict, mode: str = "client-managed") -> dict: ...
     async def get(self, owner: str, session_id: UUID) -> dict: ...
     async def update(self, owner: str, session_id: UUID, status: str | None, metadata: dict | None) -> dict: ...
     async def delete(self, owner: str, session_id: UUID) -> None: ...
     async def append(self, owner: str, session_id: UUID, event_id: str, kind: str, payload: dict) -> tuple[dict, bool]: ...
     async def read(self, owner: str, session_id: UUID, kind: str, after: int, limit: int) -> list[dict]: ...
+    async def claim(self, owner, session_id, event_id, fingerprint, messages, cfg) -> dict: ...
+    async def renew(self, owner, session_id, lease, seconds) -> None: ...
+    async def finish_turn(self, owner, session_id, lease, message) -> None: ...
+    async def fail_turn(self, owner, session_id, lease) -> None: ...
+    async def context(self, owner, session_id, cfg) -> dict: ...
+    async def compact(self, owner, session_id, lease, through_seq, payload) -> dict: ...
+    async def compactions(self, owner, session_id, after, limit) -> list[dict]: ...
+    async def search(self, owner, session_id, query, after, limit) -> list[dict]: ...
     async def close(self) -> None: ...
 
 
-def record(row):
-    result = dict(row)
-    for key, value in result.items():
-        if isinstance(value, UUID):
-            result[key] = str(value)
-        elif hasattr(value, "isoformat"):
-            result[key] = value.isoformat()
-    return result
-
-
-class PostgresSessionStore:
+class PostgresSessionStore(ManagedStore):
     def __init__(self, pool, timeout_s):
         self.pool, self.timeout_s = pool, timeout_s
 
@@ -75,7 +63,7 @@ class PostgresSessionStore:
             async with asyncio.timeout(self.timeout_s):
                 async with self.pool.acquire() as conn:
                     yield conn
-        except (SessionNotFound, SessionConflict):
+        except (SessionNotFound, SessionConflict, SessionCapacity):
             raise
         except Exception:  # noqa: BLE001 -- redact database/connection exceptions
             raise SessionUnavailable("session database unavailable") from None
@@ -87,10 +75,10 @@ class PostgresSessionStore:
         except TimeoutError:
             self.pool.terminate()
 
-    async def create(self, owner, project, data_class, metadata):
+    async def create(self, owner, project, data_class, metadata, mode="client-managed"):
         async with self.connection() as conn:
             row = await conn.fetchrow("""INSERT INTO skirnir_sessions.sessions (owner,id,project,mode,data_class,metadata)
-                VALUES ($1,$2,$3,'client-managed',$4,$5) RETURNING *""", owner, uuid4(), project, data_class, metadata)
+                VALUES ($1,$2,$3,$6,$4,$5) RETURNING *""", owner, uuid4(), project, data_class, metadata, mode)
             return record(row)
 
     async def _get(self, conn, owner, session_id, lock=False):
@@ -107,6 +95,7 @@ class PostgresSessionStore:
     async def update(self, owner, session_id, status, metadata):
         async with self.connection() as conn, conn.transaction():
             await self._get(conn, owner, session_id, lock=True)
+            await self._idle(conn, owner, session_id)
             row = await conn.fetchrow("""UPDATE skirnir_sessions.sessions SET status=COALESCE($3,status),
                 metadata=COALESCE($4,metadata) WHERE owner=$1 AND id=$2 RETURNING *""", owner, session_id, status, metadata)
             return record(row)
@@ -122,6 +111,8 @@ class PostgresSessionStore:
             raise ValueError("unsupported event kind")
         async with self.connection() as conn, conn.transaction():
             session = await self._get(conn, owner, session_id, lock=True)
+            if session["mode"] == "skirnir-managed" and kind == "message":
+                raise SessionConflict("managed messages are written through inference only")
             # Lock serializes writers/deletion, sequence allocation and idempotency.
             old = await conn.fetchrow("SELECT * FROM skirnir_sessions.events WHERE owner=$1 AND session_id=$2 AND event_id=$3",
                                       owner, session_id, event_id)

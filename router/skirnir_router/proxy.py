@@ -12,7 +12,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import admission, auth, ausweich_beobachtung, cloud, decision, kontextpruefung, metrics, memory, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
+from . import admission, auth, ausweich_beobachtung, cloud, decision, kontextpruefung, metrics, memory, managed, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
 
@@ -53,7 +53,7 @@ async def route_request(request, path, body, shape=None, err=ollama_error):
     # Memory requests must recheck live credentials/project policy on every call.
     # Do not put scoped recall results into the legacy unscoped response cache.
     rb = body.get("routing")
-    key = None if isinstance(rb, dict) and rb.get("memory") else ops.idem_key(request, body, path)
+    key = None if isinstance(rb, dict) and (rb.get("memory") or rb.get("session")) else ops.idem_key(request, body, path)
     if not key:
         return await _route(request, path, body, shape, err)
     cached = await ops.idem_wait(key)
@@ -70,6 +70,20 @@ async def route_request(request, path, body, shape=None, err=ollama_error):
 
 async def _route(request, path, body, shape, err):
     try:
+        return await _route_inner(request, path, body, shape, err)
+    except managed.ManagedError as exc:
+        return err(exc.status, exc.message)
+    except managed.ERRORS as exc:
+        error = managed.failure(exc)
+        return err(error.status, error.message)
+    finally:
+        turn = request.get(managed.KEY)
+        if turn is not None:
+            await turn.close()
+
+
+async def _route_inner(request, path, body, shape, err):
+    try:
         name, role, tiers, req = await _prepare(request, path, body)
     except _Reject as e:
         return err(e.status, e.msg)
@@ -82,7 +96,7 @@ async def _route(request, path, body, shape, err):
             return err(e.status, e.msg, e.why)
         result = await dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape, req)
         if result is not None:
-            if _is_role(role) and not req.memory:
+            if _is_role(role) and not req.memory and not req.session:
                 ops.maybe_shadow(role, body, node, req)   # Stufe 6: Schattenlauf nach der Antwort, Client merkt nichts
             return result
         # None = Fehler vor dem ersten Byte -> naechster Kandidat
@@ -111,6 +125,10 @@ async def _prepare(request, path, body):
     if denied:
         raise _Reject(403, denied)
     try:
+        await managed.begin(request, path, body, req)
+    except ValueError:
+        raise _Reject(400, "invalid managed session request") from None
+    try:
         await memory.prepare(request, path, body, req)
     except memory.MemoryUnauthenticated:
         raise _Reject(401, "memory requires authenticated client credentials") from None
@@ -121,7 +139,7 @@ async def _prepare(request, path, body):
     except ValueError:
         raise _Reject(400, "invalid memory request") from None
     # Recall changes the actual prompt, so limits/cloud scans must see the augmented body.
-    if req.memory:
+    if req.memory and not req.session:
         too_big = request_mod.check_limits(body)
         if too_big:
             raise _Reject(413, too_big)
@@ -285,7 +303,7 @@ class _Acquire:
             state.remember({"event": "queued", "role": self.role["name"], "node": node.name, "priority": self.req.priority,
                             "request_id": self.req.request_id, "inflight": node.inflight, "model": model,
                             "reason": "max_parallel" if model_full else "max_inflight"})
-            if _is_role(self.role) and self.body is not None:   # 0.6.7: haette eine tiefere freie Stufe gereicht? (nur Protokoll)
+            if _is_role(self.role) and self.body is not None and not self.req.session:   # 0.6.7: haette eine tiefere freie Stufe gereicht? (nur Protokoll)
                 ausweich_beobachtung.start(self.body, self.path, self.role, self.tiers, self.req, node, model,
                                            "max_parallel" if model_full else "max_inflight", self.client)
         if now >= self.deadline_at:
@@ -306,6 +324,13 @@ class _Acquire:
 
 async def dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape=None, req=None):
     """Eine Stufe auf einem Knoten oder Cloud-Anbieter ausfuehren. None = Fehler vor dem ersten Byte -> naechster Kandidat."""
+    turn = request.get(managed.KEY)
+    if turn is not None:
+        try:
+            await turn.target(body, tier, ctx)
+            ctx = body["options"]["num_ctx"]
+        except ValueError:
+            raise managed.ManagedError(400, "invalid managed generation options") from None
     relay = _Relay(request, path, body, role, tier, ctx, node, tier_idx, shape, req or request_mod.Routing.fresh())
     return await relay.run()
 
@@ -352,6 +377,9 @@ class _Relay:
         self.tier_idx, self.shape, self.req = tier_idx, shape, req
         self.model, self.exposed = tier["model"], role["exposed"]
         self.out, self.ctx = _backend_body(body, role, tier, ctx, node)
+        if req.session:
+            self.ctx = ctx
+            self.out["options"]["num_ctx"] = ctx
         self.stream = bool(self.out.get("stream", True)) and path in STREAM_PATHS
         # Ollama beschraenkt den tools-Pfad nicht und verwirft einen missglueckten Aufruf still;
         # gemessen verliert qwen3-coder:30b so 80 % seiner Calls oberhalb ~12k Token. Siehe toolcall_rescue.
@@ -367,6 +395,8 @@ class _Relay:
         self.info = self.headers = None
         self.resp = None             # Antwort an den Client, sobald der Stream offen ist (_open_stream)
         self.memory_capture = memory.Capture(request, req, body) if req.memory and req.memory["retain"] else None
+        self.managed_turn = request.get(managed.KEY)
+        self.managed_capture = managed.AssistantCapture(self.managed_turn.cfg.max_response_bytes) if self.managed_turn else None
         self.obs_task = None         # 0.6.7: Einordnung im Hintergrund fuer anfragen.jsonl (ausweich_beobachtung, observe_all)
 
     async def run(self):
@@ -384,6 +414,12 @@ class _Relay:
             if self.is_cloud:   # Stufe 5: Anbieter statt Knoten
                 return await self._via_cloud()
             return await self._via_node()
+        except (managed.ManagedError, *managed.ERRORS) as exc:
+            error = exc if isinstance(exc, managed.ManagedError) else managed.failure(exc)
+            self.outcome = "error"
+            if self.resp is not None:
+                return await self._end_with_error(error.status, error.message)
+            return self._client_error(error.status, error.message)
         except (*UPSTREAM_ERRORS, ConnectionResetError) as e:
             # Fehler nach dem ersten Byte: nichts mehr zu retten, Verbindung endet
             log.warning("stream from %s aborted: %s", self.node.name, e)
@@ -407,7 +443,7 @@ class _Relay:
         self.headers = request_mod.headers_for(self.info)
         if hasattr(self.shape, "bind"):   # Anthropic: Message-ID = Request-ID, model = Name, den der Client kennt
             self.shape.bind(self.req.request_id, self.exposed)
-        self.obs_task = ausweich_beobachtung.begin(self.path, self.out)
+        self.obs_task = None if self.managed_turn else ausweich_beobachtung.begin(self.path, self.out)
         request_mod.remember_session(self.req.session_id, node.name, model)
         reason = "loaded" if self.warm else "cold"
         log.info("route %s %s -> tier%d %s ctx=%s node=%s(%s,%s) inflight=%d req=%s%s", self.path, self.role["name"], self.tier_idx,
@@ -507,7 +543,7 @@ class _Relay:
     async def _late_upstream_error(self, upstream):
         """Knoten lehnt ab, nachdem der Stream schon offen ist: Fehler als Ereignis im Stream statt als HTTP-Status."""
         txt = (await upstream.text())[:500]
-        log.warning("node %s returned %s after keep-alive: %s", self.node.name, upstream.status, txt[:200])
+        log.warning("node %s returned %s after keep-alive: %s", self.node.name, upstream.status, "managed response redacted" if self.managed_turn else txt[:200])
         if upstream.status == 404:
             self.node.models.discard(self.model)   # wie _node_failed: Knoten hat das Modell nicht (mehr)
         elif _failed_before_first_byte(upstream.status):
@@ -524,13 +560,14 @@ class _Relay:
         self.outcome = self.outcome or "error"
         transport = self.request.transport
         if transport is not None and not transport.is_closing():
-            await self.resp.write(self.shape.stream_error(status, msg))
+            data = self.shape.stream_error(status, msg) if self.shape else (json.dumps({"error": msg}) + "\n").encode()
+            await self.resp.write(data)
             await self.resp.write_eof()
         return self.resp
 
     async def _node_failed(self, upstream):
         txt = await upstream.text()
-        log.warning("node %s returned %s before first byte: %s", self.node.name, upstream.status, txt[:200])
+        log.warning("node %s returned %s before first byte: %s", self.node.name, upstream.status, "managed response redacted" if self.managed_turn else txt[:200])
         if upstream.status == 404:
             self.node.models.discard(self.model)   # Knoten hat das Modell nicht (mehr); kein Breaker-Fall
             return None
@@ -548,10 +585,19 @@ class _Relay:
         return self.shape.error(upstream.status, str(msg))
 
     async def _complete_unary(self, upstream):
-        data = await upstream.read()
+        if self.managed_capture is not None:
+            data = bytearray()
+            async for chunk in upstream.content.iter_chunked(65536):
+                data.extend(chunk)
+                if len(data) > self.managed_turn.cfg.max_response_bytes:
+                    raise managed.ManagedError(502, "managed response exceeds persistence limit")
+        else:
+            data = await upstream.read()
         try:
             j = json.loads(data)
         except ValueError:
+            if self.managed_capture is not None:
+                raise managed.ManagedError(502, "invalid managed upstream JSON") from None
             if self.shape:
                 return self.shape.error(502, f"upstream {self.node.name}: invalid json")
         else:
@@ -560,9 +606,14 @@ class _Relay:
                     self._rescue_unary(j)
                 if self.memory_capture is not None:
                     self.memory_capture.observe(j)
+                if self.managed_capture is not None:
+                    self.managed_capture.observe(j)
+                    await self.managed_turn.commit(self.managed_capture)
                 self._record_stats(j, ttft=None)
                 data = self._finalize_json(j)
             else:
+                if self.managed_capture is not None:
+                    raise managed.ManagedError(502, "invalid managed upstream response")
                 data = self.shape.complete(j) if self.shape else json.dumps(j).encode()
         self.outcome = "ok"
         return web.Response(status=200, body=data, content_type="application/json", headers=self.headers)
@@ -571,16 +622,28 @@ class _Relay:
         resp = await self._open_stream()
         rescuer = toolcall_rescue.StreamRescuer(self.out.get("tools")) if self.rescue else None
         first_at = None
-        async for line in upstream.content:
+        terminal = b""
+        lines = managed.lines(upstream.content, self.managed_turn.cfg.max_response_bytes) if self.managed_turn else upstream.content
+        async for line in lines:
             if not line.strip():
                 continue
             first_at = first_at or time.time()
             chunk = self._render_chunks(line, rescuer, first_at)
+            if self.managed_capture is not None:
+                if chunk is None:
+                    raise managed.ManagedError(502, "invalid managed stream JSON")
+                if self.managed_capture.done:
+                    terminal = chunk
+                    continue  # Hold success until EOF and the database commit.
             if chunk is None:            # kein JSON: im Ollama-Format roh weiterreichen, im Fremdformat weglassen
                 chunk = b"" if self.shape else line
             if chunk:
                 await resp.write(chunk)
         self._note_stream_rescue(rescuer)
+        if self.managed_capture is not None:
+            await self.managed_turn.commit(self.managed_capture)
+            if terminal:
+                await resp.write(terminal)
         if self.shape:
             await resp.write(self.shape.tail())
         await resp.write_eof()
@@ -594,12 +657,16 @@ class _Relay:
             j = json.loads(line)
         except ValueError:
             return None
+        if self.managed_capture is not None and (not isinstance(j, dict) or j.get("error")):
+            raise managed.ManagedError(502, "managed upstream stream failed")
         if isinstance(j, dict) and j.get("error") and "message" not in j and not j.get("done"):
             return self._stream_error(line, str(j["error"]))
         if self.memory_capture is not None:
             self.memory_capture.observe(j)
         out = b""
         for jj in (rescuer.chunk(j) if rescuer else [j]):
+            if self.managed_capture is not None:
+                self.managed_capture.observe(jj)
             if "model" in jj:
                 jj["model"] = self.exposed
             if jj.get("done"):
@@ -742,7 +809,7 @@ class _Relay:
 
     def _note_lost(self, stream, content=None):
         """Unbekannter Dialekt: fuer den Client verloren, aber nicht mehr stumm."""
-        sample = f": {(content or '').replace(chr(10), ' ')[:120]}" if content else ""
+        sample = f": {(content or '').replace(chr(10), ' ')[:120]}" if content and not self.managed_turn else ""
         log.warning("tool-call VERLOREN (Dialekt unbekannt%s): %s req=%s%s", ", stream" if stream else "", self.model,
                     self.req.request_id, sample)
         state.remember({"event": "toolcall_lost", "node": self.node.name, "model": self.model, "stream": stream,

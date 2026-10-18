@@ -31,7 +31,35 @@ CREATE TABLE skirnir_sessions.events (
     FOREIGN KEY (owner, session_id) REFERENCES skirnir_sessions.sessions(owner, id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX checkpoint_versions ON skirnir_sessions.events(owner, session_id, version) WHERE kind = 'checkpoint';
-""",)
+""", """
+ALTER TABLE skirnir_sessions.sessions DROP CONSTRAINT sessions_mode_check;
+ALTER TABLE skirnir_sessions.sessions ADD CONSTRAINT sessions_mode_check CHECK (mode IN ('client-managed', 'skirnir-managed'));
+CREATE TABLE skirnir_sessions.turns (
+    owner text NOT NULL,
+    session_id uuid NOT NULL,
+    event_id text NOT NULL,
+    fingerprint text NOT NULL,
+    state text NOT NULL CHECK (state IN ('pending', 'completed', 'failed')),
+    lease uuid NOT NULL,
+    lease_until timestamptz NOT NULL,
+    input_end_seq bigint NOT NULL,
+    input_start_seq bigint NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (owner, session_id, event_id),
+    FOREIGN KEY (owner, session_id) REFERENCES skirnir_sessions.sessions(owner, id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX one_pending_turn ON skirnir_sessions.turns(owner, session_id) WHERE state='pending';
+CREATE TABLE skirnir_sessions.compactions (
+    owner text NOT NULL,
+    session_id uuid NOT NULL,
+    version bigint NOT NULL CHECK (version>0),
+    through_seq bigint NOT NULL CHECK (through_seq>=0),
+    payload jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (owner, session_id, version),
+    FOREIGN KEY (owner, session_id) REFERENCES skirnir_sessions.sessions(owner, id) ON DELETE CASCADE
+);
+""")
 
 
 async def migrate(conn):

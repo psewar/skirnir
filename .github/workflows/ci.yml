@@ -35,6 +35,7 @@ jobs:
       - run: python test/selftest_katalog_merge.py
       - run: python test/selftest_sessions.py
       - run: python test/selftest_memory.py
+      - run: python test/selftest_context.py
       - name: Check added lines for common public-data leaks
         if: github.event_name == 'pull_request'
         env:
@@ -66,6 +67,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -r router/requirements-session.txt
       - run: python test/integration_sessions.py
+      - run: python test/integration_context.py
 
   go:
     name: Agent vet, test, Windows cross-build

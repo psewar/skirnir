@@ -9,7 +9,8 @@ from aiohttp import web
 
 from . import auth, metrics, state
 from .session_config import SessionConfig
-from .session_store import PostgresSessionStore, SessionConflict, SessionNotFound, SessionUnavailable
+from .context_config import ContextConfig
+from .session_store import PostgresSessionStore, SessionConflict, SessionNotFound, SessionUnavailable, SessionCapacity
 
 STORE_KEY = "skirnir_session_store"  # string keys support aiohttp 3.8 (router minimum)
 CONFIG_KEY = "skirnir_session_store_config"
@@ -46,6 +47,8 @@ def register(app):
     for resource in ("messages", "checkpoints"):
         app.router.add_get(PREFIX + "/{session_id}/" + resource, handle, name="session-read-" + resource)
         app.router.add_post(PREFIX + "/{session_id}/" + resource, handle, name="session-append-" + resource)
+    for resource in ("compactions", "snapshot", "search"):
+        app.router.add_get(PREFIX + "/{session_id}/" + resource, handle, name="session-" + resource)
 
 
 def fail(status, message):
@@ -87,8 +90,8 @@ def allowed_project(principal, project):
     return project in projects or "*" in projects
 
 
-def cursor(request):
-    if set(request.query) - {"after", "limit"}:
+def cursor(request, extra=()):
+    if set(request.query) - {"after", "limit", *extra}:
         raise ValueError("unknown pagination parameter")
     try:
         after, limit = int(request.query.get("after", "0")), int(request.query.get("limit", "50"))
@@ -133,6 +136,8 @@ async def handle(request):
             response = fail(404, "session store disabled (configuration changes require restart)")
         else:
             response = await dispatch(request, action)
+    except SessionCapacity:
+        response = fail(413, "session working set exceeds configured limit")
     except SessionNotFound:
         response = fail(404, "session not found")
     except SessionConflict as exc:
@@ -168,14 +173,18 @@ async def dispatch(request, action):
         project = text(data["project"], "project")
         if not allowed_project(principal, project):
             return fail(403, "project not allowed")
-        if data.get("mode", "client-managed") != "client-managed":
-            raise ValueError("only explicit client-managed persistence is available in PR 1")
+        mode = data.get("mode", "client-managed")
+        if mode not in ("client-managed", "skirnir-managed"):
+            raise ValueError("invalid session mode")
+        if mode == "skirnir-managed" and not getattr(state.CFG, "context_manager", ContextConfig()).enabled:
+            raise ValueError("managed context is disabled")
         metadata = data.get("metadata", {})
         if not isinstance(metadata, dict):
             raise ValueError("metadata must be an object")
         client = auth.client_auth_cfg()["clients"][principal]
         data_class = client.get("data_class") or state.CFG.cloud["default_data_class"]
-        result = await store.create(principal, project, data_class, metadata)
+        result = (await store.create(principal, project, data_class, metadata, mode=mode) if mode == "skirnir-managed"
+                  else await store.create(principal, project, data_class, metadata))
         return web.json_response(result, status=201)
     try:
         session_id = UUID(request.match_info["session_id"])
@@ -197,6 +206,8 @@ async def dispatch(request, action):
         if "metadata" in data and not isinstance(data["metadata"], dict):
             raise ValueError("metadata must be an object")
         return web.json_response(await store.update(principal, session_id, data.get("status"), data.get("metadata")))
+    if action in ("compactions", "snapshot", "search"):
+        return await context_resource(request, store, principal, session_id, action)
     kind = "message" if action.endswith("messages") else "checkpoint"
     if action.startswith("append-"):
         event_id, payload = validate_payload(await body(request), kind)
@@ -205,3 +216,30 @@ async def dispatch(request, action):
     after, limit = cursor(request)
     items = await store.read(principal, session_id, kind, after, limit)
     return web.json_response({"items": items, "next_after": items[-1]["seq"] if items else after})
+
+
+async def context_resource(request, store, owner, sid, action):
+    if action == "snapshot":
+        if request.query:
+            raise ValueError("snapshot has no query parameters")
+        from .context_manager import compose
+        context = await store.context(owner, sid, getattr(state.CFG, "context_manager", ContextConfig()))
+        # This is an active-context export, never a promise to resume OS processes.
+        return web.json_response({"schema_version": 1, "kind": "skirnir-context-snapshot", "resumable_execution": False,
+            "provenance": {"session_id": str(sid), "project": context["session"]["project"],
+                           "data_class": context["session"]["data_class"], "mode": context["session"]["mode"],
+                           "compaction_version": context["compaction"]["version"] if context["compaction"] else None,
+                           "message_head": context["messages"][-1]["seq"] if context["messages"] else (context["compaction"]["through_seq"] if context["compaction"] else 0)},
+            "last_turn": context.get("last_turn"),
+            "messages": compose(context), "compaction": context["compaction"], "checkpoint": context["checkpoint"],
+            "raw_history_complete": context["compaction"] is None})
+    if action == "search":
+        if set(request.query) - {"q", "after", "limit"}:
+            raise ValueError("unknown search parameter")
+        query = text(request.query.get("q"), "q", 256)
+        after, limit = cursor(request, ("q",))
+        items = await store.search(owner, sid, query, after, limit)
+        return web.json_response({"items": items, "next_after": items[-1]["seq"] if items else after})
+    after, limit = cursor(request)
+    items = await store.compactions(owner, sid, after, limit)
+    return web.json_response({"items": items, "next_after": items[-1]["version"] if items else after})
