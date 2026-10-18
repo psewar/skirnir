@@ -308,6 +308,15 @@ async def handle_oa_chat(request):
         return e
     if not isinstance(b.get("messages"), list) or not b["messages"]:
         return openai_error(400, "messages is required")
+    if isinstance(b.get("routing"), dict) and b["routing"].get("session"):
+        # Do not silently drop unsupported OpenAI image/audio parts during native
+        # translation: managed raw history must contain all accepted input.
+        for message in b["messages"]:
+            if not isinstance(message, dict):
+                return openai_error(400, "managed messages must be objects")
+            content = message.get("content")
+            if isinstance(content, list) and any(not isinstance(part, dict) or part.get("type") != "text" for part in content):
+                return openai_error(400, "managed sessions support text content only")
     native = oa_chat_to_native(b)
     return await proxy.route_request(request, "/api/chat", native, OpenAIChatShape(_include_usage(b)), openai_error)
 

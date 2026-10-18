@@ -294,6 +294,10 @@ class ManagedHttpTests(ManagedHarness):
             response = await self.infer(extra=extra)
             self.assertEqual(response.status, 400)
         self.assertEqual((await self.infer("/api/generate")).status, 400)
+        response = await self.infer("/v1/chat/completions", extra={"messages": [{"role": "user", "content": [
+            {"type": "text", "text": "Synthetic question"},
+            {"type": "image_url", "image_url": {"url": "https://images.example.invalid/example.png"}}]}]})
+        self.assertEqual(response.status, 400)
         self.store.claim.assert_not_awaited()
 
     async def test_truncated_bad_oversized_and_error_responses_do_not_commit(self):
