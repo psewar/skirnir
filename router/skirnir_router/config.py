@@ -10,6 +10,7 @@ import yaml
 
 from . import state
 from .session_config import parse_session_config
+from .memory_config import HindsightConfig, parse_hindsight, parse_client_memory
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES
 
@@ -54,12 +55,13 @@ SCHEMA = {
         "ollama_poll_s": None, "heartbeat_interval_s": None, "heartbeat_stale_s": None, "offline_after_misses": None,
         "agent_missing_problem_s": None, "expose_concrete_models": None, "request_timeout_s": None,
         "toolcall_rescue": None,
+        "hindsight": {k: None for k in HindsightConfig.__dataclass_fields__},
         "session_store": {"enabled": None, "dsn_env": None, "min_pool_size": None, "max_pool_size": None, "timeout_s": None},
         "limits": {"max_images": None, "max_tools": None, "max_messages": None}, "session_affinity_ttl_s": None,
         "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
-                                          "cloud": None, "data_class": None, "session_projects": None, "note": None, "token_rotated": None, "created": None}}},
+                                          "cloud": None, "data_class": None, "session_projects": None, "memory": {"owner": None, "projects": {"*": {"read": None, "write": None, "data_class": None, "allow_cloud": None}}}, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None,
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
@@ -218,6 +220,9 @@ class Config:
         self._parse_client_auth(r.get("client_auth") or {})
         self.session_store = parse_session_config(r.get("session_store"))
         self._parse_cloud(r.get("cloud") or {})
+        self.hindsight = parse_hindsight(r.get("hindsight"))
+        for client in self.client_auth["clients"].values():
+            client["memory"] = parse_client_memory(client.get("memory"), self.cloud["data_classes"])
         self.mqtt = c.get("mqtt") or None   # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
         self._parse_wol(r.get("wol") or {})
         self._parse_modes(c["modes"])

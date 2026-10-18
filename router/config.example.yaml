@@ -3,6 +3,15 @@
 # Algorithmus: design/routing-algorithm.md
 
 router:
+  # Optional long-term memory: all connection values come from external secrets/environment.
+  # Read design/hindsight-memory.md before enabling; no implicit capture of client sessions.
+  hindsight:
+    enabled: false
+    endpoint_env: SKIRNIR_HINDSIGHT_URL
+    api_key_env: SKIRNIR_HINDSIGHT_TOKEN
+    namespace_key_env: SKIRNIR_MEMORY_NAMESPACE_KEY
+    fail_open: true
+    retention_enabled: false
   # Optionaler expliziter Session-Speicher; normale Inferenz und routing.session_id bleiben unveraendert.
   # pip install -r router/requirements-session.txt; DSN nur per Service-Environment/Secret setzen.
   # Backend-/Pool-Aenderungen erfordern Neustart. Siehe design/session-store.md.
@@ -69,6 +78,12 @@ router:
                                  # enforce = 401 ohne gueltige Identitaet. Umschalten zur Laufzeit: POST /admin/client_auth.
     audit_log: /var/log/skirnir-router/audit.jsonl
     clients:
+      # Memory grants are independent of session_projects. Default owner: client (no router memory).
+      # example-client:
+      #   memory:
+      #     owner: skirnir
+      #     projects:
+      #       example-project: {read: true, write: false, data_class: personal, allow_cloud: false}
       # Session-Zugriff wird separat je authentifiziertem Client freigegeben:
       # hermes:
       #   token_sha256: "<sha256 eines starken Tokens>"

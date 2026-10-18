@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -32,6 +34,12 @@ jobs:
       - run: python test/selftest_max_parallel.py
       - run: python test/selftest_katalog_merge.py
       - run: python test/selftest_sessions.py
+      - run: python test/selftest_memory.py
+      - name: Check added lines for common public-data leaks
+        if: github.event_name == 'pull_request'
+        env:
+          PUBLIC_CHANGES_BASE: ${{ github.event.pull_request.base.sha }}
+        run: python test/check_public_changes.py --base "$PUBLIC_CHANGES_BASE"
 
   sessions-postgres:
     name: Session store PostgreSQL integration

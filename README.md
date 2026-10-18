@@ -590,3 +590,22 @@ This is PR 1's explicit `client-managed` persistence foundation. Hermes retains 
 own compaction/memory behavior. Automatic `skirnir-managed` context, compaction and
 Hindsight recall/retention follow in separate PRs. See the [API, configuration,
 migration, rollback and test guide](design/session-store.md).
+
+
+## Optional Hindsight memory
+
+An opt-in Hindsight REST adapter adds scoped long-term recall and conscious asynchronous
+retention, independent of the Session Store. It is disabled by default; existing clients
+keep their behavior. Service URLs/tokens and a stable namespace key come from the
+environment, while client/project policies separately grant read/write access.
+
+Explicit `routing.memory` works through the existing native/OpenAI/Anthropic chat path.
+Retrieved facts are bounded, source-labelled untrusted user-role data. Cloud use is
+denied by default for memory projects. Retention is separately disabled by default;
+incomplete streams, tool workflows and detected sensitive content are excluded.
+Hermes clients with their own memory provider keep `memory.owner: client` to prevent
+double processing. See [configuration, API contract and limitations](design/hindsight-memory.md).
+
+Public changes are checked for common identifying/secret patterns in CI, with manual
+privacy review required by [repository guidance](AGENTS.md). Examples/tests use only
+synthetic data; connection values and real memory data must stay outside the repository.
