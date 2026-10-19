@@ -118,15 +118,19 @@ def parse_client_memory(raw, classes):
     for project, policy in projects.items():
         if not isinstance(project, str) or not project.strip() or len(project) > 128 or any(ord(c) < 32 for c in project):
             return invalid("invalid memory project name")
-        if not isinstance(policy, dict) or set(policy) - {"read", "write", "delete", "data_class", "allow_cloud", "scope"}:
+        if not isinstance(policy, dict) or set(policy) - {"read", "write", "delete", "data_class", "allow_cloud", "scope", "allow_private_addresses"}:
             return invalid("invalid memory project policy")
         if policy.get("data_class") not in classes:
             return invalid("each memory project needs an explicit configured data_class")
         clean[project] = {"data_class": policy["data_class"]}
-        for k in ("read", "write", "allow_cloud", "delete"):
+        for k in ("read", "write", "allow_cloud", "delete", "allow_private_addresses"):
             if type(policy.get(k, False)) is not bool:
                 return invalid(f"memory project {k} must be boolean")
             clean[project][k] = policy.get(k, False)
+        # Private network addresses may enter a bank only when its contents never reach a cloud (a shared scope is
+        # checked in config.py, where the scopes are known). Explicit, so the filter never loosens silently.
+        if clean[project]["allow_private_addresses"] and clean[project]["allow_cloud"]:
+            return invalid("memory project allow_private_addresses requires allow_cloud false")
         from .shared_config import name
         scope = name(policy["scope"]) if "scope" in policy else ""
         if failed(scope):

@@ -133,6 +133,7 @@ router:
       #     auto_retain: false      # opt-in only with auto; provider output stays unconfirmed
       #     projects:
       #       example-project: {read: true, write: false, data_class: personal, allow_cloud: false}
+      #       # allow_private_addresses: true lets private IPv4 addresses pass the filter; only with allow_cloud: false
       # Session-Zugriff wird separat je authentifiziertem Client freigegeben:
       # hermes:
       #   token_sha256: "<sha256 eines starken Tokens>"
