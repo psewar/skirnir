@@ -1,8 +1,12 @@
-# Skirnir – rollen- und zustandsbewusster Router für Ollama
+# Skirnir – selbst gehosteter LLM-Router und AI-Gateway für Ollama
 
 **Deutsch** · [English](README.md)
 
 <img src="design/skirnir-logo.png" alt="Skirnir" width="120" align="right">
+
+Skirnir ([psewar/skirnir](https://github.com/psewar/skirnir)) ist ein selbst gehosteter LLM-Router und AI-Gateway für Ollama
+mit OpenAI-kompatibler API und Anthropic Messages API. Es verteilt Anfragen GPU-bewusst auf mehrere Knoten und bietet
+optionalen Cloud-Fallback sowie optionalen persistenten Sitzungskontext und gemeinsames Agentengedächtnis.
 
 Skirnir steht vor einer oder mehreren Ollama-Installationen auf GPU-Rechnern und verhält sich gegenüber seinen Clients wie
 **ein** Ollama-Server. Clients fragen nicht nach einem konkreten Modell, sondern nach einer **Rolle** (`standard:latest`,
