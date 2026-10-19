@@ -46,14 +46,16 @@ async def pause(stopping, seconds):
 
 
 async def maintenance(api, stopping):
-    last_cleanup = 0
+    # None: no cleanup yet, the first pass cleans up at once. A 0 here held the first cleanup back for
+    # maintenance_interval_s after boot, because time.monotonic() starts near zero then.
+    last_cleanup = None
     while not stopping.is_set():
         await poll(api)
         cfg = state.CFG.session_store
         memory_cfg = memory.settings()
         store = api.get(session_api.STORE_KEY)
-        if (cfg.enabled and store is not None and not stopping.is_set()
-                and time.monotonic() - last_cleanup >= cfg.maintenance_interval_s):
+        due = last_cleanup is None or time.monotonic() - last_cleanup >= cfg.maintenance_interval_s
+        if cfg.enabled and store is not None and not stopping.is_set() and due:
             last_cleanup = time.monotonic()
             if cfg.retention_days or cfg.archived_retention_days or memory_cfg.outbox_retention_days:
                 result = await store.cleanup(cfg.retention_days, cfg.archived_retention_days, memory_cfg.outbox_retention_days)
