@@ -48,7 +48,7 @@ async def submit(service, scope, event_id, content, confirmed, provenance=None, 
     origin = provenance or make_provenance({}, scope.principal, confirmed=confirmed)
     if failed(origin):
         return origin
-    if rejected_content(json.dumps(origin), service.cfg):
+    if rejected_content(json.dumps(origin), service.cfg, private_addresses=scope.private_addresses):
         return denied("sensitive provenance")
     payload = {"content": content, "confirmed": confirmed, "provenance": origin}
     if shared_observations:
@@ -82,8 +82,9 @@ async def deliver(service, scope, operation, row):
         return "deleted", None
     from .memory import rejected_content
     payload = row["payload"]
-    if not (service.cfg.retention_enabled and service.current(scope, write=True) and not rejected_content(payload["content"], service.cfg)
-            and not rejected_content(payload.get("context", ""), service.cfg)):
+    if not (service.cfg.retention_enabled and service.current(scope, write=True)
+            and not rejected_content(payload["content"], service.cfg, private_addresses=scope.private_addresses)
+            and not rejected_content(payload.get("context", ""), service.cfg, private_addresses=scope.private_addresses)):
         return "revoked", "policy_changed"
     sent = await service.client.retain(service.bank(scope), payload["content"], upstream_id(operation, row), document_id=str(operation),
                                        confirmed=payload["confirmed"], provenance=payload.get("provenance"),

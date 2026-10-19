@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-from selftest_memory import MemoryHarness, PROJECT, policy, realistic_fact, trimmed_count
+from selftest_memory import MemoryHarness, PRIVATE, PROJECT, policy, realistic_fact, trimmed_count
 from selftest_context import ManagedHarness, history, row
 from skirnir_router import context_ops, memory, memory_gateway, memory_outbox, session_api, session_exchange, state
 from skirnir_router.context_config import ContextConfig
@@ -241,6 +241,30 @@ class SharedGatewayTests(MemoryHarness):
         value = await response.json()
         self.assertEqual(value["memory_state"], "unavailable:protocol")
         self.assertNotIn("results", value)
+
+    async def test_private_addresses_through_gateway_and_durable_outbox(self):
+        # The outbox filters again when it delivers: a local-only shared bank keeps addresses on both checks, and the
+        # gateway answers a filtered query with 403 and its state.
+        self.shared()
+        await self.durable()
+        path = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED
+        data = {"async": True, "items": [{"content": f"The synthetic service runs on {PRIVATE}.", "context": f"Synthetic host {PRIVATE}"}]}
+        response = await self.api(path + "/memories", data)
+        self.assertEqual(response.status, 403)
+        # The client context is filtered with the same scope setting as the content.
+        response = await self.api(path + "/memories", {"async": True, "items": [{"content": "Synthetic plain fact", "context": f"Synthetic host {PRIVATE}"}]})
+        self.assertEqual(response.status, 403)
+        response = await self.api(path + "/memories/recall", {"query": f"What runs on {PRIVATE}?"})
+        self.assertEqual((response.status, (await response.json())["memory_state"]), (403, "query_filtered"))
+        state.CFG.client_auth["clients"]["client-a"]["memory"]["projects"][SHARED]["allow_private_addresses"] = True
+        response = await self.api(path + "/memories", data)
+        self.assertEqual(response.status, 200)
+        operation = (await response.json())["operation_id"]
+        await memory_outbox.step(self.service)
+        retained = self.operations[operation]["items"][0]
+        self.assertEqual(retained["content"], f"The synthetic service runs on {PRIVATE}.")
+        self.assertTrue(retained["context"].endswith(f"client context: Synthetic host {PRIVATE}"))
+        self.assertEqual((await self.api(path + "/memories/recall", {"query": f"What runs on {PRIVATE}?"})).status, 200)
 
     async def test_gateway_retain_rejection_names_its_reason(self):
         self.shared()

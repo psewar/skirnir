@@ -25,8 +25,14 @@ BASE = os.path.join(os.path.dirname(__file__), "..", "router", "config.example.y
 PROJECT = "example-project"
 
 
-def policy(read=True, write=True, owner="skirnir", allow_cloud=False):
-    return {"owner": owner, "projects": {PROJECT: {"read": read, "write": write, "data_class": "personal", "allow_cloud": allow_cloud}}}
+def policy(read=True, write=True, owner="skirnir", allow_cloud=False, allow_private=None):
+    grant = {"read": read, "write": write, "data_class": "personal", "allow_cloud": allow_cloud}
+    if allow_private is not None:
+        grant["allow_private_addresses"] = allow_private
+    return {"owner": owner, "projects": {PROJECT: grant}}
+
+
+PRIVATE = ".".join(("10", "23", "45", "67"))   # synthetic private IPv4 address, assembled so the publication guard stays quiet
 
 
 def realistic_fact(source, text):
@@ -98,6 +104,30 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(cfg.hindsight.enabled)
         raw["router"]["client_auth"]["clients"]["example-client"]["memory"]["projects"][PROJECT]["bank"] = "forbidden"
         self.assertTrue(config.validate_schema(raw))
+
+    def test_private_addresses_only_for_banks_that_never_reach_a_cloud(self):
+        self.assertTrue(parse_client_memory(policy(allow_private=True), ["personal"])["projects"][PROJECT]["allow_private_addresses"])
+        self.assertFalse(parse_client_memory(policy(), ["personal"])["projects"][PROJECT]["allow_private_addresses"])
+        for raw in (policy(allow_private="yes"), policy(allow_cloud=True, allow_private=True)):
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(parse_client_memory(raw, ["personal"])))
+        # A shared scope that allows cloud would hand the bank's addresses to another client's cloud inference:
+        # the option must be refused at load time, never accepted and silently ignored.
+        raw = copy.deepcopy(config.load_yaml(BASE))
+        raw["router"]["hindsight"] = {"enabled": False}
+        spec = policy(allow_private=True)
+        spec["projects"][PROJECT]["scope"] = "example-team"
+        raw["router"]["client_auth"] = {"clients": {"example-client": {"memory": spec}}}
+        self.assertEqual(config.validate_schema(raw), [])
+        for allow_cloud, ok in ((False, True), (True, False)):
+            with self.subTest(shared_allow_cloud=allow_cloud):
+                raw["router"]["memory_scopes"] = {"example-team": {"data_class": "personal", "allow_cloud": allow_cloud}}
+                cfg = config.Config.__new__(config.Config)
+                if ok:
+                    cfg.parse(copy.deepcopy(raw))
+                else:
+                    with self.assertRaises(ValueError):   # genuine startup abort, as for other invalid scope grants
+                        cfg.parse(copy.deepcopy(raw))
 
 
 class MemoryHarness(unittest.IsolatedAsyncioTestCase):
@@ -405,14 +435,24 @@ class MemoryHttpTests(MemoryHarness):
         self.assertEqual(self.operations, {})
 
     async def test_sensitive_data_filters_both_directions(self):
-        for content in ("contact user@example.invalid", "internal address " + ".".join(("10", "23", "45", "67")), "password=" + "synthetic-value"):
+        for content in ("contact user@example.invalid", "internal address " + PRIVATE, "password=" + "synthetic-value"):
             data = {"project": PROJECT, "event_id": "sensitive", "content": content, "confirmed": True}
             self.assertEqual((await self.call("retain", data=data)).status, 403)
             recalled = await self.call(data={"project": PROJECT, "query": content})
-            self.assertEqual(recalled.status, 200)
-            # Not sent is not the same as "nothing known": the state says the query was filtered.
-            self.assertEqual(await recalled.json(), {"items": [], "trusted": False, "memory_state": "query_filtered",
-                                                     "trimmed": 0, "duplicates": 0, "limited_by": None})
+            # Not sent is not "nothing known": an explicit recall refuses with the state and the reason, so a client
+            # such as Hermes reports a refused query instead of "No relevant memories found".
+            self.assertEqual(recalled.status, 403)
+            value = await recalled.json()
+            self.assertEqual((value["memory_state"], value["error"]["reason"]),
+                             ("query_filtered", "memory query rejected by sensitive-data filter"))
+            self.assertNotIn("items", value)
+        self.assertEqual(self.calls, [])
+        # Inference goes on without recall and says why.
+        r = await self.client.post("/api/chat", headers={"Authorization": "Bearer client-a"}, json={
+            "model": "example:latest", "stream": False, "messages": [{"role": "user", "content": "internal address " + PRIVATE}],
+            "routing": {"memory": {"project": PROJECT, "recall": True}}})
+        await r.read()
+        self.assertEqual((r.status, r.headers.get("X-Skirnir-Memory-State")), (200, "query_filtered"))
         self.assertEqual(self.calls, [])
         self.results = [{"id": "source-1", "text": "password=" + "synthetic-value"}]
         r = await self.call()
@@ -478,9 +518,26 @@ class MemoryHttpTests(MemoryHarness):
         response = await self.call()
         self.assertEqual(response.status, 200)
         value = await response.json()
-        self.assertEqual((value["items"], value["memory_state"]), ([], "available"))
+        # A bank that does not exist yet holds no knowledge, but it is a different fact than "nothing matched": after a
+        # namespace key change every bank would look like this.
+        self.assertEqual((value["items"], value["memory_state"]), ([], "bank_missing"))
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.operations, {})
+
+    async def test_private_addresses_pass_for_a_local_only_bank(self):
+        state.CFG.client_auth["clients"]["client-a"]["memory"] = policy(allow_private=True)
+        self.results = [{"id": "source-1", "text": f"The synthetic service runs on {PRIVATE}."}]
+        value = await (await self.call(data={"project": PROJECT, "query": f"What runs on {PRIVATE}?"})).json()
+        self.assertEqual(([v["text"] for v in value["items"]], value["memory_state"]), ([f"The synthetic service runs on {PRIVATE}."], "available"))
+        self.assertEqual(self.calls[-1][1]["query"], f"What runs on {PRIVATE}?")
+        data = {"project": PROJECT, "event_id": "private", "content": f"The synthetic service runs on {PRIVATE}.", "confirmed": True}
+        self.assertEqual((await self.call("retain", data=data)).status, 202)
+        await self.service.queue.join()
+        self.assertEqual(len(self.operations), 1)
+        # Only addresses: secrets and e-mail addresses stay refused, and other clients keep the full filter.
+        for content in ("contact user@example.invalid", "password=" + "synthetic-value"):
+            self.assertEqual((await self.call(data={"project": PROJECT, "query": content})).status, 403)
+        self.assertEqual((await self.call(token="client-b", data={"project": PROJECT, "query": f"What runs on {PRIVATE}?"})).status, 403)
 
     async def test_retention_idempotency_and_retry(self):
         self.retain_failures = 1

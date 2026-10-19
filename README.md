@@ -206,7 +206,7 @@ structured, `suffix` → insert. Capabilities come from Ollama's `/api/show`, co
 (`models.<name>.capabilities: {structured: false}` for models that answer a schema with HTTP 500). Unknown capabilities never block.
 
 The response always carries the headers `X-Skirnir-Request-Id`, `-Node`, `-Model`, `-Tier`, `-Warm`; a request with memory
-recall also carries `X-Skirnir-Memory-State` (`available`, `query_filtered` or `unavailable[:<kind>]`, see
+recall also carries `X-Skirnir-Memory-State` (`available`, `bank_missing`, `query_filtered` or `unavailable[:<kind>]`, see
 [design/hindsight-memory.md](design/hindsight-memory.md)). The `routing` block in the
 body (node, model, tier, `reason`, `skipped` with a reason per skipped tier, `candidates` with score, `queued_ms`, `decision`) is
 only included if the client itself sent a `routing` block – legacy clients see an unchanged body. For `/v1` it is in the

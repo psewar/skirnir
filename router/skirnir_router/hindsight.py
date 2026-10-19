@@ -18,6 +18,9 @@ from .session_api import parse_json_value
 
 KINDS = ("unavailable", "upstream_auth", "upstream_rejected", "protocol", "timeout", "transport", "remote_pending")
 RETRY_STATUSES = (429, 500, 502, 503, 504)
+# Set by this client (never by Hindsight) on the empty result for a bank that does not exist (HTTP 404), so a caller
+# can report it as a state instead of reading it as "nothing matched".
+BANK_MISSING = "skirnir_bank_missing"
 BANK_TEXT = re.compile(r"skirnir-[0-9a-f]{64}")
 # Host names, IPv4 or the IPv6 loopback literal; an optional path prefix of plain URL characters.
 URL_TEXT = re.compile(r"(?P<scheme>https?)://(?P<host>[A-Za-z0-9.-]+|\[::1\])(?::(?P<port>[0-9]{1,5}))?(?:/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?")
@@ -99,7 +102,7 @@ class HindsightClient:
                     continue
                 status, value = reply
                 if status == 404 and missing_empty:
-                    outcome, result = "empty", {"results": []}
+                    outcome, result = "empty", {"results": [], BANK_MISSING: True}
                     break
                 if status in RETRY_STATUSES:
                     result = unavailable_as("unavailable")

@@ -152,7 +152,8 @@ async def operation_control(request, service, principal, gateway):
             if not scope.delete:
                 return SCOPE_DENIED
         elif (not service.current(scope, write=True) or not service.cfg.retention_enabled
-              or (row.get("payload") and memory.rejected_content(json.dumps(row["payload"]), service.cfg))):
+              or (row.get("payload") and memory.rejected_content(json.dumps(row["payload"]), service.cfg,
+                                                                 private_addresses=scope.private_addresses))):
             return SCOPE_DENIED
         result = await service.outbox.outbox_retry(principal, operation, retry_id,
             {**asdict(scope), "__bank": service.bank(scope)}, service.cfg.outbox_capacity, service.cfg.outbox_client_capacity)
@@ -271,7 +272,7 @@ async def gateway_retain(service, scope, principal, alias, data):
         context = None
     elif failed(context := session_api.text(context, "context", CONTEXT_CHARS)):
         return context
-    elif memory.rejected_content(context, service.cfg):
+    elif memory.rejected_content(context, service.cfg, private_addresses=scope.private_addresses):
         return memory.FILTERED
     timestamp = item.get("timestamp")
     if timestamp is not None and failed(timestamp := event_time(timestamp)):
