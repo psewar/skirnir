@@ -131,7 +131,6 @@ CREATE TRIGGER outbox_totals AFTER INSERT OR DELETE OR UPDATE OF state ON skirni
 ALTER TABLE skirnir_sessions.memory_outbox DROP CONSTRAINT memory_outbox_state_check;
 ALTER TABLE skirnir_sessions.memory_outbox ADD CONSTRAINT memory_outbox_state_check
     CHECK(state IN ('pending','processing','accepted','completed','dead','revoked','cancelled','delete_pending','deleted'));
-ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN upstream_operation uuid;
 ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN upstream_attempts integer NOT NULL DEFAULT 0;
 ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN upstream_base integer NOT NULL DEFAULT 0;
 ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN verify_checks integer NOT NULL DEFAULT 0;
