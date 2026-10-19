@@ -246,7 +246,8 @@ def _venv_command():
     specs = [line.strip() for line in open(os.path.join(ROUTER_DIR, "requirements-session.txt"), encoding="utf-8")
              if line.strip() and not line.lstrip().startswith(("#", "-"))]
     venv = "/opt/skirnir-router/venv"
-    return ("set -e; dpkg -s python3-venv >/dev/null 2>&1 || apt-get install -y -q python3-venv >/dev/null; "
+    # Paketlisten erst auffrischen, wenn wirklich installiert werden muss (veraltete Listen zeigen auf entfernte .deb-Versionen)
+    return ("set -e; dpkg -s python3-venv >/dev/null 2>&1 || { apt-get update -q >/dev/null && apt-get install -y -q python3-venv >/dev/null; }; "
             f"[ -x {venv}/bin/python ] || python3 -m venv --system-site-packages {venv}; "
             f"{venv}/bin/python -m pip install -q --disable-pip-version-check " + " ".join(shlex.quote(s) for s in specs) + "; "
             f"{venv}/bin/python -c 'import aiohttp, yaml, asyncpg; print(\"venv ok\", asyncpg.__version__)'")
