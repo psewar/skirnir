@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 import selftest_interoperability as shared
 import selftest_memory as fixture
 from skirnir_router import hindsight, memory, memory_gateway, memory_outbox, state
+from skirnir_router.outcome import failed
 from skirnir_router.session_config import SessionConfig
 from skirnir_router.session_store import PostgresSessionStore
 
@@ -45,15 +46,14 @@ class LiveMemoryTests(fixture.MemoryHarness):
         cfg = replace(self.service.cfg, outbox_enabled=True, endpoint_env='SKIRNIR_TEST_HINDSIGHT_URL',
                       allow_http_loopback=True, timeout_s=30, recall_max_tokens=4096)
         endpoint = hindsight.endpoint_from_env(cfg)
-        from urllib.parse import urlsplit
-        import ipaddress
-        host = urlsplit(endpoint).hostname
-        if host != 'localhost' and not ipaddress.ip_address(host).is_loopback:
+        if failed(endpoint) or not hindsight.is_loopback(hindsight.URL_TEXT.fullmatch(endpoint)['host'].lower()):
             self.fail('live tests accept loopback backends only')
         self.service.cfg = state.CFG.hindsight = cfg
         self.service.key = uuid4().hex.encode()
         self.service.client = hindsight.HindsightClient(endpoint, os.environ.get('SKIRNIR_TEST_HINDSIGHT_TOKEN', ''), cfg)
         self.real = await PostgresSessionStore.open(dsn, SessionConfig(enabled=True))
+        if failed(self.real):
+            self.fail('live test database unavailable')
         self.service.outbox = self.real
         from hindsight_client import Hindsight
         self.sdk = Hindsight(base_url=str(self.client.make_url(memory_gateway.GATEWAY)), api_key='client-a', timeout=30)
@@ -69,9 +69,11 @@ class LiveMemoryTests(fixture.MemoryHarness):
         for operation, owner in self.operations_to_delete.items():
             try:
                 await self.wait_completed(operation, owner)
-                await self.service.client.delete_document(self.service.bank(memory.scope_for_principal(owner, shared.SHARED)), operation)
-            except (AssertionError, hindsight.MemoryUnavailable, TimeoutError):
+            except (AssertionError, TimeoutError):   # test harness: a failed wait is counted, cleanup continues
                 failures += 1
+                continue
+            deleted = await self.service.client.delete_document(self.service.bank(memory.scope_for_principal(owner, shared.SHARED)), operation)
+            failures += failed(deleted)
         await self.sdk.aclose()
         async with self.real.pool.acquire() as conn:
             await conn.execute("DELETE FROM skirnir_sessions.memory_outbox WHERE owner=ANY($1::text[]) AND scope->>'__bank'=$2", ['client-a', 'client-b'],

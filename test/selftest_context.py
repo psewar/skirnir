@@ -19,7 +19,9 @@ from skirnir_router import app, config, managed, nodes, ops, proxy, session_api,
 from skirnir_router.context_config import ContextConfig, parse_context_config  # noqa: E402
 from skirnir_router.context_manager import compose, encoded, estimate, project, tool_delta  # noqa: E402
 from skirnir_router.session_config import SessionConfig  # noqa: E402
-from skirnir_router.session_store import SessionCapacity, SessionConflict, SessionNotFound, SessionStore, SessionUnavailable  # noqa: E402
+from skirnir_router.outcome import conflict, failed  # noqa: E402
+from skirnir_router.session_store import SessionStore  # noqa: E402
+from skirnir_router.session_types import NOT_FOUND, UNAVAILABLE  # noqa: E402
 
 BASE = os.path.join(os.path.dirname(__file__), "..", "router", "config.example.yaml")
 PROJECT = "example-project"
@@ -39,8 +41,8 @@ class ProjectionTests(unittest.TestCase):
     def test_configuration_optin_strict_and_store_dependency(self):
         self.assertFalse(parse_context_config(None).enabled)
         for raw in ([], {"enabled": 1}, {"tail_messages": True}, {"lease_s": 0}, {"reserve_tokens": "2"}, {"tokenizer": "auto"}):
-            with self.subTest(raw=raw), self.assertRaises(ValueError):
-                parse_context_config(raw)
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(parse_context_config(raw)))
         raw = config.load_yaml(BASE)
         raw["router"]["context_manager"] = {"enabled": True}
         cfg = config.Config.__new__(config.Config)
@@ -87,15 +89,13 @@ class ProjectionTests(unittest.TestCase):
     def test_protected_content_does_not_fit_fails_without_mutation(self):
         context = history()
         before = copy.deepcopy(context)
-        with self.assertRaises(SessionCapacity):
-            project(context, {}, 200, ContextConfig(), "small-model")
+        self.assertEqual(project(context, {}, 200, ContextConfig(), "small-model").status, 413)
         self.assertEqual(context, before)
 
     def test_incomplete_long_current_turn_is_not_summarized(self):
         context = {"messages": [row(1, content="x" * 4000), *[row(i, "tool", "Synthetic result") for i in range(2, 12)]],
                    "compaction": None, "checkpoint": None}
-        with self.assertRaises(SessionCapacity):
-            project(context, {}, 3000, ContextConfig(tail_messages=2), "small-model")
+        self.assertEqual(project(context, {}, 3000, ContextConfig(tail_messages=2), "small-model").status, 413)
 
     def test_failed_inputs_and_current_delta_remain_exact(self):
         context = history()
@@ -116,8 +116,7 @@ class ProjectionTests(unittest.TestCase):
 
     def test_tools_schema_is_part_of_budget(self):
         context = history()
-        with self.assertRaises(SessionCapacity):
-            project(context, {"tools": [{"description": "x" * 8000}]}, 6000, ContextConfig(tail_messages=2), "example")
+        self.assertEqual(project(context, {"tools": [{"description": "x" * 8000}]}, 6000, ContextConfig(tail_messages=2), "example").status, 413)
 
     def test_pending_tool_results_bound_to_persisted_calls(self):
         context = {"messages": [row(1, "assistant", "", tool_calls=[{"id": "call-a", "function": {"name": "example", "arguments": {}}}])],
@@ -125,27 +124,28 @@ class ProjectionTests(unittest.TestCase):
         result = tool_delta(context, [{"role": "tool", "content": "result", "tool_call_id": "call-a"}])
         self.assertEqual(result[0]["tool_name"], "example")
         for delta in ([{"role": "user", "content": "new"}], [{"role": "tool", "content": "result", "tool_call_id": "foreign"}]):
-            with self.assertRaises(SessionConflict):
-                tool_delta(context, delta)
+            with self.subTest(delta=delta):
+                self.assertEqual(tool_delta(context, delta).status, 409)
 
     def test_request_and_capture_validation(self):
         for raw in (True, {"id": "bad", "mode": "skirnir-managed", "event_id": "x"},
                     {"id": str(uuid4()), "mode": "client-managed", "event_id": "x"}):
-            with self.assertRaises(ValueError):
-                managed.parse(raw)
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(managed.parse(raw)))
         for messages in ([], [{"role": "assistant", "content": "history"}], [{"role": "user", "content": "text", "images": ["synthetic"]}]):
-            with self.assertRaises(ValueError):
-                managed.validate_messages(messages)
+            with self.subTest(messages=messages):
+                self.assertTrue(failed(managed.validate_messages(messages)))
         capture = managed.AssistantCapture(1000)
-        capture.observe({"message": {"content": "a", "thinking": "b"}})
-        capture.observe({"done": True, "message": {"content": "c"}})
+        self.assertIsNone(capture.observe({"message": {"content": "a", "thinking": "b"}}))
+        self.assertIsNone(capture.observe({"done": True, "message": {"content": "c"}}))
         self.assertEqual(capture.message, {"role": "assistant", "content": "ac", "thinking": "b"})
-        with self.assertRaises(managed.ManagedError):
-            capture.observe({"done": True})
-        with self.assertRaises(managed.ManagedError):
-            managed.AssistantCapture(10).observe({"message": {"content": "x" * 20}})
-        with self.assertRaises(managed.ManagedError):
-            managed.AssistantCapture(1000).observe({"message": {"tool_calls": [{"function": {"name": "example", "arguments": "fragment"}}]}})
+        self.assertEqual(capture.observe({"done": True}).status, 502)
+        self.assertEqual(managed.AssistantCapture(10).observe({"message": {"content": "x" * 20}}).status, 502)
+        self.assertEqual(managed.AssistantCapture(1000).observe(
+            {"message": {"tool_calls": [{"function": {"name": "example", "arguments": "fragment"}}]}}).status, 502)
+        # Lenient upstream JSON (NaN, unpaired surrogate) cannot be persisted: a Problem, not an encoder exception.
+        for message in ({"content": "x", "extra": float("nan")}, {"content": "\ud800"}):
+            self.assertEqual(managed.AssistantCapture(1000).observe({"message": message}).status, 502)
 
 
 class ManagedHarness(unittest.IsolatedAsyncioTestCase):
@@ -205,12 +205,12 @@ class ManagedHarness(unittest.IsolatedAsyncioTestCase):
 
     async def get(self, owner, sid):
         if owner != "client-a" or sid != self.sid:
-            raise SessionNotFound
+            return NOT_FOUND
         return self.session
 
     async def claim(self, owner, sid, eid, fingerprint, messages, cfg):
         if eid in self.completed:
-            raise SessionConflict("turn already completed")
+            return conflict("turn already completed")
         self.last_eid = eid
         for message in messages:
             self.context["messages"].append({"seq": len(self.context["messages"]) + 1, "payload": copy.deepcopy(message)})
@@ -317,7 +317,7 @@ class ManagedHttpTests(ManagedHarness):
         self.assertGreater(self.store.fail_turn.await_count, 0)
 
     async def test_database_failure_never_emits_success_terminal(self):
-        self.store.finish_turn.side_effect = SessionUnavailable
+        self.store.finish_turn.side_effect = lambda *args, **kwargs: UNAVAILABLE
         for stream in (False, True):
             response = await self.infer(stream=stream, eid=str(stream))
             data = await response.text()
@@ -341,7 +341,7 @@ class ManagedHttpTests(ManagedHarness):
         self.assertEqual(response.status, 200)
         self.store.compact.assert_awaited_once()
         self.assertTrue(any("Untrusted, lossy session summary" in m.get("content", "") for m in self.seen[-1]["messages"]))
-        self.store.compact.side_effect = SessionUnavailable
+        self.store.compact.side_effect = lambda *args, **kwargs: UNAVAILABLE
         before = len(self.seen)
         response = await self.infer(eid="second")
         self.assertEqual(response.status, 503)
@@ -397,11 +397,10 @@ class ManagedHttpTests(ManagedHarness):
         # Independently exercise heartbeat loss and cancellation cleanup.
         fake = {"client": "client-a"}
         turn = managed.Turn(fake, None, self.store, "client-a", self.sid, UUID(int=1), replace(ContextConfig(), lease_s=0.01))
-        self.store.renew.side_effect = SessionUnavailable
+        self.store.renew.return_value = UNAVAILABLE
         await turn.renew()
         self.assertTrue(turn.lost)
-        with self.assertRaises(SessionConflict):
-            turn.check()
+        self.assertEqual(turn.check().status, 409)
         turn.heartbeat = asyncio.create_task(asyncio.sleep(30))
         await turn.close()
         self.assertTrue(turn.heartbeat.cancelled())

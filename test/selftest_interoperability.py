@@ -17,7 +17,10 @@ from skirnir_router.context_config import ContextConfig
 from skirnir_router.context_manager import encoded, estimate, project
 from skirnir_router.memory_config import parse_client_memory, parse_hindsight
 from skirnir_router.shared_config import parse_scopes
-from skirnir_router.session_store import SessionCapacity, SessionConflict, SessionStore, SessionUnavailable
+from skirnir_router.outcome import conflict, failed, unavailable
+from skirnir_router.reliability_store import OPERATION_NOT_FOUND
+from skirnir_router.session_store import SessionStore
+from skirnir_router.session_types import UNAVAILABLE
 
 SHARED = "shared-project"
 
@@ -27,21 +30,19 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(parse_hindsight(None).outbox_enabled)
         self.assertFalse(parse_hindsight(None).gateway_enabled)
         for data in ({"outbox_enabled": 1}, {"outbox_attempts": 0}, {"outbox_lease_s": 1}, {"recall_min_score": float("nan")}):
-            with self.assertRaises(ValueError):
-                parse_hindsight(data)
+            with self.subTest(data=data):
+                self.assertTrue(failed(parse_hindsight(data)))
         for data in ({"a": {"data_class": "unknown"}}, {"bad/alias": {"data_class": "personal"}}, {"a": {"data_class": "personal", "bank": "chosen"}}):
-            with self.assertRaises(ValueError):
-                parse_scopes(data, ["personal"])
+            with self.subTest(data=data):
+                self.assertTrue(failed(parse_scopes(data, ["personal"])))
         for data in ({"owner": "client", "strategy": "auto"}, {"strategy": "hybrid"}, {"strategy": "manual", "auto_retain": True}):
-            with self.assertRaises(ValueError):
-                parse_client_memory(data, ["personal"])
+            with self.subTest(data=data):
+                self.assertTrue(failed(parse_client_memory(data, ["personal"])))
         self.assertEqual(parse_client_memory(None, ["personal"])["strategy"], "legacy")
 
     def test_provenance_cannot_promote_unconfirmed_knowledge(self):
-        with self.assertRaises(ValueError):
-            memory_gateway.provenance({"kind": "confirmed_information"}, "client-a", confirmed=False)
-        with self.assertRaises(ValueError):
-            memory_gateway.provenance({"origin_client": "client-b"}, "client-a", confirmed=True)
+        self.assertTrue(failed(memory_gateway.provenance({"kind": "confirmed_information"}, "client-a", confirmed=False)))
+        self.assertTrue(failed(memory_gateway.provenance({"origin_client": "client-b"}, "client-a", confirmed=True)))
         origin = memory_gateway.provenance({"source_refs": ["repo:example.py"], "supersedes": "source-1"}, "client-a", confirmed=False)
         self.assertEqual(origin["origin_client"], "client-a")
         self.assertEqual(origin["confirmed"], "false")
@@ -52,8 +53,7 @@ class PolicyTests(unittest.TestCase):
         context["messages"][2] = row(3, "assistant", "", tool_calls=[call])
         context["messages"][3] = row(4, "tool", "Synthetic tool data " * 2000, tool_call_id="call-example", tool_name="example")
         original = copy.deepcopy(context)
-        with self.assertRaises(SessionCapacity):
-            project(context, {}, 7000, ContextConfig(tail_messages=2), "example")
+        self.assertEqual(project(context, {}, 7000, ContextConfig(tail_messages=2), "example").status, 413)
         cfg = ContextConfig(tail_messages=2, reduce_tool_results=True, tool_result_bytes=256)
         messages, version = project(context, {}, 7000, cfg, "example")
         self.assertEqual(context, original)
@@ -67,12 +67,10 @@ class PolicyTests(unittest.TestCase):
     def test_reduction_does_not_touch_unpaired_or_protected_tool_result(self):
         context = history()
         context["messages"][3] = row(4, "tool", "x" * 30000, tool_call_id="orphan")
-        with self.assertRaises(SessionCapacity):
-            project(context, {}, 6000, ContextConfig(tail_messages=2, reduce_tool_results=True), "example")
+        self.assertEqual(project(context, {}, 6000, ContextConfig(tail_messages=2, reduce_tool_results=True), "example").status, 413)
         context["messages"][2] = row(3, "assistant", "", tool_calls=[{"id": "orphan", "function": {"name": "example", "arguments": {}}}])
         context["protected_sequences"] = [4]
-        with self.assertRaises(SessionCapacity):
-            project(context, {}, 6000, ContextConfig(tail_messages=2, reduce_tool_results=True), "example")
+        self.assertEqual(project(context, {}, 6000, ContextConfig(tail_messages=2, reduce_tool_results=True), "example").status, 413)
 
 
 class SharedGatewayTests(MemoryHarness):
@@ -99,20 +97,19 @@ class SharedGatewayTests(MemoryHarness):
             ident = str(operation)
             if ident in self.jobs:
                 if self.jobs[ident]["fingerprint"] != fingerprint:
-                    raise SessionConflict
+                    return conflict("event_id already used for different memory content")
                 return self.jobs[ident]
             if sum(r["state"] in ("pending", "processing") for r in self.jobs.values()) >= capacity:
-                raise SessionCapacity
+                return unavailable("memory outbox full")
             self.jobs[ident] = {"operation_id": ident, "owner": scope["principal"], "project": scope["project"], "scope": scope,
                 "payload": payload, "fingerprint": fingerprint, "attempts": 0, "state": "pending", "lease": str(uuid4()),
                 "created_at": "2026-01-01T00:00:00+00:00", "updated_at": "2026-01-01T00:00:00+00:00"}
             return self.jobs[ident]
 
         async def get(owner, operation):
-            from skirnir_router.session_types import SessionNotFound
             value = self.jobs.get(str(operation))
             if value is None or value["owner"] != owner:
-                raise SessionNotFound
+                return OPERATION_NOT_FOUND
             return value
 
         async def claim(*args):
@@ -207,7 +204,7 @@ class SharedGatewayTests(MemoryHarness):
         duplicate = await self.api(memory.PREFIX + "/retain", data)
         self.assertEqual((await duplicate.json())["operation_id"], value["operation_id"])
         self.assertEqual(len(self.jobs), 1)
-        store.outbox_put.side_effect = SessionUnavailable
+        store.outbox_put.side_effect = lambda *args, **kwargs: UNAVAILABLE
         self.assertEqual((await self.api(memory.PREFIX + "/retain", {**data, "event_id": "second"})).status, 503)
 
     async def test_outbox_retry_idempotency_dead_letter_and_revoke(self):
@@ -428,8 +425,8 @@ class SessionExchangeTests(ManagedHarness):
         unsigned["signature"] = session_exchange.signature(unsigned)
         self.assertEqual((await self.import_(unsigned)).status, 400)
         for value in ("/private/example.txt", "../example.txt", "https://git.example.invalid/?secret=synthetic"):
-            with self.assertRaises(ValueError):
-                session_exchange.reference(value)
+            with self.subTest(value=value):
+                self.assertTrue(failed(session_exchange.reference(value)))
         state.CFG.hindsight = replace(state.CFG.hindsight, deny_terms=("SYNTHETIC_DENIED",))
         self.context["messages"].append(row(21, content="SYNTHETIC_DENIED"))
         response = await self.client.get(session_api.PREFIX + "/" + str(self.sid) + "/handoff", headers={"Authorization": "Bearer client-a"})

@@ -15,7 +15,10 @@ from selftest_interoperability import SHARED
 from skirnir_router import memory, memory_outbox, session_api, state
 from skirnir_router.context_config import ContextConfig
 from skirnir_router.session_config import SessionConfig
-from skirnir_router.session_store import PostgresSessionStore, SessionCapacity, SessionConflict, SessionNotFound, SessionUnavailable
+from skirnir_router.outcome import Problem
+from skirnir_router.reliability_store import OPERATION_NOT_FOUND
+from skirnir_router.session_store import PostgresSessionStore
+from skirnir_router.session_types import UNAVAILABLE
 
 DSN = os.environ.get("SKIRNIR_TEST_SESSION_DSN")
 
@@ -46,10 +49,8 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         self.store = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
         self.assertEqual((await self.store.outbox_get(self.owner, self.operation))["payload"], self.payload)
         self.assertEqual((await self.put())["operation_id"], first["operation_id"])
-        with self.assertRaises(SessionConflict):
-            await self.put(fingerprint="changed")
-        with self.assertRaises(SessionCapacity):
-            await self.put(uuid4(), capacity=1)
+        self.assertEqual((await self.put(fingerprint="changed")).status, 409)
+        self.assertEqual((await self.put(uuid4(), capacity=1)).status, 503)
         self.assertEqual((await self.store.outbox_counts())["pending"], 1)
 
     async def test_parallel_workers_claim_once_and_stale_lease_cannot_finish(self):
@@ -61,8 +62,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET lease_until=clock_timestamp()-interval '1 second' WHERE operation_id=$1", self.operation)
         second = await self.store.outbox_claim(120, 5)
         self.assertNotEqual(first["lease"], second["lease"])
-        with self.assertRaises(SessionConflict):
-            await self.store.outbox_finish(self.operation, UUID(first["lease"]), "accepted")
+        self.assertEqual((await self.store.outbox_finish(self.operation, UUID(first["lease"]), "accepted")).status, 409)
         await self.store.outbox_finish(self.operation, UUID(second["lease"]), "accepted")
         self.assertEqual((await self.store.outbox_get(self.owner, self.operation))["attempts"], 2)
 
@@ -76,8 +76,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pending_cancel_is_repeatable_and_ambiguous_cancel_is_blocked(self):
         await self.put()
-        with self.assertRaises(SessionNotFound):
-            await self.store.outbox_cancel(self.other, self.operation)
+        self.assertEqual(await self.store.outbox_cancel(self.other, self.operation), OPERATION_NOT_FOUND)
         await self.store.outbox_cancel(self.owner, self.operation)
         await self.store.outbox_cancel(self.owner, self.operation)
         self.assertEqual((await self.put())["state"], "cancelled")
@@ -86,8 +85,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         await self.put(operation)
         claim = await self.store.outbox_claim(120, 5)
         await self.store.outbox_finish(operation, UUID(claim["lease"]), "pending", 10)
-        with self.assertRaises(SessionConflict):
-            await self.store.outbox_cancel(self.owner, operation)
+        self.assertEqual((await self.store.outbox_cancel(self.owner, operation)).status, 409)
 
     async def test_backoff_prevents_early_claim(self):
         await self.put()
@@ -134,11 +132,10 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         sid = UUID(first["id"])
         self.assertEqual((await self.store.read(self.owner, sid, "message", 0, 10))[0]["payload"], messages[0])
         self.assertEqual((await self.store.read(self.owner, sid, "checkpoint", 0, 10))[0]["payload"], checkpoint)
-        with self.assertRaises(SessionConflict):
-            await self.store.import_session(self.owner, "import-1", "other", *args[3:])
+        self.assertEqual((await self.store.import_session(self.owner, "import-1", "other", *args[3:])).status, 409)
         # Driver encoding failure occurs after inserting the session and messages.
-        with self.assertRaises(SessionUnavailable):
-            await self.store.import_session(self.owner, "invalid", "x", PROJECT, "personal", "skirnir-managed", {}, messages, {"schema_version": 1, "invalid": object()})
+        self.assertEqual(await self.store.import_session(self.owner, "invalid", "x", PROJECT, "personal", "skirnir-managed", {}, messages,
+                                                         {"schema_version": 1, "invalid": object()}), UNAVAILABLE)
         async with self.store.pool.acquire() as conn:
             self.assertEqual(await conn.fetchval("SELECT count(*) FROM skirnir_sessions.handoff_imports WHERE owner=$1", self.owner), 1)
 
@@ -175,9 +172,9 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_per_owner_capacity_is_atomic_and_does_not_block_other_clients(self):
         async def submit():
             return await self.store.outbox_put(uuid4(), self.scope, self.payload, "synthetic", 10, owner_capacity=2)
-        values = await asyncio.gather(*(submit() for _ in range(6)), return_exceptions=True)
+        values = await asyncio.gather(*(submit() for _ in range(6)))
         self.assertEqual(sum(isinstance(v, dict) for v in values), 2)
-        self.assertEqual(sum(isinstance(v, SessionCapacity) for v in values), 4)
+        self.assertEqual(sum(isinstance(v, Problem) and v.status == 503 for v in values), 4)
         scope = {**self.scope, 'principal': self.other}
         await self.store.outbox_put(uuid4(), scope, self.payload, 'synthetic-other', 10, owner_capacity=2)
         self.assertEqual((await self.store.outbox_counts())['pending'], 3)
@@ -192,8 +189,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first['retry_rounds'], 1)
         replay = await self.store.outbox_retry(self.owner, self.operation, 'recovery-1', self.scope, 10)
         self.assertEqual(replay['retry_rounds'], 1)
-        with self.assertRaises(SessionConflict):
-            await self.store.outbox_cancel(self.owner, self.operation)
+        self.assertEqual((await self.store.outbox_cancel(self.owner, self.operation)).status, 409)
         claim = await self.store.outbox_claim(120, 1)
         self.assertEqual(claim['attempts'], 2)
         await self.store.outbox_finish(self.operation, UUID(claim['lease']), 'dead', error='timeout')
@@ -206,14 +202,11 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         await self.put()
         claim = await self.store.outbox_claim(120, 1)
         await self.store.outbox_finish(self.operation, UUID(claim['lease']), 'dead')
-        with self.assertRaises(SessionNotFound):
-            await self.store.outbox_retry(self.other, self.operation, 'one', self.scope, 10)
-        with self.assertRaises(SessionConflict):
-            await self.store.outbox_retry(self.owner, self.operation, 'one', {**self.scope, '__bank': 'changed'}, 10)
+        self.assertEqual(await self.store.outbox_retry(self.other, self.operation, 'one', self.scope, 10), OPERATION_NOT_FOUND)
+        self.assertEqual((await self.store.outbox_retry(self.owner, self.operation, 'one', {**self.scope, '__bank': 'changed'}, 10)).status, 409)
         async with self.store.pool.acquire() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET payload=NULL WHERE operation_id=$1", self.operation)
-        with self.assertRaises(SessionConflict):
-            await self.store.outbox_retry(self.owner, self.operation, 'one', self.scope, 10)
+        self.assertEqual((await self.store.outbox_retry(self.owner, self.operation, 'one', self.scope, 10)).status, 409)
 
     async def test_totals_remain_exact_on_transitions_and_transaction_rollback(self):
         await self.put()

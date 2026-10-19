@@ -15,6 +15,15 @@ from .context_config import ContextConfig, parse_context_config
 from .memory_config import HindsightConfig, parse_hindsight, parse_client_memory
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES
+from .outcome import failed
+
+
+def _accepted(value):
+    """Bruecke, bis Config.parse selbst Probleme als Wert liefert (PR 2): das Problem eines Parsers stoppt das Laden wie
+    die anderen Pruefungen hier."""
+    if failed(value):
+        raise ValueError(value.message)
+    return value
 
 
 def _d(path):
@@ -222,20 +231,20 @@ class Config:
         r = c["router"]
         self._parse_router(r)
         self._parse_client_auth(r.get("client_auth") or {})
-        self.session_store = parse_session_config(r.get("session_store"))
-        self.context_manager = parse_context_config(r.get("context_manager"))
+        self.session_store = _accepted(parse_session_config(r.get("session_store")))
+        self.context_manager = _accepted(parse_context_config(r.get("context_manager")))
         if self.context_manager.enabled and not self.session_store.enabled:
             raise ValueError("context_manager requires session_store.enabled")
         self._parse_cloud(r.get("cloud") or {})
-        self.hindsight = parse_hindsight(r.get("hindsight"))
-        self.memory_scopes = parse_scopes(r.get("memory_scopes"), self.cloud["data_classes"])
+        self.hindsight = _accepted(parse_hindsight(r.get("hindsight")))
+        self.memory_scopes = _accepted(parse_scopes(r.get("memory_scopes"), self.cloud["data_classes"]))
         if self.hindsight.outbox_enabled and not (self.hindsight.enabled and self.session_store.enabled):
             raise ValueError("persistent memory outbox requires enabled hindsight and session_store")
         for client in self.client_auth["clients"].values():
             sources = client.get("session_handoff_from", [])
             if not isinstance(sources, list) or any(not isinstance(v, str) or v not in self.client_auth["clients"] for v in sources):
                 raise ValueError("session_handoff_from must list configured principals")
-            client["memory"] = parse_client_memory(client.get("memory"), self.cloud["data_classes"])
+            client["memory"] = _accepted(parse_client_memory(client.get("memory"), self.cloud["data_classes"]))
             for grant in client["memory"]["projects"].values():
                 if grant["scope"]:
                     shared = self.memory_scopes.get(grant["scope"])
