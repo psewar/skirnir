@@ -232,7 +232,8 @@ to interpret:
 | `memory_state` | Meaning |
 | --- | --- |
 | `available` | Hindsight answered. No items means no matching knowledge. |
-| `query_filtered` | The sensitive-data filter kept the query from being sent. |
+| `bank_missing` | The bank does not exist yet: nothing was ever retained under this scope and namespace key. After a namespace key change every bank looks like this, which is why it is not reported as `available`. |
+| `query_filtered` | The sensitive-data filter kept the query from being sent. Explicit recall answers **403** with this state and `error.reason`; inference proceeds without recall. |
 | `unavailable` / `unavailable:<kind>` | No usable answer. `kind` is a fixed category: `timeout`, `transport`, `protocol` (malformed or above `max_response_bytes`), `upstream_auth`, `upstream_rejected`. |
 
 `fail_open` applies to **inference augmentation only**. With `true`, an unavailable
@@ -298,6 +299,14 @@ Secret patterns, email-like strings, private IPv4 addresses and configured liter
 `deny_terms` are rejected before outgoing query/retention and before injecting recalled
 text. These are defensive heuristics, **not full PII detection**; do not grant retention
 to clients that may emit confidential information without an appropriate policy.
+
+A memory project grant can set `allow_private_addresses: true` to let **only** private IPv4
+addresses pass, for a memory about one's own network (a homelab assistant asking "what
+runs on 10.x.y.z?" was otherwise never sent to memory). It requires `allow_cloud: false`,
+and for a shared scope a scope with `allow_cloud: false`, because another client of the
+shared bank could otherwise take the addresses into cloud inference. A configuration that
+combines it with cloud access is refused at load time, never accepted and silently
+ignored. Secrets, email-like strings and `deny_terms` stay rejected.
 Do not send raw session exports or whole conversation histories as memory items.
 
 No new logs/metrics contain prompts, facts, tokens, DSNs, principals, project/bank IDs

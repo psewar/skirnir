@@ -7,10 +7,11 @@ import hmac
 import os
 import unittest
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-from selftest_memory import MemoryHarness, PROJECT, policy, realistic_fact, trimmed_count
+from selftest_memory import MemoryHarness, PRIVATE, PROJECT, policy, realistic_fact, trimmed_count
 from selftest_context import ManagedHarness, history, row
 from skirnir_router import context_ops, memory, memory_gateway, memory_outbox, session_api, session_exchange, state
 from skirnir_router.context_config import ContextConfig
@@ -241,6 +242,30 @@ class SharedGatewayTests(MemoryHarness):
         self.assertEqual(value["memory_state"], "unavailable:protocol")
         self.assertNotIn("results", value)
 
+    async def test_private_addresses_through_gateway_and_durable_outbox(self):
+        # The outbox filters again when it delivers: a local-only shared bank keeps addresses on both checks, and the
+        # gateway answers a filtered query with 403 and its state.
+        self.shared()
+        await self.durable()
+        path = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED
+        data = {"async": True, "items": [{"content": f"The synthetic service runs on {PRIVATE}.", "context": f"Synthetic host {PRIVATE}"}]}
+        response = await self.api(path + "/memories", data)
+        self.assertEqual(response.status, 403)
+        # The client context is filtered with the same scope setting as the content.
+        response = await self.api(path + "/memories", {"async": True, "items": [{"content": "Synthetic plain fact", "context": f"Synthetic host {PRIVATE}"}]})
+        self.assertEqual(response.status, 403)
+        response = await self.api(path + "/memories/recall", {"query": f"What runs on {PRIVATE}?"})
+        self.assertEqual((response.status, (await response.json())["memory_state"]), (403, "query_filtered"))
+        state.CFG.client_auth["clients"]["client-a"]["memory"]["projects"][SHARED]["allow_private_addresses"] = True
+        response = await self.api(path + "/memories", data)
+        self.assertEqual(response.status, 200)
+        operation = (await response.json())["operation_id"]
+        await memory_outbox.step(self.service)
+        retained = self.operations[operation]["items"][0]
+        self.assertEqual(retained["content"], f"The synthetic service runs on {PRIVATE}.")
+        self.assertTrue(retained["context"].endswith(f"client context: Synthetic host {PRIVATE}"))
+        self.assertEqual((await self.api(path + "/memories/recall", {"query": f"What runs on {PRIVATE}?"})).status, 200)
+
     async def test_gateway_retain_rejection_names_its_reason(self):
         self.shared()
         await self.durable()
@@ -255,6 +280,98 @@ class SharedGatewayTests(MemoryHarness):
                 self.assertEqual(error["message"], "invalid memory gateway request")
                 self.assertEqual(error["reason"], "unsupported gateway retain option: " + option)
         self.assertEqual(self.jobs, {})
+
+    async def test_gateway_retain_passes_client_context_and_timestamp_untrusted(self):
+        self.shared()
+        await self.durable()
+        path = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories"
+        item = {"content": "Synthetic team moved the review to Friday", "context": "Synthetic project decision",
+                "timestamp": "2026-03-14T09:30:00+01:00", "metadata": {"confirmed": "true"}}
+        response = await self.api(path, {"async": True, "items": [item]})
+        self.assertEqual(response.status, 200)
+        operation = (await response.json())["operation_id"]
+        self.assertFalse(self.jobs[operation]["payload"]["confirmed"])
+        await memory_outbox.step(self.service)
+        retained = self.operations[operation]["items"][0]
+        # The fixed notice stays first: a client context can describe the content, never confirm it.
+        self.assertEqual(retained["context"], "Unverified assistant response; not confirmed facts; client context: Synthetic project decision")
+        self.assertEqual(retained["timestamp"], "2026-03-14T09:30:00+01:00")
+        self.assertEqual((retained["metadata"]["confirmed"], retained["metadata"]["kind"]), ("false", "assistant_derivation"))
+        # UTC written as Z reaches Hindsight in one canonical form.
+        response = await self.api(path, {"async": True, "items": [{"content": "Synthetic second fact", "timestamp": "2026-03-14T08:30:00.250Z"}]})
+        operation = (await response.json())["operation_id"]
+        await memory_outbox.step(self.service)
+        retained = self.operations[operation]["items"][0]
+        self.assertEqual(retained["timestamp"], "2026-03-14T08:30:00.250000+00:00")
+        self.assertEqual(retained["context"], "Unverified assistant response; not confirmed facts")
+
+    async def test_gateway_retain_without_context_and_timestamp_keeps_the_stored_shape(self):
+        # Rows admitted before this field support carry only content/confirmed/provenance. New rows without the
+        # options keep that exact shape and fingerprint, so a replay of an old retain still finds its operation.
+        self.shared()
+        await self.durable()
+        path = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories"
+        # The official SDK sends both fields as null when unset (Hindsight: no timestamp means "now").
+        for number, options in enumerate(({}, {"context": None, "timestamp": None}, {"context": ""})):
+            with self.subTest(options=options):
+                self.jobs.clear()
+                item = {"content": f"Synthetic plain fact {number}", **options}
+                operation = (await (await self.api(path, {"async": True, "items": [item]})).json())["operation_id"]
+                job = self.jobs[operation]
+                self.assertEqual(set(job["payload"]), {"content", "confirmed", "provenance"})
+                self.assertEqual(job["fingerprint"], memory_outbox.digest(job["payload"]))
+                await memory_outbox.step(self.service)
+                retained = self.operations[operation]["items"][0]
+                self.assertNotIn("timestamp", retained)
+                self.assertEqual(retained["context"], "Unverified assistant response; not confirmed facts")
+
+    async def test_gateway_retain_replay_with_a_new_timestamp_is_the_same_operation(self):
+        # Hermes stamps every send with the current time; a replayed document must not become a conflict or a duplicate.
+        self.shared()
+        await self.durable()
+        path = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories"
+        item = {"content": "Synthetic replayed transcript", "document_id": "provider-document-2", "context": "Synthetic label"}
+        first = await self.api(path, {"async": True, "items": [{**item, "timestamp": "2026-03-14T09:30:00+01:00"}]})
+        operation = (await first.json())["operation_id"]
+        replay = await self.api(path, {"async": True, "items": [{**item, "timestamp": "2026-03-14T10:45:00+01:00", "context": "Other label"}]})
+        self.assertEqual(replay.status, 200)
+        self.assertEqual((await replay.json())["operation_id"], operation)
+        self.assertEqual(len(self.jobs), 1)
+        self.assertEqual(self.jobs[operation]["payload"]["timestamp"], "2026-03-14T09:30:00+01:00")
+
+    async def test_gateway_retain_rejects_invalid_timestamp_and_context(self):
+        self.shared()
+        await self.durable()
+        path = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories"
+        item = {"content": "Synthetic knowledge"}
+        for value in ("2026-02-30T10:00:00+00:00", "2026-13-01T00:00:00Z", "2026-03-14T24:00:00Z", "2026-03-14T09:60:00Z",
+                      "2026-03-14T09:30:00+15:00", "0000-01-01T00:00:00Z", "2026-03-14", "2026-03-14T09:30:00", "unset",
+                      "yesterday", "2026-03-14T09:30:00+01:00\n", 1773480600, ""):
+            with self.subTest(timestamp=value):
+                response = await self.api(path, {"async": True, "items": [{**item, "timestamp": value}]})
+                self.assertEqual(response.status, 400)
+                self.assertEqual((await response.json())["error"]["reason"],
+                                 "gateway retain timestamp must be an ISO 8601 date and time with a UTC offset")
+        for value in ("x" * 257, "Synthetic\nlabel", ["Synthetic"], "   "):
+            with self.subTest(context=value):
+                response = await self.api(path, {"async": True, "items": [{**item, "context": value}]})
+                self.assertEqual(response.status, 400)
+                self.assertEqual((await response.json())["error"]["reason"], "context must be a nonempty string of at most 256 characters")
+        # The context passes the same sensitive-data filter as the content.
+        response = await self.api(path, {"async": True, "items": [{**item, "context": "Synthetic note for someone@example.com"}]})
+        self.assertEqual(response.status, 403)
+        self.assertEqual(self.jobs, {})
+
+    async def test_gateway_retain_context_is_filtered_again_before_delivery(self):
+        self.shared()
+        await self.durable()
+        path = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories"
+        response = await self.api(path, {"async": True, "items": [{"content": "Synthetic fact", "context": "Synthetic codename label"}]})
+        operation = (await response.json())["operation_id"]
+        self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, deny_terms=("codename",))
+        await memory_outbox.step(self.service)
+        self.assertEqual(self.jobs[operation]["state"], "revoked")
+        self.assertEqual(self.operations, {})
 
     async def test_persistent_202_is_durable_and_database_failure_is_not_accepted(self):
         self.shared()
@@ -408,6 +525,12 @@ class SharedGatewayTests(MemoryHarness):
             self.assertEqual(retained.bank_id, SHARED)
             self.assertEqual(retained.items_count, 1)
             self.assertIn(str(retained.operation_id), self.jobs)
+            # As the Hermes plugin sends it: an aware event time and a short label.
+            dated = await client.aretain_batch(bank_id=SHARED, items=[{"content": "Synthetic dated SDK knowledge", "context": "Synthetic label",
+                                                                       "timestamp": datetime(2026, 3, 14, 9, 30, tzinfo=timezone(timedelta(hours=1)))}],
+                                               document_id="synthetic-dated-document", retain_async=True)
+            payload = self.jobs[str(dated.operation_id)]["payload"]
+            self.assertEqual((payload["context"], payload["timestamp"]), ("Synthetic label", "2026-03-14T09:30:00+01:00"))
             self.service.client.operation = AsyncMock(return_value={"status": "completed"})
             await memory_outbox.step(self.service)
             status = await client.operations.get_operation_status(bank_id=SHARED, operation_id=str(retained.operation_id))

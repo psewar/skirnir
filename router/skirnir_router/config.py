@@ -74,7 +74,7 @@ SCHEMA = {
         "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
-                                          "cloud": None, "data_class": None, "session_projects": None, "session_handoff_from": None, "memory": {"owner": None, "strategy": None, "default_project": None, "auto_retain": None, "projects": {"*": {"read": None, "write": None, "delete": None, "scope": None, "data_class": None, "allow_cloud": None}}}, "note": None, "token_rotated": None, "created": None}}},
+                                          "cloud": None, "data_class": None, "session_projects": None, "session_handoff_from": None, "memory": {"owner": None, "strategy": None, "default_project": None, "auto_retain": None, "projects": {"*": {"read": None, "write": None, "delete": None, "scope": None, "data_class": None, "allow_cloud": None, "allow_private_addresses": None}}}, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None,
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
@@ -250,6 +250,9 @@ class Config:
                     shared = self.memory_scopes.get(grant["scope"])
                     if not shared or shared["data_class"] != grant["data_class"]:
                         raise ValueError("shared scope classification must match the project grant")
+                    if grant["allow_private_addresses"] and shared["allow_cloud"]:
+                        # another client of the shared bank could take its addresses into cloud inference
+                        raise ValueError("allow_private_addresses requires a shared scope with allow_cloud false")  # exception-ok: aborts startup on an invalid configuration
         self.mqtt = c.get("mqtt") or None   # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
         self._parse_wol(r.get("wol") or {})
         self._parse_modes(c["modes"])

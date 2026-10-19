@@ -17,7 +17,7 @@ from uuid import UUID
 from aiohttp import web
 
 from . import auth, cloud, metrics, session_api, state
-from .hindsight import HindsightClient, endpoint_from_env
+from .hindsight import BANK_MISSING, HindsightClient, endpoint_from_env
 from .memory_config import HindsightConfig
 from .outcome import Problem, conflict, denied, failed, invalid, unauthenticated, unavailable
 
@@ -51,6 +51,7 @@ class Scope:
     shared_scope: str = ""
     delete: bool = False
     strategy: str = "legacy"
+    private_addresses: bool = False   # private network addresses may pass the content filter (local-only bank)
 
 
 def settings():
@@ -80,21 +81,28 @@ def scope_for_principal(principal, project, *, read=False, write=False, explicit
     if shared and (not shared_policy or shared_policy["data_class"] != grant["data_class"]):
         return denied("shared scope unavailable or classification changed")
     allow_cloud = bool(grant.get("allow_cloud")) and (not shared or shared_policy["allow_cloud"])
+    # The configuration refuses the option for any bank that can reach a cloud; checked again here so a live policy can
+    # never widen it.
+    private = bool(grant.get("allow_private_addresses")) and not grant.get("allow_cloud") and not (shared and shared_policy["allow_cloud"])
     return Scope(principal, project, grant["data_class"], bool(grant.get("read")), bool(grant.get("write")), allow_cloud,
-                 shared, bool(grant.get("delete")), strategy)
+                 shared, bool(grant.get("delete")), strategy, private)
 
 
-def rejected_content(content, cfg):
-    return (cloud.scan_secrets({"prompt": content}) is not None or bool(EMAIL.search(content)) or bool(PRIVATE_ADDRESS.search(content))
+def rejected_content(content, cfg, *, private_addresses=False):
+    """True when content must not leave or enter memory: secrets, e-mail addresses, configured terms and, unless the
+    scope allows them (private_addresses, a local-only bank), private network addresses."""
+    return (cloud.scan_secrets({"prompt": content}) is not None or bool(EMAIL.search(content))
+            or (not private_addresses and bool(PRIVATE_ADDRESS.search(content)))
             or any(term.casefold() in content.casefold() for term in cfg.deny_terms))
 
 
 @dataclass(frozen=True)
 class Recall:
     """Recalled facts with the memory's state as a fact, never inferred from an empty list.
-    state: "available" (Hindsight answered; no items means no matching knowledge), "query_filtered"
-    (the sensitive-data filter kept the query from being sent) or "unavailable[:<kind>]" (no usable
-    answer; kind as in hindsight.KINDS, e.g. "protocol" for an oversized or malformed response)."""
+    state: "available" (Hindsight answered; no items means no matching knowledge), "bank_missing" (the bank does
+    not exist yet: nothing was ever retained under this scope and namespace key), "query_filtered" (the
+    sensitive-data filter kept the query from being sent) or "unavailable[:<kind>]" (no usable answer; kind as in
+    hindsight.KINDS, e.g. "protocol" for an oversized or malformed response)."""
     items: list
     state: str = "available"
     trimmed: int = 0      # facts dropped by a size limit (recall_max_bytes or the client's budget)
@@ -123,12 +131,19 @@ def single_source(fact):
     return None
 
 
+QUERY_FILTERED = "memory query rejected by sensitive-data filter"
+
+
 def recall_response(body, recalled):
-    """Explicit recall (REST and gateway) answers with its state. Unreachable or oversized memory is a 503 with
-    that state, not an empty list: fail_open only lets inference proceed without facts (see prepare)."""
+    """Explicit recall (REST and gateway) answers with its state. Unreachable or oversized memory is a 503 and a
+    filtered query a 403, each with that state, not an empty list: fail_open only lets inference proceed without
+    facts (see prepare)."""
     if not recalled.available:
         return web.json_response({"error": {"message": MEMORY_UNAVAILABLE.message, "type": "memory_unavailable"}, "memory_state": recalled.state},
                                  status=503, headers={"Cache-Control": "no-store"})
+    if recalled.state == "query_filtered":
+        return web.json_response({"error": {"message": "memory query refused", "type": "memory_query_filtered", "reason": QUERY_FILTERED},
+                                  "memory_state": recalled.state}, status=403, headers={"Cache-Control": "no-store"})
     return web.json_response({**body, "memory_state": recalled.state, "trimmed": recalled.trimmed, "duplicates": recalled.duplicates,
                               "limited_by": recalled.limited_by}, headers={"Cache-Control": "no-store"})
 
@@ -188,7 +203,8 @@ class MemoryService:
             return invalid("memory query must be a nonempty string")
         # No conversation dumps or oversized query bodies; even no-network filtering is explicit.
         query = query.encode("utf-8")[:self.cfg.max_query_bytes].decode("utf-8", "ignore")
-        if rejected_content(query, self.cfg):
+        private = scope.private_addresses
+        if rejected_content(query, self.cfg, private_addresses=private):
             count("recall", "filtered")
             return Recall([], "query_filtered")
         result = await self.client.recall(self.bank(scope), query, types=types, authorize=lambda: self.current(scope, read=True))
@@ -196,6 +212,9 @@ class MemoryService:
             return POLICY_CHANGED
         if not self.current(scope, read=True):
             return POLICY_CHANGED
+        if not failed(result) and result.get(BANK_MISSING) is True:
+            count("recall", "bank_missing")
+            return Recall([], "bank_missing")
         values = None if failed(result) else result.get("results")
         if not isinstance(values, list):
             count("recall", "unavailable")
@@ -218,7 +237,8 @@ class MemoryService:
             source, content = fact.get("id"), fact.get("text")
             if not isinstance(source, str) or not 1 <= len(source) <= 128 or any(ord(c) < 32 for c in source):
                 continue
-            if not isinstance(content, str) or rejected_content(content, self.cfg) or rejected_content(source, self.cfg):
+            if (not isinstance(content, str) or rejected_content(content, self.cfg, private_addresses=private)
+                    or rejected_content(source, self.cfg, private_addresses=private)):
                 continue
             candidate = {"source": source, "text": content}
             metadata = fact.get("metadata")
@@ -227,7 +247,7 @@ class MemoryService:
                 # still untrusted data and never proof that a statement is true.
                 from .provenance import recall_metadata
                 clean = recall_metadata(metadata)
-                if rejected_content(json.dumps(clean), self.cfg):
+                if rejected_content(json.dumps(clean), self.cfg, private_addresses=private):
                     continue
                 if clean:
                     candidate["provenance"] = clean
@@ -268,14 +288,15 @@ class MemoryService:
             return RETENTION_OFF
         if not isinstance(content, str) or not content.strip() or len(content.encode()) > self.cfg.max_content_bytes:
             return invalid("retention content is empty or too large")
-        if rejected_content(content, self.cfg):
+        if rejected_content(content, self.cfg, private_addresses=scope.private_addresses):
             return FILTERED
         return self.operation(scope, event_id)
 
-    async def submit(self, scope, event_id, content, *, confirmed, provenance=None, shared_observations=False):
+    async def submit(self, scope, event_id, content, *, confirmed, provenance=None, shared_observations=False, context=None, timestamp=None):
         if self.outbox is not None:
             from .memory_outbox import submit
-            return await submit(self, scope, event_id, content, confirmed, provenance, shared_observations)
+            return await submit(self, scope, event_id, content, confirmed, provenance, shared_observations, context, timestamp)
+        # Context and timestamp come only from the gateway, which requires the persistent outbox.
         return self.enqueue(scope, event_id, content, confirmed=confirmed, provenance=provenance)
 
     def enqueue(self, scope, event_id, content, *, confirmed, provenance=None):
@@ -284,7 +305,7 @@ class MemoryService:
             return RETENTION_OFF
         if not isinstance(content, str) or not content.strip() or len(content.encode()) > self.cfg.max_content_bytes:
             return invalid("retention content is empty or too large")
-        if rejected_content(content, self.cfg):
+        if rejected_content(content, self.cfg, private_addresses=scope.private_addresses):
             count("retain", "filtered")
             return FILTERED
         operation = self.operation(scope, event_id)
@@ -292,7 +313,7 @@ class MemoryService:
         origin = provenance or make_provenance({}, scope.principal, confirmed=confirmed)
         if failed(origin):
             return origin
-        if rejected_content(json.dumps(origin), self.cfg):
+        if rejected_content(json.dumps(origin), self.cfg, private_addresses=scope.private_addresses):
             return denied("sensitive provenance")
         fingerprint = hashlib.sha256(json.dumps([content, confirmed, origin], sort_keys=True).encode()).hexdigest()
         if operation in self.seen:

@@ -18,6 +18,9 @@ from .session_api import parse_json_value
 
 KINDS = ("unavailable", "upstream_auth", "upstream_rejected", "protocol", "timeout", "transport", "remote_pending")
 RETRY_STATUSES = (429, 500, 502, 503, 504)
+# Set by this client (never by Hindsight) on the empty result for a bank that does not exist (HTTP 404), so a caller
+# can report it as a state instead of reading it as "nothing matched".
+BANK_MISSING = "skirnir_bank_missing"
 BANK_TEXT = re.compile(r"skirnir-[0-9a-f]{64}")
 # Host names, IPv4 or the IPv6 loopback literal; an optional path prefix of plain URL characters.
 URL_TEXT = re.compile(r"(?P<scheme>https?)://(?P<host>[A-Za-z0-9.-]+|\[::1\])(?::(?P<port>[0-9]{1,5}))?(?:/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?")
@@ -99,7 +102,7 @@ class HindsightClient:
                     continue
                 status, value = reply
                 if status == 404 and missing_empty:
-                    outcome, result = "empty", {"results": []}
+                    outcome, result = "empty", {"results": [], BANK_MISSING: True}
                     break
                 if status in RETRY_STATUSES:
                     result = unavailable_as("unavailable")
@@ -129,17 +132,22 @@ class HindsightClient:
             payload["types"] = types
         return await self.post(bank, "/recall", payload, missing_empty=True, authorize=authorize)
 
-    async def retain(self, bank, content, operation_id, *, document_id=None, confirmed, provenance=None, shared_observations=False, authorize=None):
+    async def retain(self, bank, content, operation_id, *, document_id=None, confirmed, provenance=None, shared_observations=False,
+                     context=None, timestamp=None, authorize=None):
         """None once Hindsight acknowledged the operation, or a Problem. The document id defaults to the operation id;
-        a resubmission sends a new operation id for the same document."""
+        a resubmission sends a new operation id for the same document. A client `context` is appended to the fixed
+        notice, never in its place; `timestamp` (ISO 8601, checked by the caller) is the event time Hindsight dates
+        the facts by, otherwise Hindsight uses the time of extraction."""
         document_id = document_id or operation_id
         origin = {"kind": "confirmed_information" if confirmed else "assistant_derivation",
                   "origin_client": "unspecified", "observed_at": datetime.now(timezone.utc).isoformat(), "version": document_id}
         origin.update(provenance or {})
+        notice = "Client-confirmed knowledge" if confirmed else "Unverified assistant response; not confirmed facts"
         result = await self.post(bank, "", {"async": True, "operation_id": operation_id, "items": [{
             "content": content, "document_id": document_id,
             **({"observation_scopes": "shared"} if shared_observations else {}),
-            "context": "Client-confirmed knowledge" if confirmed else "Unverified assistant response; not confirmed facts",
+            **({"timestamp": timestamp} if timestamp is not None else {}),
+            "context": notice + ("; client context: " + context if context else ""),
             "metadata": {**origin, "source": "client" if confirmed else "assistant", "confirmed": str(confirmed).lower()}}]}, authorize=authorize)
         if failed(result):
             return result
