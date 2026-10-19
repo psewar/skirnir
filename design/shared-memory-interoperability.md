@@ -147,7 +147,7 @@ Implemented gateway contracts under `/v1/skirnir/hindsight`:
 | Method/path | Meaning |
 | --- | --- |
 | `GET /version` or `/v1/version` | Versionless capabilities; never advertises full-server/append support. |
-| `POST /v1/default/banks/{alias}/memories/recall` | Bounded untrusted text recall. |
+| `POST /v1/default/banks/{alias}/memories/recall` | Bounded untrusted text recall with `memory_state` and `trimmed`; 503 with `memory_state` when the memory is unavailable (never an empty list). |
 | `POST /v1/default/banks/{alias}/memories` | One bounded item, `async: true` or `false`, persistent outbox required. |
 | `GET /v1/default/banks/{alias}/operations/{uuid}` | Owner-scoped operation status; accepted waits for actual upstream completion. |
 
@@ -164,7 +164,9 @@ Recall accepts SDK default null expansions, `types` absent, `observation`, or th
 standard world/experience/observation set. Server limits cap results and upstream
 search uses the low budget. Filters, expanded entities/chunks/source facts, trace,
 reflect, bank administration, extraction strategies and append are unsupported
-and rejected. Provider metadata is not trusted as confirmation.
+and rejected; retain item `tags`, `entities`, `strategy` and `resolve_entities: false`
+are refused with 400 and `error.reason` naming the option. Provider metadata is not
+trusted as confirmation.
 
 Use manual bounded fact retention. Full transcript mirroring is intentionally not
 promised: repeated identical provider document/content snapshots deduplicate;

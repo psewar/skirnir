@@ -18,7 +18,7 @@ The adapter uses these paths relative to the configured service URL:
 
 | Operation | HTTP contract |
 | --- | --- |
-| Recall | `POST /v1/default/banks/{bank_id}/memories/recall` with `query`, `budget: low`, `max_tokens`; reads `results[].id/text` |
+| Recall | `POST /v1/default/banks/{bank_id}/memories/recall` with `query`, `budget: low`, `max_tokens`, `include: {entities: null}`; reads `results[].id/text` |
 | Retain | `POST /v1/default/banks/{bank_id}/memories` with `async: true`, a deterministic UUID `operation_id`, and one item containing `content`, `document_id`, `context`, `metadata` |
 
 Use a deployment supporting the documented caller-supplied async `operation_id`.
@@ -34,6 +34,14 @@ and payload. Only connection errors/timeouts and HTTP 429/500/502/503/504 are re
 at most `retries` times (0–2). Other failures, malformed/oversized responses and
 redirects are not retried. A missing recall bank (404) returns an empty result without
 creating a bank. Skirnir never exposes bank-management endpoints.
+
+Recall sends `include: {entities: null}`. Hindsight returns entity state by default
+(documented since 0.7: null skips the entity JOIN), and Skirnir never passes it on.
+Measured on a bank of about 90 matching facts at a 4096-token budget, this saves about
+14 % of the response (85 KB to 73 KB). The response size is driven by the number of
+facts, which `recall_max_tokens` controls. Skirnir passes on at most 10 facts within
+`recall_max_bytes`, so a large `recall_max_tokens` mostly adds bytes that are dropped
+again and can push the response past `max_response_bytes`.
 
 ## Deployment and opt-in
 
@@ -69,7 +77,7 @@ router:
     namespace_key_env: SKIRNIR_MEMORY_NAMESPACE_KEY
     timeout_s: 3
     retries: 1
-    fail_open: true
+    fail_open: true                # inference only: proceed without facts, state in X-Skirnir-Memory-State
     retention_enabled: false
     recall_max_tokens: 512          # token budget sent to Hindsight
     recall_max_bytes: 4096          # byte cap of the rendered recall wrapper (incl. provenance)
@@ -163,9 +171,25 @@ run on the **augmented** prompt. Request classification may not be lowered to wr
 higher-class output into a lower-class bank. Shadow execution and the legacy response
 cache are bypassed for memory requests to prevent secondary/unscoped disclosure.
 
-`fail_open: true` turns upstream recall failures into empty retrieval so normal
-inference proceeds; `false` returns 503 before inference. Authentication/scope errors
-are always denied, not treated as outages. Ordinary requests never call Hindsight.
+Every recall reports the memory's state as a fact, never as an empty list a client has
+to interpret:
+
+| `memory_state` | Meaning |
+| --- | --- |
+| `available` | Hindsight answered. No items means no matching knowledge. |
+| `query_filtered` | The sensitive-data filter kept the query from being sent. |
+| `unavailable` / `unavailable:<kind>` | No usable answer. `kind` is a fixed category: `timeout`, `transport`, `protocol` (malformed or above `max_response_bytes`), `upstream_auth`, `upstream_rejected`. |
+
+`fail_open` applies to **inference augmentation only**. With `true`, an unavailable
+memory lets normal inference proceed without facts, and the response carries the
+header `X-Skirnir-Memory-State` (also the `routing` block's `memory_state`). With `false`,
+inference returns 503 before it starts. Explicit recall (`/v1/skirnir/memory/recall` and
+the Hindsight gateway) always answers 503 with `memory_state` when the memory is
+unavailable. Before, an oversized answer from a large bank arrived as an empty list,
+and the Hermes provider reported "No relevant memories found" for a memory it never
+reached; through the official SDK it is now an error. Successful explicit recalls carry
+`memory_state` and `trimmed` (facts dropped by `recall_max_bytes`). Authentication/scope
+errors are always denied, not treated as outages. Ordinary requests never call Hindsight.
 
 ## Conscious, bounded retention
 
@@ -191,7 +215,10 @@ only Skirnir's bounded in-memory queue, not durable storage or successful Hindsi
 fact extraction. Deterministic operation IDs support client replay after failures
 or restarts. A queue-full condition returns 503; conflicting cached IDs return 409.
 Other errors use 400/401/403/404/413/503 without backend error text or secrets.
-All memory API responses use no-store caching.
+A rejected request (400/413) keeps its fixed public `error.message` and adds
+`error.reason`, the fixed text chosen where the problem was detected (for example
+`unsupported gateway retain option: tags`), so a client does not have to guess which
+field was refused. All memory API responses use no-store caching.
 
 Response retention is eligible only for a completed stop response with nonempty,
 bounded plain text and no known client disconnect. Streams must finish writing their
@@ -224,7 +251,8 @@ Hindsight/proxy/database logging and backup policies remain the operator's respo
 ## Direct recall API and validation
 
 `POST /v1/skirnir/memory/recall` accepts only `project` and `query`; returns
-`{items:[{source,text}], trusted:false}`. Both APIs reject supplied bank, owner,
+`{items:[{source,text}], trusted:false, memory_state, trimmed}`, or 503 with
+`memory_state` when the memory is unavailable. Both APIs reject supplied bank, owner,
 tenant, endpoint and other unknown fields. They do not expose session history.
 
 ```sh

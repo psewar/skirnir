@@ -136,6 +136,7 @@ class Routing:
         self.session = None
         self.memory_context = None
         self.memory_items = []
+        self.memory_state = None   # Zustand des Recalls (memory.Recall.state), als Header X-Skirnir-Memory-State
         self.context_sensitive = False
         self.memory = None
         self.memory_scope = None
@@ -174,6 +175,8 @@ class Routing:
         d["execution"] = self.execution
         if self.data_class_effective:
             d["data_class"] = self.data_class_effective
+        if self.memory_state:
+            d["memory_state"] = self.memory_state
         return d
 
 
@@ -259,6 +262,8 @@ def check_limits(body):
 def headers_for(info):
     h = {"X-Skirnir-Request-Id": str(info["request_id"]), "X-Skirnir-Node": info["node"], "X-Skirnir-Model": info["model"],
          "X-Skirnir-Tier": str(info["tier"]), "X-Skirnir-Warm": "1" if info["warm"] else "0"}
+    if info.get("memory_state"):   # nur bei Recall: ein Ausfall (auch unter fail_open) sieht nie wie "kein Wissen" aus
+        h["X-Skirnir-Memory-State"] = info["memory_state"]
     return h
 
 
