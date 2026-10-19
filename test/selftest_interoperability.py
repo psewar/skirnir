@@ -190,14 +190,30 @@ class SharedGatewayTests(MemoryHarness):
         self.results = [realistic_fact("source-1", "Synthetic project uses versioned events.")]
         base = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories/recall"
         before = trimmed_count()
-        # Without max_tokens the server byte cap alone applies, not the 512-token Hindsight budget.
+        # Without max_tokens the server byte cap alone applies.
         response = await self.api(base, {"query": "Synthetic"}, "client-owned")
         self.assertEqual([r["id"] for r in (await response.json())["results"]], ["source-1"])
         self.assertEqual(trimmed_count(), before)
-        response = await self.api(base, {"query": "Synthetic", "max_tokens": 100}, "client-owned")
-        self.assertEqual((await response.json())["results"], [])
+        # As in Hindsight, the client's max_tokens counts fact text only (here 40 bytes, at most 40 tokens), not the
+        # provenance and JSON around it: 100 tokens hold this fact, although the whole block is far larger.
+        value = await (await self.api(base, {"query": "Synthetic", "max_tokens": 100}, "client-owned")).json()
+        self.assertEqual(([r["id"] for r in value["results"]], value["limited_by"]), (["source-1"], "results"))
+        value = await (await self.api(base, {"query": "Synthetic", "max_tokens": 10}, "client-owned")).json()
+        self.assertEqual((value["results"], value["limited_by"]), ([], "client"))
         self.assertEqual(trimmed_count(), before + 1)
         self.assertEqual((await self.api(base, {"query": "Synthetic", "max_tokens": 0}, "client-owned")).status, 400)
+
+    async def test_hermes_default_budget_no_longer_caps_a_larger_server_limit(self):
+        # Hermes sends max_tokens 4096 by default. Applied to the whole block as bytes it silently held the recall at
+        # 4 KiB whatever the server allowed; applied to fact text it only lowers when the client really wants less.
+        self.shared()
+        self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, recall_max_bytes=16384)
+        self.results = [realistic_fact(f"source-{i}", f"Synthetic project fact number {i} with a few more words.") for i in range(60)]
+        base = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories/recall"
+        value = await (await self.api(base, {"query": "Synthetic", "max_tokens": 4096})).json()
+        self.assertEqual(value["limited_by"], "bytes")
+        self.assertGreater(len(memory.packed([{"source": r["id"], "text": r["text"], "provenance": r["metadata"]}
+                                              for r in value["results"]]).encode()), 8192)
 
     async def test_gateway_never_becomes_an_arbitrary_proxy(self):
         self.shared()

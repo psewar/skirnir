@@ -147,7 +147,7 @@ Implemented gateway contracts under `/v1/skirnir/hindsight`:
 | Method/path | Meaning |
 | --- | --- |
 | `GET /version` or `/v1/version` | Versionless capabilities; never advertises full-server/append support. |
-| `POST /v1/default/banks/{alias}/memories/recall` | Bounded untrusted text recall with `memory_state`, `trimmed` and `duplicates`; 503 with `memory_state` when the memory is unavailable (never an empty list). |
+| `POST /v1/default/banks/{alias}/memories/recall` | Bounded untrusted text recall with `memory_state`, `trimmed`, `duplicates` and `limited_by`; a client's `max_tokens` counts fact text, as in Hindsight; 503 with `memory_state` when the memory is unavailable (never an empty list). |
 | `POST /v1/default/banks/{alias}/memories` | One bounded item, `async: true` or `false`, persistent outbox required. |
 | `GET /v1/default/banks/{alias}/operations/{uuid}` | Owner-scoped operation status; accepted waits for actual upstream completion. |
 

@@ -168,7 +168,7 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
         if self.bad_json:
             return web.Response(text="invalid-json")
         if self.large_response:
-            return web.json_response({"results": [{"id": "source-1", "text": "x" * 100000}]})
+            return web.json_response({"results": [{"id": "source-1", "text": "x" * 300000}]})   # above the derived 256 KiB
         return web.json_response({"results": self.results})
 
     async def fake_retain(self, request):
@@ -233,7 +233,9 @@ class MemoryHttpTests(MemoryHarness):
         self.assertTrue(all(c[0].startswith("skirnir-") and "client" not in c[0] and PROJECT not in c[0] for c in self.calls))
         # Entities are never passed on, so they are not requested (Hindsight: include.entities null skips them). Source
         # facts are requested with a zero budget: only their ids, to recognise an observation that repeats one fact.
-        self.assertEqual(self.calls[0][1], {"query": "Synthetic question", "budget": "low", "max_tokens": 512,
+        # Hindsight's budget is derived from recall_max_bytes (4096): a token is never shorter than a byte, so that many
+        # tokens of fact text always suffice to fill the byte cap.
+        self.assertEqual(self.calls[0][1], {"query": "Synthetic question", "budget": "low", "max_tokens": 4096,
                                             "include": {"entities": None, "source_facts": {"max_tokens": 0}}})
         self.assertEqual(self.calls[0][2], "Bearer synthetic-token")
 
@@ -291,7 +293,7 @@ class MemoryHttpTests(MemoryHarness):
         before = trimmed_count()
         value = await (await self.call()).json()
         self.assertEqual([v["source"] for v in value["items"]], ["source-2"])
-        self.assertEqual((value["memory_state"], value["trimmed"]), ("available", 1))
+        self.assertEqual((value["memory_state"], value["trimmed"], value["limited_by"]), ("available", 1, "bytes"))
         self.assertEqual(trimmed_count(), before + 1)
 
     async def test_an_observation_and_its_single_source_fact_take_one_place(self):
@@ -309,17 +311,40 @@ class MemoryHttpTests(MemoryHarness):
         self.assertEqual((value["memory_state"], value["trimmed"], value["duplicates"]), ("available", 0, 2))
         self.assertEqual(trimmed_count("duplicate"), before + 2)
 
-    async def test_recall_max_facts_is_configurable(self):
+    async def test_the_byte_cap_alone_decides_unless_a_fact_limit_is_set(self):
+        # Without recall_max_facts the byte cap decides alone, and the answer says which limit stopped it, so a
+        # setting never silently has no effect.
         self.results = [fact(f"source-{i}", f"Synthetic fact {i}.") for i in range(30)]
         value = await (await self.call()).json()
-        self.assertEqual(len(value["items"]), 10)   # default unchanged
-        self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, recall_max_facts=25)
+        self.assertEqual((len(value["items"]), value["limited_by"]), (30, "results"))   # all Hindsight gave, nothing cut
+        self.results = [fact(f"source-{i}", f"Synthetic fact number {i} with some more words.") for i in range(100)]
         value = await (await self.call()).json()
-        self.assertEqual([v["source"] for v in value["items"]], [f"source-{i}" for i in range(25)])
+        self.assertEqual(value["limited_by"], "bytes")
+        self.assertLessEqual(len(memory.packed(value["items"]).encode()), 4096)
+        bytes_only = len(value["items"])
+        self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, recall_max_facts=bytes_only - 5)
+        value = await (await self.call()).json()
+        self.assertEqual([v["source"] for v in value["items"]], [f"source-{i}" for i in range(bytes_only - 5)])
+        self.assertEqual(value["limited_by"], "facts")
         for raw in (0, 101, True, "10"):
             with self.subTest(raw=raw):
                 self.assertTrue(failed(parse_hindsight({"recall_max_facts": raw})))
         self.assertEqual(parse_hindsight({"recall_max_facts": 20}).recall_max_facts, 20)
+        self.assertIsNone(parse_hindsight({}).recall_max_facts)
+
+    def test_budgets_are_derived_from_the_byte_cap_unless_set(self):
+        # One setting to turn: Hindsight's selection budget and the response limit follow recall_max_bytes. An explicit
+        # value still wins, for a remote or metered Hindsight.
+        cases = (({}, 4096, 262144), ({"recall_max_bytes": 8192}, 8192, 524288), ({"recall_max_bytes": 1024}, 1024, 65536),
+                 ({"recall_max_tokens": 512}, 512, 65536), ({"recall_max_tokens": 4096, "max_response_bytes": 262144}, 4096, 262144),
+                 ({"recall_max_bytes": 16384, "max_response_bytes": 131072}, 16384, 131072))
+        for raw, tokens, response in cases:
+            with self.subTest(raw=raw):
+                cfg = parse_hindsight(raw)
+                self.assertEqual((cfg.recall_tokens, cfg.response_limit), (tokens, response))
+        for raw in ({"recall_max_tokens": 100}, {"recall_max_tokens": True}, {"max_response_bytes": 512}):
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(parse_hindsight(raw)))
 
     async def test_opt_out_never_calls_memory(self):
         ops.IDEM.clear()
@@ -387,7 +412,7 @@ class MemoryHttpTests(MemoryHarness):
             self.assertEqual(recalled.status, 200)
             # Not sent is not the same as "nothing known": the state says the query was filtered.
             self.assertEqual(await recalled.json(), {"items": [], "trusted": False, "memory_state": "query_filtered",
-                                                     "trimmed": 0, "duplicates": 0})
+                                                     "trimmed": 0, "duplicates": 0, "limited_by": None})
         self.assertEqual(self.calls, [])
         self.results = [{"id": "source-1", "text": "password=" + "synthetic-value"}]
         r = await self.call()
@@ -431,7 +456,7 @@ class MemoryHttpTests(MemoryHarness):
         self.assertEqual(r.headers.get("X-Skirnir-Memory-State"), "unavailable:protocol")
         self.assertEqual(len(self.upstream_bodies[-1]["messages"]), 2)
         # The limit is configurable: the same answer fits under a larger max_response_bytes.
-        self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, max_response_bytes=262144)
+        self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, max_response_bytes=524288)
         self.service.client.cfg = self.service.cfg
         value = await (await self.call()).json()
         self.assertEqual((value["memory_state"], value["items"], value["trimmed"]), ("available", [], 1))

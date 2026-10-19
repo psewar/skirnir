@@ -31,8 +31,9 @@ router:
     sync_wait_s: 20             # gateway retain with async=false: wait for verified completion, then 504 with operation id
     sync_max_waiting: 8         # concurrent synchronous retains
     recall_min_score: 0.0
-    recall_max_bytes: 4096      # byte cap of the rendered recall wrapper incl. provenance; dropped facts count as outcome=trimmed
-    recall_max_facts: 10        # facts per recall after duplicates are dropped (1-100); the byte cap applies as well
+    recall_max_bytes: 4096      # the one recall setting: byte cap of the rendered block incl. provenance (outcome=trimmed)
+    # Derived from it unless set (design/hindsight-memory.md, "One setting"): recall_max_tokens (Hindsight budget),
+    # max_response_bytes, recall_max_facts (no count cut). Each recall reports limited_by.
   memory_scopes: {}             # server-controlled shared scopes; private HMAC IDs stay unchanged
   # Optionaler expliziter Session-Speicher; normale Inferenz und routing.session_id bleiben unveraendert.
   # pip install -r router/requirements-session.txt; DSN nur per Service-Environment/Secret setzen.

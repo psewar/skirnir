@@ -97,8 +97,12 @@ class Recall:
     answer; kind as in hindsight.KINDS, e.g. "protocol" for an oversized or malformed response)."""
     items: list
     state: str = "available"
-    trimmed: int = 0      # facts dropped by the byte cap recall_max_bytes
+    trimmed: int = 0      # facts dropped by a size limit (recall_max_bytes or the client's budget)
     duplicates: int = 0   # results dropped because they repeat a fact already passed on (see single_source)
+    # Which limit stopped this recall, so no setting silently has no effect: "facts" (recall_max_facts), "bytes"
+    # (recall_max_bytes), "client" (the caller's own max_tokens), "results" (everything usable Hindsight returned
+    # was passed on; more needs a larger Hindsight budget or there is no more matching knowledge). None: no lookup.
+    limited_by: str | None = None
 
     @property
     def available(self):
@@ -125,8 +129,8 @@ def recall_response(body, recalled):
     if not recalled.available:
         return web.json_response({"error": {"message": MEMORY_UNAVAILABLE.message, "type": "memory_unavailable"}, "memory_state": recalled.state},
                                  status=503, headers={"Cache-Control": "no-store"})
-    return web.json_response({**body, "memory_state": recalled.state, "trimmed": recalled.trimmed, "duplicates": recalled.duplicates},
-                             headers={"Cache-Control": "no-store"})
+    return web.json_response({**body, "memory_state": recalled.state, "trimmed": recalled.trimmed, "duplicates": recalled.duplicates,
+                              "limited_by": recalled.limited_by}, headers={"Cache-Control": "no-store"})
 
 
 def public_problem(problem, public):
@@ -173,9 +177,10 @@ class MemoryService:
         """True while the service is active and the live grant still yields exactly this scope."""
         return self.active() and scope_for_principal(scope.principal, scope.project, read=read, write=write, explicit=True) == scope
 
-    async def recall(self, scope, query, *, types=None, byte_budget=None):
+    async def recall(self, scope, query, *, types=None, text_budget=None):
         """A Recall carrying its state (also when Hindsight gave no usable answer; the caller decides whether that
-        stops it), or a Problem for a policy or request error."""
+        stops it), or a Problem for a policy or request error. text_budget: a caller's own max_tokens, applied as
+        Hindsight applies it, to the fact text only."""
         if not self.current(scope, read=True):
             return POLICY_CHANGED
         if not isinstance(query, str) or not query.strip():
@@ -195,13 +200,13 @@ class MemoryService:
             count("recall", "unavailable")
             return Recall([], unavailable_state(result.kind if failed(result) else "protocol"))
         items, trimmed, duplicates, shown = [], 0, 0, set()   # shown: ids passed on, incl. the single source of an observation
-        # Hindsight max_tokens (recall_max_tokens) is advisory: an oversized top fact may be returned.
-        # Bound the complete rendered wrapper locally by UTF-8 bytes, a conservative upper bound on its
-        # text tokens, including the notice, source labels, provenance and JSON overhead. This byte cap
-        # (recall_max_bytes) is separate from the upstream token budget: provenance alone is a few hundred
-        # bytes, so one shared limit of 512 dropped even a single short fact. A caller's own budget
-        # (gateway max_tokens) can only lower it.
-        limit = min(self.cfg.recall_max_bytes, byte_budget if byte_budget is not None else self.cfg.recall_max_bytes)
+        by_bytes = by_client = False
+        text_bytes = 0
+        # Hindsight's max_tokens is advisory: an oversized top fact may be returned. Bound the complete rendered
+        # wrapper locally by UTF-8 bytes (recall_max_bytes), a conservative upper bound on its text tokens, including
+        # the notice, source labels, provenance and JSON overhead. A caller's own budget (gateway max_tokens) means
+        # what it means in Hindsight: tokens of fact text, bounded conservatively by the text's bytes. Applied to the
+        # whole wrapper it silently held a client's default 4096 tokens to 4 KiB whatever the server allowed.
         for fact in values[:100]:
             if not isinstance(fact, dict):
                 continue
@@ -233,18 +238,26 @@ class MemoryService:
             if source in shown or (twin is not None and twin in shown):
                 duplicates += 1
                 continue
-            if len(packed([*items, candidate]).encode()) <= limit:
-                items.append(candidate)
-                shown.update((source, twin) if twin is not None else (source,))
-            else:
-                trimmed += 1   # a smaller later fact may still fit, so keep looking
+            size = len(content.encode())
+            if text_budget is not None and text_bytes + size > text_budget:
+                trimmed, by_client = trimmed + 1, True   # a shorter later fact may still fit, so keep looking
+                continue
+            if len(packed([*items, candidate]).encode()) > self.cfg.recall_max_bytes:
+                trimmed, by_bytes = trimmed + 1, True
+                continue
+            items.append(candidate)
+            text_bytes += size
+            shown.update((source, twin) if twin is not None else (source,))
             if len(items) == self.cfg.recall_max_facts:
                 break
+        limited_by = ("facts" if self.cfg.recall_max_facts is not None and len(items) == self.cfg.recall_max_facts
+                      else "client" if by_client else "bytes" if by_bytes else "results")
+        count("recall", "limited_" + limited_by)
         if trimmed:   # visible as state: an empty or short recall caused by the size limit, not by missing facts
             count("recall", "trimmed", trimmed)
         if duplicates:
             count("recall", "duplicate", duplicates)
-        return Recall(items, trimmed=trimmed, duplicates=duplicates)
+        return Recall(items, trimmed=trimmed, duplicates=duplicates, limited_by=limited_by)
 
     def validate_retain(self, scope, event_id, content):
         """Operation UUID for this event, or a Problem."""

@@ -193,12 +193,12 @@ async def gateway_recall(service, scope, data):
         return invalid("unsupported gateway recall budget or tag match")
     if data.get("types") not in (None, ["observation"], ["world", "experience", "observation"]):
         return invalid("unsupported recall fact types")
-    # A client's max_tokens can only lower the server's byte cap (bytes bound tokens from above). Without it the
-    # server cap recall_max_bytes applies alone - not recall_max_tokens, which is Hindsight's own selection budget.
+    # A client's max_tokens counts fact text, as in Hindsight, and can only lower what the server passes on; the
+    # server cap recall_max_bytes still bounds the whole block. It never changes Hindsight's own selection budget.
     tokens = data.get("max_tokens")
     if tokens is not None and (type(tokens) is not int or not 1 <= tokens <= 100000):
         return invalid("invalid recall budget")
-    recalled = await service.recall(scope, data["query"], types=data.get("types"), byte_budget=tokens)
+    recalled = await service.recall(scope, data["query"], types=data.get("types"), text_budget=tokens)
     if failed(recalled):
         return recalled
     return memory.recall_response({"results": [{"id": x["source"], "text": x["text"], "metadata": x.get("provenance", {})}
