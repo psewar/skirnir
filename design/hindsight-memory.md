@@ -39,9 +39,7 @@ Recall sends `include: {entities: null}`. Hindsight returns entity state by defa
 (documented since 0.7: null skips the entity JOIN), and Skirnir never passes it on.
 Measured on a bank of about 90 matching facts at a 4096-token budget, this saves about
 14 % of the response (85 KB to 73 KB). The response size is driven by the number of
-facts, which `recall_max_tokens` controls. Skirnir passes on at most `recall_max_facts`
-(10) facts within `recall_max_bytes`, so a large `recall_max_tokens` mostly adds bytes
-that are dropped again and can push the response past `max_response_bytes`.
+facts, which Hindsight's token budget controls (see "One setting" below).
 
 **Duplicates.** Hindsight returns an observation next to the fact it was derived from,
 for example a fact with its appended `| When: … |` context and an observation with the
@@ -54,10 +52,30 @@ fact, the higher-ranked of the pair keeps its place and the other is dropped, co
 `duplicates` on explicit recalls. An observation summarising several facts is more than a
 copy of any of them; it and its sources all stay.
 
-**Why 10.** The number came from the first implementation without a recorded reason.
-A replay of 27 realistic test questions against one real bank (the router's own filter
-over the stored raw Hindsight answers) measured the alternatives. Over the gateway, the
-Hermes provider sends `max_tokens: 4096`, which caps the block at 4096 bytes as well:
+**One setting: `recall_max_bytes`.** How much memory reaches a context is one question,
+so one setting answers it: `recall_max_bytes` (4096), the hard cap of the rendered block.
+The other limits are derived from it unless set, and each has its own reason to be set:
+
+| Setting | Unset (derived) | Set it explicitly when |
+| --- | --- | --- |
+| `recall_max_tokens` | = `recall_max_bytes`: a token is never shorter than a byte, so that many tokens of fact text always fill the cap, also after duplicates and filtered facts | Hindsight is remote, slow or metered and should send less |
+| `max_response_bytes` | max(64 KiB, 64 × the token budget); measured 18 bytes per budget token on a real bank | responses are larger than that (an answer above it is `unavailable:protocol`) |
+| `recall_max_facts` | no count cut, the byte cap decides | a small model loses focus with many items, or a bank of very short facts fits dozens into the cap |
+
+A gateway client's own `max_tokens` means what it means in Hindsight: tokens of **fact
+text**, bounded conservatively by the text's bytes. It can only lower what is passed on.
+Applied to the whole block as bytes (before), the Hermes provider's default of 4096
+tokens silently held every recall to 4 KiB whatever the server allowed.
+
+Every recall reports which limit stopped it, so a setting never silently has no effect:
+`limited_by` is `bytes`, `facts`, `client` or `results` (everything usable Hindsight
+returned was passed on), counted as `outcome="limited_<by>"`.
+
+**Measured.** The former fixed limit of 10 facts came from the first implementation
+without a recorded reason. A replay of 27 realistic test questions against one real bank
+(the router's own filter over the stored raw Hindsight answers, cross-checked against
+the live Hermes path) measured the alternatives, then still with the client's 4096 as a
+byte cap:
 
 | Setting | Probe hit | Keyword coverage | Facts | Duplicates | Bytes | Binding limit |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -67,10 +85,21 @@ Hermes provider sends `max_tokens: 4096`, which caps the block at 4096 bytes as 
 | 20 facts, 8 KB | 27/27 | 84.9 % | 19.6 | 0.1 | 7285 | count |
 | 30 facts, 16 KB | 27/27 | 88.9 % | 30 | 0.1 | 10670 | count |
 
-With duplicates dropped, 10 facts nearly fill 4 KB, so the two limits match. More facts
-help only together with a larger byte cap (and, over the gateway, a larger client
-`max_tokens`), at about 1.9 to 2.9 times the bytes for 2.7 to 6.7 points of coverage. The
-default stays 10; `recall_max_facts` changes it.
+With duplicates dropped, 10 facts nearly fill 4 KB, and without a count cut the 4 KB cap
+passes about 11 facts at the same quality (row "15–20 facts, 4 KB"). That is the default
+now. The same replay with the client's budget counting fact text (Hermes still sending
+4096):
+
+| Setting | Probe hit | Keyword coverage | Facts | Bytes | `limited_by` |
+| --- | --- | --- | --- | --- | --- |
+| default: 4 KB, no count cut | 26/27 | 82.2 % | 11.4 | 4065 | bytes 27× |
+| 4 KB, `recall_max_facts: 10` | 26/27 | 82.2 % | 9.9 | 3733 | facts 25× |
+| `recall_max_bytes: 8192` | 27/27 | 86.2 % | 19.7 | 7069 | client 27× |
+| `recall_max_bytes: 16384` | 27/27 | 86.2 % | 19.9 | 7141 | client 27× |
+
+Raising `recall_max_bytes` alone now takes effect, up to the client's own budget: 4096
+tokens of fact text, counted conservatively as bytes, hold about 20 facts here. Beyond
+that the client decides (Hermes: `recall_max_tokens`), and `limited_by: client` says so.
 
 ## Deployment and opt-in
 
@@ -108,10 +137,9 @@ router:
     retries: 1
     fail_open: true                # inference only: proceed without facts, state in X-Skirnir-Memory-State
     retention_enabled: false
-    recall_max_tokens: 512          # token budget sent to Hindsight
-    recall_max_bytes: 4096          # byte cap of the rendered recall wrapper (incl. provenance)
+    recall_max_bytes: 4096          # the one recall setting: byte cap of the rendered block (incl. provenance)
+    # recall_max_tokens, max_response_bytes, recall_max_facts: derived unless set, see "One setting"
     max_query_bytes: 512
-    max_response_bytes: 65536
     max_inflight: 4
     queue_size: 32
     max_content_bytes: 4096
@@ -178,15 +206,13 @@ not a proof that an LLM is immune to prompt injection.
 
 Hindsight's max_tokens can return an oversized top fact. Skirnir therefore independently
 bounds the complete rendered wrapper by UTF-8 bytes, a conservative upper bound on its text
-tokens. Two settings apply, deliberately separate:
+tokens. `recall_max_bytes` (4096) caps the rendered wrapper: notice, fact text, source
+labels, provenance metadata, timestamps and JSON overhead. Provenance alone takes a few
+hundred bytes, so the former shared limit of 512 for tokens and bytes dropped even a single
+short fact. Hindsight's token budget is a separate value, derived from the cap unless set.
 
-- `recall_max_tokens` (512) is the token budget Skirnir sends to Hindsight for its own selection.
-- `recall_max_bytes` (4096) caps the rendered wrapper: notice, fact text, source labels,
-  provenance metadata, timestamps and JSON overhead. Provenance alone takes a few hundred bytes,
-  so one shared limit of 512 dropped even a single short fact.
-
-A gateway client's `max_tokens` can only lower the byte cap. Skirnir drops whole facts instead
-of cutting them, and counts each dropped fact as
+A gateway client's `max_tokens` counts fact text and can only lower what is passed on.
+Skirnir drops whole facts instead of cutting them, and counts each dropped fact as
 `skirnir_memory_events_total{operation="recall",outcome="trimmed"}`. A short or empty recall
 caused by the size limit is therefore visible instead of looking like missing knowledge.
 Bodies/queries/responses are bounded and HTTP concurrency includes pool-wait time in
@@ -217,8 +243,9 @@ the Hindsight gateway) always answers 503 with `memory_state` when the memory is
 unavailable. Before, an oversized answer from a large bank arrived as an empty list,
 and the Hermes provider reported "No relevant memories found" for a memory it never
 reached; through the official SDK it is now an error. Successful explicit recalls carry
-`memory_state`, `trimmed` (facts dropped by `recall_max_bytes`) and `duplicates` (results
-dropped as repeats of a fact already passed on). Authentication/scope
+`memory_state`, `trimmed` (facts dropped by a size limit), `duplicates` (results dropped as
+repeats of a fact already passed on) and `limited_by` (which limit stopped the recall;
+`null` when no lookup was made). Authentication/scope
 errors are always denied, not treated as outages. Ordinary requests never call Hindsight.
 
 ## Conscious, bounded retention

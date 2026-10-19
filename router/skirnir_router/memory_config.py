@@ -18,12 +18,15 @@ class HindsightConfig:
     retries: int = 1
     fail_open: bool = True
     allow_http_loopback: bool = False
-    recall_max_tokens: int = 512      # token budget sent to Hindsight for its own selection (advisory upstream)
-    recall_max_bytes: int = 4096      # UTF-8 byte cap of the rendered recall wrapper (notice + facts + provenance)
-    recall_max_facts: int = 10        # facts passed on per recall (after duplicates are dropped); the byte cap still applies
+    # recall_max_bytes is the one setting for how much memory reaches a context: the UTF-8 byte cap of the rendered recall
+    # wrapper (notice + facts + provenance). The three below are derived from it unless set (None = derive); each has its
+    # own reason to be set explicitly, and every recall reports which limit stopped it (memory.Recall.limited_by).
+    recall_max_bytes: int = 4096
+    recall_max_tokens: int | None = None    # Hindsight's selection budget; explicit e.g. for a remote or metered Hindsight
+    recall_max_facts: int | None = None     # fact count cut, e.g. for a small model or a bank of very short facts
+    max_response_bytes: int | None = None   # largest Hindsight response read
     recall_min_score: float = 0.0
     max_query_bytes: int = 512
-    max_response_bytes: int = 65536
     max_inflight: int = 4
     retention_enabled: bool = False
     queue_size: int = 32
@@ -49,6 +52,25 @@ class HindsightConfig:
     sync_wait_s: int = 20
     sync_max_waiting: int = 8
 
+    @property
+    def recall_tokens(self):
+        """Hindsight's selection budget. Derived: as many tokens as the byte cap has bytes. A token is never shorter than
+        a byte, so that much fact text always suffices to fill the cap, also after duplicates and filtered facts."""
+        return self.recall_max_tokens if self.recall_max_tokens is not None else self.recall_max_bytes
+
+    @property
+    def response_limit(self):
+        """Largest Hindsight response read. Derived from the selection budget: measured on a real bank 18 bytes of
+        response per budget token (75 KB at 4096 tokens: ids, scores, metadata, timestamps per fact); 64 leaves room
+        for banks of shorter facts. An answer above it is reported as unavailable:protocol, never as an empty recall."""
+        if self.max_response_bytes is not None:
+            return self.max_response_bytes
+        return max(65536, RESPONSE_BYTES_PER_TOKEN * self.recall_tokens)
+
+
+RESPONSE_BYTES_PER_TOKEN = 64
+DERIVED = ("recall_max_tokens", "recall_max_facts", "max_response_bytes")   # None (or absent) = derived, see the properties
+
 
 def parse_hindsight(raw):
     raw = {} if raw is None else raw
@@ -63,11 +85,13 @@ def parse_hindsight(raw):
         if not isinstance(values[k], str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", values[k]):
             return invalid(f"hindsight.{k} must name an environment variable")
     ranges = {"outbox_workers": (1, 16), "outbox_client_capacity": (0, 100000), "outbox_attempts": (1, 20), "outbox_backoff_s": (1, 3600), "outbox_lease_s": (90, 3600),
-              "outbox_capacity": (1, 100000), "outbox_retention_days": (0, 36500), "retries": (0, 2), "recall_max_tokens": (256, 4096), "recall_max_bytes": (1024, 65536), "recall_max_facts": (1, 100), "max_query_bytes": (64, 1024),
-              "max_response_bytes": (1024, 262144), "max_inflight": (1, 16), "queue_size": (1, 256), "max_content_bytes": (256, 16384),
+              "outbox_capacity": (1, 100000), "outbox_retention_days": (0, 36500), "retries": (0, 2), "recall_max_tokens": (256, 65536), "recall_max_bytes": (1024, 65536), "recall_max_facts": (1, 100), "max_query_bytes": (64, 1024),
+              "max_response_bytes": (1024, 4194304), "max_inflight": (1, 16), "queue_size": (1, 256), "max_content_bytes": (256, 16384),
               "verify_delay_s": (1, 60), "verify_max_delay_s": (1, 3600), "verify_timeout_s": (60, 86400), "upstream_attempts": (1, 100),
               "upstream_backoff_s": (10, 86400), "sync_wait_s": (1, 110), "sync_max_waiting": (1, 256)}
     for k, (low, high) in ranges.items():
+        if k in DERIVED and values[k] is None:
+            continue
         if type(values[k]) is not int or not low <= values[k] <= high:
             return invalid(f"hindsight.{k} must be an integer between {low} and {high}")
     score = values["recall_min_score"]

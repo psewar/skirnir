@@ -71,7 +71,7 @@ class HindsightClient:
                     data = bytearray()
                     async for chunk in response.content.iter_chunked(8192):
                         data.extend(chunk)
-                        if len(data) > self.cfg.max_response_bytes:
+                        if len(data) > self.cfg.response_limit:
                             return unavailable_as("protocol")
                     status = response.status
         except TimeoutError:   # exception-ok: network faults cannot be checked beforehand; this is their only catch
@@ -120,10 +120,10 @@ class HindsightClient:
 
     async def recall(self, bank, query, *, types=None, authorize=None):
         # Entities are on by default upstream but never passed on by Skirnir (measured: ~14 % of a 85 KB answer).
-        # Hindsight documents null as "skip the entity JOIN". The fact count, set by recall_max_tokens, drives the size.
+        # Hindsight documents null as "skip the entity JOIN". The fact count, set by the token budget, drives the size.
         # Source facts with a zero budget: each observation lists the ids of the facts it was derived from, without their
         # text (+2.6 % measured), so an observation repeating a single fact is recognised as its duplicate (memory.py).
-        payload = {"query": query, "budget": "low", "max_tokens": self.cfg.recall_max_tokens,
+        payload = {"query": query, "budget": "low", "max_tokens": self.cfg.recall_tokens,
                    "include": {"entities": None, "source_facts": {"max_tokens": 0}}}
         if types is not None:
             payload["types"] = types
