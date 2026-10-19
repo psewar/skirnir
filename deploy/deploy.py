@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -240,6 +241,17 @@ def deploy_agent(c, dist_dir=None):
     print(f"Agent {version} hinterlegt ({len(files)} Datei(en)). Oeffentlicher Schluessel fuer update.public_key der Agenten: {pub}")
 
 
+def _venv_command():
+    """Shell-Kommando (im CT), das /opt/skirnir-router/venv anlegt bzw. aktualisiert und mit 'venv ok <asyncpg-version>' endet."""
+    specs = [line.strip() for line in open(os.path.join(ROUTER_DIR, "requirements-session.txt"), encoding="utf-8")
+             if line.strip() and not line.lstrip().startswith(("#", "-"))]
+    venv = "/opt/skirnir-router/venv"
+    return ("set -e; dpkg -s python3-venv >/dev/null 2>&1 || apt-get install -y -q python3-venv >/dev/null; "
+            f"[ -x {venv}/bin/python ] || python3 -m venv --system-site-packages {venv}; "
+            f"{venv}/bin/python -m pip install -q --disable-pip-version-check " + " ".join(shlex.quote(s) for s in specs) + "; "
+            f"{venv}/bin/python -c 'import aiohttp, yaml, asyncpg; print(\"venv ok\", asyncpg.__version__)'")
+
+
 def _router_version():
     m = re.search(r'^VERSION\s*=\s*"([^"]+)"', open(os.path.join(ROUTER_DIR, "skirnir_router", "common.py"), encoding="utf-8").read(), re.M)
     return m.group(1) if m else "?"
@@ -278,6 +290,15 @@ def main():
         with open(os.path.join(ROUTER_DIR, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=1)
         FILES.append(("manifest.json", "/etc/skirnir-router/manifest.json", "0644"))
+        # Router-Python VOR dem Dateitausch bereitstellen (fail-closed: scheitert es, laeuft der alte Router unveraendert weiter).
+        # venv mit Systempaketen (apt: aiohttp, yaml, cryptography) plus die pip-Abhaengigkeiten der optionalen Schichten aus
+        # router/requirements-session.txt - Debian 12 bietet asyncpg nur in 0.27, verlangt ist >= 0.29.
+        rc, out, err = run(c, ct_exec(_venv_command()), timeout=600)
+        print(out.strip().splitlines()[-1] if out.strip() else err.strip()[-300:])
+        if rc != 0 or "venv ok" not in out:
+            print("Abbruch: Router-venv nicht bereit - nichts ausgerollt, alter Router laeuft weiter")
+            c.close()
+            sys.exit(1)
         # Umbenennung 2026-09-25 (ollama-router -> skirnir-router): einmaliger Umzug auf dem CT, bevor die neuen Dateien kommen.
         rc, out, err = run(c, ct_exec(
             "if [ ! -d /etc/skirnir-router ] && [ -d /etc/ollama-router ]; then "

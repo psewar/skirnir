@@ -5,7 +5,9 @@ Wants=network-online.target skirnir-router-secrets.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/skirnir-router/router.py /etc/skirnir-router/config.yaml
+# venv mit --system-site-packages: Debian-Pakete (aiohttp, yaml, cryptography) plus pip-Abhaengigkeiten der optionalen
+# Schichten (router/requirements-session.txt); deploy.py legt sie an und prueft sie vor jedem Neustart.
+ExecStart=/opt/skirnir-router/venv/bin/python /opt/skirnir-router/router.py /etc/skirnir-router/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=3
