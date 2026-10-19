@@ -36,14 +36,24 @@ async def poll(api):
                 STATUS["outbox"] = "available"
 
 
-async def maintenance(api):
+async def pause(stopping, seconds):
+    """Wait `seconds` or until stopping. asyncio.wait reports the timeout as state, not as an exception."""
+    waiter = asyncio.ensure_future(stopping.wait())
+    done, _ = await asyncio.wait({waiter}, timeout=seconds)
+    if not done:
+        waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
+
+
+async def maintenance(api, stopping):
     last_cleanup = 0
-    while True:
+    while not stopping.is_set():
         await poll(api)
         cfg = state.CFG.session_store
         memory_cfg = memory.settings()
         store = api.get(session_api.STORE_KEY)
-        if cfg.enabled and store is not None and time.monotonic() - last_cleanup >= cfg.maintenance_interval_s:
+        if (cfg.enabled and store is not None and not stopping.is_set()
+                and time.monotonic() - last_cleanup >= cfg.maintenance_interval_s):
             last_cleanup = time.monotonic()
             if cfg.retention_days or cfg.archived_retention_days or memory_cfg.outbox_retention_days:
                 result = await store.cleanup(cfg.retention_days, cfg.archived_retention_days, memory_cfg.outbox_retention_days)
@@ -52,20 +62,26 @@ async def maintenance(api):
                 else:
                     for kind, value in result.items():
                         metrics._counter("skirnir_context_cleanup_total", {"kind": kind}, value)
-        await asyncio.sleep(10)
+        await pause(stopping, 10)
 
 
 async def lifecycle(api):
-    task = None
+    task, stopping = None, asyncio.Event()
     STATUS.update(session_store="disabled", context_manager="disabled", hindsight="disabled", outbox="disabled", outbox_counts={}, outbox_oldest_seconds=0)
     if state.CFG.session_store.enabled or memory.settings().enabled:
         await poll(api)
-        task = asyncio.create_task(maintenance(api))
+        task = asyncio.create_task(maintenance(api, stopping))
     try:
         yield
     finally:
         if task:
-            task.cancel()
+            # Ordered stop before the session store closes its pool (cleanup contexts end in reverse order): a pass in
+            # progress ends its transaction, at most session_store.timeout_s; only what still runs then is cancelled.
+            stopping.set()
+            done, _ = await asyncio.wait({task}, timeout=state.CFG.session_store.timeout_s)
+            if not done:
+                metrics._counter("skirnir_context_maintenance_total", {"outcome": "shutdown_cancel"})
+                task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
 

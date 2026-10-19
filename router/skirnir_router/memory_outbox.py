@@ -159,16 +159,18 @@ async def run(service):
 
 
 async def wait_for_wakeup(service, seconds):
-    """Wait until woken or `seconds` passed. asyncio.wait reports the timeout as state, not as an exception."""
-    waiter = asyncio.ensure_future(service.wakeup.wait())
-    done, _ = await asyncio.wait({waiter}, timeout=seconds)
-    if not done:
+    """Wait until woken, stopping or `seconds` passed. asyncio.wait reports the timeout as state, not as an exception."""
+    waiters = {asyncio.ensure_future(service.wakeup.wait()), asyncio.ensure_future(service.stopping.wait())}
+    _, pending = await asyncio.wait(waiters, timeout=seconds, return_when=asyncio.FIRST_COMPLETED)
+    for waiter in pending:
         waiter.cancel()
-        await asyncio.gather(waiter, return_exceptions=True)
+    await asyncio.gather(*pending, return_exceptions=True)
 
 
 async def consume(service):
-    while True:
+    # Ends after the current job once the service is stopping (MemoryService.close): its transactions complete and its
+    # outcome is recorded, instead of a cancellation cutting them off.
+    while not service.stopping.is_set():
         if service.active():
             worked = await step(service)
             if worked is True:

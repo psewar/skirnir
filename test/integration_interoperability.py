@@ -5,15 +5,18 @@ import os
 import unittest
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from selftest_memory import MemoryHarness, PROJECT
 from selftest_context import ManagedHarness
 import selftest_interoperability as shared_fixture
 from selftest_interoperability import SHARED
-from skirnir_router import memory, memory_outbox, session_api, state
+from skirnir_router import context_ops, memory, memory_outbox, session_api, state
 from skirnir_router.context_config import ContextConfig
+from skirnir_router.memory_config import HindsightConfig
 from skirnir_router.session_config import SessionConfig
 from skirnir_router.outcome import Problem
 from skirnir_router.reliability_store import OPERATION_NOT_FOUND
@@ -452,6 +455,121 @@ class ExchangeHttpTests(ManagedHarness):
         self.assertEqual(len(checkpoints), 2)
         self.assertIn("unverified", checkpoints[-1]["payload"]["last_result"])
         self.assertTrue(checkpoints[-1]["payload"]["open_steps"])
+
+
+RESET = "Resetting connection with an active transaction"
+
+
+class HoldingRelay:
+    """Loopback TCP relay to the test database. Armed, it holds the next client chunk carrying a BEGIN (and what follows
+    on that connection) until released, so a test can stop a task exactly while its transaction is starting."""
+    def __init__(self, host, port):
+        self.target = (host, port)
+        self.armed = False
+        self.held, self.released = asyncio.Event(), asyncio.Event()
+
+    async def start(self):
+        self.server = await asyncio.start_server(self.accept, "127.0.0.1", 0)
+        return self.server.sockets[0].getsockname()[1]
+
+    async def accept(self, reader, writer):
+        upstream_reader, upstream_writer = await asyncio.open_connection(*self.target)
+        await asyncio.gather(self.pipe(reader, upstream_writer, True), self.pipe(upstream_reader, writer, False), return_exceptions=True)
+
+    async def pipe(self, reader, writer, outbound):
+        while data := await reader.read(65536):
+            if outbound and self.armed and b"BEGIN" in data:
+                self.armed = False
+                self.held.set()
+                await self.released.wait()
+            writer.write(data)
+            await writer.drain()
+        writer.close()
+
+    async def close(self):
+        self.released.set()
+        self.server.close()
+
+
+class StubHindsight:
+    async def close(self):
+        pass
+
+
+def outbox_count(outcome):
+    series = state.METRICS["counters"].get("skirnir_memory_events_total", {})
+    return series.get(tuple(sorted({"operation": "outbox", "outcome": outcome}.items())), 0)
+
+
+@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
+class OrderedShutdownTests(unittest.IsolatedAsyncioTestCase):
+    """Stopping the router must not cut a transaction off. A task cancelled while its BEGIN was on the way left asyncpg's
+    transaction marker on the connection, and returning it to the pool logged 'Resetting connection with an active
+    transaction' (router 0.8.1, deploy 2026-10-19). The background tasks stop first and the pool closes after them."""
+    async def asyncSetUp(self):
+        self.previous = state.CFG
+        target = urlsplit(DSN)
+        self.relay = HoldingRelay(target.hostname or "127.0.0.1", target.port or 5432)
+        port = await self.relay.start()
+        credentials = target.netloc.rpartition("@")[0]
+        relayed = target._replace(netloc=(credentials + "@" if credentials else "") + f"127.0.0.1:{port}").geturl()
+        self.store = await PostgresSessionStore.open(relayed, SessionConfig(enabled=True))
+        self.assertIsInstance(self.store, PostgresSessionStore)
+        self.reports = []
+        asyncio.get_running_loop().set_exception_handler(lambda loop, context: self.reports.append(context["message"]))
+
+    async def asyncTearDown(self):
+        self.relay.released.set()
+        await self.store.close()
+        await self.relay.close()
+        asyncio.get_running_loop().set_exception_handler(None)
+        state.CFG = self.previous
+
+    def resets(self):
+        """The pool's reports about a connection returned in a transaction (asyncpg appends the connection's repr)."""
+        return [message for message in self.reports if message.startswith(RESET)]
+
+    def outbox_service(self, **settings):
+        cfg = HindsightConfig(enabled=True, allow_http_loopback=True, retention_enabled=True, outbox_enabled=True, **settings)
+        state.CFG = SimpleNamespace(hindsight=cfg)
+        service = memory.MemoryService(cfg, b"synthetic-namespace-key-32-bytes", StubHindsight())
+        service.outbox = self.store
+        self.relay.armed = True
+        service.worker = asyncio.create_task(service.run_worker())   # the first claim begins a transaction at once
+        return service
+
+    async def stop_while_beginning(self, stop, hold_s=0.2):
+        """Start `stop` while the task's BEGIN is held by the relay, release the BEGIN after hold_s, wait for `stop`."""
+        await asyncio.wait_for(self.relay.held.wait(), 5)
+        stopping = asyncio.ensure_future(stop)
+        await asyncio.sleep(hold_s)
+        self.relay.released.set()
+        await asyncio.wait_for(stopping, 10)
+
+    async def test_outbox_worker_ends_its_transaction_before_the_pool_closes(self):
+        service = self.outbox_service()
+        before = outbox_count("shutdown_cancel")
+        await self.stop_while_beginning(service.close())
+        self.assertEqual(self.resets(), [])
+        self.assertTrue(service.worker.done())
+        self.assertFalse(service.worker.cancelled())   # it ended on its own after the claim
+        self.assertEqual(outbox_count("shutdown_cancel"), before)
+
+    async def test_outbox_worker_outlasting_the_timeout_is_cancelled_and_counted(self):
+        service = self.outbox_service(timeout_s=0.2)
+        before = outbox_count("shutdown_cancel")
+        await self.stop_while_beginning(service.close(), hold_s=0.6)   # held longer than timeout_s
+        self.assertTrue(service.worker.done())
+        self.assertEqual(outbox_count("shutdown_cancel"), before + 1)
+
+    async def test_maintenance_ends_its_cleanup_before_the_pool_closes(self):
+        state.CFG = SimpleNamespace(session_store=SessionConfig(enabled=True, retention_days=36500), context_manager=ContextConfig(),
+                                    hindsight=HindsightConfig())
+        lifecycle = context_ops.lifecycle({session_api.STORE_KEY: self.store})
+        await anext(lifecycle)
+        self.relay.armed = True   # poll() runs no transaction: the next BEGIN is the cleanup's
+        await self.stop_while_beginning(anext(lifecycle, None))
+        self.assertEqual(self.resets(), [])
 
 
 if __name__ == "__main__":
