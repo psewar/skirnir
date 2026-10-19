@@ -148,7 +148,7 @@ Implemented gateway contracts under `/v1/skirnir/hindsight`:
 | --- | --- |
 | `GET /version` or `/v1/version` | Versionless capabilities; never advertises full-server/append support. |
 | `POST /v1/default/banks/{alias}/memories/recall` | Bounded untrusted text recall with `memory_state`, `trimmed`, `duplicates` and `limited_by`; a client's `max_tokens` counts fact text, as in Hindsight; 503 with `memory_state` when the memory is unavailable (never an empty list). |
-| `POST /v1/default/banks/{alias}/memories` | One bounded item, `async: true` or `false`, persistent outbox required. |
+| `POST /v1/default/banks/{alias}/memories` | One bounded item with optional `context` and `timestamp`, `async: true` or `false`, persistent outbox required. |
 | `GET /v1/default/banks/{alias}/operations/{uuid}` | Owner-scoped operation status; accepted waits for actual upstream completion. |
 
 Native retain returns HTTP **200**, matching the official SDK response contract,
@@ -165,8 +165,29 @@ standard world/experience/observation set. Server limits cap results and upstrea
 search uses the low budget. Filters, expanded entities/chunks/source facts, trace,
 reflect, bank administration, extraction strategies and append are unsupported
 and rejected; retain item `tags`, `entities`, `strategy` and `resolve_entities: false`
-are refused with 400 and `error.reason` naming the option. Provider metadata is not
-trusted as confirmation.
+are refused with 400 and `error.reason` naming the option. Tags stay refused: the
+separation runs over banks and scopes. Provider metadata is not trusted as confirmation.
+
+Retain items may carry Hindsight's `context` and `timestamp`; both reach Hindsight,
+so a date need not be written into the text:
+
+- `context` is a label of at most 256 characters without control characters. It
+  passes the same sensitive-data filter as the content (`deny_terms`, secrets,
+  e-mail and private addresses), at admission and again before delivery. Skirnir
+  keeps its fixed notice first and appends the label (`Unverified assistant
+  response; not confirmed facts; client context: <label>`), so a client context can
+  describe the content but never confirm it; the job stays `confirmed: false`.
+- `timestamp` is the event time Hindsight dates the facts by ("When:"). It must be
+  an ISO 8601 date and time with a UTC offset (`2026-03-14T09:30:00+01:00`, `Z`
+  allowed, seconds and up to six fraction digits optional); impossible dates, a
+  missing offset or Hindsight's special value `unset` are refused with 400 and
+  `error.reason`. Skirnir passes it on in canonical form (`Z` becomes `+00:00`).
+- `null` (as the official SDK sends unset fields) and an empty `context` mean "not
+  given": Hindsight then uses its own default (extraction time) and the fixed notice.
+- Neither field is part of the operation's identity. Hermes stamps every send with
+  the current time, so a replay of identical document/content returns the operation
+  admitted first, with that operation's context and event time. Outbox rows store
+  both only when given; rows admitted before keep their shape and fingerprint.
 
 Use manual bounded fact retention. Full transcript mirroring is intentionally not
 promised: repeated identical provider document/content snapshots deduplicate;

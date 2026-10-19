@@ -5,9 +5,12 @@ proxying, reflect, bank administration, payload/status disclosure or tenant sele
 Functions return their result or a Problem (outcome.py).
 """
 import asyncio
+import calendar
 import hashlib
 import json
+import re
 from dataclasses import asdict
+from datetime import datetime
 from uuid import UUID
 
 from aiohttp import web
@@ -23,6 +26,25 @@ SCOPE_DENIED = denied("memory scope denied")
 PUBLIC = {400: "invalid memory gateway request", 403: SCOPE_DENIED.message, 404: OPERATION_NOT_FOUND.message,
           409: "memory operation conflicts or may already be processing upstream", 413: "memory request too large",
           503: "memory backend unavailable"}
+# Hindsight's retain `timestamp`: an ISO 8601 date and time, here with a mandatory UTC offset so the event time is
+# never read in some server's local zone. Seconds and up to six fraction digits are optional, as in fromisoformat.
+EVENT_TIME = re.compile(r"(?P<year>[0-9]{4})-(?P<month>[0-9]{2})-(?P<day>[0-9]{2})T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2})"
+                        r"(?::(?P<second>[0-9]{2})(?:\.[0-9]{1,6})?)?(?:Z|[+-](?P<offset_hour>[0-9]{2}):(?P<offset_minute>[0-9]{2}))")
+INVALID_EVENT_TIME = invalid("gateway retain timestamp must be an ISO 8601 date and time with a UTC offset")
+CONTEXT_CHARS = 256   # a short label next to Skirnir's own notice, not a second content field
+
+
+def event_time(value):
+    """The timestamp in one canonical ISO form, or a Problem. Pattern and field ranges are checked first, so
+    fromisoformat never fails."""
+    match = EVENT_TIME.fullmatch(value) if isinstance(value, str) else None
+    if match is None:
+        return INVALID_EVENT_TIME
+    year, month, day = int(match["year"]), int(match["month"]), int(match["day"])
+    valid = (year >= 1 and 1 <= month <= 12 and 1 <= day <= calendar.monthrange(year, month)[1]
+             and int(match["hour"]) <= 23 and int(match["minute"]) <= 59 and int(match["second"] or 0) <= 59
+             and int(match["offset_hour"] or 0) <= 14 and int(match["offset_minute"] or 0) <= 59)
+    return datetime.fromisoformat(value).isoformat() if valid else INVALID_EVENT_TIME
 
 
 def provenance(raw, principal, *, confirmed):
@@ -242,9 +264,24 @@ async def gateway_retain(service, scope, principal, alias, data):
         if failed(checked := session_api.text(doc, "document_id", 256)):
             return checked
         origin["source_refs"] = json.dumps(["provider-document:" + hashlib.sha256(doc.encode()).hexdigest()])
+    # The client's context and event time go to Hindsight as data. The context is only appended to Skirnir's fixed
+    # notice (hindsight.retain), so it can describe the content but never confirm it. The official SDK sends both
+    # as null when unset; an empty context is the same as none.
+    context = item.get("context")
+    if context in (None, ""):
+        context = None
+    elif failed(context := session_api.text(context, "context", CONTEXT_CHARS)):
+        return context
+    elif memory.rejected_content(context, service.cfg, private_addresses=scope.private_addresses):
+        return memory.FILTERED
+    timestamp = item.get("timestamp")
+    if timestamp is not None and failed(timestamp := event_time(timestamp)):
+        return timestamp
     content = item["content"]
     # Identical replays/compaction retains share one immutable operation. Changed
     # versions remain distinct evidence, not destructive edits of shared facts.
+    # Context and timestamp are not part of the identity: Hermes stamps every send with the current time, and a
+    # replay keeps the operation admitted first, with its context and event time.
     if data.get("operation_id"):
         given = session_api.uuid(data["operation_id"])
         if given is None:
@@ -252,7 +289,8 @@ async def gateway_retain(service, scope, principal, alias, data):
         event = str(given)
     else:
         event = hashlib.sha256(json.dumps([doc, content], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    operation = await service.submit(scope, event, content, confirmed=False, provenance=origin, shared_observations=item.get("observation_scopes") == "shared")
+    operation = await service.submit(scope, event, content, confirmed=False, provenance=origin, shared_observations=item.get("observation_scopes") == "shared",
+                                     context=context, timestamp=timestamp)
     if failed(operation):
         return operation
     if sync:

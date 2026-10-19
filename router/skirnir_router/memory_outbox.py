@@ -37,8 +37,9 @@ def resubmit_delay(cfg, attempt):
     return min(21600, cfg.upstream_backoff_s * 2 ** min(attempt - 1, 12))
 
 
-async def submit(service, scope, event_id, content, confirmed, provenance=None, shared_observations=False):
-    """Operation UUID admitted durably, or a Problem."""
+async def submit(service, scope, event_id, content, confirmed, provenance=None, shared_observations=False, context=None, timestamp=None):
+    """Operation UUID admitted durably, or a Problem. `context` and `timestamp` (gateway retain, already checked there)
+    are stored with the job but are not part of its fingerprint, so a replay with a newer send time is the same job."""
     operation = service.validate_retain(scope, event_id, content)
     if failed(operation):
         return operation
@@ -52,7 +53,9 @@ async def submit(service, scope, event_id, content, confirmed, provenance=None, 
     payload = {"content": content, "confirmed": confirmed, "provenance": origin}
     if shared_observations:
         payload["shared_observations"] = True
-    admitted = await service.outbox.outbox_put(UUID(operation), {**asdict(scope), "__bank": service.bank(scope)}, payload, digest(payload),
+    # Optional keys only when given: rows without them (also all rows admitted before) keep their shape and fingerprint.
+    item = {key: value for key, value in (("context", context), ("timestamp", timestamp)) if value is not None}
+    admitted = await service.outbox.outbox_put(UUID(operation), {**asdict(scope), "__bank": service.bank(scope)}, {**payload, **item}, digest(payload),
                                                service.cfg.outbox_capacity, **({"owner_capacity": service.cfg.outbox_client_capacity} if service.cfg.outbox_client_capacity else {}))
     if failed(admitted):
         return admitted
@@ -80,11 +83,13 @@ async def deliver(service, scope, operation, row):
     from .memory import rejected_content
     payload = row["payload"]
     if not (service.cfg.retention_enabled and service.current(scope, write=True)
-            and not rejected_content(payload["content"], service.cfg, private_addresses=scope.private_addresses)):
+            and not rejected_content(payload["content"], service.cfg, private_addresses=scope.private_addresses)
+            and not rejected_content(payload.get("context", ""), service.cfg, private_addresses=scope.private_addresses)):
         return "revoked", "policy_changed"
     sent = await service.client.retain(service.bank(scope), payload["content"], upstream_id(operation, row), document_id=str(operation),
                                        confirmed=payload["confirmed"], provenance=payload.get("provenance"),
                                        **({"shared_observations": True} if payload.get("shared_observations") else {}),
+                                       context=payload.get("context"), timestamp=payload.get("timestamp"),
                                        authorize=lambda: service.current(scope, write=True))
     if failed(sent):
         return ("revoked", "policy_changed") if sent.status == 403 else ("retry", sent.kind)
