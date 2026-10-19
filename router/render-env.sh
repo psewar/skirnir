@@ -27,7 +27,9 @@ M=$(g MQTT_PASSWORD)
 [ -z "$M" -o "$M" = "null" ] && { echo "Secret-Fetch fehlgeschlagen (Secret-Store nicht erreichbar?) - behalte bestehende $OUT"; exit 0; }
 TMP=$(mktemp); printf 'MQTT_PASSWORD=%s\n' "$M" > "$TMP"; chmod 600 "$TMP"
 # Stufe 5 Cloud: Anbieter-Schluessel sind optional (fehlt einer im Secret-Store, bleibt der Anbieter im Router ohne Schluessel = keine Stufe)
-for K in OPENAI_API_KEY ANTHROPIC_API_KEY; do
+# Optionale Gedaechtnisschicht (design/session-store.md, design/hindsight-memory.md): nur vorhandene Secrets landen in der
+# Datei; ohne sie bleibt die Schicht aus bzw. startet nicht (der Router meldet beim Start, welche Variable fehlt).
+for K in OPENAI_API_KEY ANTHROPIC_API_KEY SKIRNIR_SESSION_DSN SKIRNIR_MEMORY_NAMESPACE_KEY SKIRNIR_HINDSIGHT_URL SKIRNIR_HINDSIGHT_TOKEN SKIRNIR_HANDOFF_KEY; do
   V=$(g "$K"); [ -n "$V" -a "$V" != "null" ] && printf '%s=%s\n' "$K" "$V" >> "$TMP"
 done
 if [ ! -f "$OUT" ] || ! cmp -s "$TMP" "$OUT"; then
