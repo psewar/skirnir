@@ -69,7 +69,7 @@ Hermes provider sends `max_tokens: 4096`, which caps the block at 4096 bytes as 
 
 With duplicates dropped, 10 facts nearly fill 4 KB, so the two limits match. More facts
 help only together with a larger byte cap (and, over the gateway, a larger client
-`max_tokens`), at about 1.5 to 2.7 times the context for a few points of coverage. The
+`max_tokens`), at about 1.9 to 2.9 times the bytes for 2.7 to 6.7 points of coverage. The
 default stays 10; `recall_max_facts` changes it.
 
 ## Deployment and opt-in
