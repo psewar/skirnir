@@ -97,7 +97,8 @@ class Recall:
     answer; kind as in hindsight.KINDS, e.g. "protocol" for an oversized or malformed response)."""
     items: list
     state: str = "available"
-    trimmed: int = 0   # facts dropped by the byte cap recall_max_bytes
+    trimmed: int = 0      # facts dropped by the byte cap recall_max_bytes
+    duplicates: int = 0   # results dropped because they repeat a fact already passed on (see single_source)
 
     @property
     def available(self):
@@ -108,13 +109,24 @@ def unavailable_state(kind):
     return "unavailable" if kind in ("", "unavailable") else "unavailable:" + kind
 
 
+def single_source(fact):
+    """The id of the one fact an observation was derived from, or None. Hindsight returns such an observation next to its
+    fact (include.source_facts lists the ids), so the pair says the same once. An observation summarising several facts
+    is more than a copy of any of them and has no single source."""
+    sources = fact.get("source_fact_ids")
+    if fact.get("type") == "observation" and isinstance(sources, list) and len(sources) == 1 and isinstance(sources[0], str):
+        return sources[0]
+    return None
+
+
 def recall_response(body, recalled):
     """Explicit recall (REST and gateway) answers with its state. Unreachable or oversized memory is a 503 with
     that state, not an empty list: fail_open only lets inference proceed without facts (see prepare)."""
     if not recalled.available:
         return web.json_response({"error": {"message": MEMORY_UNAVAILABLE.message, "type": "memory_unavailable"}, "memory_state": recalled.state},
                                  status=503, headers={"Cache-Control": "no-store"})
-    return web.json_response({**body, "memory_state": recalled.state, "trimmed": recalled.trimmed}, headers={"Cache-Control": "no-store"})
+    return web.json_response({**body, "memory_state": recalled.state, "trimmed": recalled.trimmed, "duplicates": recalled.duplicates},
+                             headers={"Cache-Control": "no-store"})
 
 
 def public_problem(problem, public):
@@ -182,7 +194,7 @@ class MemoryService:
         if not isinstance(values, list):
             count("recall", "unavailable")
             return Recall([], unavailable_state(result.kind if failed(result) else "protocol"))
-        items, trimmed = [], 0
+        items, trimmed, duplicates, shown = [], 0, 0, set()   # shown: ids passed on, incl. the single source of an observation
         # Hindsight max_tokens (recall_max_tokens) is advisory: an oversized top fact may be returned.
         # Bound the complete rendered wrapper locally by UTF-8 bytes, a conservative upper bound on its
         # text tokens, including the notice, source labels, provenance and JSON overhead. This byte cap
@@ -216,15 +228,23 @@ class MemoryService:
             for key in ("created_at", "updated_at"):
                 if isinstance(fact.get(key), str):
                     candidate[key] = fact[key][:64]
+            # The higher-ranked of a fact and its single-source observation keeps the place; the other repeats it.
+            twin = single_source(fact)
+            if source in shown or (twin is not None and twin in shown):
+                duplicates += 1
+                continue
             if len(packed([*items, candidate]).encode()) <= limit:
                 items.append(candidate)
+                shown.update((source, twin) if twin is not None else (source,))
             else:
                 trimmed += 1   # a smaller later fact may still fit, so keep looking
-            if len(items) == 10:
+            if len(items) == self.cfg.recall_max_facts:
                 break
         if trimmed:   # visible as state: an empty or short recall caused by the size limit, not by missing facts
             count("recall", "trimmed", trimmed)
-        return Recall(items, trimmed=trimmed)
+        if duplicates:
+            count("recall", "duplicate", duplicates)
+        return Recall(items, trimmed=trimmed, duplicates=duplicates)
 
     def validate_retain(self, scope, event_id, content):
         """Operation UUID for this event, or a Problem."""

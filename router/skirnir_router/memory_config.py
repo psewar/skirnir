@@ -20,6 +20,7 @@ class HindsightConfig:
     allow_http_loopback: bool = False
     recall_max_tokens: int = 512      # token budget sent to Hindsight for its own selection (advisory upstream)
     recall_max_bytes: int = 4096      # UTF-8 byte cap of the rendered recall wrapper (notice + facts + provenance)
+    recall_max_facts: int = 10        # facts passed on per recall (after duplicates are dropped); the byte cap still applies
     recall_min_score: float = 0.0
     max_query_bytes: int = 512
     max_response_bytes: int = 65536
@@ -62,7 +63,7 @@ def parse_hindsight(raw):
         if not isinstance(values[k], str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", values[k]):
             return invalid(f"hindsight.{k} must name an environment variable")
     ranges = {"outbox_workers": (1, 16), "outbox_client_capacity": (0, 100000), "outbox_attempts": (1, 20), "outbox_backoff_s": (1, 3600), "outbox_lease_s": (90, 3600),
-              "outbox_capacity": (1, 100000), "outbox_retention_days": (0, 36500), "retries": (0, 2), "recall_max_tokens": (256, 4096), "recall_max_bytes": (1024, 65536), "max_query_bytes": (64, 1024),
+              "outbox_capacity": (1, 100000), "outbox_retention_days": (0, 36500), "retries": (0, 2), "recall_max_tokens": (256, 4096), "recall_max_bytes": (1024, 65536), "recall_max_facts": (1, 100), "max_query_bytes": (64, 1024),
               "max_response_bytes": (1024, 262144), "max_inflight": (1, 16), "queue_size": (1, 256), "max_content_bytes": (256, 16384),
               "verify_delay_s": (1, 60), "verify_max_delay_s": (1, 3600), "verify_timeout_s": (60, 86400), "upstream_attempts": (1, 100),
               "upstream_backoff_s": (10, 86400), "sync_wait_s": (1, 110), "sync_max_waiting": (1, 256)}
