@@ -271,10 +271,11 @@ class MemoryService:
             return FILTERED
         return self.operation(scope, event_id)
 
-    async def submit(self, scope, event_id, content, *, confirmed, provenance=None, shared_observations=False):
+    async def submit(self, scope, event_id, content, *, confirmed, provenance=None, shared_observations=False, context=None, timestamp=None):
         if self.outbox is not None:
             from .memory_outbox import submit
-            return await submit(self, scope, event_id, content, confirmed, provenance, shared_observations)
+            return await submit(self, scope, event_id, content, confirmed, provenance, shared_observations, context, timestamp)
+        # Context and timestamp come only from the gateway, which requires the persistent outbox.
         return self.enqueue(scope, event_id, content, confirmed=confirmed, provenance=provenance)
 
     def enqueue(self, scope, event_id, content, *, confirmed, provenance=None):

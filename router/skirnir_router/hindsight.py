@@ -129,17 +129,22 @@ class HindsightClient:
             payload["types"] = types
         return await self.post(bank, "/recall", payload, missing_empty=True, authorize=authorize)
 
-    async def retain(self, bank, content, operation_id, *, document_id=None, confirmed, provenance=None, shared_observations=False, authorize=None):
+    async def retain(self, bank, content, operation_id, *, document_id=None, confirmed, provenance=None, shared_observations=False,
+                     context=None, timestamp=None, authorize=None):
         """None once Hindsight acknowledged the operation, or a Problem. The document id defaults to the operation id;
-        a resubmission sends a new operation id for the same document."""
+        a resubmission sends a new operation id for the same document. A client `context` is appended to the fixed
+        notice, never in its place; `timestamp` (ISO 8601, checked by the caller) is the event time Hindsight dates
+        the facts by, otherwise Hindsight uses the time of extraction."""
         document_id = document_id or operation_id
         origin = {"kind": "confirmed_information" if confirmed else "assistant_derivation",
                   "origin_client": "unspecified", "observed_at": datetime.now(timezone.utc).isoformat(), "version": document_id}
         origin.update(provenance or {})
+        notice = "Client-confirmed knowledge" if confirmed else "Unverified assistant response; not confirmed facts"
         result = await self.post(bank, "", {"async": True, "operation_id": operation_id, "items": [{
             "content": content, "document_id": document_id,
             **({"observation_scopes": "shared"} if shared_observations else {}),
-            "context": "Client-confirmed knowledge" if confirmed else "Unverified assistant response; not confirmed facts",
+            **({"timestamp": timestamp} if timestamp is not None else {}),
+            "context": notice + ("; client context: " + context if context else ""),
             "metadata": {**origin, "source": "client" if confirmed else "assistant", "confirmed": str(confirmed).lower()}}]}, authorize=authorize)
         if failed(result):
             return result
