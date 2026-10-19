@@ -148,12 +148,18 @@ Implemented gateway contracts under `/v1/skirnir/hindsight`:
 | --- | --- |
 | `GET /version` or `/v1/version` | Versionless capabilities; never advertises full-server/append support. |
 | `POST /v1/default/banks/{alias}/memories/recall` | Bounded untrusted text recall. |
-| `POST /v1/default/banks/{alias}/memories` | One bounded item, `async: true`, persistent outbox required. |
+| `POST /v1/default/banks/{alias}/memories` | One bounded item, `async: true` or `false`, persistent outbox required. |
 | `GET /v1/default/banks/{alias}/operations/{uuid}` | Owner-scoped operation status; accepted waits for actual upstream completion. |
 
 Native retain returns HTTP **200**, matching the official SDK response contract,
-with `async: true`, `durable: true` and an operation UUID. This confirms local
-admission only. The separate Skirnir `/memory/retain` endpoint returns **202**.
+with `durable: true` and an operation UUID. With `async: true` this confirms local
+admission only. With `async: false` (the Hindsight default, used by the Hermes
+`hindsight_retain` tool in provider 1.0.0) the job is admitted durably the same way and
+the answer waits for **verified completion** (see "Verified delivery" below), bounded
+by `sync_wait_s` (20 s). A timeout returns **504** with the operation UUID: the job
+keeps going, and resending identical content returns the same operation. At most
+`sync_max_waiting` synchronous retains wait at once; beyond that the gateway answers
+503 without admitting the job. The separate Skirnir `/memory/retain` endpoint returns **202**.
 Recall accepts SDK default null expansions, `types` absent, `observation`, or the
 standard world/experience/observation set. Server limits cap results and upstream
 search uses the low budget. Filters, expanded entities/chunks/source facts, trace,
@@ -207,11 +213,30 @@ Keep authorization and secret configuration consistent across worker instances.
 | `DELETE /operations/{uuid}` | Cancel a never-attempted job. Ambiguous or in-flight work returns 409. |
 | `POST /operations/{uuid}/delete` with `{}` | Separate `delete` grant; durable selective source deletion. 202 while pending, 200 once deleted. |
 
-States are `pending`, `processing`, `accepted`, `dead`, `revoked`, `cancelled`,
-`delete_pending`, `deleted`. `accepted` means upstream acknowledged retention.
-The deletion worker first requires upstream status `completed`, then deletes only
-its immutable UUID document. Unknown/pending/failed upstream operations are retried
-and can become dead letters; they are not labelled erased. HTTP 404 on the document
+States are `pending`, `processing`, `accepted`, `completed`, `dead`, `revoked`,
+`cancelled`, `delete_pending`, `deleted`. `accepted` means upstream acknowledged
+retention and the job is being verified; `completed` means Hindsight reported the
+extraction as completed.
+
+**Verified delivery.** Hindsight retries a failed LLM call only briefly (by default
+three retries, at most 60 s apart) and then marks the operation `failed`; a local
+model busy for hours (a game on the GPU node) therefore loses the extraction. The
+outbox checks every accepted job: first after `verify_delay_s`, doubling up to
+`verify_max_delay_s`. `completed` ends the job. `failed`/`cancelled` requeues it after
+`upstream_backoff_s` (doubling, at most 6 h) under a **new upstream operation id**
+with the **same document id**, because Hindsight answers a known operation id with its
+old state; at most `upstream_attempts` resubmissions per round, then `dead` with
+`upstream_failed`. An operation Hindsight no longer knows becomes `dead`
+(`remote_unknown`); one unconfirmed for `verify_timeout_s` becomes `dead`
+(`remote_pending`). Each resubmission starts a new send round. A retry round keeps
+the resubmission counter, so no failed upstream id is reused. The payload of an
+accepted job is kept until it is completed. The gateway status reports an accepted
+job whose upstream extraction failed as still `processing`, since it will be resubmitted.
+
+The deletion worker first requires upstream status `completed` (or `failed`, after
+which no write can follow), then deletes only its immutable UUID document.
+Unknown/pending upstream operations are retried and can become dead letters; they
+are not labelled erased. HTTP 404 on the document
 DELETE is repeatably absent only after that completion check. Source deletion does
 not delete the shared bank or unrelated sources; Hindsight controls reconsolidation
 of observations with other sources. There is no guarantee about backups, external

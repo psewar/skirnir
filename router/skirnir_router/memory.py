@@ -102,6 +102,7 @@ class MemoryService:
         self.worker = None
         self.outbox = None
         self.wakeup = asyncio.Event()
+        self.sync_waiting = 0   # synchronous gateway retains currently waiting (bounded by sync_max_waiting)
 
     def active(self):
         # Endpoint/pool settings are restart-only. Never send queued work under a

@@ -267,7 +267,7 @@ def render():
           [({}, services.get("outbox_oldest_seconds", 0))])
     gauge("skirnir_memory_outbox_jobs", "durable outbox counts, refreshed every ten seconds",
           [({"status": k}, (services.get("outbox_counts") or {}).get(k, 0)) for k in
-           ("pending", "processing", "accepted", "dead", "revoked", "cancelled", "delete_pending", "deleted")])
+           ("pending", "processing", "accepted", "completed", "dead", "revoked", "cancelled", "delete_pending", "deleted")])
     gauge("skirnir_sessions", "active session affinities", [({}, len(state.SESSIONS))])
     rows = []
     for _exposed, role in state.CFG.roles.items():

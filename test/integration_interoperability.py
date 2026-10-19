@@ -43,6 +43,42 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
     async def put(self, operation=None, fingerprint="synthetic-fingerprint", capacity=10):
         return await self.store.outbox_put(operation or self.operation, self.scope, self.payload, fingerprint, capacity)
 
+    async def test_verified_delivery_state_machine_and_resubmission_round(self):
+        await self.put()
+        send = await self.store.outbox_claim(120, 5)
+        await self.store.outbox_finish(self.operation, UUID(send["lease"]), "accepted")
+        check = await self.store.outbox_claim(120, 5)
+        # A verification keeps 'accepted', counts a check, not a send, and starts the verification clock.
+        self.assertEqual((check["state"], check["attempts"], check["verify_checks"]), ("accepted", 1, 1))
+        self.assertIsNotNone(check["accepted_at"])
+        self.assertIsNone(await self.store.outbox_claim(120, 5))   # leased verification is not claimed twice
+        self.assertEqual((await self.store.outbox_finish(self.operation, UUID(send["lease"]), "completed")).status, 409)
+        await self.store.outbox_finish(self.operation, UUID(check["lease"]), "pending", 0, error="upstream_failed", upstream_attempts=1)
+        row = await self.store.outbox_get(self.owner, self.operation)
+        self.assertEqual((row["state"], row["upstream_attempts"], row["retry_base"], row["last_error"]), ("pending", 1, 1, "upstream_failed"))
+        self.assertEqual(row["payload"], self.payload)   # kept for the resubmission
+        resend = await self.store.outbox_claim(120, 5)
+        self.assertEqual((resend["state"], resend["attempts"] - resend["retry_base"]), ("processing", 1))   # new send round
+        await self.store.outbox_finish(self.operation, UUID(resend["lease"]), "accepted")
+        self.assertEqual((await self.store.outbox_get(self.owner, self.operation))["verify_checks"], 0)
+        check = await self.store.outbox_claim(120, 5)
+        await self.store.outbox_finish(self.operation, UUID(check["lease"]), "completed")
+        counts = await self.store.outbox_counts()
+        self.assertEqual(counts.get("completed"), 1)
+        self.assertNotIn("accepted", counts)
+
+    async def test_retry_round_keeps_resubmission_ids_unique(self):
+        await self.put()
+        send = await self.store.outbox_claim(120, 5)
+        await self.store.outbox_finish(self.operation, UUID(send["lease"]), "accepted")
+        check = await self.store.outbox_claim(120, 5)
+        await self.store.outbox_finish(self.operation, UUID(check["lease"]), "dead", error="upstream_failed", upstream_attempts=3)
+        await self.store.outbox_retry(self.owner, self.operation, "round-1", self.scope, 10)
+        row = await self.store.outbox_get(self.owner, self.operation)
+        # The round's resubmission budget starts at the current count; the counter itself never goes back,
+        # so no upstream id that Hindsight already marked as failed is ever reused.
+        self.assertEqual((row["state"], row["upstream_attempts"], row["upstream_base"]), ("pending", 3, 3))
+
     async def test_restart_persistence_replay_conflict_and_capacity(self):
         first = await self.put()
         await self.store.close()
@@ -95,16 +131,32 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         value = await self.store.outbox_get(self.owner, self.operation)
         self.assertEqual(value["state"], "pending")
 
+    async def complete(self):
+        """Send (accepted), then one verification claim that confirms completion."""
+        claim = await self.store.outbox_claim(120, 5)
+        await self.store.outbox_finish(self.operation, UUID(claim["lease"]), "accepted")
+        claim = await self.store.outbox_claim(120, 5)
+        self.assertEqual((claim["state"], claim["verify_checks"], claim["attempts"]), ("accepted", 1, 1))
+        await self.store.outbox_finish(self.operation, UUID(claim["lease"]), "completed")
+
     async def test_retention_purges_payload_but_keeps_idempotency_tombstone(self):
         await self.put()
         claim = await self.store.outbox_claim(120, 5)
-        await self.store.outbox_finish(self.operation, UUID(claim["lease"]), "accepted")
+        await self.store.outbox_finish(self.operation, UUID(claim["lease"]), "accepted", 3600)
+        async with self.store.pool.acquire() as conn:
+            await conn.execute("UPDATE skirnir_sessions.memory_outbox SET updated_at=clock_timestamp()-interval '20 days' WHERE operation_id=$1", self.operation)
+        # Accepted but unverified: the payload may still be resubmitted, retention must keep it.
+        self.assertEqual((await self.store.cleanup(0, 0, 10))["outbox_payloads"], 0)
+        async with self.store.pool.acquire() as conn:
+            await conn.execute("UPDATE skirnir_sessions.memory_outbox SET available_at=clock_timestamp() WHERE operation_id=$1", self.operation)
+        claim = await self.store.outbox_claim(120, 5)
+        await self.store.outbox_finish(self.operation, UUID(claim["lease"]), "completed")
         async with self.store.pool.acquire() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET updated_at=clock_timestamp()-interval '20 days' WHERE operation_id=$1", self.operation)
         value = await self.store.cleanup(0, 0, 10)
         self.assertEqual(value["outbox_payloads"], 1)
         row = await self.put()
-        self.assertEqual(row["state"], "accepted")
+        self.assertEqual(row["state"], "completed")
         self.assertIsNone(row["payload"])
         self.assertIsNone(await self.store.outbox_claim(120, 5))
 
@@ -226,8 +278,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_compacted_tombstone_keeps_binding_and_deletion_is_not_unsent(self):
         await self.put()
-        claim = await self.store.outbox_claim(120, 5)
-        await self.store.outbox_finish(self.operation, UUID(claim['lease']), 'accepted')
+        await self.complete()
         async with self.store.pool.acquire() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET updated_at=clock_timestamp()-interval '20 days' WHERE operation_id=$1", self.operation)
         await self.store.cleanup(0, 0, 10)

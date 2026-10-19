@@ -44,7 +44,7 @@ class LiveMemoryTests(fixture.MemoryHarness):
         self.service.worker = None
         await self.service.client.close()
         cfg = replace(self.service.cfg, outbox_enabled=True, endpoint_env='SKIRNIR_TEST_HINDSIGHT_URL',
-                      allow_http_loopback=True, timeout_s=30, recall_max_tokens=4096)
+                      allow_http_loopback=True, timeout_s=30, recall_max_tokens=4096, sync_wait_s=60)
         endpoint = hindsight.endpoint_from_env(cfg)
         if failed(endpoint) or not hindsight.is_loopback(hindsight.URL_TEXT.fullmatch(endpoint)['host'].lower()):
             self.fail('live tests accept loopback backends only')
@@ -89,7 +89,8 @@ class LiveMemoryTests(fixture.MemoryHarness):
                 self.assertEqual(response.status, 200)
                 value = await response.json()
                 self.assertNotIn(value.get('upstream_status'), ('failed', 'cancelled'))
-                if value.get('upstream_status') == 'completed':
+                # Verified by the outbox, or acknowledged and already finished upstream.
+                if value.get('state') == 'completed' or value.get('upstream_status') == 'completed':
                     return
                 await asyncio.sleep(1)
 
@@ -148,32 +149,29 @@ class LiveMemoryTests(fixture.MemoryHarness):
             await asyncio.to_thread(self.provider.initialize, 'synthetic-live-session')
         marker = 'synthetic-' + uuid4().hex[:12]
         content = f'The fictional project {marker} has an amber wooden kite as its test symbol.'
-        # Write through the actual Hermes tool, then replay identical content via
-        # the official SDK to obtain the same gateway-deduplicated operation UUID.
-        result = await asyncio.to_thread(self.provider.handle_tool_call, 'hindsight_retain', {'content': content})
-        self.assertNotIn('error', json.loads(result))
-        # The Hermes writer owns its operation; client-b polls/cleans it through
-        # the SDK-compatible gateway, avoiding cross-owner status access.
-        from hindsight_client import Hindsight
-        peer = Hindsight(base_url=str(self.client.make_url(memory_gateway.GATEWAY)), api_key='client-b', timeout=30)
+        # Write through the actual Hermes tool. Whether the installed provider retains synchronously (the
+        # Hindsight default, e.g. provider 1.0.0) or asynchronously, the gateway admits it durably; a
+        # synchronous call returns only after the outbox verified the extraction, so a worker must run.
+        worker = asyncio.create_task(memory_outbox.run(self.service))
         try:
-            retained = await peer.aretain_batch(bank_id=shared.SHARED, items=[{'content': content, 'observation_scopes': 'shared'}], retain_async=True)
-            operation = str(retained.operation_id)
-            self.operations_to_delete[operation] = 'client-b'
-            await memory_outbox.step(self.service)
-            async with asyncio.timeout(180):
-                while True:
-                    status = await peer.operations.get_operation_status(bank_id=shared.SHARED, operation_id=operation)
-                    self.assertNotIn(status.status, ('failed', 'cancelled'))
-                    if status.status == 'completed':
-                        break
-                    await asyncio.sleep(1)
-            result = await asyncio.to_thread(self.provider.handle_tool_call, 'hindsight_recall', {'query': marker})
-            self.assertIn(marker, result.lower())
-            response = await self.client.post(memory.PREFIX + '/recall', json={'project': shared.SHARED, 'query': marker}, headers={'Authorization': 'Bearer client-a'})
-            self.assertIn(marker, json.dumps(await response.json()).lower())
+            result = await asyncio.to_thread(self.provider.handle_tool_call, 'hindsight_retain', {'content': content})
         finally:
-            await peer.aclose()
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+        self.assertNotIn('error', json.loads(result))
+        # Find the provider's operation without assuming its request shape (document id, scopes, async flag).
+        async with self.real.pool.acquire() as conn:
+            operation = str(await conn.fetchval("SELECT operation_id FROM skirnir_sessions.memory_outbox WHERE owner='client-b' AND payload->>'content'=$1",
+                                                content))
+        self.operations_to_delete[operation] = 'client-b'
+        async with asyncio.timeout(180):
+            while (await self.real.outbox_get('client-b', UUID(operation)))['state'] != 'completed':
+                await memory_outbox.step(self.service)   # an asynchronous provider returned before verification
+                await asyncio.sleep(1)
+        result = await asyncio.to_thread(self.provider.handle_tool_call, 'hindsight_recall', {'query': marker})
+        self.assertIn(marker, result.lower())
+        response = await self.client.post(memory.PREFIX + '/recall', json={'project': shared.SHARED, 'query': marker}, headers={'Authorization': 'Bearer client-a'})
+        self.assertIn(marker, json.dumps(await response.json()).lower())
 
 
 if __name__ == '__main__':

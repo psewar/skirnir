@@ -40,9 +40,11 @@ Versandversuche wird nie zurückgesetzt. Ein früher versendeter Auftrag wird da
 nicht fälschlich als unversendet abbrechbar. Neue fachliche Absicht braucht ein neues
 Event, keine Löschung bestehender Idempotenzdaten.
 
-Der Status ergänzt `last_error` und `retry_rounds`. Fehler werden ausschliesslich
-als feste Kategorien gespeichert: unavailable, timeout, transport, upstream_auth,
-upstream_rejected, protocol, remote_pending, policy_changed, lease_expired.
+Der Status ergänzt `last_error`, `retry_rounds` und `upstream_attempts` (Neueinreichungen
+nach gescheiterter Upstream-Extraktion, siehe geprüfte Zustellung in der Shared-Memory-
+Anleitung). Fehler werden ausschliesslich als feste Kategorien gespeichert: unavailable,
+timeout, transport, upstream_auth, upstream_rejected, protocol, remote_pending,
+policy_changed, lease_expired, upstream_failed, remote_unknown.
 Keine Fehlertexte, Endpunkte, Credentials oder Upstream-Bodies werden persistiert.
 Die Kategorie beweist nicht, dass der Upstream noch keine Arbeit ausgeführt hat.
 
