@@ -86,9 +86,15 @@ umgehen; das lässt sich nicht im Router verhindern.
 
 Der Adapter unterstützt unter `/v1/skirnir/hindsight` die nativen Recall-/Retain-
 und Operationsstatus-Pfade sowie eine versionslose Capability-Antwort. Native
-Retain-Antworten verwenden HTTP **200** mit `async: true`, `durable: true` und UUID,
-weil der offizielle SDK nur dafür `RetainResponse` deserialisiert. Das bedeutet
-lokale Annahme, keine abgeschlossene Extraktion. Skirnirs eigene Retain-API nutzt 202.
+Retain-Antworten verwenden HTTP **200** mit `durable: true` und UUID, weil der
+offizielle SDK nur dafür `RetainResponse` deserialisiert. Mit `async: true` bedeutet
+das lokale Annahme, keine abgeschlossene Extraktion. Mit `async: false` (Hindsight-
+Standard, so ruft das Hermes-Werkzeug `hindsight_retain` in Plugin 1.0.0 auf) wird der
+Auftrag genauso dauerhaft angenommen, die Antwort wartet aber auf die **geprüfte
+Fertigstellung**, höchstens `sync_wait_s` (20 s). Danach kommt **504** mit der
+Operations-UUID: Der Auftrag läuft weiter, identisches erneutes Senden liefert dieselbe
+Operation. Höchstens `sync_max_waiting` synchrone Aufträge warten gleichzeitig, darüber
+503 ohne Annahme. Skirnirs eigene Retain-API nutzt 202.
 
 Bewusst begrenzt: ein kurzer Texteingang pro Retain, keine freie Tenant-/Bank-
 Administration, kein Reflect, Append, Entity-/Chunk-Expansion, Trace oder nicht
@@ -138,9 +144,25 @@ Unter `/v1/skirnir/memory/operations/{uuid}`:
 | `DELETE` | Nur nie versendeten Auftrag abbrechen. Unklarer/in-flight Versand liefert 409. |
 | `POST .../delete` mit `{}` | Separater `delete`-Grant, persistente gezielte Quellenlöschung. 202 wartend, 200 gelöscht. |
 
-Zustände: `pending`, `processing`, `accepted`, `dead`, `revoked`, `cancelled`,
-`delete_pending`, `deleted`. `accepted` bestätigt nur den Upstream-Eingang.
-Vor gezielter Löschung muss Hindsight `completed` melden. Erst dann wird das
+Zustände: `pending`, `processing`, `accepted`, `completed`, `dead`, `revoked`,
+`cancelled`, `delete_pending`, `deleted`. `accepted` bestätigt den Upstream-Eingang,
+der Auftrag wird noch geprüft; `completed` heisst, Hindsight meldet die Extraktion fertig.
+
+**Geprüfte Zustellung.** Hindsight wiederholt einen gescheiterten LLM-Aufruf nur kurz
+(Standard drei Versuche, höchstens 60 s Abstand) und markiert die Operation dann
+`failed`; ein stundenlang belegtes lokales Modell (Spiel auf dem GPU-Knoten) verliert so
+die Extraktion. Die Outbox prüft jeden angenommenen Auftrag, zuerst nach
+`verify_delay_s`, dann verdoppelt bis `verify_max_delay_s`. `completed` beendet ihn,
+`failed`/`cancelled` reiht ihn nach `upstream_backoff_s` (verdoppelt, höchstens 6 h) unter
+einer **neuen Upstream-Operations-ID** mit **gleicher Dokument-ID** neu ein, weil
+Hindsight eine bekannte Operations-ID nur mit ihrem alten Zustand beantwortet. Höchstens
+`upstream_attempts` Neueinreichungen je Runde, danach `dead` mit `upstream_failed`.
+Unbekannte Operation: `dead` (`remote_unknown`); `verify_timeout_s` lang unbestätigt:
+`dead` (`remote_pending`). Der Payload eines angenommenen Auftrags bleibt bis zur
+Fertigstellung erhalten.
+
+Vor gezielter Löschung muss Hindsight `completed` melden (oder `failed`, danach folgt
+kein Schreiben mehr). Erst dann wird das
 eigene unveränderliche UUID-Dokument gelöscht. Fehlender/unklarer Status bleibt
 wartend beziehungsweise Dead Letter. Andere Quellen und die gemeinsame Bank werden
 nicht pauschal gelöscht; die Rekonsolidierung verbleibender Quellen übernimmt

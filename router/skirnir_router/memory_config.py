@@ -36,6 +36,16 @@ class HindsightConfig:
     outbox_client_capacity: int = 0
     outbox_retention_days: int = 0
     gateway_enabled: bool = False
+    # Verified delivery: after Hindsight acknowledged a retain, the outbox checks that extraction really completed and
+    # resubmits a failed one later (e.g. the local model was busy for hours), under a new upstream operation id.
+    verify_delay_s: int = 1
+    verify_max_delay_s: int = 30
+    verify_timeout_s: int = 3600
+    upstream_attempts: int = 12
+    upstream_backoff_s: int = 300
+    # Synchronous gateway retain (async=false): wait for verified completion, bounded.
+    sync_wait_s: int = 20
+    sync_max_waiting: int = 8
 
 
 def parse_hindsight(raw):
@@ -52,7 +62,9 @@ def parse_hindsight(raw):
             return invalid(f"hindsight.{k} must name an environment variable")
     ranges = {"outbox_workers": (1, 16), "outbox_client_capacity": (0, 100000), "outbox_attempts": (1, 20), "outbox_backoff_s": (1, 3600), "outbox_lease_s": (90, 3600),
               "outbox_capacity": (1, 100000), "outbox_retention_days": (0, 36500), "retries": (0, 2), "recall_max_tokens": (256, 4096), "max_query_bytes": (64, 1024),
-              "max_response_bytes": (1024, 262144), "max_inflight": (1, 16), "queue_size": (1, 256), "max_content_bytes": (256, 16384)}
+              "max_response_bytes": (1024, 262144), "max_inflight": (1, 16), "queue_size": (1, 256), "max_content_bytes": (256, 16384),
+              "verify_delay_s": (1, 60), "verify_max_delay_s": (1, 3600), "verify_timeout_s": (60, 86400), "upstream_attempts": (1, 100),
+              "upstream_backoff_s": (10, 86400), "sync_wait_s": (1, 110), "sync_max_waiting": (1, 256)}
     for k, (low, high) in ranges.items():
         if type(values[k]) is not int or not low <= values[k] <= high:
             return invalid(f"hindsight.{k} must be an integer between {low} and {high}")

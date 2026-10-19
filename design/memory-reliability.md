@@ -49,9 +49,11 @@ local durable state only. Total attempts are never reset: retry/deletion does no
 make previously sent work eligible for an "unsent" cancellation. Distinct user
 intent needs a new event, rather than deleting idempotency records.
 
-Status adds `last_error` (a fixed safe category) and `retry_rounds`. Categories are
-`unavailable`, `timeout`, `transport`, `upstream_auth`, `upstream_rejected`,
-`protocol`, `remote_pending`, `policy_changed`, `lease_expired`. No upstream body,
+Status adds `last_error` (a fixed safe category), `retry_rounds` and `upstream_attempts`
+(resubmissions after a failed upstream extraction, see verified delivery in the
+shared-memory guide). Categories are `unavailable`, `timeout`, `transport`, `upstream_auth`,
+`upstream_rejected`, `protocol`, `remote_pending`, `policy_changed`, `lease_expired`,
+`upstream_failed`, `remote_unknown`. No upstream body,
 exception text, endpoint or credential is persisted as a diagnostic. HTTP errors
 remain bounded/retried; these categories do not promise the upstream did no work.
 

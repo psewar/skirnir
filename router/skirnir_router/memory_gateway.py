@@ -4,14 +4,17 @@ The path bank is a configured project alias, not an upstream identifier. No arbi
 proxying, reflect, bank administration, payload/status disclosure or tenant selection.
 Functions return their result or a Problem (outcome.py).
 """
+import asyncio
 import hashlib
 import json
 from dataclasses import asdict
+from uuid import UUID
 
 from aiohttp import web
 
 from . import auth, memory, session_api
-from .outcome import Problem, denied, failed, invalid
+from .memory_outbox import upstream_id
+from .outcome import Problem, bad_gateway, denied, failed, invalid, unavailable
 from .reliability_store import OPERATION_NOT_FOUND
 
 GATEWAY = "/v1/skirnir/hindsight"
@@ -150,20 +153,24 @@ async def operation_control(request, service, principal, gateway):
     if not (scope.read or scope.write or scope.delete):
         return SCOPE_DENIED
     result = {k: row[k] for k in ("operation_id", "state", "attempts", "created_at", "updated_at")}
-    if row["state"] == "accepted":
-        upstream = await service.client.operation(service.bank(scope), str(operation), authorize=lambda: service.current(scope))
+    if row["state"] == "accepted":   # acknowledged, not yet verified by the outbox: show the live upstream state
+        upstream = await service.client.operation(service.bank(scope), upstream_id(operation, row), authorize=lambda: service.current(scope))
         if failed(upstream):
             return SCOPE_DENIED if upstream.status == 403 else upstream
         result["upstream_status"] = upstream.get("status", "unknown")
-    for field in ("last_error", "retry_rounds"):
+    for field in ("last_error", "retry_rounds", "upstream_attempts"):
         result[field] = row.get(field)
     result["action"] = "delete" if row.get("delete_requested") else "retain"
     if gateway and result.get("upstream_status") == "not_found":
         return session_api.fail(404, "upstream operation no longer available")
     if gateway:
-        # Hermes waits for actual upstream completion, never local 202 alone.
-        result["status"] = result.get("upstream_status") or {"pending": "pending", "processing": "processing", "dead": "failed",
-            "revoked": "cancelled", "cancelled": "cancelled", "deleted": "completed", "delete_pending": "pending"}.get(row["state"], "pending")
+        # Hermes waits for verified completion, never local 202 alone. The outbox's state wins over a single upstream
+        # reading: an accepted job whose extraction failed upstream is resubmitted, so it is still in progress.
+        mapped = {"pending": "pending", "processing": "processing", "accepted": "processing", "completed": "completed",
+                  "dead": "failed", "revoked": "cancelled", "cancelled": "cancelled", "deleted": "completed",
+                  "delete_pending": "pending"}.get(row["state"], "pending")
+        live = result.get("upstream_status")
+        result["status"] = live if live in ("pending", "processing", "completed") else mapped
     return web.json_response(result)
 
 
@@ -201,8 +208,13 @@ async def gateway_retain(service, scope, principal, alias, data):
         return session_api.fail(503, "native retain gateway requires the persistent outbox")
     if failed(problem := session_api.fields(data, ("items", "async", "operation_id", "document_tags"), ("items",))):
         return problem
-    if data.get("async") is not True or data.get("document_tags"):
-        return invalid("gateway requires async retain without document tag mutation")
+    if data.get("async", False) not in (True, False) or data.get("document_tags"):
+        return invalid("gateway retain needs a boolean async flag and no document tag mutation")
+    # Synchronous retain (the Hindsight default): admitted durably like async, then answered once the outbox verified
+    # the extraction, bounded by sync_wait_s. The waiting slots are limited so clients cannot pin connections.
+    sync = data.get("async", False) is False
+    if sync and service.sync_waiting >= service.cfg.sync_max_waiting:
+        return unavailable("too many synchronous retains waiting; retry later or retain asynchronously")
     items = data["items"]
     if not isinstance(items, list) or len(items) != 1:
         return invalid("gateway accepts one bounded text item per operation")
@@ -237,7 +249,36 @@ async def gateway_retain(service, scope, principal, alias, data):
     operation = await service.submit(scope, event, content, confirmed=False, provenance=origin, shared_observations=item.get("observation_scopes") == "shared")
     if failed(operation):
         return operation
-    # Official SDKs deserialize RetainResponse only for HTTP 200. async=true
-    # still means admission, not completed extraction; our REST API uses 202.
+    if sync:
+        verified = await wait_verified(service, principal, operation)
+        if failed(verified):
+            return verified
+    # Official SDKs deserialize RetainResponse only for HTTP 200. async=true still means admission, not completed
+    # extraction (our REST API uses 202); async=false answers 200 only after verified completion.
     return web.json_response({"success": True, "bank_id": alias, "items_count": 1, "operation_id": operation,
-                              "async": True, "durable": True})
+                              "async": not sync, "durable": True})
+
+
+async def wait_verified(service, principal, operation):
+    """None once the outbox verified the extraction as completed, or a Problem. The job stays durable either way:
+    on timeout it keeps going, and resending identical content returns the same operation."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + service.cfg.sync_wait_s
+    service.sync_waiting += 1
+    try:   # no except: only keeps the waiting counter balanced, also when the client disconnects
+        while True:
+            service.wakeup.set()
+            row = await service.outbox.outbox_get(principal, UUID(operation))
+            if failed(row):
+                return row
+            if row["state"] == "completed":
+                return None
+            if row["state"] in ("dead", "revoked", "cancelled", "deleted"):
+                return bad_gateway(f"memory extraction did not complete (state {row['state']}, category {row.get('last_error') or 'none'}); "
+                                   f"operation_id={operation}")
+            if loop.time() >= deadline:
+                return Problem(504, f"retain accepted durably but not yet confirmed within {service.cfg.sync_wait_s} s; operation_id={operation}; "
+                                    "resending identical content is safe")
+            await asyncio.sleep(0.5)
+    finally:
+        service.sync_waiting -= 1

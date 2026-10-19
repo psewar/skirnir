@@ -22,6 +22,14 @@ router:
     outbox_client_capacity: 0   # 0 = old global-only admission; e.g. 128 reserves room for other clients
     outbox_capacity: 1024
     outbox_retention_days: 0    # 0 = disabled; terminal payload scrub, keep replay tombstones
+    # Verified delivery: after Hindsight acknowledged a retain, check that extraction completed; resubmit a failed one later.
+    verify_delay_s: 1           # first check, doubling up to verify_max_delay_s
+    verify_max_delay_s: 30
+    verify_timeout_s: 3600      # unconfirmed this long after acceptance -> dead (remote_pending)
+    upstream_attempts: 12       # resubmissions after an extraction failed upstream (e.g. local model busy)
+    upstream_backoff_s: 300     # first resubmission delay, doubling up to 6 h
+    sync_wait_s: 20             # gateway retain with async=false: wait for verified completion, then 504 with operation id
+    sync_max_waiting: 8         # concurrent synchronous retains
     recall_min_score: 0.0
   memory_scopes: {}             # server-controlled shared scopes; private HMAC IDs stay unchanged
   # Optionaler expliziter Session-Speicher; normale Inferenz und routing.session_id bleiben unveraendert.

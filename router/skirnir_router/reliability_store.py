@@ -7,8 +7,12 @@ from uuid import uuid4
 from .outcome import conflict, failed, not_found, unavailable
 from .session_types import database, record
 
-OUTBOX_ERRORS = (None, "unavailable", "upstream_auth", "upstream_rejected", "protocol", "timeout", "transport", "remote_pending", "policy_changed")
-OUTBOX_FINAL = ('accepted', 'dead', 'revoked', 'pending', 'deleted', 'delete_pending')
+OUTBOX_ERRORS = (None, "unavailable", "upstream_auth", "upstream_rejected", "protocol", "timeout", "transport", "remote_pending", "policy_changed",
+                 "upstream_failed", "remote_unknown")
+OUTBOX_FINAL = ('accepted', 'completed', 'dead', 'revoked', 'pending', 'deleted', 'delete_pending')
+# Jobs whose payload is no longer needed. 'accepted' is not terminal: the job still waits for verified completion
+# and may be resubmitted from its payload.
+TERMINAL = ('completed', 'dead', 'revoked', 'cancelled', 'deleted')
 OPERATION_NOT_FOUND = not_found("memory operation not found")
 
 
@@ -36,29 +40,43 @@ class ReliabilityStore:
                 WHERE operation_id IN (SELECT operation_id FROM skirnir_sessions.memory_outbox
                     WHERE state='processing' AND lease_until<clock_timestamp() AND attempts-retry_base>=$1
                     ORDER BY lease_until FOR UPDATE SKIP LOCKED LIMIT 100)""", max_attempts)
+            # Sends (pending, delete_pending, expired processing) and verifications (accepted, due, not leased or lease expired).
             row = await conn.fetchrow("""SELECT * FROM skirnir_sessions.memory_outbox
                 WHERE (state IN ('pending','delete_pending') AND available_at<=clock_timestamp()) OR (state='processing' AND lease_until<clock_timestamp())
+                   OR (state='accepted' AND available_at<=clock_timestamp() AND (lease IS NULL OR lease_until<clock_timestamp()))
                 ORDER BY available_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1""")
             if not row:
                 return None
             lease = uuid4()
-            row = await conn.fetchrow("""UPDATE skirnir_sessions.memory_outbox SET state='processing',attempts=attempts+1,
+            # A verification keeps the state 'accepted' and counts a check; a send becomes 'processing' and counts an attempt.
+            row = await conn.fetchrow("""UPDATE skirnir_sessions.memory_outbox SET
+                state=CASE WHEN state='accepted' THEN 'accepted' ELSE 'processing' END,
+                attempts=CASE WHEN state='accepted' THEN attempts ELSE attempts+1 END,
+                verify_checks=CASE WHEN state='accepted' THEN verify_checks+1 ELSE verify_checks END,
                 lease=$2,lease_until=clock_timestamp()+$3*interval '1 second',updated_at=clock_timestamp()
                 WHERE operation_id=$1 RETURNING *""", row["operation_id"], lease, lease_s)
             return record(row)
 
     @database
-    async def outbox_finish(self, operation, lease, status, delay=0, error=None):
+    async def outbox_finish(self, operation, lease, status, delay=0, error=None, upstream_attempts=None):
+        """End a claimed send or verification. `upstream_attempts` (set when Hindsight reported the extraction as failed)
+        moves the job to a new upstream operation id on its next send. None, or a Problem when the lease was lost."""
         # Callers pass module constants; anything else is a programming error, not an outcome.
         if error not in OUTBOX_ERRORS:
             raise ValueError("invalid diagnostic category")  # exception-ok: programming error (violated invariant)
         if status not in OUTBOX_FINAL:
             raise ValueError("invalid outbox completion")  # exception-ok: programming error (violated invariant)
         async with self.connection() as conn:
+            # First acceptance after a send starts the verification clock; a verification that keeps 'accepted' does not.
             result = await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state=$3,lease=NULL,lease_until=NULL,
                 available_at=clock_timestamp()+$4*interval '1 second',updated_at=clock_timestamp(),
-                last_error=$5,payload=CASE WHEN $3 IN ('deleted','revoked') THEN NULL ELSE payload END
-                WHERE operation_id=$1 AND lease=$2 AND state='processing' AND lease_until>clock_timestamp()""", operation, lease, status, delay, error)
+                last_error=$5,payload=CASE WHEN $3 IN ('deleted','revoked') THEN NULL ELSE payload END,
+                accepted_at=CASE WHEN $3='accepted' AND state='processing' THEN clock_timestamp() ELSE accepted_at END,
+                verify_checks=CASE WHEN $3='accepted' AND state='processing' THEN 0 ELSE verify_checks END,
+                retry_base=CASE WHEN $6::integer IS NOT NULL THEN attempts ELSE retry_base END,
+                upstream_attempts=COALESCE($6,upstream_attempts)
+                WHERE operation_id=$1 AND lease=$2 AND state IN ('processing','accepted') AND lease_until>clock_timestamp()""",
+                operation, lease, status, delay, error, upstream_attempts)
             return conflict("outbox lease lost") if result == 'UPDATE 0' else None
 
     @database
@@ -98,7 +116,7 @@ class ReliabilityStore:
             # Keep idempotency tombstones. Removing IDs could resurrect deleted knowledge.
             result = await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET payload=NULL,scope=jsonb_build_object('__bank',scope->>'__bank')
                 WHERE operation_id IN (SELECT operation_id FROM skirnir_sessions.memory_outbox
-                    WHERE $1>0 AND payload IS NOT NULL AND state IN ('accepted','dead','revoked','cancelled','deleted')
+                    WHERE $1>0 AND payload IS NOT NULL AND state IN ('completed','dead','revoked','cancelled','deleted')
                     AND updated_at<clock_timestamp()-$1*interval '1 day' ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 100)""", outbox_days)
             return {"sessions": len(rows), "outbox_payloads": int(result.split()[-1])}
 
@@ -151,7 +169,7 @@ class ReliabilityStore:
             if failed(full):
                 return tx.reject(full)
             return record(await conn.fetchrow("""UPDATE skirnir_sessions.memory_outbox SET state=$3,scope=$4,
-                retry_ids=retry_ids || jsonb_build_array($5::text),retry_base=attempts,retry_rounds=retry_rounds+1,last_error=NULL,
+                retry_ids=retry_ids || jsonb_build_array($5::text),retry_base=attempts,upstream_base=upstream_attempts,verify_checks=0,retry_rounds=retry_rounds+1,last_error=NULL,
                 available_at=clock_timestamp(),updated_at=clock_timestamp(),lease=NULL,lease_until=NULL
                 WHERE owner=$1 AND operation_id=$2 RETURNING *""", owner, operation,
                 'delete_pending' if row['delete_requested'] else 'pending', scope, retry_id))

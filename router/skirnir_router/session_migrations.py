@@ -127,6 +127,18 @@ BEGIN
 END $$;
 CREATE TRIGGER outbox_totals AFTER INSERT OR DELETE OR UPDATE OF state ON skirnir_sessions.memory_outbox
     FOR EACH ROW EXECUTE FUNCTION skirnir_sessions.count_outbox();
+""", """
+ALTER TABLE skirnir_sessions.memory_outbox DROP CONSTRAINT memory_outbox_state_check;
+ALTER TABLE skirnir_sessions.memory_outbox ADD CONSTRAINT memory_outbox_state_check
+    CHECK(state IN ('pending','processing','accepted','completed','dead','revoked','cancelled','delete_pending','deleted'));
+ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN upstream_attempts integer NOT NULL DEFAULT 0;
+ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN upstream_base integer NOT NULL DEFAULT 0;
+ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN verify_checks integer NOT NULL DEFAULT 0;
+ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN accepted_at timestamptz;
+CREATE INDEX outbox_verify ON skirnir_sessions.memory_outbox(available_at) WHERE state='accepted';
+DROP INDEX skirnir_sessions.outbox_payload_expiry;
+CREATE INDEX outbox_payload_expiry ON skirnir_sessions.memory_outbox(updated_at)
+    WHERE payload IS NOT NULL AND state IN ('completed','dead','revoked','cancelled','deleted');
 """)
 
 
