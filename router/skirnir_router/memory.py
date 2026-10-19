@@ -156,6 +156,7 @@ class MemoryService:
         self.worker = None
         self.outbox = None
         self.wakeup = asyncio.Event()
+        self.stopping = asyncio.Event()   # set by close(): outbox workers claim no new job and end after the current one
         self.sync_waiting = 0   # synchronous gateway retains currently waiting (bounded by sync_max_waiting)
 
     def active(self):
@@ -332,14 +333,23 @@ class MemoryService:
                     self.seen.popitem(last=False)
 
     async def close(self):
+        """Ordered stop, at most timeout_s: the in-memory queue drains; outbox workers end after their current job, so
+        no transaction is cut off before the session store closes its pool. A cancellation during BEGIN left asyncpg's
+        transaction marker on the connection ('Resetting connection with an active transaction', deploy 2026-10-19).
+        Only what still runs after timeout_s is cancelled; an outbox job cut off that way returns after outbox_lease_s."""
         if self.worker is not None:
-            draining = asyncio.ensure_future(self.queue.join())
-            done, _ = await asyncio.wait({draining}, timeout=self.cfg.timeout_s)
+            self.stopping.set()
+            outbox = self.outbox is not None
+            waiting = self.worker if outbox else asyncio.ensure_future(self.queue.join())
+            done, _ = await asyncio.wait({waiting}, timeout=self.cfg.timeout_s)
             if not done:
-                count("retain", "shutdown_drop")
-                draining.cancel()
+                if outbox:
+                    count("outbox", "shutdown_cancel")
+                else:
+                    count("retain", "shutdown_drop")
+                waiting.cancel()
             self.worker.cancel()
-            await asyncio.gather(draining, self.worker, return_exceptions=True)
+            await asyncio.gather(waiting, self.worker, return_exceptions=True)
         await self.client.close()
 
 
