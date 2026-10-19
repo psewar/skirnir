@@ -71,7 +71,8 @@ router:
     retries: 1
     fail_open: true
     retention_enabled: false
-    recall_max_tokens: 512
+    recall_max_tokens: 512          # token budget sent to Hindsight
+    recall_max_bytes: 4096          # byte cap of the rendered recall wrapper (incl. provenance)
     max_query_bytes: 512
     max_response_bytes: 65536
     max_inflight: 4
@@ -139,8 +140,18 @@ escaped; memories never become higher-priority instructions. This is a trust bou
 not a proof that an LLM is immune to prompt injection.
 
 Hindsight's max_tokens can return an oversized top fact. Skirnir therefore independently
-bounds the complete rendered wrapper, including source/JSON overhead, by UTF-8 bytes
-as a conservative text-token upper bound. It drops whole facts instead of cutting them.
+bounds the complete rendered wrapper by UTF-8 bytes, a conservative upper bound on its text
+tokens. Two settings apply, deliberately separate:
+
+- `recall_max_tokens` (512) is the token budget Skirnir sends to Hindsight for its own selection.
+- `recall_max_bytes` (4096) caps the rendered wrapper: notice, fact text, source labels,
+  provenance metadata, timestamps and JSON overhead. Provenance alone takes a few hundred bytes,
+  so one shared limit of 512 dropped even a single short fact.
+
+A gateway client's `max_tokens` can only lower the byte cap. Skirnir drops whole facts instead
+of cutting them, and counts each dropped fact as
+`skirnir_memory_events_total{operation="recall",outcome="trimmed"}`. A short or empty recall
+caused by the size limit is therefore visible instead of looking like missing knowledge.
 Bodies/queries/responses are bounded and HTTP concurrency includes pool-wait time in
 the timeout. `max_query_bytes` is deliberately small to avoid a conversation dump and
 stay within the upstream query-token cap.
