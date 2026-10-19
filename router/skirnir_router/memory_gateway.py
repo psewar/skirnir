@@ -62,7 +62,7 @@ async def handle(request):
     response = await dispatch(request)
     if isinstance(response, Problem):
         response = (auth._deny(request, 401, "memory credentials required") if response.status == 401
-                    else session_api.fail(response.status, PUBLIC.get(response.status, response.message)))
+                    else memory.public_problem(response, PUBLIC))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -198,11 +198,11 @@ async def gateway_recall(service, scope, data):
     tokens = data.get("max_tokens")
     if tokens is not None and (type(tokens) is not int or not 1 <= tokens <= 100000):
         return invalid("invalid recall budget")
-    items = await service.recall(scope, data["query"], types=data.get("types"), byte_budget=tokens)
-    if failed(items):
-        return items
-    return web.json_response({"results": [{"id": x["source"], "text": x["text"], "metadata": x.get("provenance", {})} for x in items],
-                              "trusted": False})
+    recalled = await service.recall(scope, data["query"], types=data.get("types"), byte_budget=tokens)
+    if failed(recalled):
+        return recalled
+    return memory.recall_response({"results": [{"id": x["source"], "text": x["text"], "metadata": x.get("provenance", {})}
+                                               for x in recalled.items], "trusted": False}, recalled)
 
 
 async def gateway_retain(service, scope, principal, alias, data):
@@ -225,8 +225,11 @@ async def gateway_retain(service, scope, principal, alias, data):
              "observation_scopes", "strategy")
     if failed(problem := session_api.fields(item, names, ("content",))):
         return problem
-    if any(item.get(k) is not None for k in ("entities", "strategy")) or item.get("resolve_entities", True) is not True or item.get("tags"):
-        return invalid("unsupported gateway retain extraction options")
+    refused = [k for k, unsupported in (("entities", item.get("entities") is not None), ("strategy", item.get("strategy") is not None),
+                                        ("resolve_entities", item.get("resolve_entities", True) is not True), ("tags", bool(item.get("tags"))))
+               if unsupported]
+    if refused:   # named, so the client sees which option to drop (error.reason) instead of a generic 400
+        return invalid("unsupported gateway retain option: " + refused[0])
     if item.get("observation_scopes") not in (None, "shared"):
         return invalid("unsupported gateway observation scope")
     if item.get("update_mode") not in (None, "replace"):

@@ -205,7 +205,9 @@ Even without the block the router reads the request: `tools` → tools, images �
 structured, `suffix` → insert. Capabilities come from Ollama's `/api/show`, complemented by catalogue overrides
 (`models.<name>.capabilities: {structured: false}` for models that answer a schema with HTTP 500). Unknown capabilities never block.
 
-The response always carries the headers `X-Skirnir-Request-Id`, `-Node`, `-Model`, `-Tier`, `-Warm`. The `routing` block in the
+The response always carries the headers `X-Skirnir-Request-Id`, `-Node`, `-Model`, `-Tier`, `-Warm`; a request with memory
+recall also carries `X-Skirnir-Memory-State` (`available`, `query_filtered` or `unavailable[:<kind>]`, see
+[design/hindsight-memory.md](design/hindsight-memory.md)). The `routing` block in the
 body (node, model, tier, `reason`, `skipped` with a reason per skipped tier, `candidates` with score, `queued_ms`, `decision`) is
 only included if the client itself sent a `routing` block – legacy clients see an unchanged body. For `/v1` it is in the
 `chat.completion` or in the last SSE chunk.

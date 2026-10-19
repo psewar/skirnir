@@ -119,7 +119,9 @@ class HindsightClient:
         return result
 
     async def recall(self, bank, query, *, types=None, authorize=None):
-        payload = {"query": query, "budget": "low", "max_tokens": self.cfg.recall_max_tokens}
+        # Entities are on by default upstream but never passed on by Skirnir (measured: ~14 % of a 85 KB answer).
+        # Hindsight documents null as "skip the entity JOIN". The fact count, set by recall_max_tokens, drives the size.
+        payload = {"query": query, "budget": "low", "max_tokens": self.cfg.recall_max_tokens, "include": {"entities": None}}
         if types is not None:
             payload["types"] = types
         return await self.post(bank, "/recall", payload, missing_empty=True, authorize=authorize)

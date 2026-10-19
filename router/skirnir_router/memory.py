@@ -89,6 +89,44 @@ def rejected_content(content, cfg):
             or any(term.casefold() in content.casefold() for term in cfg.deny_terms))
 
 
+@dataclass(frozen=True)
+class Recall:
+    """Recalled facts with the memory's state as a fact, never inferred from an empty list.
+    state: "available" (Hindsight answered; no items means no matching knowledge), "query_filtered"
+    (the sensitive-data filter kept the query from being sent) or "unavailable[:<kind>]" (no usable
+    answer; kind as in hindsight.KINDS, e.g. "protocol" for an oversized or malformed response)."""
+    items: list
+    state: str = "available"
+    trimmed: int = 0   # facts dropped by the byte cap recall_max_bytes
+
+    @property
+    def available(self):
+        return not self.state.startswith("unavailable")
+
+
+def unavailable_state(kind):
+    return "unavailable" if kind in ("", "unavailable") else "unavailable:" + kind
+
+
+def recall_response(body, recalled):
+    """Explicit recall (REST and gateway) answers with its state. Unreachable or oversized memory is a 503 with
+    that state, not an empty list: fail_open only lets inference proceed without facts (see prepare)."""
+    if not recalled.available:
+        return web.json_response({"error": {"message": MEMORY_UNAVAILABLE.message, "type": "memory_unavailable"}, "memory_state": recalled.state},
+                                 status=503, headers={"Cache-Control": "no-store"})
+    return web.json_response({**body, "memory_state": recalled.state, "trimmed": recalled.trimmed}, headers={"Cache-Control": "no-store"})
+
+
+def public_problem(problem, public):
+    """Fixed client wording per status. A rejected request (400/413) also carries the fixed reason chosen where it was
+    detected, as its own field, so a client need not guess which option was refused. Never upstream text."""
+    message = public.get(problem.status, problem.message)
+    error = {"message": message, "type": "session_error"}
+    if problem.status in (400, 413) and problem.message != message:
+        error["reason"] = problem.message
+    return web.json_response({"error": error}, status=problem.status, headers={"Cache-Control": "no-store"})
+
+
 def packed(items):
     # Escape delimiters as data; source text never becomes a system/developer message.
     return (NOTICE + json.dumps(items, ensure_ascii=True, separators=(",", ":"))).replace("<", "\\u003c").replace(">", "\\u003e")
@@ -124,7 +162,8 @@ class MemoryService:
         return self.active() and scope_for_principal(scope.principal, scope.project, read=read, write=write, explicit=True) == scope
 
     async def recall(self, scope, query, *, types=None, byte_budget=None):
-        """Bounded facts, or a Problem. With fail_open an unavailable backend yields no facts instead."""
+        """A Recall carrying its state (also when Hindsight gave no usable answer; the caller decides whether that
+        stops it), or a Problem for a policy or request error."""
         if not self.current(scope, read=True):
             return POLICY_CHANGED
         if not isinstance(query, str) or not query.strip():
@@ -133,7 +172,7 @@ class MemoryService:
         query = query.encode("utf-8")[:self.cfg.max_query_bytes].decode("utf-8", "ignore")
         if rejected_content(query, self.cfg):
             count("recall", "filtered")
-            return []
+            return Recall([], "query_filtered")
         result = await self.client.recall(self.bank(scope), query, types=types, authorize=lambda: self.current(scope, read=True))
         if failed(result) and result.status == 403:
             return POLICY_CHANGED
@@ -142,7 +181,7 @@ class MemoryService:
         values = None if failed(result) else result.get("results")
         if not isinstance(values, list):
             count("recall", "unavailable")
-            return [] if self.cfg.fail_open else MEMORY_UNAVAILABLE
+            return Recall([], unavailable_state(result.kind if failed(result) else "protocol"))
         items, trimmed = [], 0
         # Hindsight max_tokens (recall_max_tokens) is advisory: an oversized top fact may be returned.
         # Bound the complete rendered wrapper locally by UTF-8 bytes, a conservative upper bound on its
@@ -185,7 +224,7 @@ class MemoryService:
                 break
         if trimmed:   # visible as state: an empty or short recall caused by the size limit, not by missing facts
             count("recall", "trimmed", trimmed)
-        return items
+        return Recall(items, trimmed=trimmed)
 
     def validate_retain(self, scope, event_id, content):
         """Operation UUID for this event, or a Problem."""
@@ -320,7 +359,7 @@ async def _api(request, write):
     if isinstance(result, Problem):
         if result.status == 401:
             return auth._deny(request, 401, UNAUTHENTICATED.message)
-        return session_api.fail(result.status, PUBLIC.get(result.status, result.message))
+        return public_problem(result, PUBLIC)
     return result
 
 
@@ -338,8 +377,8 @@ async def _api_result(request, service, write):
     if failed(scope):
         return scope
     if not write:
-        items = await service.recall(scope, data["query"])
-        return items if failed(items) else web.json_response({"items": items, "trusted": False}, headers={"Cache-Control": "no-store"})
+        recalled = await service.recall(scope, data["query"])
+        return recalled if failed(recalled) else recall_response({"items": recalled.items, "trusted": False}, recalled)
     event_id = session_api.text(data["event_id"], "event_id")
     if failed(event_id):
         return event_id
@@ -416,12 +455,16 @@ async def prepare(request, path, body, req):
     if spec["recall"] and messages and messages[-1].get("role") == "user":
         query = messages[-1].get("content")
         if isinstance(query, str):
-            items = await service.recall(scope, query)
-            if failed(items):
-                return items
-            if items:
-                req.memory_items = items
-                req.memory_context = {"role": "user", "content": packed(items)}
+            recalled = await service.recall(scope, query)
+            if failed(recalled):
+                return recalled
+            # Reported on the response (X-Skirnir-Memory-State), also when fail_open lets inference proceed without facts.
+            req.memory_state = recalled.state
+            if not recalled.available and not service.cfg.fail_open:
+                return MEMORY_UNAVAILABLE
+            if recalled.items:
+                req.memory_items = recalled.items
+                req.memory_context = {"role": "user", "content": packed(recalled.items)}
                 body["messages"] = [*messages[:-1], req.memory_context, messages[-1]]
     return None
 

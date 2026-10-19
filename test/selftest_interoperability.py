@@ -210,6 +210,35 @@ class SharedGatewayTests(MemoryHarness):
         response = await self.api(prefix + SHARED + "/memories/recall", {"query": "Synthetic", "tags": ["other"]})
         self.assertEqual(response.status, 400)
 
+    async def test_gateway_recall_carries_the_memory_state(self):
+        self.shared()
+        base = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories/recall"
+        value = await (await self.api(base, {"query": "Synthetic"})).json()
+        self.assertEqual((value["results"][0]["id"], value["memory_state"], value["trimmed"]), ("source-1", "available", 0))
+        # Unreachable or oversized memory is a 503 with its state, never an empty result list (Hermes would
+        # otherwise report "No relevant memories found" for a memory it never reached).
+        self.large_response = True
+        response = await self.api(base, {"query": "Synthetic"})
+        self.assertEqual(response.status, 503)
+        value = await response.json()
+        self.assertEqual(value["memory_state"], "unavailable:protocol")
+        self.assertNotIn("results", value)
+
+    async def test_gateway_retain_rejection_names_its_reason(self):
+        self.shared()
+        await self.durable()
+        path = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories"
+        item = {"content": "Synthetic knowledge"}
+        for option, value in (("tags", ["synthetic-tag"]), ("entities", [{"text": "Synthetic"}]), ("strategy", "synthetic"),
+                              ("resolve_entities", False)):
+            with self.subTest(option=option):
+                response = await self.api(path, {"async": True, "items": [{**item, option: value}]})
+                self.assertEqual(response.status, 400)
+                error = (await response.json())["error"]
+                self.assertEqual(error["message"], "invalid memory gateway request")
+                self.assertEqual(error["reason"], "unsupported gateway retain option: " + option)
+        self.assertEqual(self.jobs, {})
+
     async def test_persistent_202_is_durable_and_database_failure_is_not_accepted(self):
         self.shared()
         store = await self.durable()
@@ -366,6 +395,11 @@ class SharedGatewayTests(MemoryHarness):
             await memory_outbox.step(self.service)
             status = await client.operations.get_operation_status(bank_id=SHARED, operation_id=str(retained.operation_id))
             self.assertEqual(status.status, "completed")
+            # An oversized upstream answer reaches the SDK as a failure, not as an empty result list.
+            self.large_response = True
+            from hindsight_client_api.exceptions import ApiException
+            with self.assertRaises(ApiException):   # genuine exception: the SDK's own way to report HTTP 503
+                await client.arecall(bank_id=SHARED, query="Synthetic question", budget="low", max_tokens=512)
         finally:
             await client.aclose()
 
