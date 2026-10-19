@@ -143,10 +143,14 @@ class MemoryService:
         if not isinstance(values, list):
             count("recall", "unavailable")
             return [] if self.cfg.fail_open else MEMORY_UNAVAILABLE
-        items = []
-        # Hindsight max_tokens is advisory (an oversized top fact may be returned).
-        # Bound the complete rendered wrapper locally by UTF-8 bytes, a conservative
-        # upper bound on text tokens, including source labels and JSON overhead.
+        items, trimmed = [], 0
+        # Hindsight max_tokens (recall_max_tokens) is advisory: an oversized top fact may be returned.
+        # Bound the complete rendered wrapper locally by UTF-8 bytes, a conservative upper bound on its
+        # text tokens, including the notice, source labels, provenance and JSON overhead. This byte cap
+        # (recall_max_bytes) is separate from the upstream token budget: provenance alone is a few hundred
+        # bytes, so one shared limit of 512 dropped even a single short fact. A caller's own budget
+        # (gateway max_tokens) can only lower it.
+        limit = min(self.cfg.recall_max_bytes, byte_budget if byte_budget is not None else self.cfg.recall_max_bytes)
         for fact in values[:100]:
             if not isinstance(fact, dict):
                 continue
@@ -173,10 +177,14 @@ class MemoryService:
             for key in ("created_at", "updated_at"):
                 if isinstance(fact.get(key), str):
                     candidate[key] = fact[key][:64]
-            if len(packed([*items, candidate]).encode()) <= min(self.cfg.recall_max_tokens, byte_budget if byte_budget is not None else self.cfg.recall_max_tokens):
+            if len(packed([*items, candidate]).encode()) <= limit:
                 items.append(candidate)
+            else:
+                trimmed += 1   # a smaller later fact may still fit, so keep looking
             if len(items) == 10:
                 break
+        if trimmed:   # visible as state: an empty or short recall caused by the size limit, not by missing facts
+            count("recall", "trimmed", trimmed)
         return items
 
     def validate_retain(self, scope, event_id, content):
@@ -263,8 +271,8 @@ class MemoryService:
         await self.client.close()
 
 
-def count(operation, outcome):
-    metrics._counter("skirnir_memory_events_total", {"operation": operation, "outcome": outcome})
+def count(operation, outcome, inc=1):
+    metrics._counter("skirnir_memory_events_total", {"operation": operation, "outcome": outcome}, inc)
 
 
 async def lifecycle(app):

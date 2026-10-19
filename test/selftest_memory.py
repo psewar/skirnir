@@ -29,6 +29,19 @@ def policy(read=True, write=True, owner="skirnir", allow_cloud=False):
     return {"owner": owner, "projects": {PROJECT: {"read": read, "write": write, "data_class": "personal", "allow_cloud": allow_cloud}}}
 
 
+def realistic_fact(source, text):
+    """A Hindsight result carrying the full provenance Skirnir writes on retain (synthetic values)."""
+    return {"id": source, "text": text, "created_at": "2026-01-02T03:04:05.678901+00:00", "updated_at": "2026-01-02T03:04:05.678901+00:00",
+            "metadata": {"kind": "confirmed_knowledge", "confirmed": "true", "origin_client": "client-a",
+                         "observed_at": "2026-01-02T03:04:05.678901+00:00", "version": "6f1c2d3e-4a5b-5c6d-8e7f-90a1b2c3d4e5",
+                         "source": "skirnir-gateway", "source_refs": json.dumps(["synthetic-session-0001", "synthetic-event-0001"])}}
+
+
+def trimmed_count():
+    series = state.METRICS["counters"].get("skirnir_memory_events_total", {})
+    return series.get(tuple(sorted({"operation": "recall", "outcome": "trimmed"}.items())), 0)
+
+
 class ConfigurationTests(unittest.TestCase):
     def test_defaults_strict_types_and_scopes(self):
         self.assertFalse(parse_hindsight(None).enabled)
@@ -246,9 +259,26 @@ class MemoryHttpTests(MemoryHarness):
         self.assertEqual(messages[-2]["role"], "user")
         self.assertIn("Untrusted", messages[-2]["content"])
         self.assertNotIn("</memory>", messages[-2]["content"])
-        self.assertLessEqual(len(messages[-2]["content"].encode()), 512)
+        self.assertLessEqual(len(messages[-2]["content"].encode()), HindsightConfig().recall_max_bytes)
         self.assertNotIn("routing", self.upstream_bodies[-1])
         ops.maybe_shadow.assert_not_called()
+
+    async def test_recall_with_realistic_provenance_fits_the_default_cap(self):
+        # A short fact with the provenance Skirnir itself writes: alone this exceeds 512 bytes once packed.
+        self.results = [realistic_fact("source-1", "Synthetic project uses versioned events.")]
+        before = trimmed_count()
+        value = await (await self.call()).json()
+        self.assertEqual([v["source"] for v in value["items"]], ["source-1"])
+        self.assertEqual(value["items"][0]["provenance"]["origin_client"], "client-a")
+        self.assertGreater(len(memory.packed(value["items"]).encode()), 512)
+        self.assertEqual(trimmed_count(), before)
+
+    async def test_oversized_fact_is_dropped_and_counted(self):
+        self.results = [realistic_fact("oversized", "x" * 5000), realistic_fact("source-2", "Synthetic small fact.")]
+        before = trimmed_count()
+        value = await (await self.call()).json()
+        self.assertEqual([v["source"] for v in value["items"]], ["source-2"])
+        self.assertEqual(trimmed_count(), before + 1)
 
     async def test_opt_out_never_calls_memory(self):
         ops.IDEM.clear()

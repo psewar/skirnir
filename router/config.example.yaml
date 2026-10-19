@@ -31,6 +31,7 @@ router:
     sync_wait_s: 20             # gateway retain with async=false: wait for verified completion, then 504 with operation id
     sync_max_waiting: 8         # concurrent synchronous retains
     recall_min_score: 0.0
+    recall_max_bytes: 4096      # byte cap of the rendered recall wrapper incl. provenance; dropped facts count as outcome=trimmed
   memory_scopes: {}             # server-controlled shared scopes; private HMAC IDs stay unchanged
   # Optionaler expliziter Session-Speicher; normale Inferenz und routing.session_id bleiben unveraendert.
   # pip install -r router/requirements-session.txt; DSN nur per Service-Environment/Secret setzen.

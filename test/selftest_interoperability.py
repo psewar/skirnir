@@ -10,7 +10,7 @@ from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-from selftest_memory import MemoryHarness, PROJECT, policy
+from selftest_memory import MemoryHarness, PROJECT, policy, realistic_fact, trimmed_count
 from selftest_context import ManagedHarness, history, row
 from skirnir_router import context_ops, memory, memory_gateway, memory_outbox, session_api, session_exchange, state
 from skirnir_router.context_config import ContextConfig
@@ -181,6 +181,24 @@ class SharedGatewayTests(MemoryHarness):
         version = await self.api(memory_gateway.GATEWAY + "/v1/version", method="get")
         self.assertNotIn("version", await version.json())
 
+    async def test_gateway_recall_budget_only_lowers_the_server_byte_cap(self):
+        self.shared()
+        spec = policy(owner="client")
+        spec.update(strategy="manual")
+        spec["projects"][SHARED] = {"scope": "example-team", "data_class": "personal", "read": True, "write": True}
+        state.CFG.client_auth["clients"]["client-owned"]["memory"] = spec
+        self.results = [realistic_fact("source-1", "Synthetic project uses versioned events.")]
+        base = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories/recall"
+        before = trimmed_count()
+        # Without max_tokens the server byte cap alone applies, not the 512-token Hindsight budget.
+        response = await self.api(base, {"query": "Synthetic"}, "client-owned")
+        self.assertEqual([r["id"] for r in (await response.json())["results"]], ["source-1"])
+        self.assertEqual(trimmed_count(), before)
+        response = await self.api(base, {"query": "Synthetic", "max_tokens": 100}, "client-owned")
+        self.assertEqual((await response.json())["results"], [])
+        self.assertEqual(trimmed_count(), before + 1)
+        self.assertEqual((await self.api(base, {"query": "Synthetic", "max_tokens": 0}, "client-owned")).status, 400)
+
     async def test_gateway_never_becomes_an_arbitrary_proxy(self):
         self.shared()
         prefix = memory_gateway.GATEWAY + "/v1/default/banks/"
@@ -316,7 +334,7 @@ class SharedGatewayTests(MemoryHarness):
         self.assertEqual(next(iter(self.jobs.values()))["state"], "revoked")
 
     async def test_relevance_threshold_and_provenance_are_untrusted(self):
-        self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, recall_min_score=0.5, recall_max_tokens=2048)
+        self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, recall_min_score=0.5)
         self.results = [{"id": "relevant", "text": "Synthetic relevant fact", "scores": {"reranker": .9},
                          "metadata": {"kind": "assistant_derivation", "confirmed": "false", "origin_client": "client-a", "supersedes": "older-source"}},
                         {"id": "irrelevant", "text": "Synthetic other topic", "scores": {"reranker": .1}},
