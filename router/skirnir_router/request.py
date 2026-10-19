@@ -25,6 +25,7 @@ import time
 from . import cloud, state
 from .managed import parse as parse_session_request
 from .memory_config import parse_memory_request
+from .outcome import failed
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES
 
 KNOWN_CAPS = ("completion", "tools", "vision", "thinking", "structured", "embedding", "insert")
@@ -229,6 +230,9 @@ def parse(body, path, headers=None):
             r.data_class = dc
         r.session = parse_session_request(rb.get("session"))
         r.memory = parse_memory_request(rb.get("memory"))
+        for parsed in (r.session, r.memory):
+            if failed(parsed):   # Bruecke bis PR 2: parse() meldet Fehler hier noch als ValueError wie die Pruefungen oben
+                raise ValueError(parsed.message)
         r.explicit = True
     r.require |= implicit_caps(body, path)
     if not r.request_id:

@@ -1,5 +1,7 @@
-"""Strict opt-in context management limits; no model/service dependencies."""
+"""Strict opt-in context management limits; no model/service dependencies. Returns the value or a Problem (outcome.py)."""
 from dataclasses import dataclass
+
+from .outcome import invalid
 
 
 @dataclass(frozen=True)
@@ -26,17 +28,17 @@ def parse_context_config(raw):
         raw = {}
     defaults = ContextConfig()
     if not isinstance(raw, dict) or set(raw) - set(defaults.__dataclass_fields__):
-        raise ValueError("unknown router.context_manager configuration")
+        return invalid("unknown router.context_manager configuration")
     values = {k: raw.get(k, getattr(defaults, k)) for k in defaults.__dataclass_fields__}
     for k in ("enabled", "optimize_recall", "reduce_tool_results", "auto_checkpoints"):
         if type(values[k]) is not bool:
-            raise ValueError(f"context_manager.{k} must be boolean")
+            return invalid(f"context_manager.{k} must be boolean")
     if values["tool_result_strategy"] not in ("prefix", "head_tail"):
-        raise ValueError("tool_result_strategy must be prefix or head_tail")
+        return invalid("tool_result_strategy must be prefix or head_tail")
     ranges = {"recall_budget_percent": (1, 50), "tool_result_bytes": (128, 65536), "reserve_tokens": (1, 131072), "safety_tokens": (128, 131072), "tail_messages": (2, 256),
               "summary_bytes": (256, 65536), "max_history_bytes": (4096, 16777216),
               "max_history_messages": (16, 65536), "max_response_bytes": (1024, 16777216), "lease_s": (15, 3600)}
     for key, (low, high) in ranges.items():
         if type(values[key]) is not int or not low <= values[key] <= high:
-            raise ValueError(f"context_manager.{key} must be an integer between {low} and {high}")
+            return invalid(f"context_manager.{key} must be an integer between {low} and {high}")
     return ContextConfig(**values)

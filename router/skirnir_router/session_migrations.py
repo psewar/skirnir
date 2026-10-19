@@ -3,6 +3,7 @@
 Dedicated schema; no pgvector. All DDL is fixed server code, never client input.
 Do not edit released migrations: append a new version instead.
 """
+from .outcome import unavailable
 
 MIGRATIONS = ("""
 CREATE TABLE skirnir_sessions.sessions (
@@ -130,6 +131,7 @@ CREATE TRIGGER outbox_totals AFTER INSERT OR DELETE OR UPDATE OF state ON skirni
 
 
 async def migrate(conn):
+    """Apply pending migrations. Returns None, or a Problem when the schema is newer than this router."""
     async with conn.transaction():
         # Serialize concurrent router starts, including creation of the version table.
         await conn.execute("SELECT pg_advisory_xact_lock(7365471202491)")
@@ -137,7 +139,8 @@ async def migrate(conn):
         await conn.execute("CREATE TABLE IF NOT EXISTS skirnir_sessions.schema_version (version integer PRIMARY KEY)")
         version = await conn.fetchval("SELECT COALESCE(MAX(version), 0) FROM skirnir_sessions.schema_version")
         if version > len(MIGRATIONS):
-            raise RuntimeError("session database schema is newer than this router")
+            # Nothing was changed (schema and version table already exist); the commit is a no-op.
+            return unavailable("session database schema is newer than this router")
         for n, sql in enumerate(MIGRATIONS, 1):
             if n > version:
                 await conn.execute(sql)

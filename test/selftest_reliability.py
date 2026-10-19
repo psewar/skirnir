@@ -12,7 +12,7 @@ import selftest_memory as fixture
 from skirnir_router import memory, memory_gateway, memory_outbox, state
 from skirnir_router.context_config import ContextConfig, parse_context_config
 from skirnir_router.context_manager import project
-from skirnir_router.hindsight import MemoryUnavailable
+from skirnir_router.outcome import failed, unavailable
 from skirnir_router.memory_config import parse_hindsight
 from skirnir_router.provenance import recall_metadata
 
@@ -30,10 +30,9 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(parse_hindsight(None).outbox_workers, 1)
         self.assertEqual(parse_hindsight(None).outbox_client_capacity, 0)
         for raw in ({'outbox_workers': 0}, {'outbox_workers': True}, {'outbox_client_capacity': -1}):
-            with self.assertRaises(ValueError):
-                parse_hindsight(raw)
-        with self.assertRaises(ValueError):
-            parse_context_config({'tool_result_strategy': 'unknown'})
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(parse_hindsight(raw)))
+        self.assertTrue(failed(parse_context_config({'tool_result_strategy': 'unknown'})))
 
     def test_head_tail_keeps_decision_error_checkpoint_and_original(self):
         context = shared.history()
@@ -99,7 +98,7 @@ class ReliabilityApiTests(fixture.MemoryHarness):
 
     async def test_error_category_never_contains_upstream_body(self):
         await self.retain()
-        self.service.client.retain = AsyncMock(side_effect=MemoryUnavailable('SYNTHETIC_BODY_MUST_NOT_LEAK', kind='upstream_auth'))
+        self.service.client.retain = AsyncMock(return_value=unavailable('SYNTHETIC_BODY_MUST_NOT_LEAK', 'upstream_auth'))
         await memory_outbox.step(self.service)
         self.assertEqual(self.store.outbox_finish.call_args.kwargs, {'error': 'upstream_auth'})
         self.assertNotIn('SYNTHETIC_BODY', str(self.store.outbox_finish.call_args))

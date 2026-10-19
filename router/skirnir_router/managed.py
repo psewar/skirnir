@@ -1,32 +1,26 @@
-"""Opt-in managed turns inside the existing inference pipeline, never a second router."""
+"""Opt-in managed turns inside the existing inference pipeline, never a second router.
+
+Functions return their result or a Problem (outcome.py); the relay answers a Problem
+before or inside the stream.
+"""
 import asyncio
 import copy
 import hashlib
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from . import auth, cloud, metrics, session_api, state
 from .context_config import ContextConfig
-from .context_manager import compose, encoded, estimate, project
-from .session_store import SessionCapacity, SessionConflict, SessionNotFound, SessionUnavailable
+from .context_manager import compose, encoded, estimate, persistable, project
+from .outcome import Problem, bad_gateway, denied, failed, invalid, not_found, too_large, unauthenticated, unavailable
+from .session_types import NOT_FOUND
 
 KEY = "skirnir_managed_turn"
-ERRORS = (SessionCapacity, SessionConflict, SessionNotFound, SessionUnavailable)
+MANAGED_UNAVAILABLE = unavailable("managed session unavailable; inspect history before retrying the same event_id")
 
 
-class ManagedError(Exception):
-    def __init__(self, status, message):
-        self.status, self.message = status, message
-        super().__init__(message)
-
-
-def failure(exc):
-    if isinstance(exc, SessionCapacity):
-        return ManagedError(413, str(exc))
-    if isinstance(exc, SessionNotFound):
-        return ManagedError(404, "session not found")
-    if isinstance(exc, SessionConflict):
-        return ManagedError(409, str(exc))
-    return ManagedError(503, "managed session unavailable; inspect history before retrying the same event_id")
+def stored(result):
+    """A store result for a managed turn: an unavailable database is reported with managed retry guidance."""
+    return MANAGED_UNAVAILABLE if failed(result) and result.status == 503 else result
 
 
 def settings():
@@ -34,76 +28,91 @@ def settings():
 
 
 def parse(raw):
+    """routing.session as {id, event_id}, None when absent, or a Problem."""
     if raw is None:
         return None
-    session_api.fields(raw, ("id", "mode", "event_id"), ("id", "mode", "event_id"))
+    if failed(problem := session_api.fields(raw, ("id", "mode", "event_id"), ("id", "mode", "event_id"))):
+        return problem
     if raw["mode"] != "skirnir-managed":
-        raise ValueError("routing.session.mode must be skirnir-managed")
-    try:
-        sid = UUID(raw["id"])
-    except (ValueError, TypeError, AttributeError):
-        raise ValueError("routing.session.id must be a UUID") from None
-    return {"id": sid, "event_id": session_api.text(raw["event_id"], "event_id")}
+        return invalid("routing.session.mode must be skirnir-managed")
+    sid = session_api.uuid(raw["id"])
+    if sid is None:
+        return invalid("routing.session.id must be a UUID")
+    event_id = session_api.text(raw["event_id"], "event_id")
+    return event_id if failed(event_id) else {"id": sid, "event_id": event_id}
 
 
 def validate_messages(messages):
     if not isinstance(messages, list) or not 1 <= len(messages) <= 64:
-        raise ValueError("managed requests require 1..64 new messages only")
+        return invalid("managed requests require 1..64 new messages only")
     for message in messages:
         if not isinstance(message, dict) or message.get("role") not in ("system", "developer", "user", "tool", "function"):
-            raise ValueError("managed input must contain new instruction/user/tool messages, not assistant history")
+            return invalid("managed input must contain new instruction/user/tool messages, not assistant history")
         if message.get("images") or not isinstance(message.get("content"), str) or message.get("tool_calls"):
-            raise ValueError("managed sessions currently require text content and completed tool results")
+            return invalid("managed sessions currently require text content and completed tool results")
     if messages[-1]["role"] not in ("user", "tool", "function"):
-        raise ValueError("managed delta must end in user or tool input")
+        return invalid("managed delta must end in user or tool input")
+    return None
 
 
 def principal(request):
     owner, via = auth.resolve_client(request)
     if owner is None or via not in ("bearer", "basic", "x-api-key") or owner != request.get("client"):
-        raise ManagedError(401, "managed sessions require authenticated client credentials")
+        return unauthenticated("managed sessions require authenticated client credentials")
     return owner
 
 
 async def begin(request, path, body, req):
+    """Claim the managed turn and project its context into body. None, or a Problem."""
     if not req.session:
-        return
+        return None
     if not settings().enabled or not getattr(state.CFG, "session_store", None) or not state.CFG.session_store.enabled:
-        raise ManagedError(404, "managed sessions disabled")
+        return not_found("managed sessions disabled")
     if path != "/api/chat" or any(body.get(k) for k in ("system", "prompt", "suffix", "raw", "images", "template", "context")):
-        raise ValueError("managed sessions require chat messages without template overrides")
+        return invalid("managed sessions require chat messages without template overrides")
     # No implicit propagation of stored history to remote inference. A later explicit
     # cloud grant can expand this boundary; ordinary/stateless cloud is unchanged.
     if req.execution == "cloud":
-        raise ManagedError(403, "managed session inference is local only")
-    validate_messages(body.get("messages"))
+        return denied("managed session inference is local only")
+    if failed(problem := validate_messages(body.get("messages"))):
+        return problem
     owner = principal(request)
+    if failed(owner):
+        return owner
     store = request.app.get(session_api.STORE_KEY)
     if store is None:
-        raise SessionUnavailable
+        return MANAGED_UNAVAILABLE
     sid = req.session["id"]
-    session = await store.get(owner, sid)
+    session = stored(await store.get(owner, sid))
+    if failed(session):
+        return session
     if not session_api.allowed_project(owner, session["project"]):
-        raise SessionNotFound
+        return NOT_FOUND
     if req.memory and req.memory["project"] != session["project"]:
-        raise ManagedError(403, "session and memory projects must match")
+        return denied("session and memory projects must match")
     client = auth.client_auth_cfg()["clients"][owner]
     requested = max((req.data_class or state.CFG.cloud["default_data_class"],
                      client.get("data_class") or state.CFG.cloud["default_data_class"]), key=cloud.class_index)
     if cloud.class_index(requested) > cloud.class_index(session["data_class"]):
-        raise ManagedError(403, "input data class exceeds immutable session classification")
+        return denied("input data class exceeds immutable session classification")
     req.data_class, req.execution = session["data_class"], "local"
     cfg = settings()
     # Input identity includes inference-affecting options, excluding transport and
     # model selection: retries/model switches must not duplicate persisted input.
     fingerprint = hashlib.sha256(encoded({k: v for k, v in body.items() if k not in ("model", "stream", "keep_alive")})).hexdigest()
-    claim = await store.claim(owner, sid, req.session["event_id"], fingerprint, copy.deepcopy(body["messages"]), cfg)
+    claim = stored(await store.claim(owner, sid, req.session["event_id"], fingerprint, copy.deepcopy(body["messages"]), cfg))
+    if failed(claim):
+        return claim
     turn = Turn(request, req, store, owner, sid, claim["lease"], cfg)
     request[KEY] = turn
     turn.heartbeat = asyncio.create_task(turn.renew())
-    turn.context = await store.context(owner, sid, cfg)
+    context = stored(await store.context(owner, sid, cfg))
+    if failed(context):
+        return context
+    turn.context = context
     body["messages"] = compose(turn.context)
     req.require |= {"tools"} if any(m.get("tool_calls") or m.get("role") in ("tool", "function") for m in body["messages"]) else set()
+    return None
 
 
 class Turn:
@@ -115,31 +124,34 @@ class Turn:
         self.lost = False
 
     def check(self):
+        """None while the turn may continue, or a Problem when lease or policy changed."""
         if self.lost:
-            raise SessionConflict("managed turn lease lost")
+            return Problem(409, "managed turn lease lost")
         if not settings().enabled or not state.CFG.session_store.enabled:
-            raise ManagedError(503, "managed session configuration changed")
+            return unavailable("managed session configuration changed")
         if principal(self.request) != self.owner or not session_api.allowed_project(self.owner, self.context["session"]["project"]):
-            raise ManagedError(403, "session policy changed")
+            return denied("session policy changed")
         client = auth.client_auth_cfg()["clients"][self.owner]
         if cloud.class_index(self.req.data_class) > cloud.class_index(self.context["session"]["data_class"]):
-            raise ManagedError(403, "memory/request data class exceeds session classification")
+            return denied("memory/request data class exceeds session classification")
         if cloud.class_index(client.get("data_class") or state.CFG.cloud["default_data_class"]) > cloud.class_index(self.context["session"]["data_class"]):
-            raise ManagedError(403, "session data policy changed")
+            return denied("session data policy changed")
+        return None
 
     async def renew(self):
-        try:
-            while True:
-                await asyncio.sleep(self.cfg.lease_s / 3)
-                await self.store.renew(self.owner, self.sid, self.lease, self.cfg.lease_s)
-        except ERRORS:
-            self.lost = True
-            metrics._counter("skirnir_context_events_total", {"operation": "lease", "outcome": "lost"})
+        while True:
+            await asyncio.sleep(self.cfg.lease_s / 3)
+            if failed(await self.store.renew(self.owner, self.sid, self.lease, self.cfg.lease_s)):
+                self.lost = True
+                metrics._counter("skirnir_context_events_total", {"operation": "lease", "outcome": "lost"})
+                return
 
     async def target(self, body, tier, ctx):
-        self.check()
+        """Fit the projected context to this tier. None, or a Problem."""
+        if failed(problem := self.check()):
+            return problem
         if tier.get("cloud"):
-            raise ManagedError(403, "managed session inference is local only")
+            return denied("managed session inference is local only")
         ctx = min(ctx or tier["num_ctx"], tier["num_ctx"])
         model = state.CFG.catalog_twin(tier["model"]) or {}
         if model.get("context_tokens"):
@@ -147,12 +159,12 @@ class Turn:
         opts = dict(body.get("options") or {})
         output = opts.get("num_predict", self.cfg.reserve_tokens)
         if type(output) is not int:
-            raise ValueError("managed num_predict must be an integer")
+            return invalid("invalid managed generation options")
         if output <= 0:
             output = self.cfg.reserve_tokens
         budget = ctx - output - self.cfg.safety_tokens
         if budget <= 0:
-            raise SessionCapacity("output and safety reserves exceed target context")
+            return too_large("output and safety reserves exceed target context")
         from . import memory
         ephemeral = self.req.memory_context
         items = list(self.req.memory_items)
@@ -161,41 +173,48 @@ class Turn:
                 items.pop()
             ephemeral = {"role": "user", "content": memory.packed(items)} if items else None
         before = estimate(body, compose(self.context, ephemeral))
-        while True:
-            try:
-                messages, compacted = project(self.context, body, budget, self.cfg, tier["model"], ephemeral, state.CFG.limits["max_messages"])
-                break
-            except SessionCapacity:
-                if not self.cfg.optimize_recall or not items:
-                    raise
-                items.pop()
-                ephemeral = {"role": "user", "content": memory.packed(items)} if items else None
+        projected = project(self.context, body, budget, self.cfg, tier["model"], ephemeral, state.CFG.limits["max_messages"])
+        # Too large: drop recalled facts one by one (lowest priority last) while optimize_recall allows it.
+        while failed(projected) and self.cfg.optimize_recall and items:
+            items.pop()
+            ephemeral = {"role": "user", "content": memory.packed(items)} if items else None
+            projected = project(self.context, body, budget, self.cfg, tier["model"], ephemeral, state.CFG.limits["max_messages"])
+        if failed(projected):
+            return projected
+        messages, compacted = projected
         used = estimate(body, messages)
         for part, value in (("prompt_budget", budget), ("estimated_prompt", used), ("output_reserve", output),
                             ("recall", len(ephemeral["content"].encode()) if ephemeral else 0)):
             metrics._hist("skirnir_context_tokens", {"part": part}, (256, 1024, 4096, 16384, 65536, 262144), value)
         if self.req.memory_scope is not None:
             scope = self.req.memory_scope
-            await self.store.remember_memory_scope(self.owner, self.sid, self.lease,
+            remembered = await self.store.remember_memory_scope(self.owner, self.sid, self.lease,
                 {"project": scope.project, "shared_scope": scope.shared_scope, "data_class": scope.data_class})
+            if failed(remembered):
+                return stored(remembered)
         if compacted:
             metrics._hist("skirnir_compaction_saved_tokens", {}, (0, 256, 1024, 4096, 16384, 65536), max(0, before - used))
             version = await self.store.compact(self.owner, self.sid, self.lease, compacted["through_seq"], compacted["payload"])
+            if failed(version):
+                return stored(version)
             self.context["compaction"] = version
             self.context["messages"] = [row for row in self.context["messages"] if row["seq"] > version["through_seq"]]
             metrics._counter("skirnir_context_events_total", {"operation": "compaction", "outcome": "ok"})
         opts.update(num_predict=output, num_ctx=ctx)
         body.update(messages=messages, options=opts)
+        return None
 
     async def commit(self, capture):
+        """Persist the completed assistant message. None, or a Problem."""
         if self.finished:
-            return
-        self.check()
+            return None
+        if failed(problem := self.check()):
+            return problem
         if not capture.done:
-            raise ManagedError(502, "incomplete managed response; raw input retained")
+            return bad_gateway("incomplete managed response; raw input retained")
         transport = self.request.transport
         if transport is None or transport.is_closing():
-            raise ManagedError(502, "managed response interrupted; raw input retained")
+            return bad_gateway("managed response interrupted; raw input retained")
         checkpoint = None
         if self.cfg.auto_checkpoints:
             previous = self.context.get("checkpoint")
@@ -213,21 +232,22 @@ class Turn:
             if rejected_content(encoded(checkpoint).decode(), memory_settings()):
                 checkpoint = None
         if checkpoint is None:
-            await self.store.finish_turn(self.owner, self.sid, self.lease, capture.message)
+            written = await self.store.finish_turn(self.owner, self.sid, self.lease, capture.message)
         else:
-            await self.store.finish_turn(self.owner, self.sid, self.lease, capture.message, checkpoint=checkpoint)
+            written = await self.store.finish_turn(self.owner, self.sid, self.lease, capture.message, checkpoint=checkpoint)
+        if failed(written):
+            return stored(written)
         self.finished = True
         metrics._counter("skirnir_context_events_total", {"operation": "turn", "outcome": "completed"})
+        return None
 
     async def close(self):
         if self.heartbeat:
             self.heartbeat.cancel()
             await asyncio.gather(self.heartbeat, return_exceptions=True)
         if not self.finished:
-            try:
-                await self.store.fail_turn(self.owner, self.sid, self.lease)
-            except ERRORS:
-                pass  # Lease expires independently; raw input remains durable.
+            # A failed write needs no handling: the lease expires independently and raw input remains durable.
+            await self.store.fail_turn(self.owner, self.sid, self.lease)
             metrics._counter("skirnir_context_events_total", {"operation": "turn", "outcome": "incomplete"})
 
 
@@ -238,55 +258,56 @@ class AssistantCapture:
         self.message = {"role": "assistant", "content": ""}
 
     def observe(self, result):
+        """Add one native response chunk. None, or a Problem (502) for anything that cannot be persisted."""
         if self.done or not isinstance(result, dict) or result.get("error"):
-            raise ManagedError(502, "invalid managed response")
+            return bad_gateway("invalid managed response")
         message = result.get("message") or {}
         if not isinstance(message, dict):
-            raise ManagedError(502, "invalid managed message")
-        try:
-            self.size += len(encoded(message))
-        except (ValueError, UnicodeError, RecursionError):
-            raise ManagedError(502, "invalid managed JSON content") from None
+            return bad_gateway("invalid managed message")
+        if not persistable(message):
+            return bad_gateway("invalid managed JSON content")
+        self.size += len(encoded(message))
         if self.size > self.limit:
-            raise ManagedError(502, "managed response exceeds persistence limit")
+            return bad_gateway("managed response exceeds persistence limit")
         for key in ("content", "thinking"):
             value = message.get(key, "")
             if not isinstance(value, str):
-                raise ManagedError(502, "invalid managed text")
+                return bad_gateway("invalid managed text")
             if value:
                 self.message[key] = self.message.get(key, "") + value
         calls = message.get("tool_calls") or []
         if not isinstance(calls, list):
-            raise ManagedError(502, "invalid managed tool calls")
+            return bad_gateway("invalid managed tool calls")
         for call in calls:
             # Native Ollama sends complete tool calls (arguments are objects).
             # Reject unsupported partial/fragmented calls instead of saving corrupt state.
             if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
-                raise ManagedError(502, "invalid managed tool call")
+                return bad_gateway("invalid managed tool call")
             fn = call["function"]
             if not isinstance(fn.get("name"), str) or not fn["name"].strip() or not isinstance(fn.get("arguments", {}), dict):
-                raise ManagedError(502, "managed tool calls require complete native arguments")
+                return bad_gateway("managed tool calls require complete native arguments")
             if not call.get("id"):
                 call["id"] = "call-" + uuid4().hex
-            try:
-                session_api.text(call["id"], "tool call id")
-            except ValueError:
-                raise ManagedError(502, "invalid managed tool identifier") from None
+            if failed(session_api.text(call["id"], "tool call id")):
+                return bad_gateway("invalid managed tool identifier")
             if any(old["id"] == call["id"] for old in self.message.get("tool_calls", [])):
-                raise ManagedError(502, "duplicate or fragmented managed tool call")
+                return bad_gateway("duplicate or fragmented managed tool call")
             call["index"] = len(self.message.get("tool_calls", []))
             self.message.setdefault("tool_calls", []).append(copy.deepcopy(call))
         self.done = result.get("done") is True
+        return None
 
 
 async def lines(content, limit):
-    """Bound the complete managed NDJSON reply before buffering arbitrary lines."""
+    """Bound the complete managed NDJSON reply before buffering arbitrary lines. Yields lines (bytes);
+    a Problem as the last item means the reply exceeded the limit."""
     buffer = bytearray()
     total = 0
     async for chunk in content.iter_chunked(65536):
         total += len(chunk)
         if total > limit:
-            raise ManagedError(502, "managed response exceeds persistence limit")
+            yield bad_gateway("managed response exceeds persistence limit")
+            return
         buffer.extend(chunk)
         while b"\n" in buffer:
             line, _, rest = buffer.partition(b"\n")

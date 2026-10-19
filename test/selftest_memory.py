@@ -16,7 +16,8 @@ from aiohttp.test_utils import TestClient, TestServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "router"))
 from skirnir_router import app, cloud, config, memory, nodes, ops, proxy, state  # noqa: E402
-from skirnir_router.hindsight import MemoryUnavailable, endpoint_from_env  # noqa: E402
+from skirnir_router.hindsight import endpoint_from_env  # noqa: E402
+from skirnir_router.outcome import failed  # noqa: E402
 from skirnir_router.memory_config import HindsightConfig, parse_client_memory, parse_hindsight, parse_memory_request  # noqa: E402
 from check_public_changes import findings  # noqa: E402
 
@@ -33,13 +34,13 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(parse_hindsight(None).enabled)
         for raw in ({"enabled": "false"}, {"timeout_s": float("nan")}, {"retries": True}, {"max_inflight": 0},
                     {"endpoint_env": "https://memory.example.invalid"}, {"dsn": "bad"}, {"deny_terms": "bad"}, []):
-            with self.subTest(raw=raw), self.assertRaises(ValueError):
-                parse_hindsight(raw)
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(parse_hindsight(raw)))
         self.assertEqual(parse_client_memory(None, ["personal"])["owner"], "client")
         for raw in ({"owner": "auto"}, {"projects": {"x": {"read": True}}}, {"projects": {"x": {"data_class": "personal", "bank": "x"}}},
                     {"projects": {"x": {"data_class": "personal", "read": "yes"}}}):
-            with self.assertRaises(ValueError):
-                parse_client_memory(raw, ["personal"])
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(parse_client_memory(raw, ["personal"])))
 
     def test_publication_guard_uses_synthetic_examples_and_redacted_findings(self):
         self.assertEqual(findings("http://127.0.0.1:1234 user@example.invalid 192.0.2.23"), [])
@@ -52,15 +53,16 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIsNone(parse_memory_request(False))
         for raw in (True, {"bank": "chosen"}, {"project": PROJECT, "recall": "true"}, {"project": PROJECT, "retain": True},
                     {"project": PROJECT, "event_id": "\n"}):
-            with self.assertRaises(ValueError):
-                parse_memory_request(raw)
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(parse_memory_request(raw)))
 
     def test_endpoint_security(self):
         cfg = HindsightConfig()
         for url in ("http://memory.example.invalid", "https://" + "user:pass@" + "memory.example.invalid", "https://memory.example.invalid/?secret=x",
-                    "https://memory.example.invalid/#fragment", "file:///tmp/example", "http://127.0.0.1:1234"):
-            with patch.dict(os.environ, {cfg.endpoint_env: url}), self.assertRaises(ValueError):
-                endpoint_from_env(cfg)
+                    "https://memory.example.invalid/#fragment", "file:///tmp/example", "http://127.0.0.1:1234",
+                    "https://memory.example.invalid:99999", "https://[::1", "https://memory.example.invalid:x"):
+            with self.subTest(url=url), patch.dict(os.environ, {cfg.endpoint_env: url}):
+                self.assertTrue(failed(endpoint_from_env(cfg)))
         with patch.dict(os.environ, {cfg.endpoint_env: "http://127.0.0.1:1234"}):
             self.assertEqual(endpoint_from_env(replace(cfg, allow_http_loopback=True)), "http://127.0.0.1:1234")
         with patch.dict(os.environ, {cfg.endpoint_env: "https://memory.example.invalid"}):
@@ -292,8 +294,10 @@ class MemoryHttpTests(MemoryHarness):
             self.assertEqual(retained["items"][0]["content"], "Synthetic cloud answer.")
 
     async def test_legacy_async_ack_is_rejected_without_unsafe_fallback(self):
-        with patch.object(self.service.client, "post", AsyncMock(return_value={"operation_id": "different-id"})), self.assertRaises(MemoryUnavailable):
-            await self.service.client.retain(self.service.bank(memory.scope_for_principal("client-a", PROJECT)), "Synthetic", "synthetic-id", confirmed=True)
+        with patch.object(self.service.client, "post", AsyncMock(return_value={"operation_id": "different-id"})):
+            result = await self.service.client.retain(self.service.bank(memory.scope_for_principal("client-a", PROJECT)), "Synthetic", "synthetic-id", confirmed=True)
+        self.assertTrue(failed(result))
+        self.assertEqual((result.status, result.kind), (503, "protocol"))
 
     async def test_failed_truncated_length_and_tool_responses_not_retained(self):
         for mode, stream in (("error", False), ("truncated", True), ("length", False), ("tool", False), ("tool", True)):

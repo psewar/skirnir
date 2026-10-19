@@ -6,13 +6,34 @@ are exact pins. If they cannot fit, reject rather than silently discard them.
 """
 import copy
 import json
+import math
+import re
 
 from . import kontextpruefung
-from .session_types import SessionCapacity, SessionConflict
+from .outcome import conflict, too_large
+
+
+SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 def encoded(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
+
+
+def persistable(value, depth=0):
+    """True when `encoded` and the database accept value: finite numbers, no lone surrogates, bounded nesting.
+    Upstream JSON parsed leniently may contain NaN or unpaired surrogates; check before encoding."""
+    if depth > 64:
+        return False
+    if isinstance(value, str):
+        return not SURROGATE.search(value)
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, dict):
+        return all(isinstance(k, str) and persistable(k) and persistable(v, depth + 1) for k, v in value.items())
+    if isinstance(value, list):
+        return all(persistable(v, depth + 1) for v in value)
+    return value is None or isinstance(value, (bool, int))
 
 
 def pinned(message):
@@ -51,6 +72,7 @@ def estimate(body, messages):
 
 
 def project(context, body, budget, cfg, model, ephemeral=None, max_messages=None):
+    """(messages, compaction or None) that fit the budget, or a Problem (413) when protected content cannot fit."""
     messages = compose(context, ephemeral)
     if estimate(body, messages) <= budget and (max_messages is None or len(messages) <= max_messages):
         return messages, None
@@ -93,7 +115,7 @@ def project(context, body, budget, cfg, model, ephemeral=None, max_messages=None
         if reduced:
             excerpts = ["Older completed tool results were reduced. Consult original events for exact content."]
         else:
-            raise SessionCapacity("protected context exceeds target model budget")
+            return too_large("protected context exceeds target model budget")
     through = rows[start - 1]["seq"] if start else (old["through_seq"] if old else 0)
     summary = "\n".join(excerpts).encode()[-cfg.summary_bytes:].decode("utf-8", errors="ignore")
     payload = {"schema_version": 1, "algorithm": "extractive-v1", "summary": summary, "pinned": pins,
@@ -108,7 +130,7 @@ def project(context, body, budget, cfg, model, ephemeral=None, max_messages=None
             return messages, {"through_seq": through, "payload": payload}
         size = len(payload["summary"].encode())
         if size <= 64:
-            raise SessionCapacity("system, tools, checkpoint or recent tail exceeds target model budget")
+            return too_large("system, tools, checkpoint or recent tail exceeds target model budget")
         payload["summary"] = payload["summary"].encode()[-max(64, size // 2):].decode("utf-8", errors="ignore")
 
 
@@ -128,14 +150,14 @@ def tool_delta(context, messages):
         if ident is None:
             matches = [key for key, name in pending.items() if name == message.get("tool_name")]
             if len(matches) != 1:
-                raise SessionConflict("tool result must identify one pending call")
+                return conflict("tool result must identify one pending call")
             ident = matches[0]
         if ident not in pending:
-            raise SessionConflict("tool result has no pending call in this session")
+            return conflict("tool result has no pending call in this session")
         message["tool_call_id"] = ident
         message["tool_name"] = pending.pop(ident)
     if pending:
-        raise SessionConflict("all pending tool calls need results before continuing inference")
+        return conflict("all pending tool calls need results before continuing inference")
     return result
 
 

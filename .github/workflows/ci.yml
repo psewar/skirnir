@@ -22,6 +22,8 @@ jobs:
       - run: pip install -r requirements-dev.txt -r test/requirements-hindsight.txt
       - run: ruff check .
       - run: python router/router.py --check router/config.example.yaml --pure
+      - name: Explicit control flow (AGENTS.md)
+        run: python test/selftest_control_flow.py && python test/check_control_flow.py
       - run: python test/selftest_kontextpruefung.py
       - run: python test/selftest_toolcall_rescue.py
       - run: python test/selftest_verfuegbarkeit.py

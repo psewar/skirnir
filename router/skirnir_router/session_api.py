@@ -1,36 +1,48 @@
-"""Authenticated explicit session API. No inference, recall or compaction side effects."""
+"""Authenticated explicit session API. No inference, recall or compaction side effects.
+
+Validation helpers return the value or a Problem (outcome.py); handlers answer a Problem
+with its own status and fixed message.
+"""
 
 import json
 import os
+import re
 import time
 from uuid import UUID
 
 from aiohttp import web
 
 from . import auth, metrics, state
+from .outcome import Problem, failed, invalid, too_large
 from .session_config import SessionConfig
 from .context_config import ContextConfig
-from .session_store import PostgresSessionStore, SessionConflict, SessionNotFound, SessionUnavailable, SessionCapacity
+from .session_store import PostgresSessionStore
+from .session_types import NOT_FOUND, UNAVAILABLE
 
 STORE_KEY = "skirnir_session_store"  # string keys support aiohttp 3.8 (router minimum)
 CONFIG_KEY = "skirnir_session_store_config"
 MAX_BODY_BYTES = 1024 * 1024
 PREFIX = "/v1/skirnir/sessions"
+UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}")
+COUNT_TEXT = re.compile(r"[0-9]{1,19}")
+BODY_TOO_LARGE = too_large("session body exceeds 1 MiB")
+INVALID = invalid("invalid session request")
 
 
 async def lifecycle(app):
     cfg = app[CONFIG_KEY]
     store = None
     if cfg.enabled:
+        # aiohttp aborts startup only through an exception from a cleanup context: these
+        # RuntimeErrors stop the router with the reason; nothing catches them to branch.
         if cfg.handoff_enabled and len(os.environ.get(cfg.handoff_key_env, "").encode()) < 32:
-            raise RuntimeError("session handoffs require a signing key of at least 32 bytes")
+            raise RuntimeError("session handoffs require a signing key of at least 32 bytes")  # exception-ok: aborts startup
         dsn = os.environ.get(cfg.dsn_env)
         if not dsn:
-            raise RuntimeError("session store requires its configured DSN environment variable")
-        try:
-            store = await PostgresSessionStore.open(dsn, cfg)
-        except (ImportError, SessionUnavailable):
-            raise RuntimeError("session store startup failed; check driver, database and credentials") from None
+            raise RuntimeError("session store requires its configured DSN environment variable")  # exception-ok: aborts startup
+        store = await PostgresSessionStore.open(dsn, cfg)
+        if failed(store):
+            raise RuntimeError("session store startup failed; check driver, database and credentials")  # exception-ok: aborts startup
     app[STORE_KEY] = store
     try:
         yield
@@ -61,15 +73,55 @@ def fail(status, message):
                              headers={"Cache-Control": "no-store"})
 
 
+def answer(problem):
+    return fail(problem.status, problem.message)
+
+
 def text(value, name, max_len=128):
+    """The string, or a Problem: nonempty, at most max_len characters, no control characters."""
     if not isinstance(value, str) or not value.strip() or len(value) > max_len or any(ord(c) < 32 for c in value):
-        raise ValueError(f"{name} must be a nonempty string of at most {max_len} characters")
+        return invalid(f"{name} must be a nonempty string of at most {max_len} characters")
     return value
 
 
 def fields(data, allowed, required=()):
+    """None, or a Problem when data is not an object with only allowed and all required fields."""
     if not isinstance(data, dict) or set(data) - set(allowed) or set(required) - set(data):
-        raise ValueError("invalid object fields")
+        return invalid("invalid object fields")
+    return None
+
+
+def uuid(value):
+    """UUID from its text form, or None. The pattern is checked first, so UUID() never fails."""
+    return UUID(value) if isinstance(value, str) and UUID_TEXT.fullmatch(value) else None
+
+
+def count(value, low, high):
+    """Integer within [low, high] from its decimal text form, or None."""
+    if not isinstance(value, str) or not COUNT_TEXT.fullmatch(value):
+        return None
+    number = int(value)
+    return number if low <= number <= high else None
+
+
+def parse_json_value(data):
+    """Any JSON value from bytes or text, or a Problem. Rejects NaN/Infinity, which strict JSON does not allow."""
+    constants = []
+    # Parsing is the only complete validity check for JSON: the parser's exception is its
+    # report on this untrusted input (syntax, encoding, nesting depth), caught right here.
+    try:
+        value = json.loads(data, parse_constant=constants.append)
+    except (ValueError, RecursionError):  # exception-ok: JSON validity is only known by parsing
+        return invalid("body must contain valid JSON")
+    return invalid("body must contain valid JSON") if constants else value
+
+
+def parse_json(data):
+    """JSON object from bytes, or a Problem."""
+    value = parse_json_value(data)
+    if not failed(value) and not isinstance(value, dict):
+        return invalid("body must be an object")
+    return value
 
 
 async def body(request):
@@ -78,16 +130,8 @@ async def body(request):
     async for chunk in request.content.iter_chunked(65536):
         data.extend(chunk)
         if len(data) > MAX_BODY_BYTES:
-            raise web.HTTPRequestEntityTooLarge(max_size=MAX_BODY_BYTES, actual_size=len(data))
-    try:
-        def invalid_constant(_):
-            raise ValueError("non-finite JSON number")
-        value = json.loads(data, parse_constant=invalid_constant)
-    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
-        raise ValueError("body must contain valid JSON") from None
-    if not isinstance(value, dict):
-        raise ValueError("body must be an object")
-    return value
+            return BODY_TOO_LARGE
+    return parse_json(data)
 
 
 def allowed_project(principal, project):
@@ -96,39 +140,48 @@ def allowed_project(principal, project):
 
 
 def cursor(request, extra=()):
+    """(after, limit) from the query, or a Problem."""
     if set(request.query) - {"after", "limit", *extra}:
-        raise ValueError("unknown pagination parameter")
-    try:
-        after, limit = int(request.query.get("after", "0")), int(request.query.get("limit", "50"))
-    except ValueError:
-        raise ValueError("after and limit must be integers") from None
-    if not 0 <= after <= 9223372036854775807 or not 1 <= limit <= 100:
-        raise ValueError("after must be nonnegative and limit between 1 and 100")
+        return invalid("unknown pagination parameter")
+    after = count(request.query.get("after", "0"), 0, 9223372036854775807)
+    limit = count(request.query.get("limit", "50"), 1, 100)
+    if after is None or limit is None:
+        return invalid("after must be nonnegative and limit between 1 and 100")
     return after, limit
 
 
 def validate_payload(data, kind):
-    fields(data, ("event_id", kind), ("event_id", kind))
-    text(data["event_id"], "event_id")
+    """(event_id, payload), or a Problem."""
+    if failed(problem := fields(data, ("event_id", kind), ("event_id", kind))):
+        return problem
+    if failed(problem := text(data["event_id"], "event_id")):
+        return problem
     payload = data[kind]
     if not isinstance(payload, dict):
-        raise ValueError(f"{kind} must be an object")
+        return invalid(f"{kind} must be an object")
     if kind == "message":
         if payload.get("role") not in ("system", "developer", "user", "assistant", "tool", "function"):
-            raise ValueError("message.role is required")
+            return invalid("message.role is required")
         # Keep original protocol-specific content/tool-call fields, without conversion.
     else:
-        fields(payload, ("schema_version", "goals", "open_steps", "artifacts", "last_result", "provenance"), ("schema_version",))
+        if failed(problem := fields(payload, ("schema_version", "goals", "open_steps", "artifacts", "last_result", "provenance"), ("schema_version",))):
+            return problem
         if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
-            raise ValueError("checkpoint.schema_version must be 1")
+            return invalid("checkpoint.schema_version must be 1")
         for key in ("goals", "open_steps", "artifacts"):
             if key in payload and (not isinstance(payload[key], list) or any(not isinstance(x, str) for x in payload[key])):
-                raise ValueError(f"checkpoint.{key} must be a list of strings")
+                return invalid(f"checkpoint.{key} must be a list of strings")
         if "last_result" in payload and not isinstance(payload["last_result"], str):
-            raise ValueError("checkpoint.last_result must be a string")
+            return invalid("checkpoint.last_result must be a string")
         if "provenance" in payload and not isinstance(payload["provenance"], dict):
-            raise ValueError("checkpoint.provenance must be an object")
+            return invalid("checkpoint.provenance must be an object")
     return data["event_id"], payload
+
+
+# Client-facing wording per status. 400 and 404 stay generic on purpose: they must not reveal
+# which check failed or whether a foreign session exists. 409 and 413 name the actual condition.
+PUBLIC = {400: INVALID.message, 403: "session handoff or project permission denied", 404: NOT_FOUND.message,
+          503: UNAVAILABLE.message}
 
 
 async def handle(request):
@@ -140,21 +193,10 @@ async def handle(request):
         if not cfg.enabled or not request.app[CONFIG_KEY].enabled:
             response = fail(404, "session store disabled (configuration changes require restart)")
         else:
-            response = await dispatch(request, action)
-    except PermissionError:
-        response = fail(403, "session handoff or project permission denied")
-    except SessionCapacity:
-        response = fail(413, "session working set exceeds configured limit")
-    except SessionNotFound:
-        response = fail(404, "session not found")
-    except SessionConflict as exc:
-        response = fail(409, str(exc))
-    except SessionUnavailable:
-        response = fail(503, "session store unavailable; retry with the same event_id")
-    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
-        response = fail(400, "invalid session request")
-    except web.HTTPRequestEntityTooLarge:
-        response = fail(413, "session body exceeds 1 MiB")
+            result = await dispatch(request, action)
+            if isinstance(result, Problem):
+                result = fail(result.status, result.message if result.status in (401, 409, 413) else PUBLIC.get(result.status, result.message))
+            response = result
     finally:
         status = str(response.status) if response is not None else "cancelled"
         metrics._counter("skirnir_session_requests_total", {"operation": action, "status": status})
@@ -164,6 +206,7 @@ async def handle(request):
 
 
 async def dispatch(request, action):
+    """Response, or a Problem that handle() answers."""
     # Even observe mode/IP-only clients cannot access stored conversations. Use
     # existing credential resolver; session_id/project never establish identity.
     principal, via = auth.resolve_client(request)
@@ -173,87 +216,105 @@ async def dispatch(request, action):
         return fail(403, "session access is not enabled for this client")
     store = request.app[STORE_KEY]
     if store is None:
-        raise SessionUnavailable
+        return UNAVAILABLE
     if action in ("list", "handoff-imported"):
         from . import session_exchange
         if action == "list":
             return await session_exchange.discover(request, store, principal)
-        try:
-            response = await session_exchange.import_package(request, store, principal)
-        except BaseException:
-            session_exchange.count("import", "error")
-            raise
-        session_exchange.count("import", "ok")
+        response = await session_exchange.import_package(request, store, principal)
+        session_exchange.count("import", "error" if failed(response) else "ok")
         return response
     if action == "create":
         data = await body(request)
-        fields(data, ("project", "metadata", "mode"), ("project",))
+        if failed(data):
+            return data
+        if failed(problem := fields(data, ("project", "metadata", "mode"), ("project",))):
+            return problem
         project = text(data["project"], "project")
+        if failed(project):
+            return project
         if not allowed_project(principal, project):
             return fail(403, "project not allowed")
         mode = data.get("mode", "client-managed")
         if mode not in ("client-managed", "skirnir-managed"):
-            raise ValueError("invalid session mode")
+            return invalid("invalid session mode")
         if mode == "skirnir-managed" and not getattr(state.CFG, "context_manager", ContextConfig()).enabled:
-            raise ValueError("managed context is disabled")
+            return invalid("managed context is disabled")
         metadata = data.get("metadata", {})
         if not isinstance(metadata, dict):
-            raise ValueError("metadata must be an object")
+            return invalid("metadata must be an object")
         client = auth.client_auth_cfg()["clients"][principal]
         data_class = client.get("data_class") or state.CFG.cloud["default_data_class"]
         result = (await store.create(principal, project, data_class, metadata, mode=mode) if mode == "skirnir-managed"
                   else await store.create(principal, project, data_class, metadata))
-        return web.json_response(result, status=201)
-    try:
-        session_id = UUID(request.match_info["session_id"])
-    except ValueError:
-        raise SessionNotFound from None
+        return result if failed(result) else web.json_response(result, status=201)
+    session_id = uuid(request.match_info["session_id"])
+    if session_id is None:
+        return NOT_FOUND
     session = await store.get(principal, session_id)
+    if failed(session):
+        return session
     if not allowed_project(principal, session["project"]):
-        raise SessionNotFound
+        return NOT_FOUND
     if action == "get":
         return web.json_response(session)
     if action == "delete":
-        await store.delete(principal, session_id)
-        return web.Response(status=204)
+        deleted = await store.delete(principal, session_id)
+        return deleted if failed(deleted) else web.Response(status=204)
     if action == "update":
         data = await body(request)
-        fields(data, ("status", "metadata"))
+        if failed(data):
+            return data
+        if failed(problem := fields(data, ("status", "metadata"))):
+            return problem
         if not data or ("status" in data and data["status"] not in ("active", "archived")):
-            raise ValueError("invalid status")
+            return invalid("invalid status")
         if "metadata" in data and not isinstance(data["metadata"], dict):
-            raise ValueError("metadata must be an object")
-        return web.json_response(await store.update(principal, session_id, data.get("status"), data.get("metadata")))
+            return invalid("metadata must be an object")
+        updated = await store.update(principal, session_id, data.get("status"), data.get("metadata"))
+        return updated if failed(updated) else web.json_response(updated)
     if action == "handoff":
         from . import session_exchange
-        try:
-            package = await session_exchange.export(store, principal, session_id)
-        except BaseException:
-            session_exchange.count("export", "error")
-            raise
-        session_exchange.count("export", "ok")
-        return web.json_response(package)
+        package = await session_exchange.export(store, principal, session_id)
+        session_exchange.count("export", "error" if failed(package) else "ok")
+        return package if failed(package) else web.json_response(package)
     if action == "latest-checkpoint":
         context = await store.context(principal, session_id, getattr(state.CFG, "context_manager", ContextConfig()))
-        return web.json_response({"checkpoint": context["checkpoint"], "resumable_execution": False})
+        return context if failed(context) else web.json_response({"checkpoint": context["checkpoint"], "resumable_execution": False})
     if action in ("compactions", "snapshot", "search"):
         return await context_resource(request, store, principal, session_id, action)
     kind = "message" if action.endswith("messages") else "checkpoint"
     if action.startswith("append-"):
-        event_id, payload = validate_payload(await body(request), kind)
-        event, created = await store.append(principal, session_id, event_id, kind, payload)
+        data = await body(request)
+        if failed(data):
+            return data
+        validated = validate_payload(data, kind)
+        if failed(validated):
+            return validated
+        event_id, payload = validated
+        appended = await store.append(principal, session_id, event_id, kind, payload)
+        if failed(appended):
+            return appended
+        event, created = appended
         return web.json_response(event, status=201 if created else 200)
-    after, limit = cursor(request)
+    page = cursor(request)
+    if failed(page):
+        return page
+    after, limit = page
     items = await store.read(principal, session_id, kind, after, limit)
+    if failed(items):
+        return items
     return web.json_response({"items": items, "next_after": items[-1]["seq"] if items else after})
 
 
 async def context_resource(request, store, owner, sid, action):
     if action == "snapshot":
         if request.query:
-            raise ValueError("snapshot has no query parameters")
+            return invalid("snapshot has no query parameters")
         from .context_manager import compose
         context = await store.context(owner, sid, getattr(state.CFG, "context_manager", ContextConfig()))
+        if failed(context):
+            return context
         # This is an active-context export, never a promise to resume OS processes.
         return web.json_response({"schema_version": 1, "kind": "skirnir-context-snapshot", "resumable_execution": False,
             "provenance": {"session_id": str(sid), "project": context["session"]["project"],
@@ -265,11 +326,23 @@ async def context_resource(request, store, owner, sid, action):
             "raw_history_complete": context["compaction"] is None})
     if action == "search":
         if set(request.query) - {"q", "after", "limit"}:
-            raise ValueError("unknown search parameter")
+            return invalid("unknown search parameter")
         query = text(request.query.get("q"), "q", 256)
-        after, limit = cursor(request, ("q",))
+        if failed(query):
+            return query
+        page = cursor(request, ("q",))
+        if failed(page):
+            return page
+        after, limit = page
         items = await store.search(owner, sid, query, after, limit)
+        if failed(items):
+            return items
         return web.json_response({"items": items, "next_after": items[-1]["seq"] if items else after})
-    after, limit = cursor(request)
+    page = cursor(request)
+    if failed(page):
+        return page
+    after, limit = page
     items = await store.compactions(owner, sid, after, limit)
+    if failed(items):
+        return items
     return web.json_response({"items": items, "next_after": items[-1]["version"] if items else after})

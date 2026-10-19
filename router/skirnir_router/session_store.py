@@ -2,16 +2,20 @@
 
 Owner is supplied by authenticated server code. No method performs an unscoped
 session lookup. Messages and checkpoint versions are immutable until deletion.
+Every public method returns its result or a Problem (outcome.py); database faults
+become UNAVAILABLE at the `database` boundary.
 """
 
 import asyncio
+import importlib.util
 import json
 from contextlib import asynccontextmanager
 from typing import Protocol
 from uuid import UUID, uuid4
 
+from .outcome import conflict, failed, invalid, unavailable
 from .session_migrations import migrate
-from .session_types import SessionNotFound, SessionConflict, SessionUnavailable, SessionCapacity, record
+from .session_types import NOT_FOUND, Transaction, database, record
 from .managed_store import ManagedStore
 from .reliability_store import ReliabilityStore
 from .exchange_store import ExchangeStore
@@ -50,51 +54,77 @@ class SessionStore(Protocol):
 
 
 class PostgresSessionStore(ManagedStore, ReliabilityStore, ExchangeStore):
+    # Faults that the `database` boundary turns into UNAVAILABLE; open() adds the driver's own.
+    driver_errors = (OSError, TimeoutError)
+
     def __init__(self, pool, timeout_s):
         self.pool, self.timeout_s = pool, timeout_s
 
     @classmethod
     async def open(cls, dsn, cfg):
-        # Optional dependency: disabled installations do not need asyncpg.
+        """Connect and migrate. Returns the store or a Problem."""
+        # Optional dependency: disabled installations do not need it.
+        if importlib.util.find_spec("asyncpg") is None:
+            return unavailable("session store driver missing; install router/requirements-session.txt")
         import asyncpg
-
-        pool = None
+        store = cls(None, cfg.timeout_s)
+        store.driver_errors = (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError)
+        problem = None
         try:
             async with asyncio.timeout(cfg.timeout_s):
                 async def setup(conn):
                     await conn.set_type_codec("jsonb", schema="pg_catalog", encoder=json.dumps, decoder=json.loads, format="text")
-                pool = await asyncpg.create_pool(dsn, min_size=cfg.min_pool_size, max_size=cfg.max_pool_size,
-                                                timeout=cfg.timeout_s, command_timeout=cfg.timeout_s, init=setup)
-                async with pool.acquire() as conn:
-                    await migrate(conn)
-        except Exception:  # noqa: BLE001 -- driver errors may contain DSNs/secrets; never expose them
-            if pool is not None:
-                pool.terminate()
-            raise SessionUnavailable("session database startup failed") from None
-        return cls(pool, cfg.timeout_s)
+                store.pool = await asyncpg.create_pool(dsn, min_size=cfg.min_pool_size, max_size=cfg.max_pool_size,
+                                                       timeout=cfg.timeout_s, command_timeout=cfg.timeout_s, init=setup)
+                async with store.pool.acquire() as conn:
+                    problem = await migrate(conn)
+        except Exception:  # noqa: BLE001  # exception-ok: startup faults (unreachable host, bad credentials, malformed DSN)
+            # cannot be checked beforehand, and driver messages may contain the DSN or its password: report a fixed problem only.
+            problem = unavailable("session database startup failed")
+        if failed(problem):
+            if store.pool is not None:
+                store.pool.terminate()
+            return problem
+        return store
 
     @asynccontextmanager
     async def connection(self):
-        try:
-            async with asyncio.timeout(self.timeout_s):
-                async with self.pool.acquire() as conn:
-                    yield conn
-        except (SessionNotFound, SessionConflict, SessionCapacity):
-            raise
-        except Exception:  # noqa: BLE001 -- redact database/connection exceptions
-            raise SessionUnavailable("session database unavailable") from None
+        async with asyncio.timeout(self.timeout_s):
+            async with self.pool.acquire() as conn:
+                yield conn
 
+    @asynccontextmanager
+    async def transaction(self):
+        """Connection plus transaction. Commits unless the method returned `tx.reject(problem)`."""
+        async with self.connection() as conn:
+            native = conn.transaction()
+            await native.start()
+            tx = Transaction(conn)
+            try:
+                yield conn, tx
+            except BaseException:  # exception-ok: driver fault or cancellation mid-method
+                # Undo partial writes, then let the `database` boundary (or the cancelled caller) handle it.
+                await native.rollback()
+                raise  # exception-ok: re-raised unchanged after the rollback
+            if tx.problem is None:
+                await native.commit()
+            else:
+                await native.rollback()
+
+    @database
     async def health(self):
         async with self.connection() as conn:
             return await conn.fetchval("SELECT 1") == 1
 
     async def close(self):
-        try:
-            async with asyncio.timeout(self.timeout_s):
-                await self.pool.close()
-        except TimeoutError:
+        closing = asyncio.ensure_future(self.pool.close())
+        done, _ = await asyncio.wait({closing}, timeout=self.timeout_s)
+        if not done:   # graceful close did not finish in time: drop the connections
             self.pool.terminate()
+            closing.cancel()
+            await asyncio.gather(closing, return_exceptions=True)
 
+    @database
     async def create(self, owner, project, data_class, metadata, mode="client-managed"):
         async with self.connection() as conn:
             row = await conn.fetchrow("""INSERT INTO skirnir_sessions.sessions (owner,id,project,mode,data_class,metadata)
@@ -104,44 +134,51 @@ class PostgresSessionStore(ManagedStore, ReliabilityStore, ExchangeStore):
     async def _get(self, conn, owner, session_id, lock=False):
         sql = "SELECT * FROM skirnir_sessions.sessions WHERE owner=$1 AND id=$2"
         row = await conn.fetchrow(sql + (" FOR UPDATE" if lock else ""), owner, session_id)
-        if row is None:
-            raise SessionNotFound
-        return record(row)
+        return NOT_FOUND if row is None else record(row)
 
+    @database
     async def get(self, owner, session_id):
         async with self.connection() as conn:
             return await self._get(conn, owner, session_id)
 
+    @database
     async def update(self, owner, session_id, status, metadata):
-        async with self.connection() as conn, conn.transaction():
-            await self._get(conn, owner, session_id, lock=True)
-            await self._idle(conn, owner, session_id)
+        async with self.transaction() as (conn, tx):
+            session = await self._get(conn, owner, session_id, lock=True)
+            if failed(session):
+                return tx.reject(session)
+            busy = await self._idle(conn, owner, session_id)
+            if failed(busy):
+                return tx.reject(busy)
             row = await conn.fetchrow("""UPDATE skirnir_sessions.sessions SET status=COALESCE($3,status),
                 metadata=COALESCE($4,metadata),updated_at=clock_timestamp() WHERE owner=$1 AND id=$2 RETURNING *""", owner, session_id, status, metadata)
             return record(row)
 
+    @database
     async def delete(self, owner, session_id):
         async with self.connection() as conn:
             result = await conn.execute("DELETE FROM skirnir_sessions.sessions WHERE owner=$1 AND id=$2", owner, session_id)
-            if result == "DELETE 0":
-                raise SessionNotFound
+            return NOT_FOUND if result == "DELETE 0" else None
 
+    @database
     async def append(self, owner, session_id, event_id, kind, payload):
         if kind not in ("message", "checkpoint"):
-            raise ValueError("unsupported event kind")
-        async with self.connection() as conn, conn.transaction():
+            return invalid("unsupported event kind")
+        async with self.transaction() as (conn, tx):
             session = await self._get(conn, owner, session_id, lock=True)
+            if failed(session):
+                return tx.reject(session)
             if session["mode"] == "skirnir-managed" and kind == "message":
-                raise SessionConflict("managed messages are written through inference only")
+                return tx.reject(conflict("managed messages are written through inference only"))
             # Lock serializes writers/deletion, sequence allocation and idempotency.
             old = await conn.fetchrow("SELECT * FROM skirnir_sessions.events WHERE owner=$1 AND session_id=$2 AND event_id=$3",
                                       owner, session_id, event_id)
             if old:
                 if old["kind"] != kind or old["payload"] != payload:
-                    raise SessionConflict("event_id already used with different content")
+                    return tx.reject(conflict("event_id already used with different content"))
                 return record(old), False
             if session["status"] != "active":
-                raise SessionConflict("session is archived")
+                return tx.reject(conflict("session is archived"))
             seq = await conn.fetchval("SELECT COALESCE(MAX(seq),0)+1 FROM skirnir_sessions.events WHERE owner=$1 AND session_id=$2",
                                       owner, session_id)
             version = None
@@ -152,9 +189,12 @@ class PostgresSessionStore(ManagedStore, ReliabilityStore, ExchangeStore):
                 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *""", owner, session_id, seq, event_id, kind, version, payload)
             return record(row), True
 
+    @database
     async def read(self, owner, session_id, kind, after, limit):
-        async with self.connection() as conn, conn.transaction():
-            await self._get(conn, owner, session_id)
+        async with self.transaction() as (conn, tx):
+            session = await self._get(conn, owner, session_id)
+            if failed(session):
+                return tx.reject(session)
             rows = await conn.fetch("""SELECT * FROM skirnir_sessions.events
                 WHERE owner=$1 AND session_id=$2 AND kind=$3 AND seq>$4 ORDER BY seq LIMIT $5""", owner, session_id, kind, after, limit)
             return [record(row) for row in rows]

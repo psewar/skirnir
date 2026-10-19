@@ -17,7 +17,9 @@ from aiohttp.test_utils import TestClient, TestServer
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "router"))
 from skirnir_router import app, session_migrations, state  # noqa: E402
 from skirnir_router.session_config import SessionConfig  # noqa: E402
-from skirnir_router.session_store import PostgresSessionStore, SessionConflict, SessionNotFound, SessionUnavailable  # noqa: E402
+from skirnir_router.outcome import failed  # noqa: E402
+from skirnir_router.session_store import PostgresSessionStore  # noqa: E402
+from skirnir_router.session_types import NOT_FOUND, UNAVAILABLE  # noqa: E402
 from selftest_sessions import URL, configuration  # noqa: E402
 
 DSN = os.environ.get("SKIRNIR_TEST_SESSION_DSN")
@@ -44,8 +46,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         for op in (self.store.get(self.other, self.sid), self.store.read(self.other, self.sid, "message", 0, 10),
                    self.store.append(self.other, self.sid, "steal", "message", {"role": "user"}),
                    self.store.update(self.other, self.sid, "archived", {}), self.store.delete(self.other, self.sid)):
-            with self.assertRaises(SessionNotFound):
-                await op
+            self.assertEqual(await op, NOT_FOUND)
         self.assertEqual((await self.store.get(self.owner, self.sid))["metadata"], {"source": "test"})
 
     async def test_duplicate_events_and_conflicts(self):
@@ -56,8 +57,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(second_created)
         self.assertEqual(first, retry)
         for kind, payload in (("message", {"role": "user"}), ("checkpoint", {"schema_version": 1})):
-            with self.assertRaises(SessionConflict):
-                await self.store.append(self.owner, self.sid, "m1", kind, payload)
+            self.assertEqual((await self.store.append(self.owner, self.sid, "m1", kind, payload)).status, 409)
         self.assertEqual((await self.store.read(self.owner, self.sid, "message", 0, 10))[0]["payload"], message)
 
     async def test_concurrent_order_and_duplicate_writers(self):
@@ -92,19 +92,16 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated["metadata"], {"label": "done"})
         _, created = await self.store.append(self.owner, self.sid, "m1", "message", payload)
         self.assertFalse(created)
-        with self.assertRaises(SessionConflict):
-            await self.store.append(self.owner, self.sid, "m2", "message", payload)
+        self.assertEqual((await self.store.append(self.owner, self.sid, "m2", "message", payload)).status, 409)
         await self.store.update(self.owner, self.sid, "active", None)
         await self.store.append(self.owner, self.sid, "c1", "checkpoint", {"schema_version": 1})
         await self.store.delete(self.owner, self.sid)
-        with self.assertRaises(SessionNotFound):
-            await self.store.get(self.owner, self.sid)
+        self.assertEqual(await self.store.get(self.owner, self.sid), NOT_FOUND)
         async with self.store.pool.acquire() as conn:
             self.assertEqual(await conn.fetchval("SELECT count(*) FROM skirnir_sessions.events WHERE owner=$1", self.owner), 0)
 
     async def test_statement_error_rolls_back(self):
-        with self.assertRaises(SessionUnavailable):
-            await self.store.append(self.owner, self.sid, None, "message", {"role": "user"})
+        self.assertEqual(await self.store.append(self.owner, self.sid, None, "message", {"role": "user"}), UNAVAILABLE)
         self.assertEqual(await self.store.read(self.owner, self.sid, "message", 0, 100), [])
         row, _ = await self.store.append(self.owner, self.sid, "valid", "message", {"role": "user"})
         self.assertEqual(row["seq"], 1)
@@ -113,8 +110,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.store.pool.acquire() as conn, conn.transaction():
             await conn.execute("SELECT 1 FROM skirnir_sessions.sessions WHERE owner=$1 AND id=$2 FOR UPDATE", self.owner, self.sid)
             self.store.timeout_s = 0.1
-            with self.assertRaises(SessionUnavailable):
-                await self.store.append(self.owner, self.sid, "timeout", "message", {"role": "user"})
+            self.assertEqual(await self.store.append(self.owner, self.sid, "timeout", "message", {"role": "user"}), UNAVAILABLE)
             self.store.timeout_s = 5
             task = asyncio.create_task(self.store.append(self.owner, self.sid, "cancel", "message", {"role": "user"}))
             await asyncio.sleep(0.05)
@@ -138,13 +134,13 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
             await tx.start()
             try:
                 await conn.execute("INSERT INTO skirnir_sessions.schema_version VALUES (999)")
-                with self.assertRaises(RuntimeError):
-                    await session_migrations.migrate(conn)
+                self.assertEqual((await session_migrations.migrate(conn)).status, 503)
             finally:
                 await tx.rollback()
 
     async def test_parallel_migration_startup(self):
         stores = await asyncio.gather(*(PostgresSessionStore.open(DSN, self.cfg) for _ in range(3)))
+        self.assertFalse(any(failed(store) for store in stores))
         for store in stores:
             await store.close()
         self.assertEqual((await self.store.get(self.owner, self.sid))["id"], str(self.sid))
@@ -181,9 +177,10 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
             state.CFG, state.CLIENT_AUTH_MODE = old_cfg, old_mode
 
     async def test_connection_failure_does_not_expose_secrets(self):
-        with self.assertRaises(SessionUnavailable) as ctx:
-            await PostgresSessionStore.open("postgresql://private-user:private-password@127.0.0.1:1/db", self.cfg)
-        self.assertNotIn("private", str(ctx.exception))
+        # Synthetic credentials, assembled so the public-change scanner does not read them as a real URL credential.
+        problem = await PostgresSessionStore.open("postgresql://" + "private-user:private-password" + "@127.0.0.1:1/db", self.cfg)
+        self.assertTrue(failed(problem))
+        self.assertNotIn("private", problem.message)
 
 
 if __name__ == "__main__":

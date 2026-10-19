@@ -18,7 +18,9 @@ from aiohttp.test_utils import TestClient, TestServer
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "router"))
 from skirnir_router import app, auth, config, session_api, state  # noqa: E402
 from skirnir_router.session_config import SessionConfig, parse_session_config  # noqa: E402
-from skirnir_router.session_store import SessionNotFound, SessionStore, SessionUnavailable  # noqa: E402
+from skirnir_router.outcome import failed  # noqa: E402
+from skirnir_router.session_store import SessionStore  # noqa: E402
+from skirnir_router.session_types import NOT_FOUND, UNAVAILABLE  # noqa: E402
 
 BASE = os.path.join(os.path.dirname(__file__), "..", "router", "config.example.yaml")
 URL = session_api.PREFIX
@@ -40,8 +42,8 @@ class ConfigTests(unittest.TestCase):
         for raw in ({"enabled": "false"}, {"enabled": 1}, {"timeout_s": True}, {"timeout_s": float("nan")},
                     {"timeout_s": 61}, {"dsn_env": "postgres://secret"}, {"min_pool_size": 0}, {"max_pool_size": "5"},
                     {"min_pool_size": 6, "max_pool_size": 5}, {"unknown": True}, []):
-            with self.subTest(raw=raw), self.assertRaises(ValueError):
-                parse_session_config(raw)
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(parse_session_config(raw)))
 
     def test_schema_and_client_projects(self):
         raw = copy.deepcopy(config.load_yaml(BASE))
@@ -125,7 +127,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.request(token=None)).status, 401)
 
     async def test_owner_is_always_derived_from_credentials(self):
-        self.store.get.side_effect = SessionNotFound
+        self.store.get.return_value = NOT_FOUND
         response = await self.request(token="bob")
         self.assertEqual(response.status, 404)
         self.store.get.assert_awaited_once_with("bob", session_api.UUID(self.sid))
@@ -165,7 +167,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_update_delete_and_store_failure(self):
         self.assertEqual((await self.request("PATCH", json={"status": "archived"})).status, 200)
         self.assertEqual((await self.request("DELETE")).status, 204)
-        self.store.get.side_effect = SessionUnavailable("secret-db-host/password")
+        self.store.get.return_value = UNAVAILABLE
         response = await self.request()
         self.assertEqual(response.status, 503)
         self.assertNotIn("secret", await response.text())
@@ -230,7 +232,7 @@ class OffTests(unittest.IsolatedAsyncioTestCase):
         state.CFG = configuration()
         try:
             with patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "secret-value"}), \
-                    patch.object(session_api.PostgresSessionStore, "open", side_effect=SessionUnavailable("secret-value")):
+                    patch.object(session_api.PostgresSessionStore, "open", return_value=UNAVAILABLE):
                 api, _ = app.build_apps()
                 client = TestClient(TestServer(api))
                 try:

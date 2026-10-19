@@ -15,6 +15,7 @@ from aiohttp import ClientError, ClientTimeout, web
 from . import admission, auth, ausweich_beobachtung, cloud, decision, kontextpruefung, metrics, memory, managed, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
+from .outcome import Problem, bad_gateway, failed
 
 STREAM_PATHS = ("/api/chat", "/api/generate")   # nur hier streamt Ollama zeilenweise NDJSON
 CONNECT_TIMEOUT_S = 5                            # Verbindungsaufbau zum Knoten; die Antwort darf request_timeout_s dauern
@@ -73,11 +74,6 @@ async def route_request(request, path, body, shape=None, err=ollama_error):
 async def _route(request, path, body, shape, err):
     try:
         return await _route_inner(request, path, body, shape, err)
-    except managed.ManagedError as exc:
-        return err(exc.status, exc.message)
-    except managed.ERRORS as exc:
-        error = managed.failure(exc)
-        return err(error.status, error.message)
     finally:
         turn = request.get(managed.KEY)
         if turn is not None:
@@ -97,6 +93,8 @@ async def _route_inner(request, path, body, shape, err):
         except _Reject as e:
             return err(e.status, e.msg, e.why)
         result = await dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape, req)
+        if isinstance(result, Problem):   # managed turn could not be fitted to this tier
+            return err(result.status, result.message)
         if result is not None:
             if _is_role(role) and not req.context_sensitive:
                 ops.maybe_shadow(role, body, node, req)   # Stufe 6: Schattenlauf nach der Antwort, Client merkt nichts
@@ -128,20 +126,12 @@ async def _prepare(request, path, body):
     denied = auth.client_allows(request, role, concrete=not _is_role(role))
     if denied:
         raise _Reject(403, denied)
-    try:
-        await managed.begin(request, path, body, req)
-    except ValueError:
-        raise _Reject(400, "invalid managed session request") from None
-    try:
-        await memory.prepare(request, path, body, req)
-    except memory.MemoryUnauthenticated:
-        raise _Reject(401, "memory requires authenticated client credentials") from None
-    except memory.MemoryDenied:
-        raise _Reject(403, "memory access or data policy denied") from None
-    except memory.MemoryUnavailable:
-        raise _Reject(503, "memory unavailable") from None
-    except ValueError:
-        raise _Reject(400, "invalid memory request") from None
+    started = await managed.begin(request, path, body, req)
+    if failed(started):
+        raise _Reject(started.status, "invalid managed session request" if started.status == 400 else started.message)
+    prepared = await memory.prepare(request, path, body, req)
+    if failed(prepared):
+        raise _Reject(prepared.status, memory.PREPARE_PUBLIC.get(prepared.status, prepared.message))
     # Recall changes the actual prompt, so limits/cloud scans must see the augmented body.
     if req.memory and not req.session:
         too_big = request_mod.check_limits(body)
@@ -330,11 +320,10 @@ async def dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape=N
     """Eine Stufe auf einem Knoten oder Cloud-Anbieter ausfuehren. None = Fehler vor dem ersten Byte -> naechster Kandidat."""
     turn = request.get(managed.KEY)
     if turn is not None:
-        try:
-            await turn.target(body, tier, ctx)
-            ctx = body["options"]["num_ctx"]
-        except ValueError:
-            raise managed.ManagedError(400, "invalid managed generation options") from None
+        targeted = await turn.target(body, tier, ctx)
+        if failed(targeted):
+            return targeted
+        ctx = body["options"]["num_ctx"]
     relay = _Relay(request, path, body, role, tier, ctx, node, tier_idx, shape, req or request_mod.Routing.fresh())
     return await relay.run()
 
@@ -402,6 +391,7 @@ class _Relay:
         self.context_sensitive = req.context_sensitive
         self.managed_turn = request.get(managed.KEY)
         self.managed_capture = managed.AssistantCapture(self.managed_turn.cfg.max_response_bytes) if self.managed_turn else None
+        self.managed_problem = None  # set by _render_chunks when a managed chunk cannot be persisted
         self.obs_task = None         # 0.6.7: Einordnung im Hintergrund fuer anfragen.jsonl (ausweich_beobachtung, observe_all)
 
     async def run(self):
@@ -409,22 +399,13 @@ class _Relay:
         try:
             if self.req.memory:
                 service = self.request.app.get(memory.SERVICE_KEY)
-                try:
-                    allowed = service is not None and service.current(self.req.memory_scope, read=self.req.memory["recall"], write=self.req.memory["retain"])
-                except memory.MemoryDenied:
-                    allowed = False
+                allowed = service is not None and service.current(self.req.memory_scope, read=self.req.memory["recall"], write=self.req.memory["retain"])
                 if not allowed:
                     self.outcome = "error"
                     return self.shape.error(403, "memory policy changed") if self.shape else ollama_error(403, "memory policy changed")
             if self.is_cloud:   # Stufe 5: Anbieter statt Knoten
                 return await self._via_cloud()
             return await self._via_node()
-        except (managed.ManagedError, *managed.ERRORS) as exc:
-            error = exc if isinstance(exc, managed.ManagedError) else managed.failure(exc)
-            self.outcome = "error"
-            if self.resp is not None:
-                return await self._end_with_error(error.status, error.message)
-            return self._client_error(error.status, error.message)
         except (*UPSTREAM_ERRORS, ConnectionResetError) as e:
             # Fehler nach dem ersten Byte: nichts mehr zu retten, Verbindung endet
             log.warning("stream from %s aborted: %s", self.node.name, e)
@@ -593,20 +574,27 @@ class _Relay:
             msg = txt.decode(errors="replace")
         return self.shape.error(upstream.status, str(msg))
 
+    async def _answer_problem(self, problem):
+        """Managed-turn problem: error event inside an already open stream, otherwise an error response."""
+        self.outcome = "error"
+        if self.resp is not None:
+            return await self._end_with_error(problem.status, problem.message)
+        return self._client_error(problem.status, problem.message)
+
     async def _complete_unary(self, upstream):
         if self.managed_capture is not None:
             data = bytearray()
             async for chunk in upstream.content.iter_chunked(65536):
                 data.extend(chunk)
                 if len(data) > self.managed_turn.cfg.max_response_bytes:
-                    raise managed.ManagedError(502, "managed response exceeds persistence limit")
+                    return await self._answer_problem(bad_gateway("managed response exceeds persistence limit"))
         else:
             data = await upstream.read()
         try:
             j = json.loads(data)
         except ValueError:
             if self.managed_capture is not None:
-                raise managed.ManagedError(502, "invalid managed upstream JSON") from None
+                return await self._answer_problem(bad_gateway("invalid managed upstream JSON"))
             if self.shape:
                 return self.shape.error(502, f"upstream {self.node.name}: invalid json")
         else:
@@ -616,13 +604,16 @@ class _Relay:
                 if self.memory_capture is not None:
                     self.memory_capture.observe(j)
                 if self.managed_capture is not None:
-                    self.managed_capture.observe(j)
-                    await self.managed_turn.commit(self.managed_capture)
+                    problem = self.managed_capture.observe(j)
+                    if not failed(problem):
+                        problem = await self.managed_turn.commit(self.managed_capture)
+                    if failed(problem):
+                        return await self._answer_problem(problem)
                 self._record_stats(j, ttft=None)
                 data = self._finalize_json(j)
             else:
                 if self.managed_capture is not None:
-                    raise managed.ManagedError(502, "invalid managed upstream response")
+                    return await self._answer_problem(bad_gateway("invalid managed upstream response"))
                 data = self.shape.complete(j) if self.shape else json.dumps(j).encode()
         self.outcome = "ok"
         return web.Response(status=200, body=data, content_type="application/json", headers=self.headers)
@@ -634,13 +625,17 @@ class _Relay:
         terminal = b""
         lines = managed.lines(upstream.content, self.managed_turn.cfg.max_response_bytes) if self.managed_turn else upstream.content
         async for line in lines:
+            if isinstance(line, Problem):   # managed.lines: reply exceeded the persistence limit
+                return await self._answer_problem(line)
             if not line.strip():
                 continue
             first_at = first_at or time.time()
             chunk = self._render_chunks(line, rescuer, first_at)
+            if self.managed_problem is not None:
+                return await self._answer_problem(self.managed_problem)
             if self.managed_capture is not None:
                 if chunk is None:
-                    raise managed.ManagedError(502, "invalid managed stream JSON")
+                    return await self._answer_problem(bad_gateway("invalid managed stream JSON"))
                 if self.managed_capture.done:
                     terminal = chunk
                     continue  # Hold success until EOF and the database commit.
@@ -650,7 +645,9 @@ class _Relay:
                 await resp.write(chunk)
         self._note_stream_rescue(rescuer)
         if self.managed_capture is not None:
-            await self.managed_turn.commit(self.managed_capture)
+            problem = await self.managed_turn.commit(self.managed_capture)
+            if failed(problem):
+                return await self._answer_problem(problem)
             if terminal:
                 await resp.write(terminal)
         if self.shape:
@@ -667,7 +664,8 @@ class _Relay:
         except ValueError:
             return None
         if self.managed_capture is not None and (not isinstance(j, dict) or j.get("error")):
-            raise managed.ManagedError(502, "managed upstream stream failed")
+            self.managed_problem = bad_gateway("managed upstream stream failed")
+            return None
         if isinstance(j, dict) and j.get("error") and "message" not in j and not j.get("done"):
             return self._stream_error(line, str(j["error"]))
         if self.memory_capture is not None:
@@ -675,7 +673,10 @@ class _Relay:
         out = b""
         for jj in (rescuer.chunk(j) if rescuer else [j]):
             if self.managed_capture is not None:
-                self.managed_capture.observe(jj)
+                problem = self.managed_capture.observe(jj)
+                if failed(problem):
+                    self.managed_problem = problem
+                    return None
             if "model" in jj:
                 jj["model"] = self.exposed
             if jj.get("done"):
