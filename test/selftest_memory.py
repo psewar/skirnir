@@ -37,9 +37,17 @@ def realistic_fact(source, text):
                          "source": "skirnir-gateway", "source_refs": json.dumps(["synthetic-session-0001", "synthetic-event-0001"])}}
 
 
-def trimmed_count():
+def trimmed_count(outcome="trimmed"):
     series = state.METRICS["counters"].get("skirnir_memory_events_total", {})
-    return series.get(tuple(sorted({"operation": "recall", "outcome": "trimmed"}.items())), 0)
+    return series.get(tuple(sorted({"operation": "recall", "outcome": outcome}.items())), 0)
+
+
+def fact(source, text, kind="world", sources=None):
+    """A Hindsight result; an observation names the facts it was derived from (include.source_facts)."""
+    value = {"id": source, "text": text, "type": kind}
+    if sources is not None:
+        value["source_fact_ids"] = sources
+    return value
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -223,8 +231,10 @@ class MemoryHttpTests(MemoryHarness):
             self.assertEqual((await r.json())["items"][0]["source"], "source-1")
         self.assertNotEqual(self.calls[0][0], self.calls[1][0])
         self.assertTrue(all(c[0].startswith("skirnir-") and "client" not in c[0] and PROJECT not in c[0] for c in self.calls))
-        # Entities are never passed on, so they are not requested (Hindsight: include.entities null skips them).
-        self.assertEqual(self.calls[0][1], {"query": "Synthetic question", "budget": "low", "max_tokens": 512, "include": {"entities": None}})
+        # Entities are never passed on, so they are not requested (Hindsight: include.entities null skips them). Source
+        # facts are requested with a zero budget: only their ids, to recognise an observation that repeats one fact.
+        self.assertEqual(self.calls[0][1], {"query": "Synthetic question", "budget": "low", "max_tokens": 512,
+                                            "include": {"entities": None, "source_facts": {"max_tokens": 0}}})
         self.assertEqual(self.calls[0][2], "Bearer synthetic-token")
 
     async def test_no_raw_bank_or_owner_override(self):
@@ -283,6 +293,33 @@ class MemoryHttpTests(MemoryHarness):
         self.assertEqual([v["source"] for v in value["items"]], ["source-2"])
         self.assertEqual((value["memory_state"], value["trimmed"]), ("available", 1))
         self.assertEqual(trimmed_count(), before + 1)
+
+    async def test_an_observation_and_its_single_source_fact_take_one_place(self):
+        # Hindsight returns a fact and the observation derived from it as two results; both used to take one of the
+        # places. The higher-ranked one stays, the other is dropped and counted.
+        self.results = [fact("obs-1", "Synthetic rule A.", "observation", ["world-1"]), fact("world-1", "Synthetic rule A. | When: 2026-01-02"),
+                        fact("world-2", "Synthetic rule B. | When: 2026-01-03"), fact("obs-2", "Synthetic rule B.", "observation", ["world-2"]),
+                        fact("obs-3", "Synthetic summary of C and D.", "observation", ["world-3", "world-4"]),
+                        fact("world-3", "Synthetic fact C."), fact("world-4", "Synthetic fact D."),
+                        fact("obs-4", "Synthetic observation without known sources.", "observation", [])]
+        before = trimmed_count("duplicate")
+        value = await (await self.call()).json()
+        # A summary of several facts is more than a copy of one: it and its sources all stay.
+        self.assertEqual([v["source"] for v in value["items"]], ["obs-1", "world-2", "obs-3", "world-3", "world-4", "obs-4"])
+        self.assertEqual((value["memory_state"], value["trimmed"], value["duplicates"]), ("available", 0, 2))
+        self.assertEqual(trimmed_count("duplicate"), before + 2)
+
+    async def test_recall_max_facts_is_configurable(self):
+        self.results = [fact(f"source-{i}", f"Synthetic fact {i}.") for i in range(30)]
+        value = await (await self.call()).json()
+        self.assertEqual(len(value["items"]), 10)   # default unchanged
+        self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, recall_max_facts=25)
+        value = await (await self.call()).json()
+        self.assertEqual([v["source"] for v in value["items"]], [f"source-{i}" for i in range(25)])
+        for raw in (0, 101, True, "10"):
+            with self.subTest(raw=raw):
+                self.assertTrue(failed(parse_hindsight({"recall_max_facts": raw})))
+        self.assertEqual(parse_hindsight({"recall_max_facts": 20}).recall_max_facts, 20)
 
     async def test_opt_out_never_calls_memory(self):
         ops.IDEM.clear()
@@ -349,7 +386,8 @@ class MemoryHttpTests(MemoryHarness):
             recalled = await self.call(data={"project": PROJECT, "query": content})
             self.assertEqual(recalled.status, 200)
             # Not sent is not the same as "nothing known": the state says the query was filtered.
-            self.assertEqual(await recalled.json(), {"items": [], "trusted": False, "memory_state": "query_filtered", "trimmed": 0})
+            self.assertEqual(await recalled.json(), {"items": [], "trusted": False, "memory_state": "query_filtered",
+                                                     "trimmed": 0, "duplicates": 0})
         self.assertEqual(self.calls, [])
         self.results = [{"id": "source-1", "text": "password=" + "synthetic-value"}]
         r = await self.call()

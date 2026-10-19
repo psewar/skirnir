@@ -121,7 +121,10 @@ class HindsightClient:
     async def recall(self, bank, query, *, types=None, authorize=None):
         # Entities are on by default upstream but never passed on by Skirnir (measured: ~14 % of a 85 KB answer).
         # Hindsight documents null as "skip the entity JOIN". The fact count, set by recall_max_tokens, drives the size.
-        payload = {"query": query, "budget": "low", "max_tokens": self.cfg.recall_max_tokens, "include": {"entities": None}}
+        # Source facts with a zero budget: each observation lists the ids of the facts it was derived from, without their
+        # text (+2.6 % measured), so an observation repeating a single fact is recognised as its duplicate (memory.py).
+        payload = {"query": query, "budget": "low", "max_tokens": self.cfg.recall_max_tokens,
+                   "include": {"entities": None, "source_facts": {"max_tokens": 0}}}
         if types is not None:
             payload["types"] = types
         return await self.post(bank, "/recall", payload, missing_empty=True, authorize=authorize)

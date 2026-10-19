@@ -18,7 +18,7 @@ The adapter uses these paths relative to the configured service URL:
 
 | Operation | HTTP contract |
 | --- | --- |
-| Recall | `POST /v1/default/banks/{bank_id}/memories/recall` with `query`, `budget: low`, `max_tokens`, `include: {entities: null}`; reads `results[].id/text` |
+| Recall | `POST /v1/default/banks/{bank_id}/memories/recall` with `query`, `budget: low`, `max_tokens`, `include: {entities: null, source_facts: {max_tokens: 0}}`; reads `results[].id/text/type/source_fact_ids` |
 | Retain | `POST /v1/default/banks/{bank_id}/memories` with `async: true`, a deterministic UUID `operation_id`, and one item containing `content`, `document_id`, `context`, `metadata` |
 
 Use a deployment supporting the documented caller-supplied async `operation_id`.
@@ -39,9 +39,38 @@ Recall sends `include: {entities: null}`. Hindsight returns entity state by defa
 (documented since 0.7: null skips the entity JOIN), and Skirnir never passes it on.
 Measured on a bank of about 90 matching facts at a 4096-token budget, this saves about
 14 % of the response (85 KB to 73 KB). The response size is driven by the number of
-facts, which `recall_max_tokens` controls. Skirnir passes on at most 10 facts within
-`recall_max_bytes`, so a large `recall_max_tokens` mostly adds bytes that are dropped
-again and can push the response past `max_response_bytes`.
+facts, which `recall_max_tokens` controls. Skirnir passes on at most `recall_max_facts`
+(10) facts within `recall_max_bytes`, so a large `recall_max_tokens` mostly adds bytes
+that are dropped again and can push the response past `max_response_bytes`.
+
+**Duplicates.** Hindsight returns an observation next to the fact it was derived from,
+for example a fact with its appended `| When: … |` context and an observation with the
+bare statement. Both used to take a place, so of 10 places often only 6 to 8 carried
+different statements. Recall therefore also sends `include.source_facts` with a zero
+budget: each observation lists the ids of its source facts (`source_fact_ids`) without
+their text (+2.6 % response size, measured). When an observation has exactly one source
+fact, the higher-ranked of the pair keeps its place and the other is dropped, counted as
+`skirnir_memory_events_total{operation="recall",outcome="duplicate"}` and reported as
+`duplicates` on explicit recalls. An observation summarising several facts is more than a
+copy of any of them; it and its sources all stay.
+
+**Why 10.** The number came from the first implementation without a recorded reason.
+A replay of 27 realistic test questions against one real bank (the router's own filter
+over the stored raw Hindsight answers) measured the alternatives. Over the gateway, the
+Hermes provider sends `max_tokens: 4096`, which caps the block at 4096 bytes as well:
+
+| Setting | Probe hit | Keyword coverage | Facts | Duplicates | Bytes | Binding limit |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10 facts, 4 KB, duplicates kept (before) | 25/27 | 79.7 % | 9.5 | 1.1 | 3864 | bytes 13×, count 14× |
+| 10 facts, 4 KB, duplicates dropped | 26/27 | 82.2 % | 9.9 | 0.1 | 3733 | count 25× |
+| 15–20 facts, 4 KB | 26/27 | 82.2 % | 11.2–11.4 | 0.1 | ≈4040 | bytes |
+| 20 facts, 8 KB | 27/27 | 84.9 % | 19.6 | 0.1 | 7285 | count |
+| 30 facts, 16 KB | 27/27 | 88.9 % | 30 | 0.1 | 10670 | count |
+
+With duplicates dropped, 10 facts nearly fill 4 KB, so the two limits match. More facts
+help only together with a larger byte cap (and, over the gateway, a larger client
+`max_tokens`), at about 1.5 to 2.7 times the context for a few points of coverage. The
+default stays 10; `recall_max_facts` changes it.
 
 ## Deployment and opt-in
 
@@ -188,7 +217,8 @@ the Hindsight gateway) always answers 503 with `memory_state` when the memory is
 unavailable. Before, an oversized answer from a large bank arrived as an empty list,
 and the Hermes provider reported "No relevant memories found" for a memory it never
 reached; through the official SDK it is now an error. Successful explicit recalls carry
-`memory_state` and `trimmed` (facts dropped by `recall_max_bytes`). Authentication/scope
+`memory_state`, `trimmed` (facts dropped by `recall_max_bytes`) and `duplicates` (results
+dropped as repeats of a fact already passed on). Authentication/scope
 errors are always denied, not treated as outages. Ordinary requests never call Hindsight.
 
 ## Conscious, bounded retention

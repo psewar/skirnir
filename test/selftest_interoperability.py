@@ -214,7 +214,8 @@ class SharedGatewayTests(MemoryHarness):
         self.shared()
         base = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories/recall"
         value = await (await self.api(base, {"query": "Synthetic"})).json()
-        self.assertEqual((value["results"][0]["id"], value["memory_state"], value["trimmed"]), ("source-1", "available", 0))
+        self.assertEqual((value["results"][0]["id"], value["memory_state"], value["trimmed"], value["duplicates"]),
+                         ("source-1", "available", 0, 0))
         # Unreachable or oversized memory is a 503 with its state, never an empty result list (Hermes would
         # otherwise report "No relevant memories found" for a memory it never reached).
         self.large_response = True
