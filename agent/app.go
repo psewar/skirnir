@@ -34,6 +34,7 @@ type App struct {
 	ollamaUp *OllamaUpdater // Ollama-Update ueber den Router (ollamaupdate.go, 0.12.0)
 	ollamaW  *OllamaWatcher // Ollama-Zustand beobachten und melden (ollamawatch.go, 0.14.0)
 	game     *GameWatch     // Spielerkennung (spiel.go, 0.17.0)
+	routes   *Routes        // Tunnel-Routen zu weiteren lokalen Diensten (routes.go); nil ohne tunnel.routes
 	rootCtx  context.Context
 	crashed  string // Modul, das mit Panic endete (Run liefert dann einen Fehler, der Dienst startet neu)
 	ctlToken string // Token fuer POST /restart-child (Datei control.token neben der Config; Review 2026-09-25)
@@ -94,6 +95,8 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.tunnel.onOllamaSwap = a.ollamaUp.Swap
 	a.ollamaW = newOllamaWatcher(cfg.Tunnel.Upstream, log)
 	a.tunnel.ollama = a.ollamaW
+	a.routes = newRoutes(cfg.Tunnel.Routes, log)
+	a.tunnel.routes, a.hb.routes = a.routes, a.routes
 	if a.prov != nil && a.prov.HeartbeatIntervalS > 0 {
 		a.tunnel.SetHeartbeatInterval(time.Duration(a.prov.HeartbeatIntervalS * float64(time.Second)))
 	}
@@ -211,6 +214,9 @@ func (a *App) Run(ctx context.Context) error {
 	run("supervisor", a.sup.Run)
 	if a.ollamaW != nil {
 		run("ollama-watch", a.ollamaW.Run)
+	}
+	if a.routes != nil {
+		run("tunnel-routen", a.routes.Run)
 	}
 	run("ollama-registrierung", a.ollamaUp.RegistrationLoop) // Windows-Eintrag der Installation mit der laufenden Version abgleichen
 	run("gpu-guard", a.guard.Run)

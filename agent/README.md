@@ -5,7 +5,7 @@ MQTT-Geraet fuer Home Assistant, Aufsicht ueber lokale KI-Dienste (z. B. einen W
 
 | Datei | Zweck |
 |---|---|
-| `*.go` | `main` (Verben), `app` (Verdrahtung), `config`, `logging`, `gpu` (NVML direkt aus `nvml.dll`, Rueckfall nvidia-smi; `gpu_nvml_windows.go`), `sensors` + `gpuz_*` (Sensoren, GPU-Z), `guard` (GPU-Schutz), `kuerzung` (Kuerzungsmeldung), `heartbeat`, `tunnel`, `identity`, `provision`, `facts`, `updater*` (Selbst-Update), `ollamaupdate*` (Ollama-Update ueber den Router), `ollamawatch` (Ollama-Zustand melden), `proxy` (TLS-Vorschaltstelle), `secrets` (Secret-Store, Universal-Auth-API), `mqtt`, `supervisor` (Kinder + Job-Objekt), `health`, `service` (SCM), `install` |
+| `*.go` | `main` (Verben), `app` (Verdrahtung), `config`, `logging`, `gpu` (NVML direkt aus `nvml.dll`, Rueckfall nvidia-smi; `gpu_nvml_windows.go`), `sensors` + `gpuz_*` (Sensoren, GPU-Z), `guard` (GPU-Schutz), `kuerzung` (Kuerzungsmeldung), `heartbeat`, `tunnel`, `routes` (Tunnel-Routen zu weiteren lokalen Diensten), `identity`, `provision`, `facts`, `updater*` (Selbst-Update), `ollamaupdate*` (Ollama-Update ueber den Router), `ollamawatch` (Ollama-Zustand melden), `proxy` (TLS-Vorschaltstelle), `secrets` (Secret-Store, Universal-Auth-API), `mqtt`, `supervisor` (Kinder + Job-Objekt), `health`, `service` (SCM), `install` |
 | `build.sh` | Cross-Compile aus WSL: `wsl -e bash -lc '/mnt/c/<workspace>/skirnir/agent/build.sh 0.1.1'` → `dist/skirnir-agent.exe` |
 | `config.example.yaml` | Vorlage fuer neue Rechner **mit Installationsanleitung Windows/Linux im Kopf**; die echte Datei liegt unter `C:\ProgramData\skirnir-agent\config.yaml` |
 | `skirnir-agent.service` | systemd-Unit fuer Linux-Knoten (`run --config /etc/skirnir-agent/config.yaml`) |
@@ -54,6 +54,17 @@ seit 0.9.1 der einzige Weg (der HTTP-Heartbeat mit `router.token` und `tunnel.en
 Router ruft Ollama hindurch auf (`tunnel.upstream`, Standard `http://127.0.0.1:11434`). Keine eingehende Firewall-Regel, kein
 Zertifikat, keine feste IP; Reconnect mit Backoff 1-30 s; `/health` zeigt `tunnel`. Ein neuer Rechner braucht nur die Binary,
 die Config (node, router.url; optional secret_store fuer ein MQTT-Passwort aus dem Secret-Store) und `Install-Service.ps1`.
+
+### Tunnel-Routen (optional, Standard aus)
+
+`tunnel.routes` gibt einzelne Pfade statt an Ollama an einen anderen lokalen Dienst, z. B. den Reranker (`rerank-server/`)
+als Agent-Kind (`routes.go`). Je Route: `name`, `path` (exakter Vergleich ohne Query), `methods`, `upstream` (nur
+`127.0.0.1` oder `[::1]`, sonst laedt die Config nicht) und `health`. Eine nicht gelistete Methode beantwortet der Agent selbst
+mit `405` und `Allow`, ohne Dienst oder Ollama aufzurufen; nicht gelistete Pfade gehen wie bisher an `tunnel.upstream`. Der
+Agent fragt `upstream+health` alle 5 s ab und meldet im Heartbeat `routes: {<name>: {up, reason}}`: `200` heisst `up`, sonst
+nennt `reason` den Zustand, den der Dienst im Feld `status` meldet (`starting`, `selftest_failed`), oder `unhealthy` bzw.
+`unreachable`; vor der ersten Pruefung gilt `starting`. `/health` des Agenten zeigt dasselbe Feld. Ohne `routes` fehlt das
+Feld, und der Tunnel arbeitet wie zuvor. Tests: `routes_test.go`.
 
 ## Ollama-Zustand melden (0.14.0)
 

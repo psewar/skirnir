@@ -20,6 +20,7 @@ type Heartbeat struct {
 	upstream string         // lokales Ollama: Version geht mit dem Heartbeat (0.12.0, alle 60 s frisch)
 	sup      *Supervisor    // 0.13.0: Grafikspeicher der eigenen Kinder (ausser Ollama) als Fakt
 	game     *GameWatch     // 0.17.0: laufendes Spiel als Fakt (spiel.go)
+	routes   *Routes        // tunnel.routes: Gesundheit der gerouteten Dienste (routes.go); nil = Feld fehlt
 
 	mu         sync.Mutex
 	ovVersion  string
@@ -92,6 +93,9 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	}
 	if m, ok := memoryFact(); ok {
 		p["memory"] = m
+	}
+	if r := h.routes.Report(); r != nil { // Tunnel-Routen: der Router waehlt nur Knoten, deren Dienst up meldet
+		p["routes"] = r
 	}
 	return p, nil
 }

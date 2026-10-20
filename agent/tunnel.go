@@ -66,6 +66,7 @@ type Tunnel struct {
 	onOllamaSwap   func(version string)    // Freigabe {"t":"ollama-swap"} vom Router (0.15.0)
 	ollama         *OllamaWatcher          // lokaler Ollama-Zustand, geht als Rahmen OLLAMA raus (0.14.0); nil = Router pollt
 	ollamaKick     chan struct{}           // sofort vollstaendig senden (Freigabe: vorher verwirft der Router den Rahmen)
+	routes         *Routes                 // tunnel.routes: Pfade fuer andere lokale Dienste (routes.go); nil = alles an upstream
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -397,7 +398,15 @@ func (t *Tunnel) handle(ctx context.Context, conn *websocket.Conn, sid uint32, p
 		delete(t.streams, sid)
 		t.smu.Unlock()
 	}()
-	req, err := http.NewRequestWithContext(rctx, head.Method, t.upstream+head.Path, bytes.NewReader(body))
+	target := t.upstream
+	if rc, ok := t.routes.Lookup(head.Path); ok {
+		if !rc.allows(head.Method) {
+			t.methodNotAllowed(conn, sid, rc)
+			return
+		}
+		target = rc.Upstream
+	}
+	req, err := http.NewRequestWithContext(rctx, head.Method, target+head.Path, bytes.NewReader(body))
 	if err != nil {
 		_ = t.write(conn, tunErr, sid, []byte(err.Error()))
 		return
@@ -440,6 +449,21 @@ func (t *Tunnel) handle(ctx context.Context, conn *websocket.Conn, sid uint32, p
 			return
 		}
 	}
+}
+
+// methodNotAllowed beantwortet eine Anfrage an einen gerouteten Pfad mit nicht gelisteter Methode selbst: 405 mit Allow,
+// ohne den Dienst und ohne Ollama aufzurufen.
+func (t *Tunnel) methodNotAllowed(conn *websocket.Conn, sid uint32, rc RouteCfg) {
+	hb, _ := json.Marshal(map[string]any{"status": http.StatusMethodNotAllowed,
+		"headers": map[string]string{"Allow": strings.Join(rc.Methods, ", "), "Content-Type": "application/json"}})
+	if t.write(conn, tunResp, sid, hb) != nil {
+		return
+	}
+	b, _ := json.Marshal(map[string]any{"error": map[string]string{"reason": "method_not_allowed"}})
+	if t.write(conn, tunData, sid, b) != nil {
+		return
+	}
+	_ = t.write(conn, tunEnd, sid, nil)
 }
 
 func (t *Tunnel) write(conn *websocket.Conn, typ byte, sid uint32, payload []byte) error {

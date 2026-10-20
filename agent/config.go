@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -37,7 +40,17 @@ type Config struct {
 // TunnelCfg: ausgehende Dauerverbindung zum Router, durch die der Router Ollama aufruft. Seit 0.9.1 der einzige Weg
 // (der HTTP-Heartbeat mit Token und `tunnel.enabled` sind weg).
 type TunnelCfg struct {
-	Upstream string `yaml:"upstream"`
+	Upstream string     `yaml:"upstream"`
+	Routes   []RouteCfg `yaml:"routes"` // optional: weitere lokale Dienste nach Pfad (routes.go); leer = alles an upstream
+}
+
+// RouteCfg: ein Pfad, den der Tunnel statt an Ollama an einen anderen lokalen Dienst gibt (z. B. den Reranker).
+type RouteCfg struct {
+	Name     string   `yaml:"name"`     // Schluessel im Heartbeat-Feld routes
+	Path     string   `yaml:"path"`     // exakter Vergleich mit dem Pfad der Anfrage (ohne Query)
+	Methods  []string `yaml:"methods"`  // erlaubte Methoden; andere bekommen 405
+	Upstream string   `yaml:"upstream"` // nur Loopback: http://127.0.0.1:<port> oder http://[::1]:<port>
+	Health   string   `yaml:"health"`   // Pfad der Gesundheitspruefung am Upstream, alle 5 s
 }
 
 // GPUZCfg: GPU-Z-Shared-Memory als Zusatzquelle (Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung). Standard an;
@@ -227,6 +240,13 @@ func (c *Config) applyDefaults() {
 	if c.Tunnel.Upstream == "" {
 		c.Tunnel.Upstream = px.Upstream
 	}
+	for i := range c.Tunnel.Routes {
+		r := &c.Tunnel.Routes[i]
+		r.Upstream = strings.TrimRight(r.Upstream, "/")
+		for j := range r.Methods {
+			r.Methods[j] = strings.ToUpper(strings.TrimSpace(r.Methods[j]))
+		}
+	}
 	in := &c.Install
 	if in.ServiceName == "" {
 		in.ServiceName = "SkirnirAgent"
@@ -302,7 +322,60 @@ func (c *Config) validate() error {
 		}
 		seen[ch.Name] = true
 	}
+	return validateRoutes(c.Tunnel.Routes)
+}
+
+var (
+	routeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	httpMethods = map[string]bool{"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "OPTIONS": true}
+)
+
+// validateRoutes: tunnel.routes darf nur auf diesen Rechner zeigen. Ein Upstream im Netz machte den Tunnel zu einem Weg vom
+// Router in fremde Dienste; deshalb laedt die Config dann nicht, statt die Route still auszulassen.
+func validateRoutes(routes []RouteCfg) error {
+	names, paths := map[string]bool{}, map[string]bool{}
+	for _, r := range routes {
+		if !routeNameRe.MatchString(r.Name) {
+			return fmt.Errorf("tunnel.routes: name %q fehlt oder ist ungueltig (a-z, 0-9, _ und -)", r.Name)
+		}
+		if names[r.Name] {
+			return fmt.Errorf("tunnel.routes: Name %q doppelt", r.Name)
+		}
+		names[r.Name] = true
+		if !strings.HasPrefix(r.Path, "/") || strings.ContainsAny(r.Path, "?#") {
+			return fmt.Errorf("tunnel.routes[%s]: path %q muss mit / beginnen und darf keine Query enthalten", r.Name, r.Path)
+		}
+		if paths[r.Path] {
+			return fmt.Errorf("tunnel.routes[%s]: path %q doppelt", r.Name, r.Path)
+		}
+		paths[r.Path] = true
+		if len(r.Methods) == 0 {
+			return fmt.Errorf("tunnel.routes[%s]: methods fehlt", r.Name)
+		}
+		for _, m := range r.Methods {
+			if !httpMethods[m] {
+				return fmt.Errorf("tunnel.routes[%s]: Methode %q unbekannt", r.Name, m)
+			}
+		}
+		if !loopbackUpstream(r.Upstream) {
+			return fmt.Errorf("tunnel.routes[%s]: upstream %q ist kein Loopback-URL (nur http://127.0.0.1:<port> oder http://[::1]:<port>)", r.Name, r.Upstream)
+		}
+		if !strings.HasPrefix(r.Health, "/") || strings.ContainsAny(r.Health, "#") {
+			return fmt.Errorf("tunnel.routes[%s]: health %q muss ein Pfad sein (z. B. /health)", r.Name, r.Health)
+		}
+	}
 	return nil
+}
+
+// loopbackUpstream: http(s) auf 127.0.0.1 oder ::1, ohne Pfad, Query und Zugangsdaten. "localhost" zaehlt nicht: der Name
+// geht durch die Namensaufloesung und kann dort anders landen.
+func loopbackUpstream(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return false
+	}
+	ip := net.ParseIP(u.Hostname())
+	return ip != nil && (ip.Equal(net.IPv4(127, 0, 0, 1)) || ip.Equal(net.IPv6loopback))
 }
 
 func (m *MQTTCfg) on() bool   { return m.Enabled == nil || *m.Enabled }
