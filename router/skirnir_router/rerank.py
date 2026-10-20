@@ -20,6 +20,7 @@ from .common import log
 from .outcome import Problem, failed
 
 ROUTE = "rerank"   # Name der Tunnel-Route im Agenten und des Eintrags im Heartbeat-Feld routes
+MODEL_ID = "skirnir-rerank"   # GET /info: der Router kennt das Modell des Knotens nicht, er meldet sich selbst
 
 # Kein GPU-Reranker nutzbar -> 424 Failed Dependency, nie 503 und nie Retry-After. Hindsights TEI-Client wiederholt 429 und
 # alle 5xx dreimal mit Backoff (und beachtet Retry-After), einen Circuit Breaker hat er nicht: jeder Recall kostete dann
@@ -127,16 +128,24 @@ async def exchange(node, query, texts, timeout_s):
         return unusable("upstream_error")
 
 
-async def rerank(request):
-    """Ergebnisliste fuer die Antwort oder ein Problem."""
-    cfg = state.CFG.rerank
-    if not cfg.enabled:
+def admit(request):
+    """Gemeinsame Pruefung fuer /rerank und /info: None = zugelassen, sonst das Problem (404 aus, 403 ohne Recht)."""
+    if not state.CFG.rerank.enabled:
         return Problem(404, "rerank is not enabled", "disabled")
     name = request.get("client")
     if not name or not (state.CFG.client_auth["clients"].get(name) or {}).get("rerank"):
         if name:
             auth.audit("forbidden", client=name, path=request.path)
         return Problem(403, "client may not rerank" if name else "rerank requires an identified client", "forbidden")
+    return None
+
+
+async def rerank(request):
+    """Ergebnisliste fuer die Antwort oder ein Problem."""
+    cfg = state.CFG.rerank
+    refused = admit(request)
+    if refused is not None:
+        return refused
     parsed = await read_request(request, cfg)
     if failed(parsed):
         return parsed
@@ -165,6 +174,17 @@ def error_response(problem):
     if problem.status == UNAVAILABLE:   # ohne Retry-After, siehe UNAVAILABLE
         return web.json_response({"error": {"code": "rerank_unavailable", "reason": problem.kind}}, status=UNAVAILABLE)
     return web.json_response({"error": {"code": problem.kind, "message": problem.message}}, status=problem.status)
+
+
+async def handle_info(request):
+    """GET /info wie bei TEI. Hindsights TEI-Client ruft es einmal beim Initialisieren ab und braucht `model_id`; ohne
+    /info scheitert das Glied an der Initialisierung, und die Kette nimmt fuer immer den Rueckfall (Ende-zu-Ende-Test
+    2026-10-20). Bewusst unabhaengig vom Knotenzustand: initialisiert wird nur einmal je Prozess, einen Ausfall faengt das
+    424 auf /rerank je Anfrage ab. Nur Recht und Schalter gelten wie bei /rerank."""
+    refused = admit(request)
+    if refused is not None:
+        return error_response(refused)
+    return web.json_response({"model_id": MODEL_ID, "max_client_batch_size": state.CFG.rerank.max_texts})
 
 
 async def handle_rerank(request):

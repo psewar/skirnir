@@ -150,6 +150,11 @@ async def post(client, body=QUERY, token=None, raw=None):
     return r.status, (await r.json(content_type=None)), r.headers
 
 
+async def info(client, token=None):
+    r = await client.get("/info", headers={"Authorization": f"Bearer {token}"} if token else {})
+    return r.status, (await r.json(content_type=None))
+
+
 async def scenarios():
     state.METRICS = {"counters": {}, "hist": {}}
     state.CFG = load()
@@ -160,6 +165,8 @@ async def scenarios():
     try:
         s, b, _ = await post(client)
         check("rerank aus (default): 404", s == 404 and b["error"]["code"] == "disabled", f"{s} {b}")
+        s, b = await info(client)
+        check("GET /info bei rerank aus: 404", s == 404 and b["error"]["code"] == "disabled", f"{s} {b}")
 
         state.CFG = load({"enabled": True, "nodes": ["gpu-a", "gpu-b"], "timeout_s": 0.5, "busy_ok": False, "max_texts": 4,
                           "max_body_bytes": 2048})
@@ -168,6 +175,16 @@ async def scenarios():
         s, b, _ = await post(client, token=OTHER_TOKEN)
         check("Client ohne Recht rerank: 403", s == 403 and b["error"]["code"] == "forbidden", f"{s} {b}")
         check("abgelehnter Client erreicht keinen Knoten", a.tunnel.calls == [])
+        s, b = await info(client, token=OTHER_TOKEN)
+        check("GET /info ohne Recht: 403", s == 403 and b["error"]["code"] == "forbidden", f"{s} {b}")
+        s, b = await info(client)
+        check("GET /info mit Recht: 200 mit model_id (Hindsights TEI-Client braucht es beim Initialisieren)",
+              s == 200 and b == {"model_id": "skirnir-rerank", "max_client_batch_size": 4}, f"{s} {b}")
+        state.NODES = {}
+        s, b = await info(client)
+        check("GET /info haengt nicht am Knotenzustand (kein Knoten da: trotzdem 200, kein Knotenaufruf)",
+              s == 200 and b.get("model_id") == "skirnir-rerank" and a.tunnel.calls == [], f"{s} {b}")
+        state.NODES = {"gpu-a": a}
 
         s, b, h = await post(client)
         check("Client per Quell-IP mit Recht: 200", s == 200, f"{s} {b}")
