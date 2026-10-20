@@ -37,7 +37,8 @@ router:
   memory_scopes: {}             # server-controlled shared scopes; private HMAC IDs stay unchanged
   # Optional POST /rerank (TEI) on a node's reranker via the agent tunnel route "rerank"; see design/rerank.md.
   # No node usable -> 424 rerank_unavailable without Retry-After (callers fall back to their own reranker at once).
-  # Callers also need the client right rerank: true (client_auth.clients.<name>.rerank).
+  # Callers also need the client right rerank: true (client_auth.clients.<name>.rerank). The same right opens GET /info
+  # (TEI model_id), which TEI clients such as Hindsight's read once before their first /rerank.
   # rerank:
   #   enabled: false
   #   nodes: [gpu-node-a]       # order of preference; first node online, with tunnel and routes.rerank.up serves

@@ -30,6 +30,10 @@ reranker's health endpoint itself and reports the result in every heartbeat:
   (with `return_text: true` each entry also carries its `text`). Scores are as TEI reports them (sigmoid, 0..1).
 - The router checks the node's answer before passing it on: a list with one entry per text, every `index` an integer in
   range and unique, every `score` a finite number.
+- `GET /info` answers `200 {"model_id": "skirnir-rerank", "max_client_batch_size": <max_texts>}`. TEI clients read it
+  once before their first `/rerank`; Hindsight's TEI client fails its initialization without it and then always uses the
+  next reranker of its chain. Same switch and right as `/rerank` (404 when disabled, 403 without the right), but
+  independent of node state: a node failure is answered per request with 424 on `/rerank`.
 
 ## Configuration
 

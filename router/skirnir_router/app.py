@@ -46,6 +46,7 @@ def build_apps():
     api.router.add_get("/api/version", proxy.handle_version)
     api.router.add_get("/v1/skirnir/availability/{model}", proxy.handle_availability)   # vor dem /v1-Fangnetz registrieren
     api.router.add_post("/rerank", rerank.handle_rerank)   # TEI-Reranking (router.rerank, default aus -> 404); immer registriert, Reload schaltet
+    api.router.add_get("/info", rerank.handle_info)        # TEI-Kennung; Hindsights TEI-Client fragt sie vor dem ersten /rerank ab
     if state.CFG.anthropic_enabled:   # Anthropic-Messages-API (Claude Code): eigene Uebersetzung auf /api/chat
         api.router.add_post("/v1/messages", anthropic_api.handle_messages)
         api.router.add_post("/v1/messages/count_tokens", anthropic_api.handle_count_tokens)
