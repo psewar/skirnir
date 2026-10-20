@@ -6,6 +6,7 @@ den Weg durch den echten Tunnel (tunnel.Tunnel) eine WebSocket-Attrappe, die die
 import asyncio
 import copy
 import json
+import logging
 import os
 import sys
 import time
@@ -30,12 +31,14 @@ def check(name, cond, info=""):
         FAILS.append(name)
 
 
-def load(rerank=None, client_rerank=True):
+def load(rerank=None, client_rerank=True, inference=None):
     """config.example.yaml plus rerank-Abschnitt und ein Client, der per Quell-IP (Loopback des Testservers) erkannt wird."""
     raw = copy.deepcopy(config.load_yaml(EXAMPLE))
     if rerank is not None:
         raw["router"]["rerank"] = rerank
     raw["router"]["client_auth"]["clients"]["memory-service"] = {"ip": ["127.0.0.1", "::1"], "rerank": client_rerank}
+    if inference is not None:
+        raw["router"]["client_auth"]["clients"]["memory-service"]["inference"] = inference
     cfg = config.Config(EXAMPLE, use_overrides=False)
     cfg.parse(raw)
     return cfg
@@ -62,6 +65,35 @@ try:
 except ValueError:
     ok = True
 check("Config laedt nicht: Client-Recht rerank ist kein Boolean", ok)
+try:
+    load({"enabled": True, "nodes": ["gpu-a"]}, inference="nein")
+    ok = False
+except ValueError:
+    ok = True
+check("Config laedt nicht: inference ist kein Boolean", ok)
+
+
+class Warnungen(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.zeilen = []
+
+    def emit(self, record):
+        self.zeilen.append(record.getMessage())
+
+
+w = Warnungen()
+logging.getLogger("router").addHandler(w)
+load({"enabled": True, "nodes": ["gpu-a"]})
+check("Warnung beim Laden: rerank ohne inference: false und ohne roles-Grenze",
+      any("memory-service" in z and "inference: false" in z for z in w.zeilen), str(w.zeilen))
+w.zeilen.clear()
+load({"enabled": True, "nodes": ["gpu-a"]}, inference=False)
+check("keine Warnung mit inference: false", not any("memory-service" in z for z in w.zeilen), str(w.zeilen))
+check("inference Standard true, false bleibt false",
+      load().client_auth["clients"]["memory-service"]["inference"] is True
+      and load(inference=False).client_auth["clients"]["memory-service"]["inference"] is False)
+logging.getLogger("router").removeHandler(w)
 
 
 # --- Heartbeat-Feld routes
@@ -294,6 +326,34 @@ async def scenarios():
         text = metrics.render()
         check("/metrics zeigt beide Reihen", 'skirnir_rerank_requests_total{outcome="timeout"} 2' in text
               and "skirnir_rerank_duration_seconds_bucket" in text)
+
+        # --- Client mit inference: false: nur POST /rerank und GET /info, alles andere 403 inference_disabled
+        s, _ = await info(client)
+        r = await client.get("/api/tags")
+        check("inference Standard (true): Client darf weiter Inferenz-Endpunkte", s == 200 and r.status == 200, f"{s} {r.status}")
+        state.CFG = load({"enabled": True, "nodes": ["gpu-a"], "timeout_s": 0.5}, inference=False)
+        n = node("gpu-a")
+        state.NODES = {"gpu-a": n}
+        s, b, _ = await post(client)
+        check("inference false: POST /rerank weiter 200", s == 200 and len(n.tunnel.calls) == 1, f"{s} {b}")
+        s, b = await info(client)
+        check("inference false: GET /info weiter 200", s == 200 and b.get("model_id") == "skirnir-rerank", f"{s} {b}")
+        chat = {"model": "standard:latest", "messages": [{"role": "user", "content": "hallo"}]}
+        for method, path, body, code_of in (
+                ("POST", "/api/chat", chat, lambda b: b.get("code")),
+                ("GET", "/api/tags", None, lambda b: b.get("code")),
+                ("POST", "/v1/chat/completions", chat, lambda b: b["error"].get("code")),
+                ("POST", "/v1/messages", {**chat, "max_tokens": 8}, lambda b: b["error"]["skirnir"]["code"]),
+                ("POST", "/v1/skirnir/memory/recall", {"project": "p", "query": "q"}, lambda b: b["error"].get("code")),
+                ("GET", "/v1/skirnir/sessions", None, lambda b: b["error"].get("code")),
+                ("GET", "/rerank", None, lambda b: b.get("code"))):
+            r = await client.request(method, path, json=body)
+            b = await r.json(content_type=None)
+            check(f"inference false: {method} {path} -> 403 inference_disabled", r.status == 403 and code_of(b) == "inference_disabled",
+                  f"{r.status} {b}")
+        check("inference false: kein Knotenaufruf ausser dem einen /rerank", len(n.tunnel.calls) == 1, str(n.tunnel.calls))
+        st = state.CLIENT_STATS["clients"].get("memory-service") or {}
+        check("inference false: Ablehnungen in der Client-Statistik (forbidden)", st.get("forbidden", 0) >= 7, str(st.get("forbidden")))
     finally:
         await client.close()
 

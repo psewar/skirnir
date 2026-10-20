@@ -15,7 +15,7 @@ from .context_config import ContextConfig, parse_context_config
 from .memory_config import HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
 from . import settings as settings_mod
-from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES
+from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES, log
 from .outcome import failed
 
 
@@ -76,7 +76,7 @@ SCHEMA = {
         "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
-                                          "cloud": None, "data_class": None, "rerank": None, "session_projects": None, "session_handoff_from": None, "memory": {"owner": None, "strategy": None, "default_project": None, "auto_retain": None, "projects": {"*": {"read": None, "write": None, "delete": None, "scope": None, "data_class": None, "allow_cloud": None, "allow_private_addresses": None}}}, "note": None, "token_rotated": None, "created": None}}},
+                                          "cloud": None, "data_class": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": {"owner": None, "strategy": None, "default_project": None, "auto_retain": None, "projects": {"*": {"read": None, "write": None, "delete": None, "scope": None, "data_class": None, "allow_cloud": None, "allow_private_addresses": None}}}, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None,
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
@@ -337,6 +337,13 @@ class Config:
             if type(spec.get("rerank", False)) is not bool:
                 raise ValueError(f"client_auth.clients.{name}.rerank muss true oder false sein")  # exception-ok: aborts loading an invalid configuration
             spec["rerank"] = spec.get("rerank", False)
+            # inference: false = nur POST /rerank und GET /info (auth.inference_refusal); Standard true wie bisher
+            if type(spec.get("inference", True)) is not bool:
+                raise ValueError(f"client_auth.clients.{name}.inference muss true oder false sein")  # exception-ok: aborts loading an invalid configuration
+            spec["inference"] = spec.get("inference", True)
+            if spec["rerank"] and spec["inference"] and "*" in spec["roles"]:
+                log.warning("client_auth.clients.%s: rerank: true ohne inference: false und ohne roles-Grenze - der Client darf "
+                            "auch jede Rolle rufen", name)
             if spec.get("requests_per_minute") is not None:
                 spec["requests_per_minute"] = int(spec["requests_per_minute"])
             if spec.get("max_priority") is not None and spec["max_priority"] not in PRIORITIES:   # Stufe 3: Kappung der Klasse
