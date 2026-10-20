@@ -89,22 +89,23 @@ func (h *HealthServer) Run(ctx context.Context) {
 }
 
 type Snapshot struct {
-	Version   string                `json:"version"`
-	Node      string                `json:"node"`
-	Identity  string                `json:"identity,omitempty"`
-	Uptime    string                `json:"uptime"`
-	GPU       *GPUSample            `json:"gpu"`
-	GPUError  string                `json:"gpu_error,omitempty"`
-	GPUZRelay string                `json:"gpuz_relay_age,omitempty"` // Alter der letzten Relay-Werte (leer = nie)
-	Guard     GuardStatus           `json:"gpu_guard"`
-	Update    *UpdateReport         `json:"update,omitempty"`
-	Heartbeat HeartbeatStatus       `json:"heartbeat"`
-	MQTT      *MQTTStatus           `json:"mqtt,omitempty"`
-	Proxy     *ProxyStatus          `json:"ollama_proxy,omitempty"`
-	Tunnel    *TunnelStatus         `json:"tunnel,omitempty"`
-	Children  map[string]childState `json:"children"`
-	Game      GameFact              `json:"game"`
-	Memory    *MemFact              `json:"memory,omitempty"`
+	Version   string                 `json:"version"`
+	Node      string                 `json:"node"`
+	Identity  string                 `json:"identity,omitempty"`
+	Uptime    string                 `json:"uptime"`
+	GPU       *GPUSample             `json:"gpu"`
+	GPUError  string                 `json:"gpu_error,omitempty"`
+	GPUZRelay string                 `json:"gpuz_relay_age,omitempty"` // Alter der letzten Relay-Werte (leer = nie)
+	Guard     GuardStatus            `json:"gpu_guard"`
+	Update    *UpdateReport          `json:"update,omitempty"`
+	Heartbeat HeartbeatStatus        `json:"heartbeat"`
+	MQTT      *MQTTStatus            `json:"mqtt,omitempty"`
+	Proxy     *ProxyStatus           `json:"ollama_proxy,omitempty"`
+	Tunnel    *TunnelStatus          `json:"tunnel,omitempty"`
+	Routes    map[string]RouteHealth `json:"routes,omitempty"` // tunnel.routes (routes.go)
+	Children  map[string]childState  `json:"children"`
+	Game      GameFact               `json:"game"`
+	Memory    *MemFact               `json:"memory,omitempty"`
 }
 
 func (a *App) snapshot() Snapshot {
@@ -135,5 +136,6 @@ func (a *App) snapshot() Snapshot {
 		st := a.tunnel.Status()
 		s.Tunnel = &st
 	}
+	s.Routes = a.routes.Report()
 	return s
 }

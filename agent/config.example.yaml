@@ -56,6 +56,12 @@ router:
 
 tunnel:                                         # ausgehende Verbindung zum Router (einziger Weg seit 0.9.1)
   upstream: http://127.0.0.1:11434              # lokales Ollama, das der Router durch den Tunnel aufruft
+  # routes:                                     # optional: weitere lokale Dienste nach Pfad; ohne routes geht alles an upstream
+  #   - name: rerank                            #   Schluessel im Heartbeat-Feld routes: {rerank: {up, reason}}
+  #     path: /rerank                           #   exakter Pfadvergleich (ohne Query)
+  #     methods: [POST]                         #   andere Methoden beantwortet der Agent mit 405
+  #     upstream: http://127.0.0.1:8090         #   nur 127.0.0.1 oder [::1], sonst laedt die Config nicht
+  #     health: /health                         #   alle 5 s abgefragt; 200 = up, sonst Grund starting/selftest_failed/unhealthy/unreachable
 
 # gpuz:                                         # GPU-Z-Sensoren (Windows) als Zusatzquelle, Standard an: laeuft GPU-Z,
 #   enabled: false                              #   kommen Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung dazu
