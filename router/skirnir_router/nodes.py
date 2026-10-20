@@ -136,6 +136,7 @@ class Node(Breaker):
         self.game = None              # {"running", "name", "via", ...} vom Agenten
         self.game_since = None        # seit wann der Router das Spiel ununterbrochen sieht (busy erst nach game_sustain_s)
         self.memory = None            # {"ram_available_gib", "commit_free_gib", ...} vom Agenten
+        self.routes = {}              # Tunnel-Routen des Agenten neben Ollama: {"rerank": {"up": bool, "reason": str}}; leer = meldet keine
         self.mem_low_count = 0        # so viele Heartbeats in Folge unter der Grenze
         self.mem_pressure = False     # Speicherdruck: nichts kalt laden, nicht vorwaermen (das Geladene antwortet weiter)
         self.vram_last_gib = 0.0      # Ollama-Belegung beim letzten Poll, um ein Schrumpfen zu erkennen
@@ -424,4 +425,5 @@ class Node(Breaker):
             "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
             "breaker": self.breaker, "max_inflight": self.effective_max_inflight(), "draining": now < self.draining_until, "ollama_source": "push" if self.ollama_push_active(now) else "poll",
             "game": self.game, "memory": self.memory, "memory_pressure": self.mem_pressure,   # Agent >= 0.17.0
+            "routes": self.routes,
         }

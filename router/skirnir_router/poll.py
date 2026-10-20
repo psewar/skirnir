@@ -416,6 +416,24 @@ def note_game_memory(node, b, now):
         state.MQTT_DIRTY.append(True)
 
 
+ROUTE_REASONS = ("", "unreachable", "unhealthy", "starting", "selftest_failed")
+
+
+def route_health(raw):
+    """Heartbeat-Feld `routes` -> {name: {"up": bool, "reason": str}}. Nur echte Booleans zaehlen als up; ein unbekannter
+    Grund wird zu "unhealthy" (der Agent ist neuer als der Router), ein Eintrag ohne Mapping faellt weg."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for name, r in raw.items():
+        if not isinstance(name, str) or not isinstance(r, dict):
+            continue
+        up = r.get("up") is True
+        reason = r.get("reason") if r.get("reason") in ROUTE_REASONS else "unhealthy"
+        out[name] = {"up": up, "reason": "" if up else (reason or "unhealthy")}
+    return out
+
+
 def hb_ack(node):
     """Antwort auf einen Heartbeat (HTTP und Tunnel): Urteil des Routers plus ob er den GPU-Schutz dieses Knotens beachtet."""
     return {"state": node.state, "busy_reason": node.busy_reason,
@@ -442,6 +460,7 @@ def apply_heartbeat(node, b, now):
     kv = b.get("children_vram_mib")   # Agent >= 0.13.0: {kind: MiB} ohne Ollama; fehlt das Feld, gibt es keine solchen Kinder
     node.children_vram_gib = sum(v for v in kv.values() if isinstance(v, (int, float))) / 1024 if isinstance(kv, dict) else 0.0
     note_game_memory(node, b, now)   # Agent >= 0.17.0: Spiel und Hauptspeicher als Fakt
+    node.routes = route_health(b.get("routes"))   # Tunnel-Routen neben Ollama (Reranker); ein aelterer Agent meldet keine
     sens = b.get("sensors")   # Agent >= 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z-Werte (unveraendert durchgereicht)
     node.sensors = sens if isinstance(sens, dict) else None
     if isinstance(b.get("update"), dict):   # Agent >= 0.8.0: Zwischenstand eines Update-Auftrags

@@ -21,6 +21,7 @@ from .common import VERSION, log
 DURATION_BUCKETS = (0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300)
 TTFT_BUCKETS = (0.1, 0.25, 0.5, 1, 2, 5, 15)
 QUEUE_BUCKETS = (0.1, 0.5, 1, 2, 5, 10, 30, 60, 120)
+RERANK_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1, 2, 5)
 USAGE_DAYS = 90
 METRICS_SAVE_S = 60
 
@@ -64,6 +65,13 @@ def count_event(entry):
     if entry.get("state"):
         labels["state"] = entry["state"]
     _counter("skirnir_events_total", labels)
+
+
+def observe_rerank(outcome, duration_s):
+    """Am Ende jeder Anfrage an POST /rerank (rerank.py). outcome: ok, ein Grund aus rerank.REASONS oder die Klasse der
+    Ablehnung (disabled, forbidden, invalid, too_large)."""
+    _counter("skirnir_rerank_requests_total", {"outcome": outcome})
+    _hist("skirnir_rerank_duration_seconds", {"outcome": outcome}, RERANK_BUCKETS, duration_s)
 
 
 def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion_tokens, queued_s, cost_chf=0.0):

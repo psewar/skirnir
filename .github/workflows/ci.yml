@@ -37,6 +37,7 @@ jobs:
       - run: python test/selftest_katalog_merge.py
       - run: python test/selftest_sessions.py
       - run: python test/selftest_memory.py
+      - run: python test/selftest_rerank.py
       - run: python test/selftest_context.py
       - run: python test/selftest_interoperability.py
       - run: python test/selftest_reliability.py

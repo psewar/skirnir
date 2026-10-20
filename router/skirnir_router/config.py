@@ -13,6 +13,7 @@ from .session_config import SessionConfig, parse_session_config
 from .shared_config import parse_scopes
 from .context_config import ContextConfig, parse_context_config
 from .memory_config import HindsightConfig, parse_hindsight, parse_client_memory
+from .rerank_config import RerankConfig, parse_rerank_config
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES
 from .outcome import failed
@@ -70,11 +71,12 @@ SCHEMA = {
         "hindsight": {k: None for k in HindsightConfig.__dataclass_fields__},
         "context_manager": {k: None for k in ContextConfig.__dataclass_fields__},
         "session_store": {k: None for k in SessionConfig.__dataclass_fields__},
+        "rerank": {k: None for k in RerankConfig.__dataclass_fields__},
         "limits": {"max_images": None, "max_tools": None, "max_messages": None}, "session_affinity_ttl_s": None,
         "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
-                                          "cloud": None, "data_class": None, "session_projects": None, "session_handoff_from": None, "memory": {"owner": None, "strategy": None, "default_project": None, "auto_retain": None, "projects": {"*": {"read": None, "write": None, "delete": None, "scope": None, "data_class": None, "allow_cloud": None, "allow_private_addresses": None}}}, "note": None, "token_rotated": None, "created": None}}},
+                                          "cloud": None, "data_class": None, "rerank": None, "session_projects": None, "session_handoff_from": None, "memory": {"owner": None, "strategy": None, "default_project": None, "auto_retain": None, "projects": {"*": {"read": None, "write": None, "delete": None, "scope": None, "data_class": None, "allow_cloud": None, "allow_private_addresses": None}}}, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None,
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
@@ -237,6 +239,7 @@ class Config:
             raise ValueError("context_manager requires session_store.enabled")
         self._parse_cloud(r.get("cloud") or {})
         self.hindsight = _accepted(parse_hindsight(r.get("hindsight")))
+        self.rerank = _accepted(parse_rerank_config(r.get("rerank")))   # POST /rerank (rerank.py), default aus
         self.memory_scopes = _accepted(parse_scopes(r.get("memory_scopes"), self.cloud["data_classes"]))
         if self.hindsight.outbox_enabled and not (self.hindsight.enabled and self.session_store.enabled):
             raise ValueError("persistent memory outbox requires enabled hindsight and session_store")
@@ -330,6 +333,10 @@ class Config:
             spec["ip"] = [str(x) for x in (spec.get("ip") or [])]
             spec["roles"] = [str(x) for x in (spec.get("roles") or ["*"])]
             spec["models"] = bool(spec.get("models", True))
+            # Recht auf POST /rerank (rerank.py), default nein. Erkennung auch per ip: Hindsights TEI-Client schickt keinen Header.
+            if type(spec.get("rerank", False)) is not bool:
+                raise ValueError(f"client_auth.clients.{name}.rerank muss true oder false sein")  # exception-ok: aborts loading an invalid configuration
+            spec["rerank"] = spec.get("rerank", False)
             if spec.get("requests_per_minute") is not None:
                 spec["requests_per_minute"] = int(spec["requests_per_minute"])
             if spec.get("max_priority") is not None and spec["max_priority"] not in PRIORITIES:   # Stufe 3: Kappung der Klasse

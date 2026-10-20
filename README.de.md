@@ -79,6 +79,7 @@ laufen durch den Tunnel des Agenten; Ollama selbst bleibt auf `localhost`.
 | **11434** | Ollama-API: `GET /api/tags`, `/api/ps`, `/api/version`, `POST /api/show`; Inferenz `POST /api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings` (Streaming wird durchgereicht, `model` in der Antwort trägt den Rollennamen). `/api/pull`, `push`, `create`, `copy`, `delete` → 403. TLS mit dem eigenen Zertifikat (`api_tls`). | Clients |
 | **11434 `/v1`** | OpenAI-kompatibel: `GET /v1/models`, `POST /v1/chat/completions` (SSE-Streaming, `tools`, `response_format`), `/v1/completions`, `/v1/embeddings`. Der Router übersetzt selbst nach `/api/chat`, damit Rollen, Kontextstufen und `keep_alive` gelten – Ollamas eigenes `/v1` kennt weder `num_ctx` noch `keep_alive`. | OpenAI-Clients |
 | **11434 `/v1/messages`** | Anthropic-Messages-API: `POST /v1/messages` (streamend und nicht), `POST /v1/messages/count_tokens`; `GET /v1/models` antwortet in Anthropic-Form, wenn die Anfrage `anthropic-version` trägt. Übersetzung auf `/api/chat` wie bei `/v1`, siehe [Anthropic-Clients](#anthropic-clients-claude-code). | Claude Code, Anthropic-SDKs |
+| **11434 `/rerank`** | Optionales TEI-kompatibles Reranking auf einem GPU-Knoten durch den Agent-Tunnel (standardmässig aus, Client-Recht `rerank`), siehe [Rerank-Endpunkt](#optionaler-rerank-endpunkt). | Gedächtnisdienste |
 | **11435** | Web-UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/nodes`, `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2-Hashes in der Konfiguration, geprüftes Paar 10 min gecacht). | Browser, Skripte, Prometheus |
 | **11435 `/v1/tunnel`** | WebSocket vom Agenten: Anmeldung mit Ed25519-Signatur auf eine Challenge, Heartbeat, Konfigurationspaket, alle Ollama-Aufrufe als multiplexte Streams (REQ/RESP/DATA/END/ERR/CANCEL). | Agent → Router |
 | MQTT 8883 | Discovery und Zustände für Home Assistant (TLS, Passwort aus `secrets.env`). | Router → Broker |
@@ -646,3 +647,11 @@ bleiben standardmässig aus. Private Bank-IDs und bestehende Inferenz-Clients bl
 kompatibel. Siehe [Aktivierung, Hermes-Anbindung, API und Rollback](design/shared-memory-interoperability.de.md).
 
 Betriebliche Verbesserungen: [Memory-Zuverlässigkeit, Recovery und echte Smoke-Tests](design/memory-reliability.de.md).
+
+## Optionaler Rerank-Endpunkt
+
+`POST /rerank` auf dem Inferenz-Port spricht das TEI-Rerank-Protokoll und reicht die Anfrage durch den Agent-Tunnel an einen
+Reranker-Dienst auf einem GPU-Knoten weiter (Agent-Route `rerank`, Gesundheit im Heartbeat gemeldet). Standardmässig aus; ein
+Client braucht das Recht `rerank: true` und darf an seiner Quelladresse erkannt werden. Kein WOL, keine Warteschlange, keine
+Wiederholung: kann kein Knoten reranken, antwortet der Router sofort mit `424 rerank_unavailable` und einem Grund, damit ein
+Aufrufer mit eigenem CPU-Reranker ohne Verzögerung zurückfällt. Siehe [Konfiguration, Drahtformat und Gründe (Englisch)](design/rerank.md).

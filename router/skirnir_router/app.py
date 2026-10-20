@@ -12,7 +12,7 @@ import sys
 from aiohttp import ClientSession, web
 
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
-from . import decision, memory, session_api, context_ops
+from . import decision, memory, rerank, session_api, context_ops
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 
 # TCP-Keepalive auf dem API-Port: erste Probe nach 60 s Stille, dann alle 15 s, nach 4 unbeantworteten gilt die Verbindung als tot
@@ -45,6 +45,7 @@ def build_apps():
     api.router.add_get("/api/ps", proxy.handle_ps)
     api.router.add_get("/api/version", proxy.handle_version)
     api.router.add_get("/v1/skirnir/availability/{model}", proxy.handle_availability)   # vor dem /v1-Fangnetz registrieren
+    api.router.add_post("/rerank", rerank.handle_rerank)   # TEI-Reranking (router.rerank, default aus -> 404); immer registriert, Reload schaltet
     if state.CFG.anthropic_enabled:   # Anthropic-Messages-API (Claude Code): eigene Uebersetzung auf /api/chat
         api.router.add_post("/v1/messages", anthropic_api.handle_messages)
         api.router.add_post("/v1/messages/count_tokens", anthropic_api.handle_count_tokens)

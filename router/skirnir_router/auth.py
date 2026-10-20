@@ -182,7 +182,7 @@ def client_auth_view():
         s = state.CLIENT_STATS["clients"].get(name)
         out["clients"][name] = {
             "identifies_by": ["internal"] if c.get("internal") else [w for w, ok in (("token", bool(c.get("token_sha256"))), ("ip", bool(c.get("ip")))) if ok],
-            "roles": c.get("roles"), "models": c.get("models"), "requests_per_minute": c.get("requests_per_minute"),
+            "roles": c.get("roles"), "models": c.get("models"), "rerank": bool(c.get("rerank")), "requests_per_minute": c.get("requests_per_minute"),
             "total": s["total"] if s else 0, "via": s["via"] if s else None,
             "last_seen_s": round(now - s["last_seen"], 1) if s and s["last_seen"] else None,
             "last_minute": sum(1 for t in s["recent"] if t > now - 60) if s else 0,
