@@ -140,11 +140,22 @@ class Tunnel:
             log.debug("tunnel %s: Antwort verworfen, Verbindung schliesst (%s)", self.name(), e)
 
     async def open(self, method, path, body, deadline):
+        """Stream oeffnen und auf den Antwortkopf warten. Wird der Aufrufer vorher abgebrochen (Client trennt waehrend des
+        Prefills, aeussere Zeitgrenze), raeumt open den Stream ab und schickt CANCEL: sonst blieb der Eintrag in `streams`
+        bis zum Tunnelende liegen, und der Agent rechnete die Ollama-Anfrage fuer niemanden zu Ende."""
         sid = self.next_id
         self.next_id = self.next_id % 0xFFFFFFFF + 1
         resp = TunnelResponse(self, sid, deadline)
         self.streams[sid] = resp
         self.requests += 1
+        try:
+            return await self._open(sid, resp, method, path, body, deadline)
+        except asyncio.CancelledError:  # exception-ok: cancellation of the waiting caller; clean up the stream, then pass it on
+            if self.streams.pop(sid, None) is not None:
+                state.spawn(self.cancel(sid))   # nicht hier warten: der Abbruch soll sofort weiterlaufen
+            raise  # exception-ok: cancellation must propagate to the caller
+
+    async def _open(self, sid, resp, method, path, body, deadline):
         head = {"method": method, "path": path, "headers": ({"Content-Type": "application/json"} if body else {})}
         try:
             await self.send(tun_frame(TUN_REQ, sid, json.dumps(head).encode() + b"\n" + body))
