@@ -55,7 +55,7 @@ Router ruft Ollama hindurch auf (`tunnel.upstream`, Standard `http://127.0.0.1:1
 Zertifikat, keine feste IP; Reconnect mit Backoff 1-30 s; `/health` zeigt `tunnel`. Ein neuer Rechner braucht nur die Binary,
 die Config (node, router.url; optional secret_store fuer ein MQTT-Passwort aus dem Secret-Store) und `Install-Service.ps1`.
 
-### Tunnel-Routen (optional, Standard aus)
+### Tunnel-Routen (0.18.0, optional, Standard aus)
 
 `tunnel.routes` gibt einzelne Pfade statt an Ollama an einen anderen lokalen Dienst, z. B. den Reranker (`rerank-server/`)
 als Agent-Kind (`routes.go`). Je Route: `name`, `path` (exakter Vergleich ohne Query), `methods`, `upstream` (nur
