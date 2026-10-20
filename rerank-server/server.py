@@ -19,7 +19,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import engine_openvino  # noqa: E402
 from rerank_service import Limits, Reply, Service, error  # noqa: E402
 
 LOOPBACK = ("127.0.0.1", "::1", "localhost")  # der Dienst hat keine Anmeldung - nur lokal; der Agent reicht weiter
@@ -76,6 +75,9 @@ def main(argv=None) -> int:
         print(f"skirnir-rerank: --host {a.host} ist keine Loopback-Adresse - der Dienst hat keine Anmeldung und lauscht nur lokal",
               file=sys.stderr)
         return 2
+    # erst hier: die Engine braucht openvino/numpy, die HTTP-Schicht (und ihr Selbsttest in der CI) nicht
+    import engine_openvino
+
     service = Service(lambda: engine_openvino.build(a.model_dir, a.device, a.max_length, batch=a.batch),
                       Limits(max_texts=a.max_texts))
     # Modell laden und pruefen im Hintergrund: /health antwortet derweil 503 "starting"
