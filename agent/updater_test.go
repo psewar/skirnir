@@ -83,7 +83,12 @@ func TestUpdaterCleanupRaeumtGeparkteAlteBinaries(t *testing.T) {
 	if got := oldBinaries(exe); len(got) != 2 {
 		t.Fatalf("oldBinaries: %v", got)
 	}
-	log, _ := newLogger(LogCfg{Dir: t.TempDir()}, "test", false)
+	log, err := newLogger(LogCfg{Dir: t.TempDir()}, "test", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows loescht keine offene Datei: ohne Schliessen scheitert das Aufraeumen von TempDir.
+	t.Cleanup(func() { log.file.Close() })
 	called := false
 	if !cleanupOld(exe, func() { called = true }, time.Millisecond, log) || !called {
 		t.Fatalf("cleanupOld: nicht alles entfernt oder Relay-Neustart nicht aufgerufen (called=%v)", called)

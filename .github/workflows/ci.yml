@@ -98,6 +98,20 @@ jobs:
       - run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /dev/null .
       - run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /dev/null .
 
+  go-windows:
+    # Der Agent laeuft produktiv als Windows-Dienst; Dateisperren und *_windows_test.go zeigen sich nur hier.
+    name: Agent test on Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+      - run: go test ./...
+
   e2e:
     name: Router end-to-end suite (nightly, informational)
     runs-on: ubuntu-latest
