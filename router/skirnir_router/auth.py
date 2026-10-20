@@ -13,6 +13,7 @@ from aiohttp import web
 
 from . import state
 from .common import anthropic_error, log, ollama_error, openai_error
+from .outcome import Problem
 
 
 # ----------------------------------------------------------------------------- Client-Authentifizierung (11434)
@@ -96,8 +97,8 @@ def error_format(path):
     return openai_error if path.startswith("/v1/") else ollama_error
 
 
-def _deny(request, status, msg):
-    resp = error_format(request.path)(status, msg)
+def _deny(request, status, msg, why=None):
+    resp = error_format(request.path)(status, msg, why)
     if status == 401:
         resp.headers["WWW-Authenticate"] = 'Bearer realm="skirnir-router"'
     return resp
@@ -147,8 +148,27 @@ async def client_auth_middleware(request, handler):
             st["rate_limited"] += 1
             audit("rate_limited", client=name, path=request.path, limit=rpm)
             return _deny(request, 429, f"rate limit: {rpm} requests per minute for client {name}")
+    refused = inference_refusal(cfg["clients"].get(name) or {}, request)
+    if refused is not None:
+        st["forbidden"] += 1
+        audit("forbidden", client=name, path=request.path, reason=refused.kind)
+        return _deny(request, refused.status, refused.message, why={"code": refused.kind, "blockers": []})
     request["client"] = name
     return await handler(request)
+
+
+# Ein Client mit `inference: false` (z. B. ein Gedaechtnisdienst, der nur rerankt und an seiner Quell-IP erkannt wird) darf auf
+# dem API-Port nur diese Endpunkte. Alles andere ist gesperrt: Inferenz, Memory-Gateway, Session-API. Allowlist statt
+# Sperrliste, damit ein spaeter hinzugefuegter Endpunkt fuer ihn zu bleibt, bis er hier steht. `roles` behaelt seine Bedeutung
+# (leer oder fehlend = alle Rollen); ohne dieses Feld haette so ein Client also jede Rolle.
+NON_INFERENCE_ALLOWED = {("POST", "/rerank"), ("GET", "/info")}
+
+
+def inference_refusal(spec, request):
+    """None = erlaubt, sonst das Problem (403, kind inference_disabled)."""
+    if spec.get("inference", True) or (request.method, request.path) in NON_INFERENCE_ALLOWED:
+        return None
+    return Problem(403, "client may only use POST /rerank and GET /info (inference: false)", "inference_disabled")
 
 
 def client_allows(request, role, concrete):
@@ -182,7 +202,7 @@ def client_auth_view():
         s = state.CLIENT_STATS["clients"].get(name)
         out["clients"][name] = {
             "identifies_by": ["internal"] if c.get("internal") else [w for w, ok in (("token", bool(c.get("token_sha256"))), ("ip", bool(c.get("ip")))) if ok],
-            "roles": c.get("roles"), "models": c.get("models"), "rerank": bool(c.get("rerank")), "requests_per_minute": c.get("requests_per_minute"),
+            "roles": c.get("roles"), "models": c.get("models"), "rerank": bool(c.get("rerank")), "inference": c.get("inference", True), "requests_per_minute": c.get("requests_per_minute"),
             "total": s["total"] if s else 0, "via": s["via"] if s else None,
             "last_seen_s": round(now - s["last_seen"], 1) if s and s["last_seen"] else None,
             "last_minute": sum(1 for t in s["recent"] if t > now - 60) if s else 0,

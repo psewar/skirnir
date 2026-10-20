@@ -51,9 +51,18 @@ router:
       memory-service:
         ip: ["192.0.2.40"]    # TEI clients send no header: fixed source address of the caller
         rerank: true          # the right to call POST /rerank; default false
+        inference: false      # only POST /rerank and GET /info; default true
 ```
 
 `rerank` is a right of its own. A client without it, or an unidentified request in `observe` mode, gets `403`.
+
+`rerank` adds a right, it takes none away. A client without `roles` (or with an empty list) may use every role, so a client
+that is identified only by its source address and should do nothing but rerank sets `inference: false`. The router then
+answers everything else on the inference port with `403` and code `inference_disabled`, in the caller's error format:
+inference (`/api/*`, `/v1/*`, `/v1/messages`), memory gateway and session API. The allowed endpoints are a fixed list
+(`auth.NON_INFERENCE_ALLOWED`), so an endpoint added later stays closed for such a client. `/` and `/api/version` stay open
+without identity for everyone, as before. `roles` keeps its meaning. When a client has `rerank: true` but neither
+`inference: false` nor a `roles` limit, the router logs a warning while loading the configuration.
 
 ## Choosing a node
 

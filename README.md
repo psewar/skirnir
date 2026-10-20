@@ -316,7 +316,8 @@ client_auth:
     batch-jobs:     { token_sha256: "…", roles: ["gross"], models: false, max_priority: batch, cloud: false, data_class: internal }
 ```
 
-Per client: `roles`, `models` (concrete model names allowed?), `requests_per_minute` (429), `max_priority`, `cloud`, `data_class`.
+Per client: `roles`, `models` (concrete model names allowed?), `requests_per_minute` (429), `max_priority`, `cloud`, `data_class`,
+`rerank` and `inference` (`false` = only the [rerank endpoint](#optional-rerank-endpoint), everything else 403).
 Violations return 403 and go to the audit log (`auth_denied`, `bad_token`, `forbidden`, `rate_limited` – never prompts, never
 tokens). Clients can also be created in the UI; the router generates the secret, shows the plain text exactly once and stores the
 hash in `roles.yaml`. The **Try** button uses the internal identity `skirnir-ui`, which is only valid from localhost.
