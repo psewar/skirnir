@@ -80,6 +80,7 @@ Ollama itself stays on `localhost`.
 | **11434** | Ollama API: `GET /api/tags`, `/api/ps`, `/api/version`, `POST /api/show`; inference `POST /api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings` (streaming is passed through, `model` in the response carries the role name). `/api/pull`, `push`, `create`, `copy`, `delete` → 403. TLS with the router's own certificate (`api_tls`). | Clients |
 | **11434 `/v1`** | OpenAI-compatible: `GET /v1/models`, `POST /v1/chat/completions` (SSE streaming, `tools`, `response_format`), `/v1/completions`, `/v1/embeddings`. The router translates to `/api/chat` itself so that roles, context tiers and `keep_alive` apply – Ollama's own `/v1` knows neither `num_ctx` nor `keep_alive`. | OpenAI clients |
 | **11434 `/v1/messages`** | Anthropic Messages API: `POST /v1/messages` (streaming and not), `POST /v1/messages/count_tokens`; `GET /v1/models` answers in Anthropic form when the request carries `anthropic-version`. Translated to `/api/chat` like `/v1`, see [Anthropic clients](#anthropic-clients-claude-code). | Claude Code, Anthropic SDKs |
+| **11434 `/rerank`** | Optional TEI-compatible reranking on a GPU node through the agent tunnel (off by default, client right `rerank`), see [rerank endpoint](#optional-rerank-endpoint). | Memory services |
 | **11435** | Web UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/nodes`, `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2 hashes in the configuration, a verified pair is cached for 10 min). | Browser, scripts, Prometheus |
 | **11435 `/v1/tunnel`** | WebSocket from the agent: login with an Ed25519 signature over a challenge, heartbeat, configuration package, all Ollama calls as multiplexed streams (REQ/RESP/DATA/END/ERR/CANCEL). | Agent → router |
 | MQTT 8883 | Discovery and states for Home Assistant (TLS, password from `secrets.env`). | Router → broker |
@@ -640,3 +641,11 @@ by default. Private bank IDs and existing inference clients stay compatible.
 See the [activation, Hermes integration, API and rollback guide](design/shared-memory-interoperability.md).
 
 Operational improvements: [memory reliability, recovery and live smoke tests](design/memory-reliability.md).
+
+## Optional rerank endpoint
+
+`POST /rerank` on the inference port speaks the TEI rerank protocol and passes the request through the agent tunnel to a
+reranker service on a GPU node (agent route `rerank`, health reported in the heartbeat). Disabled by default; a client needs
+the right `rerank: true` and may be identified by source address. No Wake-on-LAN, queue or retry: if no node can rerank, the
+router answers at once with `424 rerank_unavailable` and a reason, so a caller with its own CPU reranker falls back without
+delay. See [configuration, wire format and reasons](design/rerank.md).
