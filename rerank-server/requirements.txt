@@ -1,0 +1,4 @@
+# Laufzeit des Reranker-Dienstes (kein torch). Export zusaetzlich: torch, transformers (export_model.py onnx).
+openvino==2026.4.1
+tokenizers==0.23.3
+numpy==2.5.4

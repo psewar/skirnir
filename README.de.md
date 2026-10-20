@@ -511,6 +511,7 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 | `decision-eval/` | Datensatz-Generator (136 Vorlagen, 1282 Beispiele, Gruppen-Split), Trainer für TF-IDF und Jevlike, Auswertung (Top-1, Kalibrierung, Ketten), Ergebnisse |
 | `decision-embed/` | Stufe 2 der Auto-Rolle: ONNX-Export, Kopf-Training, Dienst, Container |
 | `decision-jevlike/` | Jevlike-Dienst (Prototyp, gemessen, nicht produktiv) |
+| `rerank-server/` | Optionaler Cross-Encoder-Reranker mit TEI-Protokoll `/rerank` auf OpenVINO (Intel-iGPU, CPU, NPU), als Kind des Agenten fuer einen Gedaechtnisdienst wie Hindsight; eigene README |
 | `deploy/` | `deploy.py`, `ops_env.py` |
 | `design/` | Entwürfe: `routing-algorithm.md`, `roadmap.md` (Ausbaustufen und Entscheidungen), `decision-engine.md`; Logos (mit einem Bildmodell erzeugt, Metadaten entfernt) |
 | `test/` | Testsuite, Fakes, Dev-Umgebung, Messstand |

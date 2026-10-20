@@ -41,6 +41,7 @@ jobs:
       - run: python test/selftest_interoperability.py
       - run: python test/selftest_reliability.py
       - run: python test/selftest_verified_delivery.py
+      - run: python test/selftest_rerank_server.py
       - run: python test/integration_live_memory.py
       - run: python test/benchmark_context.py
       - name: Check added lines for common public-data leaks

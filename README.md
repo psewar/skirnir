@@ -511,6 +511,7 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 | `decision-eval/` | Dataset generator (136 templates, 1282 examples, group split), trainers for TF-IDF and Jevlike, evaluation (top-1, calibration, chains), results |
 | `decision-embed/` | Stage 2 of the auto role: ONNX export, head training, service, container |
 | `decision-jevlike/` | Jevlike service (prototype, measured, not in production) |
+| `rerank-server/` | Optional cross-encoder reranker with the TEI `/rerank` protocol on OpenVINO (Intel iGPU, CPU, NPU), run as an agent child for a memory service such as Hindsight; own README |
 | `deploy/` | `deploy.py`, `ops_env.py` |
 | `design/` | Design notes: `routing-algorithm.md`, `roadmap.md` (stages and decisions), `decision-engine.md`; logos (generated with an image model, metadata removed) |
 | `test/` | Test suite, fakes, dev environment, test bench |
