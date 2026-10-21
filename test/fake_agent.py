@@ -49,8 +49,8 @@ async def do_update(ws, session, lock, m, sslctx):
     Heartbeat, dann Neuanmeldung mit der neuen Version (Tausch und Neustart werden nur simuliert)."""
     import hashlib
     hb = {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}
-    async def report(state, msg=""):
-        await send(ws, lock, HB, 0, json.dumps({**hb, "update": {"version": m.get("version"), "state": state, "message": msg}}).encode())
+    async def report(state, msg=""):   # kind wie Agent >= 0.19.1: immer dabei, hier nie app_control
+        await send(ws, lock, HB, 0, json.dumps({**hb, "update": {"version": m.get("version"), "state": state, "message": msg, "kind": ""}}).encode())
         out(update=state, msg=msg)
     try:
         pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(open(UPDATE_PUB, encoding="utf-8").read().strip()))

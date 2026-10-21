@@ -7,10 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -95,5 +99,48 @@ func TestUpdaterCleanupRaeumtGeparkteAlteBinaries(t *testing.T) {
 	}
 	if got := oldBinaries(exe); len(got) != 0 {
 		t.Fatalf("alte Binaries liegen noch: %v", got)
+	}
+}
+
+// 0.19.1: eine von Smart App Control / WDAC blockierte Binary erkennt der Agent am Windows-Fehlercode, den CreateProcess
+// liefert, nie am (lokalisierten) Meldungstext.
+func TestUpdateKind(t *testing.T) {
+	start := func(code syscall.Errno) error {
+		// so kommt der Fehler aus smokeTest: exec -> os.PathError -> eingepackt mit %w
+		return fmt.Errorf("neue Binary meldet %q statt %s: %w", "", "9.9.9",
+			&os.PathError{Op: "fork/exec", Path: "skirnir-agent.exe.new", Err: code})
+	}
+	for _, code := range appControlBlocked {
+		if got := updateKind(start(code)); got != updateKindAppControl {
+			t.Errorf("Code %d: %q statt %q", uint(code), got, updateKindAppControl)
+		}
+	}
+	for name, err := range map[string]error{
+		"anderer Code":         start(syscall.Errno(2)),
+		"Richtlinie ungueltig": start(syscall.Errno(4552)), // Application Control, aber kein Block einer Datei
+		"nur Text":             errors.New("neue Binary meldet \"\" statt 9.9.9: An Application Control policy has blocked this file."),
+		"Text deutsch":         errors.New("Diese Datei wurde von einer Anwendungssteuerungsrichtlinie blockiert."),
+		"ohne Code eingepackt": fmt.Errorf("neue Binary meldet %q statt %s", "1.0.0", "9.9.9"),
+		"kein Fehler":          nil,
+	} {
+		if got := updateKind(err); got != "" {
+			t.Errorf("%s: %q statt leer", name, got)
+		}
+	}
+}
+
+// Der Startfehler des Rauchtests bleibt eingepackt, sonst faende updateKind den Code nicht.
+func TestSmokeTestKeepsStartError(t *testing.T) {
+	err := smokeTest(filepath.Join(t.TempDir(), "fehlt.exe"), "9.9.9")
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Startfehler nicht eingepackt: %v", err)
+	}
+}
+
+// Der Router erkennt an der Anwesenheit von `kind`, dass der Agent die Fehlerart meldet: das Feld geht auch leer mit.
+func TestUpdateReportKindAlwaysSent(t *testing.T) {
+	b, _ := json.Marshal(UpdateReport{Version: "9.9.9", State: "failed", Message: "x"})
+	if !strings.Contains(string(b), `"kind":""`) {
+		t.Fatalf("kind fehlt im Bericht: %s", b)
 	}
 }
