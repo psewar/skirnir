@@ -1016,6 +1016,8 @@ def main():
         check("Agent meldet Spiel -> big busy mit Grund 'game', obwohl kein fremdes VRAM und kaum Last",
               nb["state"] == "busy" and nb["busy_reason"] == "game" and (nb.get("game") or {}).get("name") == "Diablo IV.exe",
               f"{nb['state']} {nb['busy_reason']} {nb.get('game')} fremd {nb.get('foreign_vram_gib')}")
+        check("... ohne gemeldeten GPU-Bedarf (Agent < 0.19.0) wie bis 0.8.6: schwer, Grund 'nicht gemeldet'",
+              nb["game_heavy"] is True and nb["game_heavy_why"] == "GPU-Bedarf nicht gemeldet", f"{nb['game_heavy']} {nb['game_heavy_why']}")
         st, raw = http(R + "/v1/skirnir/availability/gross:latest")
         av = json.loads(raw) if st == 200 else {}
         bl = [b for b in av.get("blockers", []) if b.get("node") == "big"]
@@ -1031,6 +1033,63 @@ def main():
             if state()["nodes"]["big"]["state"] == "free":
                 break
         check("... danach free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["state"])
+
+        # Router 0.8.7 / Agent 0.19.0: der Agent meldet den GPU-Bedarf des Spiels. Ein leichtes Spiel (gemessen 735 MiB eigen,
+        # 32 MiB geteilt, 2 %) sperrt die Karte nicht mehr; eines, das die GPU braucht, schon - auch wenn es nur in den geteilten
+        # Speicher ausweicht (Diablo IV neben qwen3.8: kaum VRAM, kaum Last).
+        leicht = dict(spiel, name="Small Game.exe", procs=1, gpu_dedicated_mib=735, gpu_shared_mib=32, gpu_pct=1.8)
+        for _ in range(4):   # game_sustain_s 1 im Test
+            hb("big", 5, *ruhig, game=leicht, memory=viel); time.sleep(0.6)
+        nb = state()["nodes"]["big"]
+        check("Leichtes Spiel (735+32 MiB, 1,8 %) -> big bleibt free, game_heavy false mit Grund 'leicht'",
+              nb["state"] == "free" and nb["game_heavy"] is False and nb["game_heavy_why"].startswith("leicht")
+              and (nb.get("game") or {}).get("gpu_dedicated_mib") == 735, f"{nb['state']} {nb['game_heavy']} {nb['game_heavy_why']} {nb.get('game')}")
+        st, raw = http(R + "/v1/skirnir/availability/gross:latest")
+        av = json.loads(raw) if st == 200 else {}
+        check("... Verfuegbarkeit ohne gpu_busy-Blocker fuer big", not [b for b in av.get("blockers", []) if b.get("node") == "big"
+              and b.get("busy_reason") == "game"], f"{st} {str(av)[:200]}")
+        verdraengt = dict(leicht, gpu_dedicated_mib=300, gpu_shared_mib=2100, gpu_pct=4.0)
+        t_heavy = time.time()
+        for _ in range(3):
+            hb("big", 5, *ruhig, game=verdraengt, memory=viel); time.sleep(0.6)
+        nb = state()["nodes"]["big"]
+        ev = [d for d in state()["decisions"] if d.get("event") == "game_heavy" and d.get("t", 0) >= t_heavy]
+        check("Spiel weicht in geteilten Speicher aus (300+2100 MiB, 4 %) -> busy 'game', Grund Grafikspeicher, Journal game_heavy",
+              nb["state"] == "busy" and nb["busy_reason"] == "game" and nb["game_heavy"] is True and "Grafikspeicher" in nb["game_heavy_why"]
+              and ev, f"{nb['state']} {nb['busy_reason']} {nb['game_heavy_why']} {ev}")
+        for _ in range(3):
+            hb("big", 5, *ruhig, game=leicht, memory=viel); time.sleep(0.6)
+        check("... wieder leicht (Menue): bleibt busy bis Spielende (kein Flattern)", state()["nodes"]["big"]["state"] == "busy",
+              state()["nodes"]["big"]["state"])
+        for _ in range(10):
+            hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=viel); time.sleep(0.6)
+            if state()["nodes"]["big"]["state"] == "free":
+                break
+        nb = state()["nodes"]["big"]
+        check("... Spiel beendet -> free, game_heavy zurueckgesetzt", nb["state"] == "free" and nb["game_heavy"] is False,
+              f"{nb['state']} {nb['game_heavy']}")
+        rechnet = dict(leicht, gpu_dedicated_mib=900, gpu_shared_mib=0, gpu_pct=35.0)
+        for _ in range(3):
+            hb("big", 5, *ruhig, game=rechnet, memory=viel); time.sleep(0.6)
+        nb = state()["nodes"]["big"]
+        check("Spiel mit wenig Speicher, aber 35 % Engine -> busy, Grund GPU-Engine", nb["state"] == "busy" and "GPU-Engine" in nb["game_heavy_why"],
+              f"{nb['state']} {nb['game_heavy_why']}")
+        for _ in range(10):
+            hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=viel); time.sleep(0.6)
+            if state()["nodes"]["big"]["state"] == "free":
+                break
+        check("... danach free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["state"])
+        eng = dict(viel, ram_available_gib=3.0, commit_free_gib=2.0)
+        for _ in range(4):   # polls 2
+            hb("big", 5, *ruhig, game=leicht, memory=eng); time.sleep(0.6)
+        nb = state()["nodes"]["big"]
+        check("Leichtes Spiel bei Speicherdruck (Diablo-Fall: RAM 94 %) -> busy, Grund Speicherdruck",
+              nb["state"] == "busy" and nb["game_heavy_why"] == "Speicherdruck", f"{nb['state']} {nb['game_heavy_why']} {nb['memory_pressure']}")
+        for _ in range(10):
+            hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=viel); time.sleep(0.6)
+            if state()["nodes"]["big"]["state"] == "free" and not state()["nodes"]["big"]["memory_pressure"]:
+                break
+        check("... Spiel weg, Speicher frei -> free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["state"])
         # Speicherdruck: nichts kalt laden, nicht vorwaermen - das Geladene antwortet weiter, nichts wird entladen
         knapp = dict(viel, ram_available_gib=2.5, commit_free_gib=1.8)
         nb = state()["nodes"]["big"]; sm = state()["nodes"].get("small", {})

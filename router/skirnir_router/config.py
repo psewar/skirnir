@@ -89,7 +89,7 @@ SCHEMA = {
              "base_topic": None, "discovery_prefix": None, "interval_s": None},
     "modes": {
         "busy_enter": {"gpu_util_pct": None, "sustain_s": None, "util_requires_foreign_gib": None, "or_foreign_vram_gib": None, "foreign_sustain_s": None,
-                       "game": None, "game_sustain_s": None},
+                       "game": None, "game_sustain_s": None, "game_min_gpu_gib": None, "game_min_gpu_pct": None},
         "busy_exit": {"below_for_s": None, "gpu_util_pct": None, "game_quiet_s": None},
         "memory_pressure": {"min_free_gib": None, "polls": None}, "vram_reserve_gib": {"free": None, "busy": None}, "keep_alive": {"free": None, "busy": None},
         "unload_on_busy": None, "unload_on_busy_interval_s": None, "vram_settle_s": None, "fit_overhead_gib": None, "warm_first": None,
@@ -411,6 +411,10 @@ class Config:
         # kaltes Laden und Vorwaermen, entlaedt aber nichts
         self.busy_game = bool(be.get("game", _d("modes.busy_enter.game")))
         self.game_sustain = float(be.get("game_sustain_s", _d("modes.busy_enter.game_sustain_s")))
+        # 0.8.7 / Agent 0.19.0: meldet der Agent den GPU-Bedarf des Spiels, macht es erst busy, wenn das Spiel selbst so viel
+        # Grafikspeicher (eigen + geteilt) oder Engine-Auslastung braucht - oder bei Speicherdruck. Ohne Meldung wie bisher.
+        self.game_min_gpu_gib = float(be.get("game_min_gpu_gib", _d("modes.busy_enter.game_min_gpu_gib")))
+        self.game_min_gpu_pct = float(be.get("game_min_gpu_pct", _d("modes.busy_enter.game_min_gpu_pct")))
         self.game_exit_s = float((m.get("busy_exit") or {}).get("game_quiet_s", _d("modes.busy_exit.game_quiet_s")))
         mp = m.get("memory_pressure") or {}
         self.memory_pressure = {"min_free_gib": float(mp.get("min_free_gib", _d("modes.memory_pressure.min_free_gib"))),

@@ -56,7 +56,7 @@ func listProcesses() []procInfo {
 		if e.ProcessID == 0 || e.ProcessID == 4 { // Leerlauf- und System-Prozess: kein Programm
 			continue
 		}
-		out = append(out, procInfo{Name: windows.UTF16ToString(e.ExeFile[:]), Path: processPath(e.ProcessID)})
+		out = append(out, procInfo{Name: windows.UTF16ToString(e.ExeFile[:]), Path: processPath(e.ProcessID), PID: e.ProcessID})
 	}
 	return out
 }

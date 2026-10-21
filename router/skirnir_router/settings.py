@@ -154,6 +154,15 @@ _e("modes.busy_enter.game", "bool", "Spiel macht busy", "Agent >= 0.17.0 meldet 
    G, True, label_en="Game makes busy", help_en="agent >= 0.17.0 reports a running game: the node becomes busy regardless of VRAM and load")
 _e("modes.busy_enter.game_sustain_s", "float", "... Spiel seit s", "Launcher-Blitzer nicht werten", G, 10, min=0, max=600,
    label_en="... game running for s", help_en="ignore launcher blips")
+_e("modes.busy_enter.game_min_gpu_gib", "float", "... und Spiel braucht mind. GiB Grafikspeicher",
+   "Agent >= 0.19.0 meldet den GPU-Bedarf des Spiels: busy erst ab so viel eigenem + geteiltem Grafikspeicher (oder ab der "
+   "Engine-Auslastung unten, oder bei Speicherdruck). Geteilter Speicher zaehlt mit, weil ein verdraengtes Spiel dorthin ausweicht",
+   G, 2.0, min=0, max=64, label_en="... and the game needs at least GiB of graphics memory",
+   help_en="agent >= 0.19.0 reports the game's GPU use: busy only from this much dedicated + shared graphics memory (or the engine "
+           "load below, or memory pressure). Shared memory counts because a game pushed out of VRAM moves there")
+_e("modes.busy_enter.game_min_gpu_pct", "float", "... oder Spiel lastet eine GPU-Engine mind. % aus", "hoechste Engine-Auslastung "
+   "der Spielprozesse (wie im Task-Manager)", G, 10.0, min=0, max=100, label_en="... or the game loads a GPU engine to at least %",
+   help_en="highest engine load of the game's processes (as in Task Manager)")
 _e("modes.busy_exit.game_quiet_s", "float", "nach Spielende free nach s", "Spielneustart/Launcherwechsel ueberbruecken, bevor vorgewaermt wird",
    G, 60, min=0, max=3600, label_en="free after game ends, s", help_en="bridge game restarts/launcher switches before prewarming")
 _e("modes.memory_pressure.min_free_gib", "float", "Speicherdruck unter GiB frei",
