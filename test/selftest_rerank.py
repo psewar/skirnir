@@ -40,8 +40,8 @@ def load(rerank=None, client_rerank=True, inference=None):
     if inference is not None:
         raw["router"]["client_auth"]["clients"]["memory-service"]["inference"] = inference
     cfg = config.Config(EXAMPLE, use_overrides=False)
-    cfg.parse(raw)
-    return cfg
+    problem = cfg.parse(raw)   # 0.8.9: ungueltig = Problem statt ValueError
+    return problem if failed(problem) else cfg
 
 
 # --- Konfiguration
@@ -53,24 +53,9 @@ for bad in ({"enabled": True}, {"enabled": "yes", "nodes": ["a"]}, {"nodes": "a"
     check(f"ungueltig abgelehnt: {bad}", failed(parse_rerank_config(bad)))
 check("Config ohne rerank-Abschnitt laedt, Endpunkt aus", not config.Config(EXAMPLE, use_overrides=False).rerank.enabled)
 for raw, what in (({"enabled": True}, "enabled ohne Knoten"), ({"enable": True}, "Tippfehler im Schluessel")):
-    try:
-        load(raw)
-        ok = False
-    except ValueError:   # Config.parse bricht das Laden einer ungueltigen Konfiguration mit ValueError ab
-        ok = True
-    check(f"Config laedt nicht: {what}", ok)
-try:
-    load({"enabled": True, "nodes": ["gpu-a"]}, client_rerank="yes")
-    ok = False
-except ValueError:
-    ok = True
-check("Config laedt nicht: Client-Recht rerank ist kein Boolean", ok)
-try:
-    load({"enabled": True, "nodes": ["gpu-a"]}, inference="nein")
-    ok = False
-except ValueError:
-    ok = True
-check("Config laedt nicht: inference ist kein Boolean", ok)
+    check(f"Config laedt nicht: {what}", failed(load(raw)))
+check("Config laedt nicht: Client-Recht rerank ist kein Boolean", failed(load({"enabled": True, "nodes": ["gpu-a"]}, client_rerank="yes")))
+check("Config laedt nicht: inference ist kein Boolean", failed(load({"enabled": True, "nodes": ["gpu-a"]}, inference="nein")))
 
 
 class Warnungen(logging.Handler):

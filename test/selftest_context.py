@@ -46,10 +46,9 @@ class ProjectionTests(unittest.TestCase):
         raw = config.load_yaml(BASE)
         raw["router"]["context_manager"] = {"enabled": True}
         cfg = config.Config.__new__(config.Config)
-        with self.assertRaises(ValueError):
-            cfg.parse(raw)
+        self.assertTrue(failed(cfg.parse(raw)))
         raw["router"]["session_store"] = {"enabled": True}
-        cfg.parse(raw)
+        self.assertIsNone(cfg.parse(raw))
         self.assertTrue(cfg.context_manager.enabled)
 
     def test_no_compaction_when_full_context_fits(self):

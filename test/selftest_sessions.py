@@ -50,11 +50,10 @@ class ConfigTests(unittest.TestCase):
         raw["router"]["session_store"] = {"enabled": False, "dsn_env": "MY_DSN"}
         raw["router"]["client_auth"] = {"clients": {"a": {"session_projects": ["work"]}}}
         cfg = config.Config.__new__(config.Config)
-        cfg.parse(raw)
+        self.assertIsNone(cfg.parse(raw))
         self.assertEqual(cfg.session_store.dsn_env, "MY_DSN")
         raw["router"]["client_auth"]["clients"]["a"]["session_projects"] = "*"
-        with self.assertRaises(ValueError):
-            cfg.parse(raw)
+        self.assertTrue(failed(cfg.parse(raw)))
         raw["router"]["session_store"]["dsn"] = "secret"
         self.assertTrue(config.validate_schema(raw))
 

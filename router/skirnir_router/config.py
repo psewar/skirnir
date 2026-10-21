@@ -16,15 +16,7 @@ from .memory_config import HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES, log
-from .outcome import failed
-
-
-def _accepted(value):
-    """Bruecke, bis Config.parse selbst Probleme als Wert liefert (PR 2): das Problem eines Parsers stoppt das Laden wie
-    die anderen Pruefungen hier."""
-    if failed(value):
-        raise ValueError(value.message)
-    return value
+from .outcome import Problem, failed, invalid
 
 
 def _d(path):
@@ -44,7 +36,7 @@ def load_yaml(path, default=None):
     tiefe Kopie? Nein: Aufrufer duerfen den Baum NICHT veraendern (merged() arbeitet auf einer eigenen Kopie)."""
     try:
         st = os.stat(path)
-    except FileNotFoundError:
+    except FileNotFoundError:  # exception-ok: file system; exists() then stat() would race with a writer replacing the file
         return default
     key = (st.st_mtime_ns, st.st_size)
     hit = _YAML_CACHE.get(path)
@@ -182,10 +174,25 @@ class Config:
     """config.yaml (kommentiert, per deploy) + roles.yaml (von der UI geschrieben, überschreibt roles/models/expose)."""
 
     def __init__(self, path, use_overrides=True):
+        """Fuer Aufrufer ohne Problem-Pfad (Tests, Werkzeuge). Config.load() ist die ausdrueckliche Form und liefert eine
+        ungueltige Konfiguration als Problem."""
+        self._locate(path, use_overrides)
+        problem = self.reload()
+        if failed(problem):
+            raise ValueError(problem.message)  # exception-ok: a constructor has no return channel; Config.load returns it
+
+    @classmethod
+    def load(cls, path, use_overrides=True):
+        """Config oder ein Problem 400 (ungueltige Konfiguration) - Start, --check und Neuladen entscheiden daran."""
+        cfg = cls.__new__(cls)
+        cfg._locate(path, use_overrides)
+        problem = cfg.reload()
+        return problem if failed(problem) else cfg
+
+    def _locate(self, path, use_overrides):
         self.path = path
         self.overrides_path = os.path.join(os.path.dirname(os.path.abspath(path)), "roles.yaml")
         self.use_overrides = use_overrides
-        self.reload()
 
     def merged(self, overrides=None):
         import copy
@@ -212,7 +219,9 @@ class Config:
                 cl[str(name)] = {**(cl.get(name) or {}), **(spec or {})}
         # Stufe 7 (UI-Einstellungen): settings {pfad: wert} zuletzt - Rollen aus roles.yaml sind dann bekannt (Client-Rollen)
         if (overrides or {}).get("settings"):
-            settings_mod.apply(c, overrides["settings"])
+            applied = settings_mod.apply(c, overrides["settings"])
+            if failed(applied):
+                return applied
         return c
 
     def base(self):
@@ -220,50 +229,81 @@ class Config:
         return load_yaml(self.path)
 
     def reload(self, overrides=None):
-        self.parse(self.merged(overrides))
+        """Neu laden; None = uebernommen, ein Problem = ungueltig und NICHTS geaendert. Erst eine Probe, dann dieses Objekt:
+        bis 0.8.9 brach parse() mitten im Ueberschreiben ab, und "config reload failed, keeping old" behielt eine halb neue
+        Konfiguration."""
+        import copy
+        c = self.merged(overrides)
+        if failed(c):
+            return c
+        probe = Config.__new__(Config)
+        probe._locate(self.path, self.use_overrides)
+        problem = probe.parse(copy.deepcopy(c))
+        if failed(problem):
+            return problem
+        return self.parse(c)
 
     def parse(self, c):
+        """Baum c pruefen und uebernehmen. None = ok, ein Problem = ungueltig (dann kann das Objekt teilweise belegt sein -
+        darum prueft reload() erst an einer Probe)."""
         errs = validate_schema(c)
         if errs:
-            raise ValueError("Konfiguration: " + "; ".join(errs))
+            return invalid("Konfiguration: " + "; ".join(errs))
         for sect in ("router", "modes", "roles"):
             if not isinstance(c.get(sect), dict):
-                raise ValueError(f"Konfiguration: Abschnitt {sect} fehlt")
+                return invalid(f"Konfiguration: Abschnitt {sect} fehlt")
         self.raw = c
         r = c["router"]
-        self._parse_router(r)
-        self._parse_client_auth(r.get("client_auth") or {})
-        self.session_store = _accepted(parse_session_config(r.get("session_store")))
-        self.context_manager = _accepted(parse_context_config(r.get("context_manager")))
+        for step in (lambda: self._parse_router(r), lambda: self._parse_client_auth(r.get("client_auth") or {})):
+            if failed(problem := step()):
+                return problem
+        for attr, value in (("session_store", parse_session_config(r.get("session_store"))),
+                            ("context_manager", parse_context_config(r.get("context_manager")))):
+            if failed(value):
+                return value
+            setattr(self, attr, value)
         if self.context_manager.enabled and not self.session_store.enabled:
-            raise ValueError("context_manager requires session_store.enabled")
-        self._parse_cloud(r.get("cloud") or {})
-        self.hindsight = _accepted(parse_hindsight(r.get("hindsight")))
-        self.rerank = _accepted(parse_rerank_config(r.get("rerank")))   # POST /rerank (rerank.py), default aus
-        self.memory_scopes = _accepted(parse_scopes(r.get("memory_scopes"), self.cloud["data_classes"]))
+            return invalid("context_manager requires session_store.enabled")
+        if failed(problem := self._parse_cloud(r.get("cloud") or {})):
+            return problem
+        for attr, value in (("hindsight", parse_hindsight(r.get("hindsight"))),
+                            ("rerank", parse_rerank_config(r.get("rerank"))),   # POST /rerank (rerank.py), default aus
+                            ("memory_scopes", parse_scopes(r.get("memory_scopes"), self.cloud["data_classes"]))):
+            if failed(value):
+                return value
+            setattr(self, attr, value)
         if self.hindsight.outbox_enabled and not (self.hindsight.enabled and self.session_store.enabled):
-            raise ValueError("persistent memory outbox requires enabled hindsight and session_store")
+            return invalid("persistent memory outbox requires enabled hindsight and session_store")
         for client in self.client_auth["clients"].values():
             sources = client.get("session_handoff_from", [])
             if not isinstance(sources, list) or any(not isinstance(v, str) or v not in self.client_auth["clients"] for v in sources):
-                raise ValueError("session_handoff_from must list configured principals")
-            client["memory"] = _accepted(parse_client_memory(client.get("memory"), self.cloud["data_classes"]))
+                return invalid("session_handoff_from must list configured principals")
+            granted = parse_client_memory(client.get("memory"), self.cloud["data_classes"])
+            if failed(granted):
+                return granted
+            client["memory"] = granted
             for grant in client["memory"]["projects"].values():
                 if grant["scope"]:
                     shared = self.memory_scopes.get(grant["scope"])
                     if not shared or shared["data_class"] != grant["data_class"]:
-                        raise ValueError("shared scope classification must match the project grant")
+                        return invalid("shared scope classification must match the project grant")
                     if grant["allow_private_addresses"] and shared["allow_cloud"]:
                         # another client of the shared bank could take its addresses into cloud inference
-                        raise ValueError("allow_private_addresses requires a shared scope with allow_cloud false")  # exception-ok: aborts startup on an invalid configuration
+                        return invalid("allow_private_addresses requires a shared scope with allow_cloud false")
         self.mqtt = c.get("mqtt") or None   # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
         self._parse_wol(r.get("wol") or {})
-        self._parse_modes(c["modes"])
-        self._parse_models(c.get("models") or {})
+        for step in (lambda: self._parse_modes(c["modes"]), lambda: self._parse_models(c.get("models") or {})):
+            if failed(problem := step()):
+                return problem
         self.nodes = c["nodes"]
-        self._parse_roles(c["roles"])
+        if failed(problem := self._parse_roles(c["roles"])):
+            return problem
         self.busy_ok_models = {t["model"] for r in self.roles.values() for t in r["tiers"] if t["busy_ok"]}
-        self.decision = self._parse_decision(c.get("decision_engine") or {})
+        decision = self._parse_decision(c.get("decision_engine") or {})
+        if failed(decision):
+            return decision
+        self.decision = decision
+        return None
 
     def _parse_router(self, r):
         self.listen = r.get("listen", "0.0.0.0:11434")
@@ -298,7 +338,7 @@ class Config:
         # adaptives Denken; qwen3.8 kennt nur an/aus und denkt dann immer.
         self.anthropic_think = str(an.get("think", _d("router.anthropic.think")))
         if self.anthropic_think not in THINK_MODES:
-            raise ValueError(f"router.anthropic.think muss eine von {THINK_MODES} sein, nicht {self.anthropic_think!r}")
+            return invalid(f"router.anthropic.think muss eine von {THINK_MODES} sein, nicht {self.anthropic_think!r}")
         # Basic Auth für UI + /admin/*: {user: "pbkdf2:<iter>:<salt_hex>:<hash_hex>"}; leer = offen (nur Tests)
         self.control_users = dict((r.get("control_auth") or {}).get("users") or {})
         # TLS für den Control-Port: {cert: <fullchain.pem>, key: <key.pem>}; fehlt der Block -> Klartext (nur Tests)
@@ -317,17 +357,17 @@ class Config:
         # ip: [..], roles: [..]|["*"], models: bool, requests_per_minute}}. Kein clients-Block = Port offen wie bisher.
         mode = ca.get("mode", _d("router.client_auth.mode"))
         if mode not in ("observe", "enforce"):
-            raise ValueError(f"client_auth.mode muss observe oder enforce sein, nicht {mode!r}")
+            return invalid(f"client_auth.mode muss observe oder enforce sein, nicht {mode!r}")
         clients = {}
         for name, spec in (ca.get("clients") or {}).items():
             spec = dict(spec or {})
             th = (spec.get("token_sha256") or "").strip().lower()
             if th and (len(th) != 64 or any(ch not in "0123456789abcdef" for ch in th)):
-                raise ValueError(f"client_auth.clients.{name}.token_sha256 muss 64 Hex-Zeichen sein")
+                return invalid(f"client_auth.clients.{name}.token_sha256 muss 64 Hex-Zeichen sein")
             projects = spec.get("session_projects", [])
             if not isinstance(projects, list) or any(not isinstance(p, str) or not p.strip() or len(p) > 128
                                                      or any(ord(ch) < 32 for ch in p) for p in projects):
-                raise ValueError("client_auth session_projects must be a list of nonempty project names (max 128 characters)")
+                return invalid("client_auth session_projects must be a list of nonempty project names (max 128 characters)")
             spec["session_projects"] = projects
             spec["token_sha256"] = th
             spec["ip"] = [str(x) for x in (spec.get("ip") or [])]
@@ -335,11 +375,11 @@ class Config:
             spec["models"] = bool(spec.get("models", True))
             # Recht auf POST /rerank (rerank.py), default nein. Erkennung auch per ip: Hindsights TEI-Client schickt keinen Header.
             if type(spec.get("rerank", False)) is not bool:
-                raise ValueError(f"client_auth.clients.{name}.rerank muss true oder false sein")  # exception-ok: aborts loading an invalid configuration
+                return invalid(f"client_auth.clients.{name}.rerank muss true oder false sein")
             spec["rerank"] = spec.get("rerank", False)
             # inference: false = nur POST /rerank und GET /info (auth.inference_refusal); Standard true wie bisher
             if type(spec.get("inference", True)) is not bool:
-                raise ValueError(f"client_auth.clients.{name}.inference muss true oder false sein")  # exception-ok: aborts loading an invalid configuration
+                return invalid(f"client_auth.clients.{name}.inference muss true oder false sein")
             spec["inference"] = spec.get("inference", True)
             if spec["rerank"] and spec["inference"] and "*" in spec["roles"]:
                 log.warning("client_auth.clients.%s: rerank: true ohne inference: false und ohne roles-Grenze - der Client darf "
@@ -347,7 +387,7 @@ class Config:
             if spec.get("requests_per_minute") is not None:
                 spec["requests_per_minute"] = int(spec["requests_per_minute"])
             if spec.get("max_priority") is not None and spec["max_priority"] not in PRIORITIES:   # Stufe 3: Kappung der Klasse
-                raise ValueError(f"client_auth.clients.{name}.max_priority muss eine von {PRIORITIES} sein")
+                return invalid(f"client_auth.clients.{name}.max_priority muss eine von {PRIORITIES} sein")
             clients[str(name)] = spec
         # locked (Audit 2026-09-16): true = der Modus ist NUR ueber config.yaml + Deploy aenderbar; UI-Einstellung und
         # POST /admin/client_auth werden abgelehnt (403/400 + Audit-Eintrag). Ein kompromittiertes UI-Konto kann die
@@ -362,23 +402,23 @@ class Config:
         classes = [str(x) for x in (cl.get("data_classes") or DATA_CLASSES_DEFAULT)]
         for key in ("default_data_class", "max_cloud_data_class"):
             if cl.get(key, _d(f"router.cloud.{key}")) not in classes:
-                raise ValueError(f"router.cloud.{key} muss eine der Datenklassen {classes} sein")
+                return invalid(f"router.cloud.{key} muss eine der Datenklassen {classes} sein")
         scan = cl.get("credential_scan", _d("router.cloud.credential_scan"))
         if scan not in ("block", "off"):
-            raise ValueError("router.cloud.credential_scan muss block oder off sein")
+            return invalid("router.cloud.credential_scan muss block oder off sein")
         allow = {"api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com"} | {str(h) for h in (cl.get("egress_allow") or [])}
         providers = {}
         for pname, spec in (cl.get("providers") or {}).items():
             spec = dict(spec or {})
             if spec.get("kind") not in ("openai", "anthropic"):
-                raise ValueError(f"router.cloud.providers.{pname}.kind muss openai oder anthropic sein")
+                return invalid(f"router.cloud.providers.{pname}.kind muss openai oder anthropic sein")
             host = urlparse(str(spec.get("base_url") or "")).hostname
             if not host or host not in allow:
-                raise ValueError(f"router.cloud.providers.{pname}.base_url: Host {host!r} nicht in der Egress-Allowlist {sorted(allow)}")
+                return invalid(f"router.cloud.providers.{pname}.base_url: Host {host!r} nicht in der Egress-Allowlist {sorted(allow)}")
             if not spec.get("api_key_env"):
-                raise ValueError(f"router.cloud.providers.{pname}.api_key_env fehlt")
+                return invalid(f"router.cloud.providers.{pname}.api_key_env fehlt")
             if spec.get("max_data_class") is not None and spec["max_data_class"] not in classes:
-                raise ValueError(f"router.cloud.providers.{pname}.max_data_class muss eine der Datenklassen {classes} sein")
+                return invalid(f"router.cloud.providers.{pname}.max_data_class muss eine der Datenklassen {classes} sein")
             spec["enabled"] = bool(spec.get("enabled", True))
             providers[str(pname)] = spec
         self.cloud = {"enabled": bool(cl.get("enabled", _d("router.cloud.enabled"))), "data_classes": classes,
@@ -387,7 +427,7 @@ class Config:
                       "credential_scan": scan, "egress_allow": sorted(allow), "providers": providers}
         for cname, cspec in self.client_auth["clients"].items():
             if cspec.get("data_class") is not None and cspec["data_class"] not in classes:
-                raise ValueError(f"client_auth.clients.{cname}.data_class muss eine der Datenklassen {classes} sein")
+                return invalid(f"client_auth.clients.{cname}.data_class muss eine der Datenklassen {classes} sein")
 
     def _parse_wol(self, w):
         self.wol_wait_s = float(w.get("wait_up_s", _d("router.wol.wait_up_s")))
@@ -443,7 +483,7 @@ class Config:
         self.score = {k: float(_d(f"modes.score.{k}")) for k in settings_mod.SCORE_KEYS}
         for k, v in (m.get("score") or {}).items():
             if k not in self.score:
-                raise ValueError(f"modes.score.{k}: unbekanntes Gewicht (bekannt: {', '.join(self.score)})")
+                return invalid(f"modes.score.{k}: unbekanntes Gewicht (bekannt: {', '.join(self.score)})")
             self.score[k] = float(v)
         br = m.get("breaker") or {}
         self.breaker = {"failures": int(br.get("failures", _d("modes.breaker.failures"))), "window_s": float(br.get("window_s", _d("modes.breaker.window_s"))),
@@ -484,23 +524,23 @@ class Config:
             # nur pruefen, wo es eine Zeitzonendatenbank gibt: die lokale Schema-Pruefung von deploy.py laeuft auch auf Windows-Python
             # ohne tzdata und wuerde sonst jede Zone ablehnen (2026-09-27)
             if zoneinfo.available_timezones() and self.ollama_update["timezone"] not in zoneinfo.available_timezones():
-                raise ValueError(f"modes.ollama_update.timezone: unbekannte Zeitzone {self.ollama_update['timezone']!r}")
+                return invalid(f"modes.ollama_update.timezone: unbekannte Zeitzone {self.ollama_update['timezone']!r}")
         for k in ("window_start", "window_end"):
             v = self.ollama_update[k]
             if v and not re.match(r"^\d{2}:\d{2}$", v):
-                raise ValueError(f"modes.ollama_update.{k}: HH:MM erwartet, nicht {v!r}")
+                return invalid(f"modes.ollama_update.{k}: HH:MM erwartet, nicht {v!r}")
 
     def _parse_models(self, models):
         self.models = models
         for mname, spec in self.models.items():
             caps = (spec or {}).get("capabilities")
             if caps is not None and (not isinstance(caps, dict) or not all(isinstance(v, bool) for v in caps.values())):
-                raise ValueError(f"models.{mname}.capabilities muss ein Mapping Faehigkeit -> true/false sein")
+                return invalid(f"models.{mname}.capabilities muss ein Mapping Faehigkeit -> true/false sein")
             if (spec or {}).get("cloud"):
                 if spec["cloud"] not in self.cloud["providers"]:
-                    raise ValueError(f"models.{mname}.cloud: Anbieter {spec['cloud']} ist unter router.cloud.providers nicht konfiguriert")
+                    return invalid(f"models.{mname}.cloud: Anbieter {spec['cloud']} ist unter router.cloud.providers nicht konfiguriert")
             elif (spec or {}).get("weights_gib") is None:
-                raise ValueError(f"models.{mname}: weights_gib fehlt (lokales Modell) oder cloud: <anbieter> (Cloud-Modell)")
+                return invalid(f"models.{mname}: weights_gib fehlt (lokales Modell) oder cloud: <anbieter> (Cloud-Modell)")
 
     def _parse_roles(self, roles):
         self.roles = {}
@@ -509,7 +549,7 @@ class Config:
             tiers = []
             for t in r["tiers"]:
                 if t["model"] not in self.models:
-                    raise ValueError(f"role {rname}: tier model {t['model']} fehlt im Modellkatalog")
+                    return invalid(f"role {rname}: tier model {t['model']} fehlt im Modellkatalog")
                 tier = {"model": t["model"], "num_ctx": int(t["num_ctx"]), "busy_ok": bool(t.get("busy_ok", False))}
                 if (self.models[t["model"]] or {}).get("cloud"):
                     tier["cloud"] = self.models[t["model"]]["cloud"]   # Stufe 5: Cloud-Stufe
@@ -517,7 +557,7 @@ class Config:
             lf = r.get("latency_first")   # None = globale Einstellung warm_first
             prio = r.get("priority", "normal")   # Stufe 3: Standardklasse der Rolle (routing.priority ueberschreibt)
             if prio not in PRIORITIES:
-                raise ValueError(f"role {rname}: priority muss eine von {PRIORITIES} sein")
+                return invalid(f"role {rname}: priority muss eine von {PRIORITIES} sein")
             role = {"name": rname, "exposed": exposed, "tiers": tiers,
                     "latency_first": self.warm_first if lf is None else bool(lf),
                     "latency_first_override": lf, "priority": prio}
@@ -525,10 +565,10 @@ class Config:
                 spec = r.get(kind)
                 if spec:
                     if spec.get("model") not in self.models:
-                        raise ValueError(f"role {rname}: {kind} model {spec.get('model')} fehlt im Modellkatalog")
+                        return invalid(f"role {rname}: {kind} model {spec.get('model')} fehlt im Modellkatalog")
                     pct = float(spec.get("percent", 0))
                     if not 0 <= pct <= 100:
-                        raise ValueError(f"role {rname}: {kind}.percent muss zwischen 0 und 100 liegen")
+                        return invalid(f"role {rname}: {kind}.percent muss zwischen 0 und 100 liegen")
                     role[kind] = {"model": spec["model"], "num_ctx": int(spec.get("num_ctx", tiers[0]["num_ctx"])), "percent": pct,
                                   "busy_ok": bool(spec.get("busy_ok", False))}
             self.roles[exposed] = role
@@ -543,33 +583,33 @@ class Config:
         role_names = {r["name"] for r in self.roles.values()}
         role = str(de.get("role") or "auto")
         if role in role_names or f"{role}:latest" in self.roles:
-            raise ValueError(f"decision_engine.role {role!r} ist schon eine Rolle")
+            return invalid(f"decision_engine.role {role!r} ist schon eine Rolle")
         options = [str(o) for o in (de.get("options") or [])]
         unknown = [o for o in options if o not in role_names]
         if len(options) < 2 or unknown:
-            raise ValueError(f"decision_engine.options: mindestens zwei Rollen, unbekannt: {unknown}")
+            return invalid(f"decision_engine.options: mindestens zwei Rollen, unbekannt: {unknown}")
         default = str(de.get("default") or options[0])
         if default not in options:
-            raise ValueError(f"decision_engine.default {default!r} steht nicht in options")
+            return invalid(f"decision_engine.default {default!r} steht nicht in options")
         chain = [str(e) for e in (de.get("chain") or ["rules"])]
         bad = [e for e in chain if e not in DECISION_ENGINES]
         if bad:
-            raise ValueError(f"decision_engine.chain: unbekannte Engine {bad} (erlaubt: {DECISION_ENGINES})")
+            return invalid(f"decision_engine.chain: unbekannte Engine {bad} (erlaubt: {DECISION_ENGINES})")
         if "jevlike" in chain and not (de.get("jevlike") or {}).get("endpoint"):
-            raise ValueError("decision_engine.jevlike.endpoint fehlt, aber jevlike steht in der Kette")
+            return invalid("decision_engine.jevlike.endpoint fehlt, aber jevlike steht in der Kette")
         if "local_llm" in chain and not (de.get("local_llm") or {}).get("model"):
-            raise ValueError("decision_engine.local_llm.model fehlt, aber local_llm steht in der Kette")
+            return invalid("decision_engine.local_llm.model fehlt, aber local_llm steht in der Kette")
         light = [str(o) for o in (de.get("observe_light") or [])]
         if [o for o in light if o not in options]:
-            raise ValueError(f"decision_engine.observe_light: nur Optionen der Engine ({options}), nicht {light}")
+            return invalid(f"decision_engine.observe_light: nur Optionen der Engine ({options}), nicht {light}")
         if "embed" in chain and not (de.get("embed") or {}).get("endpoint"):
-            raise ValueError("decision_engine.embed.endpoint fehlt, aber embed steht in der Kette")
+            return invalid("decision_engine.embed.endpoint fehlt, aber embed steht in der Kette")
         if "tfidf" in chain and not (de.get("tfidf") or {}).get("model_path"):
-            raise ValueError("decision_engine.tfidf.model_path fehlt, aber tfidf steht in der Kette")
+            return invalid("decision_engine.tfidf.model_path fehlt, aber tfidf steht in der Kette")
         for k, lo, hi in (("min_top_probability", 0, 1), ("min_margin", 0, 1), ("max_entropy_ratio", 0, 1)):
             v = (de.get("policy") or {}).get(k)
             if v is not None and not lo <= float(v) <= hi:
-                raise ValueError(f"decision_engine.policy.{k} muss zwischen {lo} und {hi} liegen")
+                return invalid(f"decision_engine.policy.{k} muss zwischen {lo} und {hi} liegen")
         out.update({"enabled": True, "role": role, "options": options, "default": default, "chain": chain})
         return out
 
@@ -626,23 +666,31 @@ def cert_fingerprint(pem_path):
 
 
 def write_overrides(new):
-    """roles.yaml validieren (Probe-Config) und atomar schreiben, dann live neu laden."""
+    """roles.yaml validieren (Probe-Config) und atomar schreiben, dann live neu laden. None = geschrieben und aktiv; ein
+    Problem 400 = ungueltig (nichts geschrieben), 500 = Datei nicht schreibbar (nichts geaendert)."""
     probe = Config.__new__(Config)
-    probe.path = state.CFG.path
-    probe.overrides_path = state.CFG.overrides_path
-    probe.use_overrides = True
-    probe.parse(probe.merged(new))          # wirft bei Fehlern
+    probe._locate(state.CFG.path, True)
+    merged = probe.merged(new)
+    if failed(merged):
+        return merged
+    if failed(problem := probe.parse(merged)):
+        return problem
     tmp = state.CFG.overrides_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write("# Von der Router-UI geschrieben (%s). Ueberschreibt roles/models/expose_concrete_models aus config.yaml;\n"
-                "# settings = einzelne Einstellungen (Pfad -> Wert, Allowlist in settings.py), delete_models = per UI entfernte Katalogeintraege.\n"
-                % time.strftime("%Y-%m-%d %H:%M:%S"))
-        yaml.safe_dump(new, f, allow_unicode=True, sort_keys=False)
-    os.replace(tmp, state.CFG.overrides_path)
-    state.CFG.reload()
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("# Von der Router-UI geschrieben (%s). Ueberschreibt roles/models/expose_concrete_models aus config.yaml;\n"
+                    "# settings = einzelne Einstellungen (Pfad -> Wert, Allowlist in settings.py), delete_models = per UI entfernte Katalogeintraege.\n"
+                    % time.strftime("%Y-%m-%d %H:%M:%S"))
+            yaml.safe_dump(new, f, allow_unicode=True, sort_keys=False)
+        os.replace(tmp, state.CFG.overrides_path)
+    except OSError as e:  # exception-ok: file system (disk full, permissions) - only the write itself can tell
+        return Problem(500, f"roles.yaml not written: {type(e).__name__}")
+    if failed(problem := state.CFG.reload()):   # die Probe war gueltig - hier nur, falls sich config.yaml dazwischen aenderte
+        return problem
     from . import cloud, decision
     cloud.setup()
     decision.ensure()
+    return None
 
 
 def read_overrides():

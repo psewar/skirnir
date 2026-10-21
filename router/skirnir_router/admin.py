@@ -12,6 +12,7 @@ from aiohttp import ClientTimeout, web
 
 from . import auth, config, perf, state
 from . import admission, cloud, decision, metrics, ops
+from .outcome import failed
 from .decision.base import DecisionRequest
 from . import request as request_mod
 from .common import VERSION, GIB, log, read_json, split_listen
@@ -115,10 +116,10 @@ async def handle_client_token(request):
     current = config.read_overrides()
     cl = dict(current.get("clients") or {})
     cl[name] = {**(cl.get(name) or {}), "token_sha256": digest, "token_rotated": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    try:
-        config.write_overrides({**current, "clients": cl})
-    except Exception as e:  # noqa: BLE001
-        return web.json_response({"error": f"invalid configuration: {e}"}, status=400)
+    written = config.write_overrides({**current, "clients": cl})
+    if failed(written):
+        return web.json_response({"error": f"invalid configuration: {written.message}" if written.status == 400 else written.message},
+                                 status=written.status)
     auth.audit("client_token_rotated", client=name, by="admin-ui", sha256_prefix=digest[:8])
     state.remember({"event": "config", "client_token": name})
     return web.json_response({"ok": True, "client": name, "token": token, "sha256_prefix": digest[:8],
@@ -174,10 +175,10 @@ async def handle_config_put(request):
         new = _merge_overrides(config.read_overrides(), ov)
     except (ValueError, TypeError) as e:
         return _bad(str(e))
-    try:
-        config.write_overrides(new)
-    except Exception as e:  # noqa: BLE001 - Schema- und YAML-Fehler landen als 400 beim Bediener
-        return _bad(f"invalid configuration: {e}")
+    written = config.write_overrides(new)   # Schema- und Pruefungsfehler landen als 400 beim Bediener
+    if failed(written):
+        return _bad(f"invalid configuration: {written.message}") if written.status == 400 else \
+            web.json_response({"error": written.message}, status=written.status)
     _after_config_change(b, new)
     return web.json_response({"ok": True, "roles": len(state.CFG.roles), "settings": len(new.get("settings") or {})})
 

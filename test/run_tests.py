@@ -1526,10 +1526,8 @@ def main():
         from skirnir_router import settings as _smod   # noqa: E402
         from skirnir_router.config import Config as _Cfg   # noqa: E402
         locked_cfg = {"router": {"client_auth": {"mode": "enforce", "locked": True}}}
-        try:
-            _smod.coerce("router.client_auth.mode", "observe", locked_cfg); lock_err = ""
-        except ValueError as e:
-            lock_err = str(e)
+        refused = _smod.coerce("router.client_auth.mode", "observe", locked_cfg)   # 0.8.9: Problem statt ValueError
+        lock_err = getattr(refused, "message", "") if getattr(refused, "status", None) == 400 else ""
         unlocked_ok = _smod.coerce("router.client_auth.mode", "observe", {"router": {"client_auth": {"mode": "enforce"}}}) == "observe"
         check("client_auth.locked: Settings lehnen den Modus ab, ungesperrt geht er durch", "gesperrt" in lock_err and unlocked_ok, lock_err[:80])
         _yaml_txt = open(os.path.join(HERE, "test-config.yaml"), encoding="utf-8").read()
