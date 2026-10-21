@@ -139,6 +139,7 @@ class Node(Breaker):
         # Ohne GPU-Bedarf in der Meldung (Agent < 0.19.0, Messung gescheitert) gilt jedes Spiel als schwer - wie bis 0.8.6.
         self.game_heavy = False
         self.game_heavy_why = ""      # Grund als Fakt fuer /admin/state und das Journal
+        self.prewarm_after_game = False   # 0.8.8: Vorwaermen wegen eines Spiels uebersprungen -> nachholen, sobald es leicht/vorbei ist
         self.memory = None            # {"ram_available_gib", "commit_free_gib", ...} vom Agenten
         self.routes = {}              # Tunnel-Routen des Agenten neben Ollama: {"rerank": {"up": bool, "reason": str}}; leer = meldet keine
         self.mem_low_count = 0        # so viele Heartbeats in Folge unter der Grenze
@@ -405,6 +406,7 @@ class Node(Breaker):
         if self.state != "offline":
             log.warning("node %s -> offline (%s)", self.name, why)
         self.state, self.hot_since, self.calm_since = "offline", None, None
+        self.prewarm_after_game = False   # online plant sein eigenes Vorwaermen
         self.loaded, self.loaded_digest, self.loaded_ctx, self.loading = {}, {}, {}, {}
         self.vram_last_gib, self.vram_hold_gib, self.vram_hold_until = 0.0, 0.0, 0.0   # offline: Nachlauf ist gegenstandslos
         state.MQTT_DIRTY.append(True)

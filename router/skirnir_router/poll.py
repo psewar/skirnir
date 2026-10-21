@@ -54,7 +54,8 @@ def apply_ollama_state(node, tag_models, ps_models, now):
                 node.loaded_ctx[d] = int(m["context_length"])
     if node.state == "offline":
         log.info("node %s -> free (online)", node.name)
-        node.state, node.free_at = "free", now
+        # 0.8.8: den Grund eines busy vor dem Ausfall nicht mitschleppen - /admin/state zeigte sonst "free, Grund game"
+        node.state, node.free_at, node.busy_reason, node.calm_since = "free", now, "", None
         node.breaker_reset()   # Stufe 3: alte Fehler eines abgestuerzten Knotens zaehlen nach dem Neustart nicht mehr
         state.MQTT_DIRTY.append(True)
         if state.CFG.prewarm_on_online:
@@ -152,6 +153,7 @@ def evaluate(node, now):
             state.MQTT_DIRTY.append(True)
         if node.state == "free":
             node.state = "busy"
+            node.prewarm_after_game = False   # busy -> free waermt ohnehin vor
             node.busy_reason = "game" if game else ("gpu_util" if hot_long else "foreign_vram")
             log.info("node %s -> busy (%s util=%s foreign=%.1fGiB)", node.name, node.busy_reason,
                      node.gpu_util, node.foreign_vram_gib())
@@ -169,6 +171,20 @@ def evaluate(node, now):
             node.free_at = now
             if state.CFG.prewarm_on_free:
                 state.spawn(prewarm(node, state.CFG.prewarm_free_delay, "free", since=node.free_at))
+    # 0.8.8: ein Vorwaermen, das ein noch unbeurteiltes Spiel (game_sustain-Fenster) verhindert hat, nachholen, sobald das
+    # Spiel als leicht gilt oder beendet ist und der Knoten frei bleibt. Gefunden 2026-10-21: nach dem Agent-Update kam
+    # psewar mit laufendem Spiel online, das Vorwaermen fiel ins Fenster, und die Karte blieb neben dem leichten Spiel leer.
+    if (node.state == "free" and node.prewarm_after_game and not node.mem_pressure and not game_blocks_prewarm(node, now)):
+        node.prewarm_after_game = False
+        why = "spiel-leicht" if node.game_since is not None else "spiel-vorbei"
+        log.info("node %s: Vorwaermen nachgeholt (%s)", node.name, why)
+        state.spawn(prewarm(node, 0, why, since=node.free_at))
+
+
+def game_blocks_prewarm(node, now):
+    """Sperrt das laufende Spiel das Vorwaermen? Ja, wenn es die GPU braucht oder noch im game_sustain-Fenster steckt (noch
+    nicht beurteilt); ein leichtes Spiel (0.8.7) nicht - sonst bliebe die Karte daneben leer."""
+    return node.game_since is not None and (node.game_heavy or now - node.game_since < state.CFG.game_sustain)
 
 
 def game_needs_gpu(node):
@@ -236,8 +252,10 @@ async def prewarm(node, delay, reason, since=None):
         return
     # Ein Spiel, das die GPU braucht oder noch nicht beurteilt ist (game_sustain-Fenster), sperrt das Vorwaermen; ein leichtes
     # (0.8.7) nicht - sonst bliebe die Karte neben einem kleinen Spiel leer. Braucht es spaeter doch die GPU, wird es schwer,
-    # der Knoten busy und das Grosse entladen.
-    game_blocks = node.game_since is not None and (node.game_heavy or time.time() - node.game_since < state.CFG.game_sustain)
+    # der Knoten busy und das Grosse entladen. Gesperrt durch ein Spiel: evaluate() holt es nach (prewarm_after_game, 0.8.8).
+    game_blocks = game_blocks_prewarm(node, time.time())
+    if game_blocks:
+        node.prewarm_after_game = True
     if node.mem_pressure or game_blocks:
         # Agent >= 0.17.0: Hauptspeicher knapp oder Spiel gemeldet (z. B. noch im game_sustain-Fenster) - kein Laden, das
         # den Speicher weiter fuellt; nach Spielende erst, wenn auch der Speicherdruck vorbei ist (kein Laden-Entladen-Pingpong)
