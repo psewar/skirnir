@@ -12,7 +12,7 @@ from . import state
 from .session_config import SessionConfig, parse_session_config
 from .shared_config import parse_scopes
 from .context_config import ContextConfig, parse_context_config
-from .memory_config import HindsightConfig, parse_hindsight, parse_client_memory
+from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES, log
@@ -53,6 +53,8 @@ def load_yaml(path, default=None):
 # "*" = beliebige Namen. Unbekannte Schluessel sind ein Fehler (Tippfehler wie `limitz` wurden bisher stumm ignoriert).
 _TIER = {"model": None, "num_ctx": None, "busy_ok": None}
 _CANARY = {"model": None, "num_ctx": None, "percent": None, "busy_ok": None}
+# aus den Feldern, die parse_client_memory annimmt - eine Quelle, sonst verweigert das Schema einen gueltigen Schluessel
+_MEMORY_SCHEMA = {**dict.fromkeys(CLIENT_MEMORY_FIELDS), "projects": {"*": dict.fromkeys(PROJECT_FIELDS)}}
 SCHEMA = {
     "router": {
         "listen": None, "control_listen": None, "public_url": None, "control_tls": {"cert": None, "key": None},
@@ -68,7 +70,7 @@ SCHEMA = {
         "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
-                                          "cloud": None, "data_class": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": {"owner": None, "strategy": None, "default_project": None, "auto_retain": None, "projects": {"*": {"read": None, "write": None, "delete": None, "scope": None, "data_class": None, "allow_cloud": None, "allow_private_addresses": None}}}, "note": None, "token_rotated": None, "created": None}}},
+                                          "cloud": None, "data_class": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None,
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,

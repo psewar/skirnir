@@ -182,7 +182,7 @@ class Routing:
 
 def parse(body, path, headers=None):
     """routing-Block aus dem Body nehmen und pruefen, Anforderungen ableiten. Liefert Routing oder ein Problem 400 mit
-    Klartext (bis 0.8.9 ein ValueError, den proxy._prepare auffing)."""
+    Klartext (bis 0.8.8 ein ValueError, den proxy._prepare auffing)."""
     rb = body.pop("routing", None)
     r = Routing()
     if rb is not None:
