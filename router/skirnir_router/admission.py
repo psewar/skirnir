@@ -13,14 +13,11 @@ import time
 
 from . import state
 from .common import PRIORITIES as _PRIORITY_ORDER, log
+from .outcome import unavailable
 
 PRIORITIES = {p: i for i, p in enumerate(_PRIORITY_ORDER)}   # Klasse -> Rang (common.PRIORITIES ist die Reihenfolge)
 WAITING = []   # [{node, prio, t_enq, fut, request_id, role}]
 RECHECK_S = 2.0
-
-
-class QueueFull(Exception):
-    pass
 
 
 def saturated(node, model=None):
@@ -47,20 +44,21 @@ def rank_key(w, now):
 
 async def wait_for_slot(node, prio, t_enq, deadline_at, request_id, role, model=None):
     """Bis zu RECHECK_S (oder Deadline) auf einen Platz auf `node` (fuer `model`) warten. True = geweckt (Platz frei
-    geworden), False = Zeit abgelaufen (Aufrufer prueft Deadline und waehlt ggf. neu)."""
+    geworden), False = Zeit abgelaufen (Aufrufer prueft Deadline und waehlt ggf. neu), ein Problem 503 = Warteschlange voll."""
     if len(WAITING) >= state.CFG.admission["max_queue"]:
-        raise QueueFull(f"queue full ({len(WAITING)} waiting)")
+        return unavailable(f"queue full ({len(WAITING)} waiting)", "queue_full")
     fut = asyncio.get_running_loop().create_future()
     w = {"node": node, "prio": prio, "t_enq": t_enq, "fut": fut, "request_id": request_id, "role": role, "model": model}
     WAITING.append(w)
     try:
-        await asyncio.wait_for(fut, timeout=max(0.05, min(RECHECK_S, deadline_at - time.time())))
-        return True
-    except asyncio.TimeoutError:
-        return False
+        # asyncio.wait meldet das Ergebnis (fertig oder nicht) - kein TimeoutError als Signal fuer "Zeit um"
+        done, _ = await asyncio.wait({fut}, timeout=max(0.05, min(RECHECK_S, deadline_at - time.time())))
+        return bool(done)
     finally:
         if w in WAITING:
             WAITING.remove(w)
+        if not fut.done():
+            fut.cancel()   # niemand wartet mehr darauf; release() ueberspringt erledigte
 
 
 def release(node):

@@ -25,7 +25,7 @@ import time
 from . import cloud, state
 from .managed import parse as parse_session_request
 from .memory_config import parse_memory_request
-from .outcome import failed
+from .outcome import failed, invalid
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES
 
 KNOWN_CAPS = ("completion", "tools", "vision", "thinking", "structured", "embedding", "insert")
@@ -181,61 +181,62 @@ class Routing:
 
 
 def parse(body, path, headers=None):
-    """routing-Block aus dem Body nehmen und pruefen (ValueError mit Klartext), Anforderungen ableiten."""
+    """routing-Block aus dem Body nehmen und pruefen, Anforderungen ableiten. Liefert Routing oder ein Problem 400 mit
+    Klartext (bis 0.8.9 ein ValueError, den proxy._prepare auffing)."""
     rb = body.pop("routing", None)
     r = Routing()
     if rb is not None:
         if not isinstance(rb, dict):
-            raise ValueError("routing must be an object")
+            return invalid("routing must be an object")
         unknown = set(rb) - ROUTING_KEYS
         if unknown:
-            raise ValueError(f"routing: unknown field(s) {', '.join(sorted(unknown))}; known: {', '.join(sorted(ROUTING_KEYS))}")
+            return invalid(f"routing: unknown field(s) {', '.join(sorted(unknown))}; known: {', '.join(sorted(ROUTING_KEYS))}")
         for key in ("require", "prefer"):
             vals = rb.get(key) or []
             if not isinstance(vals, list) or not all(isinstance(v, str) for v in vals):
-                raise ValueError(f"routing.{key} must be a list of capability names")
+                return invalid(f"routing.{key} must be a list of capability names")
             bad = [v for v in vals if v not in KNOWN_CAPS]
             if bad:
-                raise ValueError(f"routing.{key}: unknown capability {', '.join(bad)}; known: {', '.join(KNOWN_CAPS)}")
+                return invalid(f"routing.{key}: unknown capability {', '.join(bad)}; known: {', '.join(KNOWN_CAPS)}")
             setattr(r, key, set(vals))
         mc = rb.get("min_context")
         if mc is not None:
             if not isinstance(mc, int) or isinstance(mc, bool) or mc <= 0:
-                raise ValueError("routing.min_context must be a positive integer")
+                return invalid("routing.min_context must be a positive integer")
             r.min_context = mc
         for key in ("session_id", "request_id"):
             v = rb.get(key)
             if v is not None:
                 v = str(v)
                 if not v or len(v) > MAX_ID_LEN:
-                    raise ValueError(f"routing.{key} must be 1-{MAX_ID_LEN} characters")
+                    return invalid(f"routing.{key} must be 1-{MAX_ID_LEN} characters")
                 setattr(r, key, v)
         pr = rb.get("priority")
         if pr is not None:
             if pr not in PRIORITIES:
-                raise ValueError(f"routing.priority must be one of {', '.join(PRIORITIES)}")
+                return invalid(f"routing.priority must be one of {', '.join(PRIORITIES)}")
             r.priority = pr
         dl = rb.get("deadline_ms")
         if dl is not None:
             if not isinstance(dl, int) or isinstance(dl, bool) or dl <= 0:
-                raise ValueError("routing.deadline_ms must be a positive integer")
+                return invalid("routing.deadline_ms must be a positive integer")
             r.deadline_ms = dl
         ex = rb.get("execution")
         if ex is not None:
             if ex not in EXECUTIONS:
-                raise ValueError(f"routing.execution must be one of {', '.join(EXECUTIONS)}")
+                return invalid(f"routing.execution must be one of {', '.join(EXECUTIONS)}")
             r.execution = ex
         dc = rb.get("data_class")
         if dc is not None:
             classes = state.CFG.cloud.get("data_classes") or DATA_CLASSES_DEFAULT
             if dc not in classes:
-                raise ValueError(f"routing.data_class must be one of {', '.join(classes)}")
+                return invalid(f"routing.data_class must be one of {', '.join(classes)}")
             r.data_class = dc
         r.session = parse_session_request(rb.get("session"))
         r.memory = parse_memory_request(rb.get("memory"))
         for parsed in (r.session, r.memory):
-            if failed(parsed):   # Bruecke bis PR 2: parse() meldet Fehler hier noch als ValueError wie die Pruefungen oben
-                raise ValueError(parsed.message)
+            if failed(parsed):
+                return invalid(parsed.message)
         r.explicit = True
     r.require |= implicit_caps(body, path)
     if not r.request_id:
