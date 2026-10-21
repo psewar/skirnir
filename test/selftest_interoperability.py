@@ -41,6 +41,19 @@ class PolicyTests(unittest.TestCase):
                 self.assertTrue(failed(parse_client_memory(data, ["personal"])))
         self.assertEqual(parse_client_memory(None, ["personal"])["strategy"], "legacy")
 
+    def test_recall_with_names_other_readable_projects_of_the_client(self):
+        def spec(recall_with, shared_read=True):
+            return {"owner": "client", "strategy": "manual", "projects": {
+                "own": {"data_class": "personal", "read": True, "recall_with": recall_with},
+                "team": {"data_class": "personal", "read": shared_read, "scope": "example-team"}}}
+        ok = parse_client_memory(spec(["team"]), ["personal"])
+        self.assertEqual(ok["projects"]["own"]["recall_with"], ("team",))
+        self.assertEqual(ok["projects"]["team"]["recall_with"], ())
+        for bad in (spec(["own"]), spec(["unknown"]), spec(["team"], shared_read=False), spec("team"), spec(["team", "team"]),
+                    spec(["a", "b", "c", "d", "e"])):
+            with self.subTest(bad=bad["projects"]["own"]["recall_with"]):
+                self.assertTrue(failed(parse_client_memory(bad, ["personal"])))
+
     def test_provenance_cannot_promote_unconfirmed_knowledge(self):
         self.assertTrue(failed(memory_gateway.provenance({"kind": "confirmed_information"}, "client-a", confirmed=False)))
         self.assertTrue(failed(memory_gateway.provenance({"origin_client": "client-b"}, "client-a", confirmed=True)))
@@ -181,6 +194,55 @@ class SharedGatewayTests(MemoryHarness):
         self.assertEqual((await self.api(base + "/memories/recall", {"query": "Synthetic"}, token="")).status, 401)
         version = await self.api(memory_gateway.GATEWAY + "/v1/version", method="get")
         self.assertNotIn("version", await version.json())
+
+    def owned_with_shared(self):
+        """client-owned reads PROJECT (private) with SHARED (example-team) via recall_with; both banks with their own facts."""
+        self.shared()
+        spec = policy(owner="client")
+        spec.update(strategy="manual")
+        spec["projects"][PROJECT]["recall_with"] = (SHARED,)
+        spec["projects"][SHARED] = {"scope": "example-team", "data_class": "personal", "read": True, "write": True}
+        state.CFG.client_auth["clients"]["client-owned"]["memory"] = spec
+        own = self.service.bank(memory.scope_for_principal("client-owned", PROJECT, read=True, explicit=True))
+        team = self.service.bank(memory.scope_for_principal("client-owned", SHARED, read=True, explicit=True))
+        self.results_by_bank = {own: [{"id": "p1", "text": "Private fact one."}, {"id": "p2", "text": "Private fact two."}],
+                                team: [{"id": "s1", "text": "Shared team fact."}, {"id": "s2", "text": "Private fact one."}]}
+        return own, team, memory_gateway.GATEWAY + "/v1/default/banks/" + PROJECT + "/memories/recall"
+
+    async def test_gateway_recall_with_reads_shared_scope_too(self):
+        own, team, url = self.owned_with_shared()
+        response = await self.api(url, {"query": "Synthetic"}, "client-owned")
+        self.assertEqual(response.status, 200)
+        body = await response.json()
+        # rank by rank: own 1, shared 1, own 2; the shared copy of "Private fact one." says nothing new
+        self.assertEqual([r["text"] for r in body["results"]], ["Private fact one.", f"[{SHARED}] Shared team fact.", "Private fact two."])
+        self.assertEqual(body["results"][1]["metadata"].get("memory_project"), SHARED)
+        self.assertNotIn("memory_project", body["results"][0]["metadata"])
+        self.assertEqual(body["also"], [{"project": SHARED, "memory_state": "available", "items": 2}])
+        self.assertEqual(body["duplicates"], 1)
+        self.assertEqual({c[0] for c in self.calls}, {own, team})
+        # REST recall: same merge, the project as a field
+        rest = await self.api(memory.PREFIX + "/recall", {"project": PROJECT, "query": "Synthetic"}, "client-owned")
+        items = (await rest.json())["items"]
+        self.assertEqual([(i["source"], i.get("project")) for i in items], [("p1", None), ("s1", SHARED), ("p2", None)])
+
+    async def test_recall_with_shared_failure_keeps_the_private_answer(self):
+        own, team, url = self.owned_with_shared()
+        self.results_by_bank[team] = 503
+        body = await (await self.api(url, {"query": "Synthetic"}, "client-owned")).json()
+        self.assertEqual([r["text"] for r in body["results"]], ["Private fact one.", "Private fact two."])
+        self.assertEqual(body["memory_state"], "available")
+        self.assertTrue(body["also"][0]["memory_state"].startswith("unavailable"), body["also"])
+        # the shared grant is withdrawn: reported as denied, never read
+        state.CFG.client_auth["clients"]["client-owned"]["memory"]["projects"][SHARED]["read"] = False
+        self.calls.clear()
+        body = await (await self.api(url, {"query": "Synthetic"}, "client-owned")).json()
+        self.assertEqual(body["also"], [{"project": SHARED, "memory_state": "denied", "items": 0}])
+        self.assertEqual({c[0] for c in self.calls}, {own})
+        # the private bank fails: the answer fails, whatever the shared one has
+        state.CFG.client_auth["clients"]["client-owned"]["memory"]["projects"][SHARED]["read"] = True
+        self.results_by_bank[own], self.results_by_bank[team] = 503, [{"id": "s1", "text": "Shared team fact."}]
+        self.assertEqual((await self.api(url, {"query": "Synthetic"}, "client-owned")).status, 503)
 
     async def test_gateway_recall_budget_only_lowers_the_server_byte_cap(self):
         self.shared()

@@ -88,6 +88,13 @@ def scope_for_principal(principal, project, *, read=False, write=False, explicit
                  shared, bool(grant.get("delete")), strategy, private)
 
 
+def recall_with(principal, project):
+    """Further projects a client reads together with `project` (memory project option recall_with), as configured."""
+    spec = (auth.client_auth_cfg().get("clients") or {}).get(principal) or {}
+    grant = ((spec.get("memory") or {}).get("projects") or {}).get(project) or {}
+    return tuple(grant.get("recall_with") or ())
+
+
 def rejected_content(content, cfg, *, private_addresses=False):
     """True when content must not leave or enter memory: secrets, e-mail addresses, configured terms and, unless the
     scope allows them (private_addresses, a local-only bank), private network addresses."""
@@ -111,6 +118,9 @@ class Recall:
     # (recall_max_bytes), "client" (the caller's own max_tokens), "results" (everything usable Hindsight returned
     # was passed on; more needs a larger Hindsight budget or there is no more matching knowledge). None: no lookup.
     limited_by: str | None = None
+    # recall_with (0.8.9): the further projects read with this one, each as {"project", "memory_state", "items"} - their state
+    # is reported here; it never turns the primary answer into an error.
+    also: tuple = ()
 
     @property
     def available(self):
@@ -144,8 +154,9 @@ def recall_response(body, recalled):
     if recalled.state == "query_filtered":
         return web.json_response({"error": {"message": "memory query refused", "type": "memory_query_filtered", "reason": QUERY_FILTERED},
                                   "memory_state": recalled.state}, status=403, headers={"Cache-Control": "no-store"})
+    extra = {"also": list(recalled.also)} if recalled.also else {}
     return web.json_response({**body, "memory_state": recalled.state, "trimmed": recalled.trimmed, "duplicates": recalled.duplicates,
-                              "limited_by": recalled.limited_by}, headers={"Cache-Control": "no-store"})
+                              "limited_by": recalled.limited_by, **extra}, headers={"Cache-Control": "no-store"})
 
 
 def public_problem(problem, public):
@@ -279,6 +290,54 @@ class MemoryService:
         if duplicates:
             count("recall", "duplicate", duplicates)
         return Recall(items, trimmed=trimmed, duplicates=duplicates, limited_by=limited_by)
+
+    async def recall_merged(self, scope, query, *, types=None, text_budget=None):
+        """recall() for this scope plus the projects its grant names in recall_with (0.8.9), read at the same time. Their
+        facts carry "project" and are interleaved rank by rank with this scope's, under the same limits (recall_max_bytes,
+        recall_max_facts, the caller's text budget) for the whole answer. The primary decides the state; a further project
+        that is unavailable, missing or no longer granted is reported in `also` and simply adds nothing."""
+        extra = recall_with(scope.principal, scope.project)
+        if not extra:
+            return await self.recall(scope, query, types=types, text_budget=text_budget)
+        scopes = [scope_for_principal(scope.principal, p, read=True, explicit=True) for p in extra]
+        tasks = [self.recall(scope, query, types=types, text_budget=text_budget)]
+        tasks += [self.recall(s, query, types=types, text_budget=text_budget) for s in scopes if not failed(s)]
+        results = await asyncio.gather(*tasks)
+        primary, rest = results[0], iter(results[1:])
+        if failed(primary) or not primary.available or primary.state == "query_filtered":
+            return primary
+        also, lists = [], [primary.items]
+        for project, s in zip(extra, scopes, strict=True):
+            r = s if failed(s) else next(rest)
+            if failed(r):
+                also.append({"project": project, "memory_state": "denied", "items": 0})
+                continue
+            also.append({"project": project, "memory_state": r.state, "items": len(r.items)})
+            lists.append([dict(x, project=project) for x in r.items])
+        items, shown, trimmed, duplicates, text_bytes = [], set(), 0, 0, 0
+        by_bytes = by_client = False
+        for rank in range(max(len(x) for x in lists)):
+            for candidates in lists:
+                if rank >= len(candidates) or (self.cfg.recall_max_facts is not None and len(items) == self.cfg.recall_max_facts):
+                    continue
+                c = candidates[rank]
+                if c["text"] in shown:   # the same statement in two banks says it once
+                    duplicates += 1
+                    continue
+                size = len(c["text"].encode())
+                if text_budget is not None and text_bytes + size > text_budget:
+                    trimmed, by_client = trimmed + 1, True
+                    continue
+                if len(packed([*items, c]).encode()) > self.cfg.recall_max_bytes:
+                    trimmed, by_bytes = trimmed + 1, True
+                    continue
+                items.append(c)
+                text_bytes += size
+                shown.add(c["text"])
+        full = self.cfg.recall_max_facts is not None and len(items) == self.cfg.recall_max_facts
+        limited_by = "facts" if full else "client" if by_client else "bytes" if by_bytes else "results"
+        return Recall(items, primary.state, trimmed=trimmed + primary.trimmed, duplicates=duplicates + primary.duplicates,
+                      limited_by=limited_by, also=tuple(also))
 
     def validate_retain(self, scope, event_id, content):
         """Operation UUID for this event, or a Problem."""
@@ -441,7 +500,7 @@ async def _api_result(request, service, write):
     if failed(scope):
         return scope
     if not write:
-        recalled = await service.recall(scope, data["query"])
+        recalled = await service.recall_merged(scope, data["query"])   # items of further projects carry "project"
         return recalled if failed(recalled) else recall_response({"items": recalled.items, "trusted": False}, recalled)
     event_id = session_api.text(data["event_id"], "event_id")
     if failed(event_id):

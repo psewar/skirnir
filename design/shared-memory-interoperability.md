@@ -97,6 +97,31 @@ Revocation stops queued work; bytes already sent cannot be recalled. Backend/poo
 and lifecycle configuration changes require restart; authorization follows the
 router's current loaded configuration after a reload.
 
+**Reading a shared scope next to a private bank (`recall_with`, router 0.8.9).** A
+client whose memory plugin serves a single bank (Hermes' Hindsight plugin has one
+`bank_id`) cannot reach a second grant through that plugin. A project may name
+further projects of the same client that are read with it:
+
+```yaml
+projects:
+  hermes: {data_class: personal, read: true, write: true, recall_with: [team]}
+  team: {scope: shared-research, data_class: personal, read: true, write: true}
+```
+
+A recall of `hermes` (gateway or `POST /v1/skirnir/memory/recall`) then also recalls
+`team`, at the same time. The facts are interleaved rank by rank and share one set of
+limits (`recall_max_bytes`, `recall_max_facts`, the caller's own `max_tokens`); a
+statement present in both banks is passed on once. Facts from a further project carry
+`project` (REST) or `metadata.memory_project` plus a `[team] ` prefix in the text
+(gateway; the Hermes plugin forwards only the text). The answer reports each further
+project as `also: [{project, memory_state, items}]`; a further project that is
+unavailable, missing or no longer readable adds nothing (`denied` when the grant is
+gone) and never turns the private answer into an error, while a failing primary bank
+fails the whole recall as before. Each name must be another project of the same
+client with `read: true` (max 4); loading refuses anything else. Writing is not
+affected: retains go only to the addressed project. Automatic recall for inference
+(`routing.memory`, strategies `auto`/`hybrid`) is not affected either.
+
 | Strategy | Behavior |
 | --- | --- |
 | `legacy` (default) | Existing explicit `routing.memory`; requires router ownership. |

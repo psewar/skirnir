@@ -145,6 +145,7 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
         self.failure_status, self.delay, self.bad_json, self.large_response = 0, 0, False, False
         self.retain_failures = 0
         self.results = [{"id": "source-1", "text": "Synthetic project uses versioned events."}]
+        self.results_by_bank = {}   # bank -> results, or a status code for a failing bank (recall_with tests)
         server = web.Application()
         server.router.add_post("/v1/default/banks/{bank}/memories/recall", self.fake_recall)
         server.router.add_post("/v1/default/banks/{bank}/memories", self.fake_retain)
@@ -199,7 +200,10 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
             return web.Response(text="invalid-json")
         if self.large_response:
             return web.json_response({"results": [{"id": "source-1", "text": "x" * 300000}]})   # above the derived 256 KiB
-        return web.json_response({"results": self.results})
+        per_bank = self.results_by_bank.get(request.match_info["bank"], self.results)
+        if isinstance(per_bank, int):
+            return web.Response(status=per_bank, text="synthetic failure")
+        return web.json_response({"results": per_bank})
 
     async def fake_retain(self, request):
         data = await request.json()
