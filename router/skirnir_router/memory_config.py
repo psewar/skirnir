@@ -107,9 +107,15 @@ def parse_hindsight(raw):
     return HindsightConfig(**values)
 
 
+# Accepted keys; config.SCHEMA derives its client memory section from these, so the schema check cannot refuse a key
+# the parser accepts (0.8.9 shipped recall_with here but not in the schema, and loading refused it).
+CLIENT_MEMORY_FIELDS = ("owner", "projects", "strategy", "default_project", "auto_retain")
+PROJECT_FIELDS = ("read", "write", "delete", "data_class", "allow_cloud", "scope", "allow_private_addresses", "recall_with")
+
+
 def parse_client_memory(raw, classes):
     raw = {} if raw is None else raw
-    if not isinstance(raw, dict) or set(raw) - {"owner", "projects", "strategy", "default_project", "auto_retain"}:
+    if not isinstance(raw, dict) or set(raw) - set(CLIENT_MEMORY_FIELDS):
         return invalid("invalid client memory fields")
     owner, projects = raw.get("owner", "client"), raw.get("projects", {})
     if owner not in ("client", "skirnir") or not isinstance(projects, dict):
@@ -118,8 +124,7 @@ def parse_client_memory(raw, classes):
     for project, policy in projects.items():
         if not isinstance(project, str) or not project.strip() or len(project) > 128 or any(ord(c) < 32 for c in project):
             return invalid("invalid memory project name")
-        if not isinstance(policy, dict) or set(policy) - {"read", "write", "delete", "data_class", "allow_cloud", "scope", "allow_private_addresses",
-                                                          "recall_with"}:
+        if not isinstance(policy, dict) or set(policy) - set(PROJECT_FIELDS):
             return invalid("invalid memory project policy")
         if policy.get("data_class") not in classes:
             return invalid("each memory project needs an explicit configured data_class")

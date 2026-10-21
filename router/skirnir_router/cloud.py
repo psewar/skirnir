@@ -471,7 +471,7 @@ class CloudError(Exception):
     read raises at the caller, which handles stream and unary errors in one place (proxy._via_cloud).
     model_unavailable: the provider says the model does not exist or this key may not use it (OpenAI error.code
     model_not_found, Anthropic 404 not_found_error) - another candidate may serve, so it is no client fault. Taken from the
-    provider's structured error, never from its message text (until 0.8.9 proxy.py checked for "the model ..." in it)."""
+    provider's structured error, never from its message text (until 0.8.8 proxy.py checked for "the model ..." in it)."""
 
     def __init__(self, status, msg, code=None):
         super().__init__(msg)

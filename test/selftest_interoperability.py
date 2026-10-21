@@ -13,10 +13,10 @@ from uuid import uuid4
 
 from selftest_memory import MemoryHarness, PRIVATE, PROJECT, policy, realistic_fact, trimmed_count
 from selftest_context import ManagedHarness, history, row
-from skirnir_router import context_ops, memory, memory_gateway, memory_outbox, session_api, session_exchange, state
+from skirnir_router import config, context_ops, memory, memory_gateway, memory_outbox, session_api, session_exchange, state
 from skirnir_router.context_config import ContextConfig
 from skirnir_router.context_manager import encoded, estimate, project
-from skirnir_router.memory_config import parse_client_memory, parse_hindsight
+from skirnir_router.memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, parse_client_memory, parse_hindsight
 from skirnir_router.shared_config import parse_scopes
 from skirnir_router.outcome import conflict, failed, unavailable
 from skirnir_router.reliability_store import OPERATION_NOT_FOUND
@@ -53,6 +53,14 @@ class PolicyTests(unittest.TestCase):
                     spec(["a", "b", "c", "d", "e"])):
             with self.subTest(bad=bad["projects"]["own"]["recall_with"]):
                 self.assertTrue(failed(parse_client_memory(bad, ["personal"])))
+
+    def test_config_schema_accepts_every_field_the_parser_accepts(self):
+        # 0.8.9 accepted recall_with in parse_client_memory, but the schema check refused it, so no config could load it
+        memory_spec = {**dict.fromkeys(CLIENT_MEMORY_FIELDS, 1), "projects": {"own": dict.fromkeys(PROJECT_FIELDS, 1)}}
+        raw = {"router": {"client_auth": {"clients": {"example-client": {"memory": memory_spec}}}}}
+        self.assertEqual(config.validate_schema(raw), [])
+        memory_spec["projects"]["own"]["recal_with"] = 1
+        self.assertEqual(len(config.validate_schema(raw)), 1)
 
     def test_provenance_cannot_promote_unconfirmed_knowledge(self):
         self.assertTrue(failed(memory_gateway.provenance({"kind": "confirmed_information"}, "client-a", confirmed=False)))

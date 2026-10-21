@@ -35,7 +35,7 @@ class Refusal(Problem):
 def cloud_client_fault(error):
     """Ist ein Anbieterfehler Sache des Clients (an ihn zurueck) - oder kann ein anderer Kandidat helfen (None, weiter)?
     Ein unbekanntes oder nicht freigegebenes Modell meldet der Anbieter in seinem strukturierten Fehlercode
-    (CloudError.model_unavailable) - dann weiter; bis 0.8.9 las der Router dafuer den Meldungstext ("the model ...")."""
+    (CloudError.model_unavailable) - dann weiter; bis 0.8.8 las der Router dafuer den Meldungstext ("the model ...")."""
     return error.status in CLIENT_FAULT_STATUSES and not error.model_unavailable
 
 
