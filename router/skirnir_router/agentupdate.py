@@ -146,9 +146,14 @@ def note_report(node, report, now=None):
         return
     if report.get("version") and u.get("version") and report["version"] != u["version"]:
         return   # alter Bericht zu einem frueheren Auftrag
-    changed = report["state"] != u.get("state") or (report.get("message") or "") != (u.get("message") or "")
+    kind = report.get("kind") if isinstance(report.get("kind"), str) else None   # feste Fehlerart, Agent >= 0.19.1 ("" = keine)
+    changed = report["state"] != u.get("state") or (report.get("message") or "") != (u.get("message") or "") or kind != u.get("kind")
     if changed:
         u.update(state=report["state"], message=report.get("message") or "", t=now, ts=time.strftime("%Y-%m-%dT%H:%M:%S"), version=u.get("version") or report.get("version"))
+        if kind is None:
+            u.pop("kind", None)   # aelterer Agent: kein Feld, retry_after faellt auf den Meldungstext zurueck
+        else:
+            u["kind"] = kind
         e["update"] = u
         state.REG.save()
         state.remember({"event": "agent_update", "node": node.name, "state": report["state"], "version": u.get("version"), "reason": u.get("message")})
@@ -277,7 +282,12 @@ APP_CONTROL_RETRY_S = 1800
 
 def retry_after(u):
     """Wartezeit nach einem Fehlschlag: 30 min, wenn Smart App Control / WDAC die neue Binary blockte (das Cloud-Urteil ueber eine
-    unsignierte Datei kippt oft binnen Minuten bis Stunden: 2026-09-26 0.11.0 nach 11 min, 0.12.0 nach < 6 h), sonst 6 h."""
+    unsignierte Datei kippt oft binnen Minuten bis Stunden: 2026-09-26 0.11.0 nach 11 min, 0.12.0 nach < 6 h), sonst 6 h.
+    Agent >= 0.19.1 meldet die Art als Feld `kind` (am Windows-Fehlercode erkannt, agent/updater.go updateKind)."""
+    if "kind" in u:
+        return APP_CONTROL_RETRY_S if u["kind"] == "app_control" else 6 * 3600
+    # Rueckfall fuer Agenten vor 0.19.1, die kein `kind` senden: nur ihr (lokalisierter) Meldungstext verraet den Block.
+    # Entfernen, sobald alle Knoten Agent >= 0.19.1 fahren.
     msg = (u.get("message") or "").lower()
     if "application control" in msg or "anwendungssteuerung" in msg:
         return APP_CONTROL_RETRY_S

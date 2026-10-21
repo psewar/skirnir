@@ -161,10 +161,15 @@ holt sie sich und tauscht sich selbst (`updater.go`; Router `agentupdate.py`).
    `version` sagen, benennt die laufende Datei in `<exe>.old` um, setzt die neue ein und startet den Dienst neu
    (Windows: `restart` aus einem vom Job losgeloesten Prozess; Linux: Ende, systemd `Restart=always`). Beim naechsten
    Start raeumt er `.old` weg und startet die GPU-Z-Relay-Aufgabe neu, die noch aus der alten Datei laeuft.
-5. Stand geht im Heartbeat mit (`update: {state, version, message}`): `downloading`, `applied`, `failed`. Meldet sich
+5. Stand geht im Heartbeat mit (`update: {state, version, message, kind}`): `downloading`, `applied`, `failed`. Meldet sich
    der Agent mit der neuen Version, gilt der Auftrag als `done`. Fehler oder 15 min Stille -> HA-Problem im Router.
+   `kind` (seit 0.19.1, immer gesendet, sonst leer) ist die feste Fehlerart: `app_control`, wenn Smart App Control oder
+   WDAC die neue Binary schon beim Start des Rauchtests blockt. Erkannt am Windows-Fehlercode (4551, 4556-4559,
+   4580-4583, "An Application Control policy has blocked this file"), nicht am lokalisierten Text; der Router versucht es
+   dann nach 30 min statt 6 h wieder.
 
-Tests: `updater_test.go` (Signatur fremd/veraendert, Hash-Widerspruch, fremde Datei, ohne Schluessel, abgewaehlt).
+Tests: `updater_test.go` (Signatur fremd/veraendert, Hash-Widerspruch, fremde Datei, ohne Schluessel, abgewaehlt;
+Fehlerart am Fehlercode, Startfehler des Rauchtests bleibt eingepackt, `kind` geht auch leer mit).
 
 **Signieren (seit 2026-09-26):** Windows mit Smart App Control (oder einer WDAC-Richtlinie) blockt eine unsignierte Binary beim
 Tausch (`neue Binary meldet "" ... An Application Control policy has blocked this file`) und beim Doppelklick-Setup. Darum wird

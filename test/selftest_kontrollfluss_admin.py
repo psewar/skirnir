@@ -195,5 +195,35 @@ check("agentupdate: Signatur passt -> None", agentupdate.verify_with(pub, manife
 check("agentupdate: falsche Signatur -> Grund", agentupdate.verify_with(pub, {**manifest, "version": "2"}, sig) == "signature does not match")
 check("agentupdate: kaputter Schluessel -> Grund", agentupdate.verify_with("abc", manifest, sig) == "key or signature malformed")
 
+# --- Agent-Update: Wartezeit nach einem Fehlschlag aus dem Feld `kind` (Agent >= 0.19.1), nicht aus dem Meldungstext
+SAC, SECHS_H = agentupdate.APP_CONTROL_RETRY_S, 6 * 3600
+blockiert = 'neue Binary meldet "" statt 1.0.0: fork/exec x.new: An Application Control policy has blocked this file.'
+check("retry_after: kind app_control -> 30 min", agentupdate.retry_after({"state": "failed", "kind": "app_control", "message": "egal"}) == SAC)
+check("retry_after: kind leer -> 6 h, Text zaehlt nicht mehr", agentupdate.retry_after({"state": "failed", "kind": "", "message": blockiert}) == SECHS_H)
+check("retry_after: kind anders -> 6 h", agentupdate.retry_after({"state": "failed", "kind": "andere_art"}) == SECHS_H)
+check("retry_after: ohne kind (Agent < 0.19.1), Text englisch -> 30 min", agentupdate.retry_after({"state": "failed", "message": blockiert}) == SAC)
+check("retry_after: ohne kind, Text deutsch -> 30 min",
+      agentupdate.retry_after({"state": "failed", "message": "Diese Datei wurde von einer Anwendungssteuerungsrichtlinie blockiert."}) == SAC)
+check("retry_after: ohne kind, anderer Fehler -> 6 h", agentupdate.retry_after({"state": "failed", "message": "Download: HTTP 500"}) == SECHS_H)
+check("retry_after: leerer Auftrag -> 6 h", agentupdate.retry_after({}) == SECHS_H)
+
+# note_report uebernimmt `kind` aus dem Heartbeat; ein Bericht ohne Feld (aelterer Agent) laesst keins stehen
+_remember, state.remember = state.remember, lambda entry: None
+_reg = state.REG
+state.REG = SimpleNamespace(nodes={"fp1": {"name": "n1", "update": {"version": "1.0.0", "state": "requested", "message": ""}}}, save=lambda: None)
+knoten = SimpleNamespace(fp="fp1", name="n1", draining_until=0.0)
+agentupdate.note_report(knoten, {"version": "1.0.0", "state": "downloading", "message": "", "kind": ""})
+check("note_report: kind leer gespeichert", state.REG.nodes["fp1"]["update"].get("kind") == "")
+agentupdate.note_report(knoten, {"version": "1.0.0", "state": "failed", "message": blockiert, "kind": "app_control"})
+u = state.REG.nodes["fp1"]["update"]
+check("note_report: kind app_control gespeichert", u.get("kind") == "app_control" and agentupdate.retry_after(u) == SAC, str(u))
+agentupdate.note_report(knoten, {"version": "1.0.0", "state": "failed", "message": blockiert, "kind": 7})
+check("note_report: kind kein Text -> wie ohne Feld", "kind" not in state.REG.nodes["fp1"]["update"], str(state.REG.nodes["fp1"]["update"]))
+agentupdate.note_report(knoten, {"version": "1.0.0", "state": "failed", "message": blockiert, "kind": "app_control"})
+agentupdate.note_report(knoten, {"version": "1.0.0", "state": "failed", "message": "Download: HTTP 500"})
+u = state.REG.nodes["fp1"]["update"]
+check("note_report: Bericht ohne kind entfernt das alte", "kind" not in u and agentupdate.retry_after(u) == SECHS_H, str(u))
+state.remember, state.REG = _remember, _reg
+
 print(f"\n{'ALLE OK' if not FAILS else str(len(FAILS)) + ' FEHLER: ' + ', '.join(FAILS)}")
 sys.exit(1 if FAILS else 0)

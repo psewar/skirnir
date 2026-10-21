@@ -1588,6 +1588,9 @@ def main():
             if u.get("state") in ("done", "failed") and u.get("version") == "test3": break
             time.sleep(0.25)
         ha_u = json.loads(http(C + "/admin/ha")[1])
+        from skirnir_router import agentupdate as _au   # reine Funktion: Wartezeit aus dem gespeicherten Stand
+        check("Agent-Update: falsche Signatur -> failed mit kind leer (0.8.12: Feld aus dem Heartbeat), naechster Versuch erst nach 6 h",
+              u.get("kind") == "" and _au.retry_after(u) == 6 * 3600, str(u))
         check("Agent-Update: falsche Signatur -> failed, HA-Problem, Version unveraendert, kein Drain", st == 200 and u.get("state") == "failed" and "Signatur" in (u.get("message") or "")
               and any("Agent-Update auf big fehlgeschlagen" in p for p in ha_u["problems"]) and reg_big()["facts"]["agent_version"] == "test2" and not state()["nodes"]["big"]["draining"], str(u) + str(ha_u["problems"]))
         st, raw = http(C + "/v1/agent/binary/skirnir-agent-test3-windows-amd64.exe", headers={"Authorization": "Bearer falsch"})

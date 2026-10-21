@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -52,7 +53,30 @@ type UpdateReport struct {
 	Version string `json:"version"`
 	State   string `json:"state"` // downloading | applied | failed
 	Message string `json:"message,omitempty"`
-	TS      string `json:"ts"`
+	// Kind: feste Fehlerart (0.19.1), "" ohne besondere Art. Immer gesendet, auch leer: so erkennt der Router an der
+	// Anwesenheit des Felds, dass er die Meldung nicht mehr nach Text durchsuchen muss (agentupdate.retry_after).
+	Kind string `json:"kind"`
+	TS   string `json:"ts"`
+}
+
+// updateKindAppControl: Smart App Control oder eine WDAC-Richtlinie hat die neue Binary blockiert. Der Router versucht es
+// dann schon nach 30 min wieder, weil das Cloud-Urteil ueber eine neue Datei oft binnen Minuten bis Stunden kippt.
+const updateKindAppControl = "app_control"
+
+// appControlBlocked: Windows-Fehlercodes "An Application Control policy has blocked this file" (winerror.h,
+// ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION 4551, _REPUTATION_MALICIOUS/_PUA/_DANGEROUS_EXT/_OFFLINE 4556-4559,
+// _REPUTATION_UNFRIENDLY_FILE/_UNATTAINABLE/_EXPLICIT_DENY_FILE/_WHQL_FAILURE 4580-4583), mit denen CreateProcess eine
+// blockierte Binary ablehnt. Gesehen 2026-09-26 beim Rauchtest `version` der unsignierten 0.11.0.
+var appControlBlocked = []syscall.Errno{4551, 4556, 4557, 4558, 4559, 4580, 4581, 4582, 4583}
+
+// updateKind ordnet einen Fehlschlag am Windows-Fehlercode einer festen Art zu (nie am lokalisierten Meldungstext).
+func updateKind(err error) string {
+	for _, code := range appControlBlocked {
+		if errors.Is(err, code) {
+			return updateKindAppControl
+		}
+	}
+	return ""
 }
 
 type Updater struct {
@@ -84,9 +108,9 @@ func (u *Updater) Report() *UpdateReport {
 	return &r
 }
 
-func (u *Updater) set(state, version, msg string) {
+func (u *Updater) set(state, version, msg, kind string) {
 	u.mu.Lock()
-	u.report = &UpdateReport{Version: version, State: state, Message: msg, TS: time.Now().Format(time.RFC3339)}
+	u.report = &UpdateReport{Version: version, State: state, Message: msg, Kind: kind, TS: time.Now().Format(time.RFC3339)}
 	u.mu.Unlock()
 }
 
@@ -108,7 +132,7 @@ func (u *Updater) Handle(o UpdateOrder) {
 		}()
 		u.log.Infof("update: Auftrag auf %s (%s, %d Bytes)", o.Version, o.File, o.Size)
 		if err := u.run(o); err != nil {
-			u.set("failed", o.Version, err.Error())
+			u.set("failed", o.Version, err.Error(), updateKind(err))
 			u.log.Warnf("update: fehlgeschlagen: %v", err)
 		}
 	}()
@@ -214,7 +238,7 @@ func (u *Updater) run(o UpdateOrder) error {
 		exe = p
 	}
 	newPath := exe + ".new"
-	u.set("downloading", o.Version, "")
+	u.set("downloading", o.Version, "", "")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	if err := u.download(ctx, o.URL, o.Token, newPath, entry); err != nil {
@@ -222,12 +246,9 @@ func (u *Updater) run(o UpdateOrder) error {
 	}
 	u.log.Infof("update: %s geladen und geprueft (SHA-256 %s...)", entry.Name, entry.Sha256[:16])
 	// Rauchtest: die neue Binary muss ihre Version nennen (nach Signatur- und Hashpruefung, nie davor)
-	cmd := exec.Command(newPath, "version")
-	hideWindow(cmd)
-	out, err := cmd.Output()
-	if err != nil || strings.TrimSpace(string(out)) != o.Version {
+	if err := smokeTest(newPath, o.Version); err != nil {
 		os.Remove(newPath)
-		return fmt.Errorf("neue Binary meldet %q statt %s (%v)", strings.TrimSpace(string(out)), o.Version, err)
+		return err
 	}
 	// ... und sie muss die vorhandene Konfiguration annehmen: sonst startet der getauschte Dienst im Kreis, statt dass der
 	// Auftrag sauber als failed endet (z. B. nach entfernten Konfig-Schluesseln, 0.9.1: tunnel.enabled, mimir:)
@@ -253,10 +274,26 @@ func (u *Updater) run(o UpdateOrder) error {
 		_ = os.Rename(old, exe)
 		return fmt.Errorf("neue Binary einsetzen: %w", err)
 	}
-	u.set("applied", o.Version, "Binary getauscht, Neustart")
+	u.set("applied", o.Version, "Binary getauscht, Neustart", "")
 	u.log.Infof("update: %s -> %s eingesetzt, Dienst startet neu", version, o.Version)
 	time.Sleep(3 * time.Second) // ein Heartbeat mit 'applied' soll noch raus
 	u.restart(exe)
+	return nil
+}
+
+// smokeTest: die Binary unter path muss `version` mit want beantworten. Ein Startfehler bleibt mit %w eingepackt, damit
+// updateKind den Windows-Fehlercode findet (Smart App Control / WDAC blockt schon CreateProcess).
+func smokeTest(path, want string) error {
+	cmd := exec.Command(path, "version")
+	hideWindow(cmd)
+	out, err := cmd.Output()
+	got := strings.TrimSpace(string(out))
+	if err != nil {
+		return fmt.Errorf("neue Binary meldet %q statt %s: %w", got, want, err)
+	}
+	if got != want {
+		return fmt.Errorf("neue Binary meldet %q statt %s", got, want)
+	}
 	return nil
 }
 
