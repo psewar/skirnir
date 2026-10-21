@@ -81,12 +81,18 @@ Tests: `ollamawatch_test.go` (Aenderung, nur `expires_at`, neues Modell, drei Fe
 
 Der Heartbeat traegt zwei Bloecke, damit der Router nicht aus fremdem VRAM raten muss, ob jemand spielt:
 
-- `game: {supported, running, name, via, since, folders}`: alle 5 s prueft das Modul `spiel`, ob ein Prozess aus einem
+- `game: {supported, running, name, via, since, folders, procs, gpu_dedicated_mib, gpu_shared_mib, gpu_pct}`: jede Sekunde
+  (bis 0.18 alle 5 s; ein Durchlauf kostet ~17 ms bei ~500 Prozessen) prueft das Modul `spiel`, ob ein Prozess aus einem
   Spielordner laeuft. Spielordner sind die Steam-Bibliotheken (`libraryfolders.vdf`, Steam-Ort aus der Registry) und die
   Installationsorte von Spielen bekannter Verlage aus den Deinstallationseintraegen (HKLM 64/32 Bit und jeder geladene
   Benutzer-Zweig), ohne Launcher. Ist der Pfad eines Prozesses nicht lesbar (Anti-Cheat), zaehlt sein Name, wenn eine
   .exe >= 20 MB mit diesem Namen bis Tiefe 3 in einem Spielordner liegt (ohne Allerweltsnamen wie `launcher`, `updater`,
   `crashpad_handler`). Den Index baut der Agent alle 6 h neu. `via` ist `pfad` oder `name`. Linux: `supported: false`.
+  Seit 0.19.0 misst er, solange ein Spiel laeuft, dessen GPU-Bedarf ueber alle Spielprozesse (`procs`): eigener und
+  geteilter Grafikspeicher (`\GPU Process Memory(*)`) und die hoechste Auslastung einer GPU-Engine (`\GPU Engine(*)`,
+  fehlt im ersten Durchlauf, weil die Rate zwei Messungen braucht). Damit unterscheidet der Router ein kleines Spiel von
+  einem, das die GPU braucht oder neben einem grossen Modell in den geteilten Speicher ausweicht. Ist die Messung nicht
+  moeglich, fehlen die Felder; der Router wertet dann jedes Spiel wie bisher als busy.
 - `memory: {ram_available_gib, ram_total_gib, commit_free_gib, commit_limit_gib}` aus `GlobalMemoryStatusEx`; Linux meldet
   nur RAM (`MemAvailable`), weil der Commit dort bei Ueberbuchung keine Grenze ist.
 
@@ -110,7 +116,8 @@ skirnir-agent.exe start|stop|restart      ohne UAC (Installer setzt das Steuerre
 skirnir-agent.exe install|uninstall       Admin
 skirnir-agent.exe check-config | mqtt-clear | version
 skirnir-agent.exe gpu                     Messquelle und alle Sensoren einmal ausgeben (auch GPU-Z, falls es laeuft)
-skirnir-agent.exe spiel                   Spielerkennung und Hauptspeicher einmal ausgeben (Ordner, Programmnamen, Treffer)
+skirnir-agent.exe spiel                   Spielerkennung und Hauptspeicher einmal ausgeben (Ordner, Programmnamen, Treffer,
+                                          GPU-Bedarf des Spiels)
 ```
 
 `/health` auf `127.0.0.1:10398`: GPU, Heartbeat (Router-Urteil), MQTT, Kinder. `POST /restart-child?name=stt` startet ein Kind neu.

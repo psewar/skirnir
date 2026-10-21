@@ -62,12 +62,12 @@ func TestMatchGame(t *testing.T) {
 		ok    bool
 	}
 	for _, c := range []tc{
-		{"kein Spiel", []procInfo{{"explorer.exe", `C:\Windows\explorer.exe`}, {"ollama.exe", `C:\Ollama\ollama.exe`}}, "", "", false},
-		{"Pfad unter Steam (gross/klein egal)", []procInfo{{"cs2.exe", `d:\steamlibrary\STEAMAPPS\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe`}}, "cs2.exe", "pfad", true},
-		{"Ausnahmeordner zaehlt nicht", []procInfo{{"x.exe", `D:\SteamLibrary\steamapps\common\Steamworks Shared\_CommonRedist\x.exe`}}, "", "", false},
-		{"Pfad unlesbar -> per Name", []procInfo{{"Diablo IV.exe", ""}}, "Diablo IV.exe", "name", true},
-		{"Name gleich, aber Pfad lesbar woanders -> kein Spiel", []procInfo{{"Diablo IV.exe", `C:\Temp\Diablo IV.exe`}}, "", "", false},
-		{"Ordnerpraefix allein reicht nicht", []procInfo{{"a.exe", `C:\Program Files (x86)\Diablo IV Tools\a.exe`}}, "", "", false},
+		{"kein Spiel", []procInfo{{Name: "explorer.exe", Path: `C:\Windows\explorer.exe`}, {Name: "ollama.exe", Path: `C:\Ollama\ollama.exe`}}, "", "", false},
+		{"Pfad unter Steam (gross/klein egal)", []procInfo{{Name: "cs2.exe", Path: `d:\steamlibrary\STEAMAPPS\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe`}}, "cs2.exe", "pfad", true},
+		{"Ausnahmeordner zaehlt nicht", []procInfo{{Name: "x.exe", Path: `D:\SteamLibrary\steamapps\common\Steamworks Shared\_CommonRedist\x.exe`}}, "", "", false},
+		{"Pfad unlesbar -> per Name", []procInfo{{Name: "Diablo IV.exe", Path: ""}}, "Diablo IV.exe", "name", true},
+		{"Name gleich, aber Pfad lesbar woanders -> kein Spiel", []procInfo{{Name: "Diablo IV.exe", Path: `C:\Temp\Diablo IV.exe`}}, "", "", false},
+		{"Ordnerpraefix allein reicht nicht", []procInfo{{Name: "a.exe", Path: `C:\Program Files (x86)\Diablo IV Tools\a.exe`}}, "", "", false},
 	} {
 		g, v, ok := matchGame(c.procs, idx)
 		if g != c.game || v != c.via || ok != c.ok {
@@ -91,11 +91,46 @@ func TestGOGLauncherUndSpiel(t *testing.T) {
 	if len(idx.folders) != 1 || idx.folders[0] != `C:\Program Files\GOG Galaxy\Games\Example Game` {
 		t.Fatalf("Index-Ordner = %q, want nur den Spielordner", idx.folders)
 	}
-	if g, _, ok := matchGame([]procInfo{{"GalaxyClient.exe", `C:\Program Files\GOG Galaxy\GalaxyClient.exe`}}, idx); ok {
+	if g, _, ok := matchGame([]procInfo{{Name: "GalaxyClient.exe", Path: `C:\Program Files\GOG Galaxy\GalaxyClient.exe`}}, idx); ok {
 		t.Errorf("Launcher gilt als Spiel: %q", g)
 	}
-	if g, v, ok := matchGame([]procInfo{{"ExampleGame.exe", `C:\Program Files\GOG Galaxy\Games\Example Game\ExampleGame.exe`}}, idx); !ok || v != "pfad" {
+	if g, v, ok := matchGame([]procInfo{{Name: "ExampleGame.exe", Path: `C:\Program Files\GOG Galaxy\Games\Example Game\ExampleGame.exe`}}, idx); !ok || v != "pfad" {
 		t.Errorf("GOG-Spiel nicht erkannt: %q,%q,%v", g, v, ok)
+	}
+}
+
+// 0.19.0: alle Prozesse eines Spiels zaehlen fuer den GPU-Bedarf (manche Spiele zeichnen in einem Kindprozess).
+func TestGameHitsAlleProzesse(t *testing.T) {
+	idx := gameIndex{folders: []string{`D:\SteamLibrary\steamapps\common`}, exes: map[string]string{"anticheat game": `x`}}
+	hits := gameHits([]procInfo{
+		{Name: "launcher.exe", Path: `D:\SteamLibrary\steamapps\common\Example\launcher.exe`, PID: 10},
+		{Name: "explorer.exe", Path: `C:\Windows\explorer.exe`, PID: 11},
+		{Name: "render.exe", Path: `D:\SteamLibrary\steamapps\common\Example\bin\render.exe`, PID: 12},
+		{Name: "AntiCheat Game.exe", Path: "", PID: 13},
+	}, idx)
+	var pids []uint32
+	for _, h := range hits {
+		pids = append(pids, h.proc.PID)
+	}
+	if len(pids) != 3 || pids[0] != 10 || pids[1] != 12 || pids[2] != 13 || hits[2].via != "name" {
+		t.Errorf("gameHits PIDs = %v, want [10 12 13] (letzter per Name)", pids)
+	}
+}
+
+func TestFootprint(t *testing.T) {
+	u := gpuUse{
+		dedicated: map[uint32]uint64{10: 512 << 20, 12: 1024 << 20, 99: 8 << 30},
+		shared:    map[uint32]uint64{12: 2048 << 20},
+		pct:       map[uint32]float64{10: 3.5, 12: 41.0, 99: 100},
+	}
+	d, s, p, ok := footprint([]uint32{10, 12}, u)
+	if d != 1536 || s != 2048 || !ok || p != 41.0 {
+		t.Errorf("footprint = %d MiB eigen, %d MiB geteilt, %.1f %% (%v); want 1536, 2048, 41.0 - fremde PID 99 zaehlt nicht", d, s, p, ok)
+	}
+	// erster Durchlauf: noch keine Rate -> Speicher ja, Auslastung fehlt (Router wertet dann nur den Speicher)
+	_, _, _, ok = footprint([]uint32{10}, gpuUse{dedicated: u.dedicated, shared: u.shared, pct: map[uint32]float64{}})
+	if ok {
+		t.Errorf("ohne Rate darf keine Auslastung gemeldet werden")
 	}
 }
 

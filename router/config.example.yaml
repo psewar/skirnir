@@ -217,6 +217,8 @@ modes:
     foreign_sustain_s: 15            # ... wenn es so lange anhält (Modellwechsel erzeugt kurze Fehlmessungen)
     game: true                       # Agent >= 0.17.0 meldet ein laufendes Spiel: Knoten busy, auch ohne fremdes VRAM/Last
     game_sustain_s: 10               # ... wenn das Spiel so lange laeuft (Launcher-Blitzer ignorieren)
+    game_min_gpu_gib: 2.0            # Agent >= 0.19.0: ... und das Spiel selbst so viel Grafikspeicher braucht (eigen + geteilt)
+    game_min_gpu_pct: 10             # ... oder eine GPU-Engine so stark auslastet (oder Speicherdruck); ohne Meldung jedes Spiel
   busy_exit:
     game_quiet_s: 60                 # nach Spielende so lange busy bleiben (Spielneustart/Ladebildschirm ueberbruecken)
     below_for_s: 15              # so lange muss Ruhe herrschen, bis der Knoten wieder free ist.

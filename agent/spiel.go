@@ -27,6 +27,15 @@ type GameFact struct {
 	Via       string `json:"via,omitempty"`   // "pfad" | "name"
 	Since     int64  `json:"since,omitempty"` // Unix-Sekunden, seit wann der Agent es sieht
 	Folders   int    `json:"folders"`         // Spielordner im Index (0 = nichts installiert, dann erkennt er auch nichts)
+	// 0.19.0: GPU-Bedarf des Spiels selbst, ueber alle seine Prozesse (Leistungsindikatoren GPU Process Memory / GPU Engine).
+	// Der Router wertet ein Spiel damit nur noch als busy, wenn es die GPU wirklich braucht: ein kleines Spiel (735 MiB, 2 %)
+	// sperrte vorher die ganze Karte. Geteilter Speicher zaehlt mit - ein Spiel, das neben einem grossen Modell kein VRAM mehr
+	// bekommt, weicht dorthin aus (Diablo IV 2026-10-04: kaum VRAM, kaum Last, RAM 94 %). Fehlen die Felder, ist nichts
+	// gemessen (kein Spiel, Messung gescheitert, Linux); GPUPct fehlt auch beim ersten Durchlauf eines Spiels (Rate braucht zwei).
+	Procs           int      `json:"procs,omitempty"`             // Prozesse, die als Spiel zaehlen
+	GPUDedicatedMiB *int     `json:"gpu_dedicated_mib,omitempty"` // eigener Grafikspeicher
+	GPUSharedMiB    *int     `json:"gpu_shared_mib,omitempty"`    // geteilter (Haupt-)Speicher, den die GPU fuer das Spiel nutzt
+	GPUPct          *float64 `json:"gpu_pct,omitempty"`           // hoechste Auslastung einer GPU-Engine durch das Spiel
 }
 
 // MemFact geht als Block "memory". Fehlt ein Wert (CommitFree auf Linux), laesst der Agent ihn weg.
@@ -41,6 +50,7 @@ type MemFact struct {
 type procInfo struct {
 	Name string
 	Path string
+	PID  uint32
 }
 
 // gameIndex: Spielordner und Namen ihrer grossen Programme (Kleinbuchstaben, ohne .exe) -> voller Pfad.
@@ -50,7 +60,7 @@ type gameIndex struct {
 }
 
 const (
-	gamePoll       = 5 * time.Second
+	gamePoll       = 1 * time.Second // 0.19.0 (vorher 5 s): ein Durchlauf kostet ~17 ms bei ~500 Prozessen (gemessen 2026-10-21)
 	gameReindex    = 6 * time.Hour
 	gameExeMinSize = 20 << 20 // nur grosse Programme: kleine Helfer tragen Allerweltsnamen (crashpad_handler-Fehlalarm 2026-09-25)
 	gameExeDepth   = 3
@@ -170,21 +180,61 @@ func exeIndex(folders []string) map[string]string {
 	return out
 }
 
-// matchGame: erster Prozess, der ein Spiel ist. Pfad lesbar -> nur der Pfad zaehlt; sonst der Name gegen den Index.
-func matchGame(procs []procInfo, idx gameIndex) (name, via string, ok bool) {
+// gameHit: ein Prozess, der als Spiel zaehlt, und woran er erkannt wurde ("pfad" | "name").
+type gameHit struct {
+	proc procInfo
+	via  string
+}
+
+// gameHits: alle Prozesse, die Spiele sind. Pfad lesbar -> nur der Pfad zaehlt; sonst der Name gegen den Index. Alle, nicht
+// nur der erste: manche Spiele zeichnen in einem eigenen Kindprozess, und der GPU-Bedarf (0.19.0) gilt fuer alle zusammen.
+func gameHits(procs []procInfo, idx gameIndex) []gameHit {
+	var out []gameHit
 	for _, p := range procs {
 		if p.Path != "" {
 			if !gameExcludedPath(p.Path) && underFolder(p.Path, idx.folders) {
-				return p.Name, "pfad", true
+				out = append(out, gameHit{p, "pfad"})
 			}
 			continue
 		}
 		n := strings.ToLower(strings.TrimSuffix(p.Name, filepath.Ext(p.Name)))
 		if _, hit := idx.exes[n]; hit {
-			return p.Name, "name", true
+			out = append(out, gameHit{p, "name"})
 		}
 	}
+	return out
+}
+
+// matchGame: erster Prozess, der ein Spiel ist (Name und Erkennungsweg fuer den Fakt).
+func matchGame(procs []procInfo, idx gameIndex) (name, via string, ok bool) {
+	if h := gameHits(procs, idx); len(h) > 0 {
+		return h[0].proc.Name, h[0].via, true
+	}
 	return "", "", false
+}
+
+// gpuUse: GPU-Bedarf je PID, wie ihn die Leistungsindikatoren liefern. pct fehlt fuer eine PID, wenn noch keine Rate da ist.
+type gpuUse struct {
+	dedicated map[uint32]uint64
+	shared    map[uint32]uint64
+	pct       map[uint32]float64 // hoechste Engine-Auslastung der PID
+}
+
+// footprint: GPU-Bedarf der Spielprozesse zusammen. Speicher summiert, Auslastung = hoechster Wert eines Prozesses (wie die
+// GPU-Spalte im Task-Manager). pctOK=false, wenn fuer keinen Spielprozess eine Auslastung vorliegt.
+func footprint(pids []uint32, u gpuUse) (dedMiB, sharedMiB int, pct float64, pctOK bool) {
+	var ded, sh uint64
+	for _, pid := range pids {
+		ded += u.dedicated[pid]
+		sh += u.shared[pid]
+		if v, ok := u.pct[pid]; ok {
+			if !pctOK || v > pct {
+				pct = v
+			}
+			pctOK = true
+		}
+	}
+	return int(ded >> 20), int(sh >> 20), pct, pctOK
 }
 
 // GameWatch prueft alle gamePoll, ob ein Spiel laeuft; den Index (Ordner + Programmnamen) baut es alle gameReindex neu.
@@ -195,6 +245,17 @@ type GameWatch struct {
 	fact  GameFact
 	idx   gameIndex
 	idxAt time.Time
+
+	// 0.19.0: Messung des GPU-Bedarfs, offen nur waehrend ein Spiel laeuft (die Engine-Auslastung ist eine Rate und braucht
+	// dieselbe Abfrage ueber zwei Durchlaeufe). nil = keine offen; newGPUSampler ist auf Linux ein Stub ohne Messung.
+	sampler    gpuSampler
+	samplerErr string // letzter Fehler, nur bei Wechsel geloggt
+}
+
+// gpuSampler misst den GPU-Bedarf aller Prozesse (Windows: PDH, gpufoot_windows.go).
+type gpuSampler interface {
+	sample() (gpuUse, error)
+	close()
 }
 
 func newGameWatch(log *Logger) *GameWatch {
@@ -227,10 +288,21 @@ func (g *GameWatch) poll() {
 		g.mu.Unlock()
 		g.log.Infof("spiel: Index %d Spielordner, %d Programmnamen", len(folders), len(idx.exes))
 	}
-	name, via, running := matchGame(listProcesses(), g.idx)
+	hits := gameHits(listProcesses(), g.idx)
+	running := len(hits) > 0
+	var name, via string
+	var pids []uint32
+	for i, h := range hits {
+		if i == 0 {
+			name, via = h.proc.Name, h.via
+		}
+		pids = append(pids, h.proc.PID)
+	}
+	ded, sh, pct := g.measure(running, pids)
 	g.mu.Lock()
 	was := g.fact.Running
 	g.fact.Running, g.fact.Name, g.fact.Via = running, name, via
+	g.fact.Procs, g.fact.GPUDedicatedMiB, g.fact.GPUSharedMiB, g.fact.GPUPct = len(pids), ded, sh, pct
 	if running && !was {
 		g.fact.Since = time.Now().Unix()
 	} else if !running {
@@ -243,6 +315,55 @@ func (g *GameWatch) poll() {
 		} else {
 			g.log.Infof("spiel: beendet")
 		}
+	}
+}
+
+// measure: GPU-Bedarf der Spielprozesse; ohne Spiel wird die Messung geschlossen (kostet dann nichts). Scheitert sie, fehlen
+// die Felder im Fakt (der Router faellt dann auf "jedes Spiel ist busy" zurueck) und der Fehler steht einmal im Log.
+func (g *GameWatch) measure(running bool, pids []uint32) (ded, sh *int, pct *float64) {
+	if !running {
+		if g.sampler != nil {
+			g.sampler.close()
+			g.sampler = nil
+		}
+		return nil, nil, nil
+	}
+	if g.sampler == nil {
+		s, err := newGPUSampler()
+		if err != nil {
+			g.noteSampleErr(err)
+			return nil, nil, nil
+		}
+		g.sampler = s
+	}
+	u, err := g.sampler.sample()
+	if err != nil {
+		g.noteSampleErr(err)
+		g.sampler.close()
+		g.sampler = nil // naechster Durchlauf oeffnet neu
+		return nil, nil, nil
+	}
+	g.noteSampleErr(nil)
+	d, s, p, ok := footprint(pids, u)
+	ded, sh = &d, &s
+	if ok {
+		pct = &p
+	}
+	return ded, sh, pct
+}
+
+func (g *GameWatch) noteSampleErr(err error) {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	if msg != g.samplerErr {
+		if msg != "" {
+			g.log.Warnf("spiel: GPU-Bedarf nicht messbar: %s", msg)
+		} else if g.samplerErr != "" {
+			g.log.Infof("spiel: GPU-Bedarf wieder messbar")
+		}
+		g.samplerErr = msg
 	}
 }
 
@@ -277,10 +398,15 @@ func probeGame() {
 				ohne++
 			}
 		}
-		name, via, ok := matchGame(procs, idx)
+		hits := gameHits(procs, idx)
 		fmt.Printf("prozesse: %d (%d ohne lesbaren Pfad), Pruefung %.0f ms\n", len(procs), ohne, float64(time.Since(t1).Microseconds())/1000)
-		if ok {
-			fmt.Printf("spiel erkannt: %s (per %s)\n", name, via)
+		if len(hits) > 0 {
+			var pids []uint32
+			for _, h := range hits {
+				pids = append(pids, h.proc.PID)
+				fmt.Printf("spiel erkannt: %s (pid %d, per %s)\n", h.proc.Name, h.proc.PID, h.via)
+			}
+			probeFootprint(pids)
 		} else {
 			fmt.Println("spiel erkannt: nein")
 		}
@@ -291,6 +417,36 @@ func probeGame() {
 	} else {
 		fmt.Println("speicher: nicht lesbar")
 	}
+}
+
+// probeFootprint: GPU-Bedarf der Spielprozesse wie im Betrieb - zweimal gesammelt (die Auslastung ist eine Rate) und die Zeit
+// eines Sammelns, damit der Preis des 1-s-Takts sichtbar ist.
+func probeFootprint(pids []uint32) {
+	s, err := newGPUSampler()
+	if err != nil {
+		fmt.Println("gpu-bedarf: nicht messbar:", err)
+		return
+	}
+	defer s.close()
+	var u gpuUse
+	var dauer time.Duration
+	for i := 0; i < 2; i++ {
+		if i > 0 {
+			time.Sleep(time.Second)
+		}
+		t := time.Now()
+		if u, err = s.sample(); err != nil {
+			fmt.Println("gpu-bedarf: nicht messbar:", err)
+			return
+		}
+		dauer = time.Since(t)
+	}
+	d, sh, p, ok := footprint(pids, u)
+	pct := "keine Rate"
+	if ok {
+		pct = fmt.Sprintf("%.1f %%", p)
+	}
+	fmt.Printf("gpu-bedarf: eigen %d MiB, geteilt %d MiB, Engine %s (Sammeln %.1f ms)\n", d, sh, pct, float64(dauer.Microseconds())/1000)
 }
 
 func gib(bytes uint64) float64 {

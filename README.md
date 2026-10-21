@@ -164,7 +164,13 @@ roles:
   Steam library or the install folder of a known game publisher; by the name of a large program in such a folder when
   the path is not readable) and the free main memory (available RAM and free commit). A running game makes the node `busy`
   after `busy_enter.game_sustain_s` (10 s), even when it uses little VRAM, and keeps it busy for `busy_exit.game_quiet_s`
-  (60 s) after it ends. When available RAM or free commit stays below `memory_pressure.min_free_gib` (8 GiB) for
+  (60 s) after it ends. Since router 0.8.7 / agent 0.19.0 this applies only to a game that needs the GPU: the agent also
+  reports the game's own GPU use (dedicated + shared graphics memory, highest engine load, over all game processes), and
+  the game counts once it reaches `busy_enter.game_min_gpu_gib` (2 GiB) or `game_min_gpu_pct` (10 %), or during memory
+  pressure; from then on it holds the node busy until it ends. Shared memory counts because a game that gets no VRAM next
+  to a large model moves there. A light game (measured: 735 MiB, 2 %) leaves the node free, and prewarm still runs. An
+  agent that does not report GPU use gets the old behaviour. `game_heavy` and its reason are in `/admin/state`.
+  When available RAM or free commit stays below `memory_pressure.min_free_gib` (8 GiB) for
   `memory_pressure.polls` heartbeats (2), the node is under memory pressure: nothing is loaded cold and no prewarm runs,
   loaded models keep answering and nothing is unloaded. Reason code `memory_pressure` with `Retry-After` 60 s.
   `skirnir-agent spiel` prints what the agent detects.

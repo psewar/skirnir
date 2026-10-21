@@ -135,6 +135,10 @@ class Node(Breaker):
         # (zu alt / Linux ohne Erkennung) - dann gilt wie bisher nur fremdes VRAM und GPU-Last.
         self.game = None              # {"running", "name", "via", ...} vom Agenten
         self.game_since = None        # seit wann der Router das Spiel ununterbrochen sieht (busy erst nach game_sustain_s)
+        # 0.8.7: braucht das laufende Spiel die GPU? Einmal ja, bleibt es ja bis Spielende (kein Flattern im Menue/Ladebildschirm).
+        # Ohne GPU-Bedarf in der Meldung (Agent < 0.19.0, Messung gescheitert) gilt jedes Spiel als schwer - wie bis 0.8.6.
+        self.game_heavy = False
+        self.game_heavy_why = ""      # Grund als Fakt fuer /admin/state und das Journal
         self.memory = None            # {"ram_available_gib", "commit_free_gib", ...} vom Agenten
         self.routes = {}              # Tunnel-Routen des Agenten neben Ollama: {"rerank": {"up": bool, "reason": str}}; leer = meldet keine
         self.mem_low_count = 0        # so viele Heartbeats in Folge unter der Grenze
@@ -425,5 +429,6 @@ class Node(Breaker):
             "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
             "breaker": self.breaker, "max_inflight": self.effective_max_inflight(), "draining": now < self.draining_until, "ollama_source": "push" if self.ollama_push_active(now) else "poll",
             "game": self.game, "memory": self.memory, "memory_pressure": self.mem_pressure,   # Agent >= 0.17.0
+            "game_heavy": self.game_heavy, "game_heavy_why": self.game_heavy_why,             # 0.8.7
             "routes": self.routes,
         }

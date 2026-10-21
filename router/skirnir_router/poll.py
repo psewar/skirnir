@@ -129,10 +129,20 @@ def evaluate(node, now):
     # haelt und die Last ueber der Austrittsschwelle liegt, bleibt der Knoten busy; Ladebildschirme darunter deckt below_for_s ab.
     keep = (node.state == "busy" and gpu_known and node.gpu_util is not None and node.gpu_util >= node.busy_exit_util_threshold()
             and node.foreign_vram_gib() >= state.CFG.util_requires_foreign_gib)
-    # Spiel als Fakt vom Agenten (0.7.0 / Agent 0.17.0): belegt unabhaengig von VRAM und Last - Diablo IV bekam neben
-    # qwen3.8@196k kaum VRAM und lastete die GPU kaum aus, trotzdem lief es (RAM 94 %). Kurz nach dem Start erst nach
-    # game_sustain_s (Launcher-Blitzer), danach haelt es den Knoten busy, bis das Spiel weg ist.
-    game = (state.CFG.busy_game and node.game_since is not None
+    # Spiel als Fakt vom Agenten (0.7.0 / Agent 0.17.0): Diablo IV bekam neben qwen3.8@196k kaum VRAM und lastete die GPU
+    # kaum aus, trotzdem lief es (RAM 94 %) - fremdes VRAM und Last allein erkennen das nicht. Bis 0.8.6 machte darum JEDES
+    # Spiel busy; ein kleines (735 MiB, 2 %) sperrte so die ganze Karte. Seit 0.8.7 nur ein Spiel, das die GPU braucht
+    # (game_heavy, gemessen vom Agenten >= 0.19.0, siehe game_needs_gpu). Kurz nach dem Start erst nach game_sustain_s
+    # (Launcher-Blitzer), danach haelt es den Knoten busy, bis das Spiel weg ist.
+    if node.game_since is not None and not node.game_heavy:
+        heavy, why = game_needs_gpu(node)
+        if heavy:
+            node.game_heavy, node.game_heavy_why = True, why
+            log.info("node %s: Spiel %s braucht die GPU (%s)", node.name, (node.game or {}).get("name"), why)
+            state.remember({"event": "game_heavy", "node": node.name, "name": (node.game or {}).get("name"), "why": why})
+        else:
+            node.game_heavy_why = why
+    game = (state.CFG.busy_game and node.game_since is not None and node.game_heavy
             and (node.state == "busy" or now - node.game_since >= state.CFG.game_sustain))
     trigger = hot_long or foreign or keep or game
     if trigger:
@@ -159,6 +169,24 @@ def evaluate(node, now):
             node.free_at = now
             if state.CFG.prewarm_on_free:
                 state.spawn(prewarm(node, state.CFG.prewarm_free_delay, "free", since=node.free_at))
+
+
+def game_needs_gpu(node):
+    """(braucht die GPU?, Grund) fuer das laufende Spiel. Grafikspeicher = eigen + geteilt: ein Spiel, das neben einem grossen
+    Modell kein VRAM mehr bekommt, weicht in den geteilten Speicher aus und zaehlt so trotzdem als schwer. Ohne gemeldeten
+    Bedarf (Agent < 0.19.0, Messung gescheitert) gilt jedes Spiel als schwer - das Verhalten bis 0.8.6."""
+    g = node.game or {}
+    ded, shared, pct = g.get("gpu_dedicated_mib"), g.get("gpu_shared_mib"), g.get("gpu_pct")
+    if not isinstance(ded, (int, float)) or not isinstance(shared, (int, float)):
+        return True, "GPU-Bedarf nicht gemeldet"
+    gib = (ded + shared) / 1024
+    if gib >= state.CFG.game_min_gpu_gib:
+        return True, f"Grafikspeicher {gib:.1f} GiB (eigen {ded:.0f} MiB, geteilt {shared:.0f} MiB)"
+    if isinstance(pct, (int, float)) and pct >= state.CFG.game_min_gpu_pct:
+        return True, f"GPU-Engine {pct:.0f} %"
+    if node.mem_pressure:
+        return True, "Speicherdruck"
+    return False, f"leicht: {gib:.1f} GiB, GPU-Engine " + (f"{pct:.0f} %" if isinstance(pct, (int, float)) else "noch ohne Rate")
 
 
 async def unload_big_models(node):
@@ -206,7 +234,11 @@ async def prewarm(node, delay, reason, since=None):
     if node.state != "free" or node.foreign_since is not None:
         log.info("prewarm on %s uebersprungen (%s): fremdes VRAM %.1f GiB", node.name, reason, node.foreign_vram_gib())
         return
-    if node.mem_pressure or node.game_since is not None:
+    # Ein Spiel, das die GPU braucht oder noch nicht beurteilt ist (game_sustain-Fenster), sperrt das Vorwaermen; ein leichtes
+    # (0.8.7) nicht - sonst bliebe die Karte neben einem kleinen Spiel leer. Braucht es spaeter doch die GPU, wird es schwer,
+    # der Knoten busy und das Grosse entladen.
+    game_blocks = node.game_since is not None and (node.game_heavy or time.time() - node.game_since < state.CFG.game_sustain)
+    if node.mem_pressure or game_blocks:
         # Agent >= 0.17.0: Hauptspeicher knapp oder Spiel gemeldet (z. B. noch im game_sustain-Fenster) - kein Laden, das
         # den Speicher weiter fuellt; nach Spielende erst, wenn auch der Speicherdruck vorbei ist (kein Laden-Entladen-Pingpong)
         log.info("prewarm on %s uebersprungen (%s): %s", node.name, reason, "Speicherdruck" if node.mem_pressure else "Spiel laeuft")
@@ -386,18 +418,21 @@ def note_game_memory(node, b, now):
     g = b.get("game")
     if isinstance(g, dict) and g.get("supported", True):
         was = bool((node.game or {}).get("running"))
-        node.game = {k: g.get(k) for k in ("running", "name", "via", "since") if g.get(k) is not None}
+        node.game = {k: g.get(k) for k in ("running", "name", "via", "since", "procs", "gpu_dedicated_mib", "gpu_shared_mib", "gpu_pct")
+                     if g.get(k) is not None}
         running = bool(g.get("running"))
         if running and node.game_since is None:
             node.game_since = now
         elif not running:
             node.game_since = None
+            node.game_heavy, node.game_heavy_why = False, ""
         if running != was:
             log.info("node %s: Spiel %s%s", node.name, "laeuft" if running else "beendet", f" ({g.get('name')})" if running else "")
             state.remember({"event": "game", "node": node.name, "running": running, "name": g.get("name") if running else None})
             state.MQTT_DIRTY.append(True)
     elif g is None:
         node.game, node.game_since = None, None
+        node.game_heavy, node.game_heavy_why = False, ""
     m = b.get("memory")
     if not isinstance(m, dict):
         node.memory, node.mem_low_count, node.mem_pressure = None, 0, False
