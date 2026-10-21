@@ -1,13 +1,15 @@
 """Konstanten, Logger und reine Helfer ohne Zustand. Werden per Name importiert."""
 
+import base64
 import json
 import logging
+import os
 import re
 
 from aiohttp import web
 
 
-VERSION = "0.8.10"
+VERSION = "0.8.11"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -19,15 +21,63 @@ DATA_CLASSES_DEFAULT = ["public", "internal", "personal", "secret"]   # Stufe 5:
 def read_env_value(path, key, strip_quotes=False):
     """KEY=VALUE roh aus einer Datei (kein systemd-EnvironmentFile-Parsing: Sonderzeichen wie \\ oder " bleiben erhalten).
     None, wenn Datei oder Schluessel fehlen. strip_quotes entfernt umschliessende Anfuehrungszeichen (Cloud-Schluessel)."""
+    if not os.path.exists(path):
+        return None
     try:
         with open(path, encoding="utf-8") as f:
-            for line in f:
-                if line.startswith(key + "="):
-                    v = line.split("=", 1)[1].rstrip("\r\n")
-                    return v.strip().strip('"').strip("'") if strip_quotes else v
-    except FileNotFoundError:
+            lines = f.read().splitlines()
+    except OSError as e:  # exception-ok: file system boundary (rights, file vanished after the check)
+        log.warning("%s unlesbar: %s", path, e)
         return None
-    return None
+    v = next((line.split("=", 1)[1] for line in lines if line.startswith(key + "=")), None)
+    return v.strip().strip('"').strip("'") if v is not None and strip_quotes else v
+
+
+def load_json_file(path, what):
+    """Geparste JSON-Datei; None, wenn sie fehlt oder unlesbar ist (dann mit Warnung). Der Aufrufer prueft die Form."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
+        log.warning("%s unlesbar: %s", what, e)
+        return None
+
+
+def save_json_file(path, data, what, **dump_kw):
+    """Atomar schreiben (tmp + replace). False mit Warnung, wenn es nicht geht; der Stand bleibt beim Aufrufer im Speicher."""
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, **dump_kw)
+        os.replace(tmp, path)
+    except (OSError, TypeError, ValueError) as e:  # exception-ok: file system boundary; json reports unencodable data only so
+        log.warning("%s schreiben: %s", what, e)
+        return False
+    return True
+
+
+_TLS_FP = re.compile(r"[0-9a-f]{64}")
+
+
+def tls_fingerprint(hexfp):
+    """'sha256:AB:CD:...' oder 64 Hexziffern -> 64 Hexziffern klein; None, wenn es kein SHA-256-Fingerprint ist."""
+    fp = str(hexfp or "").lower().removeprefix("sha256:").replace(":", "").strip()
+    return fp if _TLS_FP.fullmatch(fp) else None
+
+
+BASE64 = re.compile(r"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?")
+
+
+def basic_credentials(value):
+    """(user, passwort) aus dem Wert eines Basic-Authorization-Headers (ohne 'Basic '), None wenn er kein Base64 ist.
+    Ungueltiges UTF-8 wird ersetzt - so ein Passwort passt zu keinem gespeicherten, wie vorher die Ablehnung."""
+    value = value.strip()
+    if not BASE64.fullmatch(value):
+        return None
+    user, _, password = base64.b64decode(value).decode("utf-8", errors="replace").partition(":")
+    return user, password
 
 
 def parse_tool_args(args):
@@ -38,7 +88,7 @@ def parse_tool_args(args):
         return {}
     try:
         return json.loads(args)
-    except ValueError:
+    except ValueError:  # exception-ok: the model's tool arguments are untrusted JSON; whether they parse shows only the parser
         return {"_raw": args}
 
 _MAC_RE = re.compile(r"[0-9A-Fa-f]{2}([:-]?)(?:[0-9A-Fa-f]{2}\1){4}[0-9A-Fa-f]{2}")
@@ -74,7 +124,8 @@ async def read_json(request):
     """Body als JSON lesen; None bei ungueltigem JSON. Die Fehlerantwort baut der Aufrufer im Format seines Clients."""
     try:
         return await request.json()
-    except Exception:  # noqa: BLE001 - aiohttp wirft je nach Fall JSONDecodeError, UnicodeDecodeError oder ClientError
+    # aiohttp wirft je nach Fall JSONDecodeError, UnicodeDecodeError oder ClientError
+    except Exception:  # noqa: BLE001  # exception-ok: untrusted request body and the connection it arrives on
         return None
 
 

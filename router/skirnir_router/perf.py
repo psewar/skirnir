@@ -1,14 +1,13 @@
 """Leistungsdaten (passiv + Benchmark) und das Vermessen von Modellen fuer den Katalog."""
 
 import asyncio
-import json
 import os
 import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
 from . import config, nodes, poll, state
-from .common import GIB, log, read_json
+from .common import GIB, load_json_file, log, read_json, save_json_file
 from .outcome import bad_gateway, failed, unavailable
 
 
@@ -17,28 +16,15 @@ def perf_path():
 
 
 def perf_load():
-    if not os.path.exists(perf_path()):
-        return
-    try:
-        with open(perf_path(), encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
-        log.warning("perf.json unlesbar: %s", e)
-        return
+    data = load_json_file(perf_path(), "perf.json")
     if isinstance(data, dict):
         state.PERF.update(data)
-    else:
+    elif data is not None:
         log.warning("perf.json ist kein Mapping - ignoriert")
 
 
 def perf_save():
-    tmp = perf_path() + ".tmp"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(state.PERF, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, perf_path())
-    except OSError as e:  # exception-ok: file system boundary; the data stays in memory and is written again next time
-        log.warning("perf.json schreiben: %s", e)
+    save_json_file(perf_path(), state.PERF, "perf.json", ensure_ascii=False, indent=1)
 
 
 def _num(x):

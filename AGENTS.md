@@ -38,8 +38,12 @@ Applies to all code in this repository, to every agent and every contributor.
 - **Mark every remaining site.** Each `except` and `raise` in router code carries
   `# exception-ok: <reason>` on the same line or on the comment line directly above.
   `test/check_control_flow.py` enforces this in CI and also flags error-text comparisons.
-  Code not yet converted has a per-file ratchet in `test/control_flow_baseline.json`: the
-  count may only go down, and a change that lowers it updates the baseline
-  (`python test/check_control_flow.py --update`). New files start at zero.
+  All router code is converted (router 0.8.11), so `test/control_flow_baseline.json` is empty
+  and every file must stay at zero findings. The per-file ratchet remains only as a mechanism.
+  If a baseline entry is ever added, the count may only go down, and a change that lowers it
+  updates the baseline (`python test/check_control_flow.py --update`).
+- **Shared helpers** for recurring boundaries live in `common.py` (`load_json_file`, `save_json_file`,
+  `read_json`, `basic_credentials`, `tls_fingerprint`) and `values.py` (`number`, `ip_address`).
+  Use them instead of writing a new `try` block for the same case.
 - **Tests** assert expected outcomes as returned values (`self.assertEqual(result.status, 409)`).
   `assertRaises` is for genuine exceptions only (cancellation, programming errors, startup abort).

@@ -16,12 +16,24 @@ from aiohttp import ClientError, ClientTimeout
 
 from .. import state
 from ..common import split_listen
-from .base import DecisionEngine, DecisionRequest, DecisionResult, EngineError
+from ..outcome import Problem
+from .base import DecisionEngine, DecisionRequest, DecisionResult, engine_failed
 
 PROMPT = ("Du ordnest eine Benutzeranfrage genau einer Kategorie zu. Antworte nur mit JSON.\n"
           "Kategorien: {options}\n"
           "{descriptions}"
           "Anfrage:\n\"\"\"\n{context}\n\"\"\"")
+
+
+def chosen_option(content, options):
+    """Die Option aus der Modellantwort: das Feld `option` des erzwungenen JSON, sonst die erste Option im Klartext."""
+    try:
+        parsed = json.loads(content)
+    except ValueError:  # exception-ok: the model's output is untrusted JSON; whether it parses shows only the parser
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed.get("option")
+    return next((o for o in options if o in content), None)
 
 
 class LocalLLMEngine(DecisionEngine):
@@ -36,7 +48,7 @@ class LocalLLMEngine(DecisionEngine):
         _, port = split_listen(state.CFG.listen)
         return f"{'https' if state.CFG.api_tls else 'http'}://127.0.0.1:{port}/api/chat"
 
-    async def decide(self, req: DecisionRequest) -> DecisionResult:
+    async def decide(self, req: DecisionRequest) -> DecisionResult | Problem:
         t0 = time.perf_counter()
         desc = "".join(f"- {o}: {self.descriptions[o]}\n" for o in req.options if o in self.descriptions)
         body = {"model": self.model, "stream": False, "think": False,
@@ -48,17 +60,16 @@ class LocalLLMEngine(DecisionEngine):
         try:
             async with state.SESSION.post(self._url(), json=body, headers=hdrs, timeout=self.timeout, ssl=False if state.CFG.api_tls else None) as r:
                 data = await r.json(content_type=None)
-                if r.status != 200:
-                    raise EngineError(f"local_llm HTTP {r.status}: {str(data)[:120]}")
-        except (ClientError, TimeoutError, OSError) as e:
-            raise EngineError(f"local_llm nicht erreichbar: {type(e).__name__}: {e}") from e
-        content = ((data.get("message") or {}).get("content") or "").strip()
-        try:
-            option = json.loads(content).get("option")
-        except (ValueError, AttributeError):
-            option = next((o for o in req.options if o in content), None)
+                status = r.status
+        except (ClientError, TimeoutError, OSError, ValueError) as e:  # exception-ok: network boundary of the self-call and its JSON
+            return engine_failed(f"local_llm nicht erreichbar: {type(e).__name__}: {e}")
+        if status != 200 or not isinstance(data, dict):
+            return engine_failed(f"local_llm HTTP {status}: {str(data)[:120]}")
+        message = data.get("message") if isinstance(data.get("message"), dict) else {}
+        content = str(message.get("content") or "").strip()
+        option = chosen_option(content, req.options)
         if option not in req.options:
-            raise EngineError(f"local_llm: keine gueltige Option in {content[:80]!r}")
+            return engine_failed(f"local_llm: keine gueltige Option in {content[:80]!r}")
         probs = {o: (1.0 if o == option else 0.0) for o in req.options}
         return DecisionResult(selected=option, probabilities=probs, engine=self.name, model=(data.get("routing") or {}).get("model") or self.model,
                               latency_ms=(time.perf_counter() - t0) * 1000, model_probability=None,

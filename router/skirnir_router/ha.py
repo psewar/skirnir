@@ -1,6 +1,7 @@
 """Home Assistant: Zustandsbild und MQTT-Discovery."""
 
 import asyncio
+import importlib.util
 import json
 import os
 import threading
@@ -8,9 +9,9 @@ import time
 
 from aiohttp import web
 
-try:
-    import paho.mqtt.client as mqtt  # Debian: python3-paho-mqtt (1.6); optional
-except ImportError:  # pragma: no cover
+if importlib.util.find_spec("paho") is not None:   # Debian: python3-paho-mqtt (1.6); optional
+    import paho.mqtt.client as mqtt
+else:  # pragma: no cover
     mqtt = None
 
 from . import scheduler, state
@@ -22,13 +23,9 @@ LEGACY_BASE = "ollama-router"       # altes base_topic
 
 
 def _usage_today_fields():
-    try:
-        from . import metrics
-        t = metrics.usage_totals(metrics.usage_today())
-        return {"requests_today": t["requests"], "tokens_today": t["prompt_tokens"] + t["completion_tokens"],
-                "errors_today": t["errors"]}
-    except Exception:  # noqa: BLE001
-        return {"requests_today": 0, "tokens_today": 0, "errors_today": 0}
+    from . import metrics   # spaet, um Importzyklen zu vermeiden
+    t = metrics.usage_totals(metrics.usage_today())
+    return {"requests_today": t["requests"], "tokens_today": t["prompt_tokens"] + t["completion_tokens"], "errors_today": t["errors"]}
 
 
 def ha_snapshot(now=None):
@@ -165,7 +162,7 @@ class HAPublisher:
         try:
             c.connect_async(self.cfg["host"], int(self.cfg.get("port", 1883)), keepalive=30)
             c.loop_start()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001  # exception-ok: MQTT broker boundary; paho reconnects by itself, HA is optional
             log.error("MQTT connect failed: %s", e)
 
     def _on_connect(self, client, userdata, flags, rc):
@@ -365,26 +362,26 @@ class HAPublisher:
                     self.client.publish(f"{self.base}/status", "online", qos=1, retain=True)
                     self.publish_state()
                     last = time.time()
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:  # noqa: BLE001  # exception-ok: MQTT boundary in a background loop; the next connect announces again
                     log.warning("MQTT Anmeldung: %s", e)
             if self.sweep_at and time.time() >= self.sweep_at:
                 self.sweep_at = 0.0
                 try:
                     self.sweep_orphans()
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:  # noqa: BLE001  # exception-ok: MQTT boundary in a background loop; the sweep is best effort
                     log.warning("MQTT sweep: %s", e)
             if state.MQTT_EVENTS and self.client and self.connected:
                 events, state.MQTT_EVENTS[:] = list(state.MQTT_EVENTS), []
                 for e in events:
                     try:
                         self.client.publish(f"{self.base}/kuerzung", json.dumps(e), qos=1, retain=False)
-                    except Exception as ex:  # noqa: BLE001
+                    except Exception as ex:  # noqa: BLE001  # exception-ok: MQTT broker boundary; one lost event, the loop goes on
                         log.warning("MQTT Ereignis: %s", ex)
             if state.MQTT_DIRTY or time.time() - last >= self.interval:
                 state.MQTT_DIRTY.clear()
                 try:
                     self.publish_state()
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:  # noqa: BLE001  # exception-ok: MQTT boundary in a background loop; the next interval publishes again
                     log.warning("MQTT publish: %s", e)
                 last = time.time()
 
@@ -394,5 +391,5 @@ class HAPublisher:
                 self.client.publish(f"{self.base}/status", "offline", qos=1, retain=True).wait_for_publish(2)
                 self.client.loop_stop()
                 self.client.disconnect()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001  # exception-ok: shutdown at the MQTT boundary; the broker may already be gone
+                log.debug("MQTT stop: %s", e)

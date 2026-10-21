@@ -1,18 +1,18 @@
 """Passwort-Hashes und Basic Auth fuer die Control-Plane; Client-Authentifizierung fuer den API-Port (Stufe 2)."""
 
 import asyncio
-import base64
 import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from collections import deque
 
 from aiohttp import web
 
 from . import state
-from .common import anthropic_error, log, ollama_error, openai_error
+from .common import anthropic_error, basic_credentials, log, ollama_error, openai_error
 from .outcome import Problem
 
 
@@ -49,7 +49,7 @@ def audit(event, **fields):
                 os.makedirs(d, exist_ok=True)
             with open(path, "a", encoding="utf-8") as f:
                 f.write(line + "\n")
-        except Exception as e:  # noqa: BLE001
+        except OSError as e:  # exception-ok: file system boundary; the event still goes to the journal below
             if not _audit_failed[0]:
                 log.warning("Audit-Log %s nicht schreibbar (%s) - Ereignisse nur noch im Journal", path, e)
                 _audit_failed[0] = True
@@ -64,10 +64,7 @@ def resolve_client(request):
     if header.startswith("Bearer "):
         token = header[7:].strip()
     elif header.startswith("Basic "):
-        try:
-            user, _, token = base64.b64decode(header[6:]).decode("utf-8").partition(":")
-        except Exception:  # noqa: BLE001
-            token = None
+        user, token = basic_credentials(header[6:]) or (None, None)
     elif request.headers.get("x-api-key"):
         # Anthropic-Clients: Claude Code schickt ANTHROPIC_AUTH_TOKEN als Bearer, ANTHROPIC_API_KEY als x-api-key
         token, key_via = request.headers["x-api-key"].strip(), "x-api-key"
@@ -220,13 +217,17 @@ def hash_password(password, iterations=200_000, salt=None):
     return f"pbkdf2:{iterations}:{salt.hex()}:{h.hex()}"
 
 
+PASSWORD_HASH = re.compile(r"pbkdf2:([1-9][0-9]{0,8}):((?:[0-9a-fA-F]{2})+):((?:[0-9a-fA-F]{2})+)")
+
+
 def verify_password(password, stored):
-    try:
-        _, iters, salt_hex, hash_hex = stored.split(":")
-        h = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), int(iters))
-        return hmac.compare_digest(h.hex(), hash_hex)
-    except Exception:  # noqa: BLE001
+    """Passwort gegen 'pbkdf2:<runden>:<salz-hex>:<hash-hex>' (hash_password); False auch fuer einen unlesbaren Eintrag."""
+    m = PASSWORD_HASH.fullmatch(str(stored or ""))
+    if not m:
         return False
+    iters, salt_hex, hash_hex = m.groups()
+    h = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8", errors="replace"), bytes.fromhex(salt_hex), int(iters))
+    return hmac.compare_digest(h.hex(), hash_hex)
 
 
 # Geprueft-Cache fuer Basic Auth (2026-09-11): PBKDF2 mit 200 000 Runden kostet ~200 ms CPU je Aufruf - im Event-Loop. Die UI
@@ -291,20 +292,17 @@ async def basic_auth_middleware(request, handler):
     remote = request.remote or "?"
     ok = False
     if auth.startswith("Basic "):
-        try:
-            user, _, pw = base64.b64decode(auth[6:]).decode("utf-8").partition(":")
-            stored = state.CFG.control_users.get(user)
-            if stored:
-                key = hashlib.sha256((auth + "|" + stored).encode("utf-8")).hexdigest()
-                ok = _basic_cached(key)
-                if ok is None:
-                    if _basic_fail_src(remote, note=False):
-                        return web.json_response({"error": "too many failed logins, try again in a minute"}, status=429,
-                                                 headers={"Retry-After": str(BASIC_FAIL_S)})
-                    ok = await asyncio.to_thread(verify_password, pw, stored)   # PBKDF2 (~200 ms) nicht im Event-Loop
-                    _basic_note(key, ok)
-        except Exception:  # noqa: BLE001
-            ok = False
+        user, pw = basic_credentials(auth[6:]) or (None, None)
+        stored = state.CFG.control_users.get(user) if user is not None else None
+        if stored:
+            key = hashlib.sha256((auth + "|" + stored).encode("utf-8")).hexdigest()
+            ok = _basic_cached(key)
+            if ok is None:
+                if _basic_fail_src(remote, note=False):
+                    return web.json_response({"error": "too many failed logins, try again in a minute"}, status=429,
+                                             headers={"Retry-After": str(BASIC_FAIL_S)})
+                ok = await asyncio.to_thread(verify_password, pw, stored)   # PBKDF2 (~200 ms) nicht im Event-Loop
+                _basic_note(key, ok)
         if not ok:
             _basic_fail_src(remote, note=True)
     if not ok:
