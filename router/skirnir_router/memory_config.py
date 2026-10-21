@@ -118,7 +118,8 @@ def parse_client_memory(raw, classes):
     for project, policy in projects.items():
         if not isinstance(project, str) or not project.strip() or len(project) > 128 or any(ord(c) < 32 for c in project):
             return invalid("invalid memory project name")
-        if not isinstance(policy, dict) or set(policy) - {"read", "write", "delete", "data_class", "allow_cloud", "scope", "allow_private_addresses"}:
+        if not isinstance(policy, dict) or set(policy) - {"read", "write", "delete", "data_class", "allow_cloud", "scope", "allow_private_addresses",
+                                                          "recall_with"}:
             return invalid("invalid memory project policy")
         if policy.get("data_class") not in classes:
             return invalid("each memory project needs an explicit configured data_class")
@@ -136,6 +137,16 @@ def parse_client_memory(raw, classes):
         if failed(scope):
             return scope
         clean[project]["scope"] = scope
+        # recall_with (0.8.9): further projects of the same client read together with this one (e.g. a shared scope next to
+        # the private bank). A client whose memory plugin serves a single bank reaches the others only this way.
+        extra = policy.get("recall_with", [])
+        if not isinstance(extra, list) or len(extra) > 4 or any(not isinstance(x, str) for x in extra) or len(set(extra)) != len(extra):
+            return invalid("memory project recall_with must be a list of at most 4 distinct project names")
+        clean[project]["recall_with"] = tuple(extra)
+    for project, grant in clean.items():
+        for other in grant["recall_with"]:
+            if other == project or other not in clean or not clean[other]["read"]:
+                return invalid("memory project recall_with must name other projects of this client with read access")
     strategy = raw.get("strategy", "legacy")
     if strategy not in ("legacy", "off", "manual", "auto", "hybrid"):
         return invalid("invalid memory strategy")

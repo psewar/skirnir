@@ -221,11 +221,15 @@ async def gateway_recall(service, scope, data):
     tokens = data.get("max_tokens")
     if tokens is not None and (type(tokens) is not int or not 1 <= tokens <= 100000):
         return invalid("invalid recall budget")
-    recalled = await service.recall(scope, data["query"], types=data.get("types"), text_budget=tokens)
+    recalled = await service.recall_merged(scope, data["query"], types=data.get("types"), text_budget=tokens)
     if failed(recalled):
         return recalled
-    return memory.recall_response({"results": [{"id": x["source"], "text": x["text"], "metadata": x.get("provenance", {})}
-                                               for x in recalled.items], "trusted": False}, recalled)
+    # A fact from a further project (recall_with) names it in the text: Hermes' plugin passes on only the text, so the
+    # model would otherwise not know a statement comes from the shared memory. Also as metadata for clients that read it.
+    return memory.recall_response({"results": [
+        {"id": x["source"], "text": (f"[{x['project']}] " if x.get("project") else "") + x["text"],
+         "metadata": {**x.get("provenance", {}), **({"memory_project": x["project"]} if x.get("project") else {})}}
+        for x in recalled.items], "trusted": False}, recalled)
 
 
 async def gateway_retain(service, scope, principal, alias, data):
