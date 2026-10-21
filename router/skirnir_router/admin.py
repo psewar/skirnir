@@ -2,7 +2,6 @@
 
 import asyncio
 import hashlib
-import ipaddress
 import os
 import re
 import secrets
@@ -10,9 +9,9 @@ import time
 
 from aiohttp import ClientTimeout, web
 
-from . import auth, config, perf, state
+from . import auth, config, perf, state, values
 from . import admission, cloud, decision, metrics, ops
-from .outcome import failed
+from .outcome import failed, invalid
 from .decision.base import DecisionRequest
 from . import request as request_mod
 from .common import VERSION, GIB, log, read_json, split_listen
@@ -80,23 +79,28 @@ def clients_view():
 
 
 def _client_spec(name, v):
-    """Felder eines Clients aus der UI pruefen (ValueError mit Klartext)."""
+    """Felder eines Clients aus der UI pruefen: die Felder oder ein Problem 400 mit Klartext."""
     if not isinstance(v, dict):
-        raise ValueError(f"Client {name}: Objekt erwartet")
+        return invalid(f"Client {name}: Objekt erwartet")
     bad = set(v) - set(CLIENT_FIELDS)
     if bad:
-        raise ValueError(f"Client {name}: Feld(er) {sorted(bad)} nicht ueber die UI setzbar (Secret: POST /admin/clients/{name}/token)")
+        return invalid(f"Client {name}: Feld(er) {sorted(bad)} nicht ueber die UI setzbar (Secret: POST /admin/clients/{name}/token)")
     spec = {}
     if v.get("ip"):
         ips = v["ip"] if isinstance(v["ip"], list) else [x.strip() for x in str(v["ip"]).replace(";", ",").split(",") if x.strip()]
-        spec["ip"] = [str(ipaddress.ip_address(str(x).strip())) for x in ips]
+        spec["ip"] = [values.ip_address(x, f"Client {name}") for x in ips]
+        problem = next((p for p in spec["ip"] if failed(p)), None)
+        if problem:
+            return problem
     if v.get("roles"):
         spec["roles"] = [str(x).strip() for x in (v["roles"] if isinstance(v["roles"], list) else str(v["roles"]).split(",")) if str(x).strip()]
     for k in ("models", "cloud"):
         if v.get(k) is not None:
             spec[k] = bool(v[k])
     if v.get("requests_per_minute") is not None:
-        spec["requests_per_minute"] = int(v["requests_per_minute"])
+        spec["requests_per_minute"] = values.number(v["requests_per_minute"], f"Client {name}: requests_per_minute", integer=True)
+        if failed(spec["requests_per_minute"]):
+            return spec["requests_per_minute"]
     for k in ("max_priority", "data_class"):
         if v.get(k):
             spec[k] = str(v[k])
@@ -169,12 +173,11 @@ async def handle_config_put(request):
     b = await read_json(request)
     if b is None:
         return _bad("invalid json")
-    try:
-        ov = _overrides_from_request(b)
-        _estimate_unknown_tier_models(ov)
-        new = _merge_overrides(config.read_overrides(), ov)
-    except (ValueError, TypeError) as e:
-        return _bad(str(e))
+    ov = _overrides_from_request(b)
+    estimated = ov if failed(ov) else _estimate_unknown_tier_models(ov)
+    new = estimated if failed(estimated) else _merge_overrides(config.read_overrides(), ov)
+    if failed(new):
+        return _bad(new.message)
     written = config.write_overrides(new)   # Schema- und Pruefungsfehler landen als 400 beim Bediener
     if failed(written):
         return _bad(f"invalid configuration: {written.message}") if written.status == 400 else \
@@ -184,27 +187,38 @@ async def handle_config_put(request):
 
 
 def _overrides_from_request(b):
-    """Body der UI -> Override-Abschnitte (validiert, noch nicht mit dem Bestand zusammengefuehrt). ValueError = 400."""
+    """Body der UI -> Override-Abschnitte (validiert, noch nicht mit dem Bestand zusammengefuehrt), oder ein Problem 400."""
+    if not isinstance(b, dict):
+        return invalid("Objekt erwartet")
+    for key in ("roles", "models", "settings", "clients"):   # Stufe 7 settings: {pfad: wert}; null = Override entfernen
+        if not isinstance(b.get(key) or {}, dict):
+            return invalid(f"{key} muss ein Mapping sein")
+    for key in ("delete_models", "delete_clients"):
+        if not isinstance(b.get(key) or [], list):
+            return invalid(f"{key} muss eine Liste sein")
     ov = {}
     if "roles" in b:
         ov["roles"] = _roles_from(b["roles"] or {})
     if "models" in b:
         ov["models"] = _models_from(b["models"] or {})
-    if "settings" in b:   # Stufe 7: {pfad: wert}; null = Override entfernen (zurueck auf config.yaml)
-        if not isinstance(b["settings"], dict):
-            raise ValueError("settings muss ein Mapping Pfad -> Wert sein")
-        ov["settings"] = dict(b["settings"])
+    if "settings" in b:
+        ov["settings"] = dict(b["settings"] or {})
     if "delete_models" in b:
         ov["delete_models"] = [str(m) for m in (b["delete_models"] or [])]
     if "clients" in b:   # Clients-Tab: neue Clients oder Felder bestehender; das Secret kommt separat ueber /admin/clients/<n>/token
-        if not isinstance(b["clients"], dict):
-            raise ValueError("clients muss ein Mapping Name -> Felder sein")
-        ov["clients"] = _clients_from(b["clients"])
+        ov["clients"] = _clients_from(b["clients"] or {})
     if "delete_clients" in b:
         ov["delete_clients"] = [str(n) for n in (b["delete_clients"] or [])]
     if "expose_concrete_models" in b:
         ov["expose_concrete_models"] = bool(b["expose_concrete_models"])
-    return ov
+    return next((v for v in ov.values() if failed(v)), ov)
+
+
+def _tier_from(role, t):
+    if not isinstance(t, dict) or not t.get("model"):
+        return invalid(f"Rolle {role}: jedes Tier braucht model und num_ctx")
+    ctx = values.number(t.get("num_ctx"), f"Rolle {role}: num_ctx", integer=True)
+    return ctx if failed(ctx) else {"model": str(t["model"]), "num_ctx": ctx, "busy_ok": bool(t.get("busy_ok", False))}
 
 
 def _roles_from(raw):
@@ -212,12 +226,14 @@ def _roles_from(raw):
     for name, r in raw.items():
         name = str(name).strip()
         if not name or ":" in name or " " in name:
-            raise ValueError(f"ungültiger Rollenname {name!r}")
-        tiers = r.get("tiers") or []
-        if not tiers:
-            raise ValueError(f"Rolle {name}: mindestens ein Tier")
-        roles[name] = {"exposed_as": f"{name}:latest",
-                       "tiers": [{"model": str(t["model"]), "num_ctx": int(t["num_ctx"]), "busy_ok": bool(t.get("busy_ok", False))} for t in tiers]}
+            return invalid(f"ungültiger Rollenname {name!r}")
+        tiers = (r.get("tiers") if isinstance(r, dict) else None) or []
+        if not isinstance(tiers, list) or not tiers:
+            return invalid(f"Rolle {name}: mindestens ein Tier")
+        roles[name] = {"exposed_as": f"{name}:latest", "tiers": [_tier_from(name, t) for t in tiers]}
+        problem = next((t for t in roles[name]["tiers"] if failed(t)), None)
+        if problem:
+            return problem
         if r.get("latency_first") is not None:
             roles[name]["latency_first"] = bool(r["latency_first"])
         for k in ("priority", "canary", "shadow"):   # Stufe 3/6: die UI darf sie setzen; fehlen sie, bleibt config.yaml
@@ -231,34 +247,52 @@ def _models_from(raw):
     for m, v in raw.items():
         m = str(m).strip()
         if not m or " " in m:
-            raise ValueError(f"ungültiger Modellname {m!r}")
-        models[m] = _cloud_model_entry(m, v) if v.get("cloud") else {"weights_gib": float(v["weights_gib"]), "kv_gib_per_1k": float(v.get("kv_gib_per_1k", 0))}
+            return invalid(f"ungültiger Modellname {m!r}")
+        if not isinstance(v, dict):
+            return invalid(f"Modell {m}: Objekt erwartet")
+        entry = _cloud_model_entry(m, v) if v.get("cloud") else _local_model_entry(m, v)
+        if failed(entry):
+            return entry
         if v.get("max_parallel"):   # 0.6.5: Grenze gleichzeitiger Anfragen je Knoten fuer dieses Modell
-            models[m]["max_parallel"] = int(v["max_parallel"])
-            if models[m]["max_parallel"] < 1:
-                raise ValueError(f"Modell {m}: max_parallel muss mindestens 1 sein")
+            entry["max_parallel"] = values.number(v["max_parallel"], f"Modell {m}: max_parallel", integer=True)
+            if failed(entry["max_parallel"]):
+                return entry["max_parallel"]
+            if entry["max_parallel"] < 1:
+                return invalid(f"Modell {m}: max_parallel muss mindestens 1 sein")
+        models[m] = entry
     return models
+
+
+def _local_model_entry(m, v):
+    weights = values.number(v.get("weights_gib"), f"Modell {m}: weights_gib")
+    kv = values.number(v.get("kv_gib_per_1k", 0), f"Modell {m}: kv_gib_per_1k")
+    return next((x for x in (weights, kv) if failed(x)), None) or {"weights_gib": weights, "kv_gib_per_1k": kv}
 
 
 def _cloud_model_entry(m, v):
     """Stufe 7: Cloud-Modell im Katalog anlegen/aendern (Anbieter, Preise, Kontext, Faehigkeiten)."""
     if v["cloud"] not in (state.CFG.cloud.get("providers") or {}):
-        raise ValueError(f"Modell {m}: Cloud-Anbieter {v['cloud']} ist nicht konfiguriert")
+        return invalid(f"Modell {m}: Cloud-Anbieter {v['cloud']} ist nicht konfiguriert")
     pr = v.get("price_chf_per_m") or {}
-    try:
-        e = {"cloud": str(v["cloud"]), "price_chf_per_m": {"input": float(pr.get("input", 0)), "output": float(pr.get("output", 0))}}
-        if v.get("provider_model"):
-            e["provider_model"] = str(v["provider_model"]).strip()
-        if v.get("context_tokens"):
-            e["context_tokens"] = int(v["context_tokens"])
-        if v.get("reasoning") is not None:
-            e["reasoning"] = bool(v["reasoning"])
-        if v.get("capabilities") is not None:
-            e["capabilities"] = {str(k): bool(x) for k, x in dict(v["capabilities"]).items()}
-        if v.get("note"):
-            e["note"] = str(v["note"])[:200]
-    except (TypeError, ValueError) as ex:
-        raise ValueError(f"Modell {m}: {ex}") from None
+    if not isinstance(pr, dict) or not isinstance(v.get("capabilities") or {}, dict):
+        return invalid(f"Modell {m}: price_chf_per_m und capabilities muessen Mappings sein")
+    prices = {k: values.number(pr.get(k, 0), f"Modell {m}: price_chf_per_m.{k}") for k in ("input", "output")}
+    problem = next((p for p in prices.values() if failed(p)), None)
+    if problem:
+        return problem
+    e = {"cloud": str(v["cloud"]), "price_chf_per_m": prices}
+    if v.get("provider_model"):
+        e["provider_model"] = str(v["provider_model"]).strip()
+    if v.get("context_tokens"):
+        e["context_tokens"] = values.number(v["context_tokens"], f"Modell {m}: context_tokens", integer=True)
+        if failed(e["context_tokens"]):
+            return e["context_tokens"]
+    if v.get("reasoning") is not None:
+        e["reasoning"] = bool(v["reasoning"])
+    if v.get("capabilities") is not None:
+        e["capabilities"] = {str(k): bool(x) for k, x in v["capabilities"].items()}
+    if v.get("note"):
+        e["note"] = str(v["note"])[:200]
     return e
 
 
@@ -267,13 +301,15 @@ def _clients_from(raw):
     for name, v in raw.items():
         name = str(name).strip()
         if not CLIENT_NAME.match(name):
-            raise ValueError(f"ungültiger Client-Name {name!r} (a-z, 0-9, -, _)")
+            return invalid(f"ungültiger Client-Name {name!r} (a-z, 0-9, -, _)")
         clients[name] = _client_spec(name, v or {})
+        if failed(clients[name]):
+            return clients[name]
     return clients
 
 
 def _estimate_unknown_tier_models(ov):
-    """Tier-Modelle ohne Katalogeintrag: aus Knotenwissen ableiten (Dateigroesse), sonst ablehnen."""
+    """Tier-Modelle ohne Katalogeintrag: aus Knotenwissen ableiten (Dateigroesse), sonst ein Problem 400."""
     known = set(state.CFG.models) | set(ov.get("models", {}))
     for name, r in ov.get("roles", {}).items():
         for t in r["tiers"]:
@@ -281,7 +317,7 @@ def _estimate_unknown_tier_models(ov):
                 continue
             size = max((n.model_details.get(t["model"], {}).get("size", 0) for n in state.NODES.values()), default=0)
             if not size:
-                raise ValueError(f"Rolle {name}: Modell {t['model']} ist weder im Katalog noch auf einem Knoten")
+                return invalid(f"Rolle {name}: Modell {t['model']} ist weder im Katalog noch auf einem Knoten")
             ov.setdefault("models", {})[t["model"]] = {"weights_gib": round(size / GIB * 1.05, 2), "kv_gib_per_1k": 0.1,
                                                         "source": "geschaetzt", "note": "geschaetzt aus Dateigroesse, bitte messen"}
             known.add(t["model"])
@@ -289,7 +325,7 @@ def _estimate_unknown_tier_models(ov):
 
 def _merge_overrides(current, ov):
     """Neue Abschnitte in die bestehenden Overrides einarbeiten: Katalog und Clients ergaenzen, Settings mit null loeschen,
-    Loeschlisten anwenden. ValueError = 400 (Modell noch in Rollen, Client aus config.yaml)."""
+    Loeschlisten anwenden. Problem 400: Modell noch in Rollen, Client aus config.yaml."""
     if "models" in ov:
         cur_models = current.get("models", {})
         merged = dict(cur_models)
@@ -313,11 +349,15 @@ def _merge_overrides(current, ov):
                 merged[k] = v
         ov["settings"] = merged
     if "delete_models" in ov:
-        _apply_delete_models(current, ov)
+        problem = _apply_delete_models(current, ov)
+        if failed(problem):
+            return problem
     if "clients" in ov:
         ov["clients"] = _merge_clients(current, ov["clients"])
     if "delete_clients" in ov:
-        _apply_delete_clients(current, ov)
+        problem = _apply_delete_clients(current, ov)
+        if failed(problem):
+            return problem
     new = {**current, **ov}
     for key in ("settings", "clients"):
         if new.get(key) == {}:
@@ -330,8 +370,7 @@ def _apply_delete_models(current, ov):
     gone = [m for m in ov.pop("delete_models") if m not in base_models]
     ov["models"] = {m: v for m, v in {**current.get("models", {}), **ov.get("models", {})}.items() if m not in gone}
     used = [(r, t["model"]) for r, rr in {**current.get("roles", {}), **ov.get("roles", {})}.items() for t in rr.get("tiers", []) if t["model"] in gone]
-    if used:
-        raise ValueError(f"Modell wird noch in Rollen benutzt: {used}")
+    return invalid(f"Modell wird noch in Rollen benutzt: {used}") if used else None
 
 
 def _merge_clients(current, incoming):
@@ -347,7 +386,7 @@ def _merge_clients(current, incoming):
 def _apply_delete_clients(current, ov):
     blocked = [n for n in ov["delete_clients"] if n in base_clients()]
     if blocked:
-        raise ValueError(f"Client(s) {blocked} stehen in config.yaml und lassen sich nur per Deploy entfernen")
+        return invalid(f"Client(s) {blocked} stehen in config.yaml und lassen sich nur per Deploy entfernen")
     gone = set(ov.pop("delete_clients"))
     ov["clients"] = {n: v for n, v in {**(current.get("clients") or {}), **ov.get("clients", {})}.items() if n not in gone}
     ov["settings"] = {k: v for k, v in {**(current.get("settings") or {}), **ov.get("settings", {})}.items()
@@ -370,7 +409,10 @@ async def handle_try(request):
         return _bad("invalid json")
     body = {"model": b.get("model"), "stream": False, "messages": [{"role": "user", "content": b.get("prompt") or "Antworte nur mit OK"}]}
     if b.get("num_ctx"):
-        body["options"] = {"num_ctx": int(b["num_ctx"])}
+        ctx = values.number(b["num_ctx"], "num_ctx", integer=True)
+        if failed(ctx):
+            return _bad(ctx.message)
+        body["options"] = {"num_ctx": ctx}
     if "think" in b:
         body["think"] = bool(b["think"])   # thinking-Modelle (glm, qwen3.6, gpt-oss, granite) denken sonst unsichtbar vor der Antwort
     rt = {k: v for k, v in (b.get("routing") or {}).items() if v not in (None, "", [])}   # UI: execution, data_class, priority, require
@@ -384,7 +426,7 @@ async def handle_try(request):
         async with state.SESSION.post(url, json=body, headers=hdrs, timeout=ClientTimeout(total=state.CFG.request_timeout_s), ssl=False if state.CFG.api_tls else None) as r:
             data = await r.json(content_type=None)
             status = r.status
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001  # exception-ok: network boundary of the self-call; the operator sees the reason
         return web.json_response({"status": 502, "answer": str(e), "seconds": round(time.time() - t0, 1)})
     # ueber die request_id, nicht per Index: der Ring ist nach dem Laden von events.jsonl voll, ein Slice ab len() waere leer
     decision = next((d for d in reversed(state.DECISIONS) if d.get("event") == "route" and d.get("request_id") == rid), None)
@@ -400,10 +442,8 @@ async def handle_try(request):
 
 
 def _decisions_n(request):
-    try:
-        return max(1, min(int(request.query.get("decisions", 50)), state.DECISIONS_KEEP))
-    except (TypeError, ValueError):
-        return 50
+    raw = request.query.get("decisions", "50")
+    return max(1, min(int(raw), state.DECISIONS_KEEP)) if re.fullmatch(r"\d{1,7}", raw) else 50
 
 
 LOADTEST = {"running": False}
@@ -418,8 +458,11 @@ async def handle_loadtest(request):
         return _bad("invalid json")
     if LOADTEST["running"]:
         return web.json_response({"error": "a load test is already running"}, status=409)
-    n = max(1, min(int(b.get("n") or 20), 300))
-    conc = max(1, min(int(b.get("concurrency") or 4), 16))
+    n, conc, ctx = (values.number(b.get(k) or d, k, integer=True) for k, d in (("n", 20), ("concurrency", 4), ("num_ctx", 0)))
+    problem = next((p for p in (n, conc, ctx) if failed(p)), None)
+    if problem:
+        return _bad(problem.message)
+    n, conc = max(1, min(n, 300)), max(1, min(conc, 16))
     model = b.get("model") or "standard:latest"
     prompt = b.get("prompt") or "Antworte nur mit OK."
     probe = bool(b.get("probe_interactive"))
@@ -431,15 +474,15 @@ async def handle_loadtest(request):
     async def one(i, prio, sink):
         body = {"model": model, "stream": False, "think": False, "messages": [{"role": "user", "content": prompt}],
                 "routing": {"request_id": f"lt-{prio[0]}{i}-{int(t_start)}", "priority": prio}}
-        if b.get("num_ctx"):
-            body["options"] = {"num_ctx": int(b["num_ctx"])}
+        if ctx:
+            body["options"] = {"num_ctx": ctx}
         t0 = time.time()
         try:
             async with state.SESSION.post(url, json=body, headers=hdrs, timeout=ClientTimeout(total=state.CFG.request_timeout_s),
                                           ssl=False if state.CFG.api_tls else None) as r:
                 data = await r.json(content_type=None)
                 status = r.status
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001  # exception-ok: network boundary of the self-call; counted as a failed request
             sink.append({"wall": time.time() - t0, "status": 599, "error": str(e)[:80]})
             return
         ri = (data.get("routing") or {}) if isinstance(data, dict) else {}
@@ -470,10 +513,7 @@ async def handle_loadtest(request):
         await asyncio.gather(*tasks)
         if ptask:
             ptask.cancel()
-            try:
-                await ptask
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
+            await asyncio.gather(ptask, return_exceptions=True)   # wait for the cancelled probe; its outcome does not matter
     finally:
         LOADTEST["running"] = False
     total = time.time() - t_start

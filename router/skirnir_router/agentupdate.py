@@ -19,6 +19,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import secrets
 import time
 
@@ -34,6 +35,7 @@ TOKEN_TTL_S = 900
 DRAIN_S = 600
 STALL_S = 900
 _MANIFEST = {"mtime": None, "data": None}
+STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")   # version_since, vom Router selbst geschrieben
 
 
 def agent_dir():
@@ -50,7 +52,7 @@ def load_manifest():
     p = os.path.join(agent_dir(), "manifest.json")
     try:
         mtime = os.stat(p).st_mtime
-    except FileNotFoundError:
+    except FileNotFoundError:  # exception-ok: stat is the existence check; a separate check would race with deploy.py
         _MANIFEST.update(mtime=None, data=None)
         return None
     if _MANIFEST["mtime"] == mtime:
@@ -58,13 +60,15 @@ def load_manifest():
     try:
         with open(p, encoding="utf-8") as f:
             raw = json.load(f)
-        m = raw["manifest"]
-        if not m.get("version") or not isinstance(m.get("files"), list):
-            raise ValueError("version/files fehlen")
-        data = {"manifest": m, "signature": raw.get("signature", ""), "raw": raw}
-    except Exception as e:  # noqa: BLE001
+    except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
         log.warning("agent/manifest.json unlesbar: %s", e)
-        data = None
+        raw = None
+    m = raw.get("manifest") if isinstance(raw, dict) else None
+    data = None
+    if isinstance(m, dict) and m.get("version") and isinstance(m.get("files"), list):
+        data = {"manifest": m, "signature": raw.get("signature", ""), "raw": raw}
+    elif raw is not None:
+        log.warning("agent/manifest.json unlesbar: manifest mit version/files fehlt")
     _MANIFEST.update(mtime=mtime, data=data)
     return data
 
@@ -77,8 +81,16 @@ def file_for(manifest, os_name, arch):
 
 
 def verify_with(public_key_b64, manifest, signature_b64):
-    """Optionale Selbstpruefung auf dem Router (wenn modes.agent_update.public_key gesetzt ist): dieselbe Pruefung wie im Agenten."""
-    Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64)).verify(base64.b64decode(signature_b64), canonical(manifest))
+    """Optionale Selbstpruefung auf dem Router (wenn modes.agent_update.public_key gesetzt ist): dieselbe Pruefung wie im Agenten.
+    None, wenn die Signatur passt, sonst der Grund."""
+    try:
+        key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64))
+        key.verify(base64.b64decode(signature_b64), canonical(manifest))
+    except InvalidSignature:  # exception-ok: cryptography reports a wrong signature only as an exception
+        return "signature does not match"
+    except ValueError:  # exception-ok: base64 and cryptography report a malformed key or signature only as an exception
+        return "key or signature malformed"
+    return None
 
 
 def available_for(e):
@@ -196,11 +208,9 @@ async def order_update(fp, reason="ui", force=False):
     if node.inflight > 0 and not force:
         return False, f"node is serving {node.inflight} request(s)"
     pub = (state.CFG.agent_update or {}).get("public_key")
-    if pub:
-        try:
-            verify_with(pub, m["manifest"], m["signature"])
-        except (InvalidSignature, ValueError) as ex:
-            return False, f"manifest signature invalid ({ex.__class__.__name__}), nothing sent"
+    why = verify_with(pub, m["manifest"], m["signature"]) if pub else None
+    if why:
+        return False, f"manifest signature invalid ({why}), nothing sent"
     token = make_token(fp, f["name"])
     url = f"{state.CFG.public_url.rstrip('/')}/v1/agent/binary/{f['name']}"
     msg = {"t": "update", "version": version, "file": f["name"], "url": url, "sha256": f["sha256"], "size": f.get("size", 0),
@@ -256,12 +266,9 @@ def canary_clean(cfg, version, now):
     node = state.NODES.get(name)
     if e is None or node is None or node.state == "offline":
         return False
-    if (e.get("facts") or {}).get("agent_version") != version or not e.get("version_since"):
+    if (e.get("facts") or {}).get("agent_version") != version or not STAMP.fullmatch(str(e.get("version_since") or "")):
         return False
-    try:
-        since = time.mktime(time.strptime(e["version_since"], "%Y-%m-%dT%H:%M:%S"))
-    except ValueError:
-        return False
+    since = time.mktime(time.strptime(e["version_since"], "%Y-%m-%dT%H:%M:%S"))
     return now - since >= float(cfg.get("canary_clean_h", 24)) * 3600
 
 
@@ -284,7 +291,7 @@ async def rollout_loop():
     while True:
         try:
             await rollout_once()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001  # exception-ok: background loop; one failed round must not end the rollout, next try in 60 s
             log.warning("agent-update rollout: %s", e)
         await asyncio.sleep(60)
 

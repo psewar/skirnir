@@ -27,6 +27,7 @@ from aiohttp import web
 
 from . import state
 from .common import VERSION, log
+from .outcome import bad_gateway, failed, invalid
 
 ASSETS = {("windows", "amd64"): "ollama-windows-amd64.zip", ("windows", "arm64"): "ollama-windows-arm64.zip",
           ("linux", "amd64"): "ollama-linux-amd64.tar.zst", ("linux", "arm64"): "ollama-linux-arm64.tar.zst"}
@@ -58,24 +59,25 @@ def latest_path():
 
 
 def load_latest():
+    if not os.path.exists(latest_path()):
+        return
     try:
         with open(latest_path(), encoding="utf-8") as f:
             d = json.load(f)
-        if d.get("version") and isinstance(d.get("files"), dict):
-            LATEST.update({k: d[k] for k in ("version", "checked", "checked_ts", "files", "source") if k in d})
-    except FileNotFoundError:
-        pass
-    except Exception as e:  # noqa: BLE001
+    except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
         log.warning("ollama-latest.json unlesbar: %s", e)
+        return
+    if isinstance(d, dict) and d.get("version") and isinstance(d.get("files"), dict):
+        LATEST.update({k: d[k] for k in ("version", "checked", "checked_ts", "files", "source") if k in d})
 
 
 def save_latest():
+    tmp = latest_path() + ".tmp"
     try:
-        tmp = latest_path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(LATEST, f, indent=1)
         os.replace(tmp, latest_path())
-    except OSError as e:
+    except OSError as e:  # exception-ok: file system boundary; LATEST stays in memory, the next check writes again
         log.warning("ollama-latest.json schreiben: %s", e)
 
 
@@ -93,44 +95,53 @@ def parse_checksums(txt):
 async def check_latest():
     """Neueste Version bei der Quelle erfragen (GitHub-API: tag_name, assets) samt sha256sum.txt; Ergebnis in LATEST."""
     url = _cfg().get("release_url") or ""
+    found = await _fetch_release(url) if url else invalid("modes.ollama_update.release_url ist leer")
+    if failed(found):
+        LATEST.update(error=found.message[:200], checked=time.time(), checked_ts=_ts())
+        log.warning("ollama-update: Versionspruefung: %s", LATEST["error"])
+        return LATEST
+    version, files = found
+    changed = version != LATEST["version"]
+    LATEST.update(version=version, files=files, error=None, source=url, checked=time.time(), checked_ts=_ts())
+    save_latest()
+    if changed:
+        log.info("ollama-update: neueste Version %s (%s)", version, ", ".join(sorted(files)))
+        state.MQTT_DIRTY.append(True)
+    return LATEST
+
+
+async def _fetch_release(url):
+    """(version, {"os/arch": Archiv}) des neuesten Releases oder ein Problem 502 mit dem Grund."""
     headers = {"Accept": "application/vnd.github+json", "User-Agent": f"skirnir-router/{VERSION}"}
     try:
-        if not url:
-            raise ValueError("modes.ollama_update.release_url ist leer")
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=40)) as s:
             async with s.get(url, headers=headers) as r:
                 if r.status != 200:
-                    raise ValueError(f"HTTP {r.status} von {url}")
+                    return bad_gateway(f"HTTP {r.status} von {url}")
                 rel = await r.json(content_type=None)
+            if not isinstance(rel, dict):
+                return bad_gateway(f"keine Release-Beschreibung von {url}")
             tag = str(rel.get("tag_name") or rel.get("name") or "")
             version = tag[1:] if tag.startswith("v") else tag
             if not re.match(r"^\d+(\.\d+){1,3}", version):
-                raise ValueError(f"tag_name {tag!r} ist keine Version")
-            assets = {a["name"]: a for a in rel.get("assets") or [] if a.get("name") and a.get("browser_download_url")}
+                return bad_gateway(f"tag_name {tag!r} ist keine Version")
+            assets = {a["name"]: a for a in rel.get("assets") or [] if isinstance(a, dict) and a.get("name") and a.get("browser_download_url")}
             sums = assets.get("sha256sum.txt")
             if not sums:
-                raise ValueError("Release ohne sha256sum.txt")
+                return bad_gateway("Release ohne sha256sum.txt")
             async with s.get(sums["browser_download_url"], headers={"User-Agent": headers["User-Agent"]}) as r:
                 if r.status != 200:
-                    raise ValueError(f"sha256sum.txt: HTTP {r.status}")
+                    return bad_gateway(f"sha256sum.txt: HTTP {r.status}")
                 checks = parse_checksums(await r.text())
-        files = {}
-        for (osn, arch), name in ASSETS.items():
-            a = assets.get(name)
-            if a and name in checks:
-                files[f"{osn}/{arch}"] = {"name": name, "url": a["browser_download_url"], "size": int(a.get("size") or 0), "sha256": checks[name]}
-        if not files:
-            raise ValueError("kein bekanntes Archiv im Release")
-        changed = version != LATEST["version"]
-        LATEST.update(version=version, files=files, error=None, source=url, checked=time.time(), checked_ts=_ts())
-        save_latest()
-        if changed:
-            log.info("ollama-update: neueste Version %s (%s)", version, ", ".join(sorted(files)))
-            state.MQTT_DIRTY.append(True)
-    except Exception as e:  # noqa: BLE001
-        LATEST.update(error=f"{e.__class__.__name__}: {e}"[:200], checked=time.time(), checked_ts=_ts())
-        log.warning("ollama-update: Versionspruefung: %s", LATEST["error"])
-    return LATEST
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:  # exception-ok: network boundary and the source's JSON
+        return bad_gateway(f"{e.__class__.__name__}: {e}")
+    files = {}
+    for (osn, arch), name in ASSETS.items():
+        a = assets.get(name)
+        if a and name in checks:
+            size = a.get("size") if isinstance(a.get("size"), int) else 0
+            files[f"{osn}/{arch}"] = {"name": name, "url": a["browser_download_url"], "size": size, "sha256": checks[name]}
+    return (version, files) if files else bad_gateway("kein bekanntes Archiv im Release")
 
 
 def available_for(e):
@@ -400,19 +411,18 @@ def _local(cfg, now):
 
 
 _TZ_WARNED = []
+HHMM = re.compile(r"\d{2}:\d{2}")
+STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")   # _ts(), vom Router selbst geschrieben
 
 
 def in_window(cfg, now=None):
     """Liegt die Uhrzeit (Zeitzone `timezone`, sonst Ortszeit des Routers) im Fenster window_start..window_end (auch ueber
     Mitternacht)? Leeres Fenster = immer."""
     start, end = (cfg.get("window_start") or "").strip(), (cfg.get("window_end") or "").strip()
-    if not start or not end:
+    if not (HHMM.fullmatch(start) and HHMM.fullmatch(end)):   # leer oder unlesbar = kein Fenster
         return True
-    try:
-        a = int(start[:2]) * 60 + int(start[3:5])
-        b = int(end[:2]) * 60 + int(end[3:5])
-    except ValueError:
-        return True
+    a = int(start[:2]) * 60 + int(start[3:5])
+    b = int(end[:2]) * 60 + int(end[3:5])
     lt = _local(cfg, now or time.time())
     cur = lt.tm_hour * 60 + lt.tm_min
     return a <= cur < b if a <= b else (cur >= a or cur < b)
@@ -431,12 +441,9 @@ def canary_clean(cfg, version, now):
     node = state.NODES.get(name)
     if e is None or node is None or node.state == "offline":
         return False
-    if e.get("ollama_version") != version or not e.get("ollama_version_since"):
+    if e.get("ollama_version") != version or not STAMP.fullmatch(str(e.get("ollama_version_since") or "")):
         return False
-    try:
-        since = time.mktime(time.strptime(e["ollama_version_since"], "%Y-%m-%dT%H:%M:%S"))
-    except ValueError:
-        return False
+    since = time.mktime(time.strptime(e["ollama_version_since"], "%Y-%m-%dT%H:%M:%S"))
     return now - since >= float(cfg.get("canary_clean_h", 24)) * 3600
 
 
@@ -452,7 +459,7 @@ async def rollout_loop():
                 if not LATEST.get("error"):
                     LATEST["checked_ok"] = LATEST["checked"]
             await rollout_once()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001  # exception-ok: background loop; one failed round must not end the rollout, next try in 60 s
             log.warning("ollama-update rollout: %s", e)
         await asyncio.sleep(60)
 

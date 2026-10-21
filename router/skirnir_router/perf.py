@@ -5,11 +5,11 @@ import json
 import os
 import time
 
-from aiohttp import ClientTimeout, web
+from aiohttp import ClientError, ClientTimeout, web
 
 from . import config, nodes, poll, state
-from .common import GIB, log
-from .outcome import failed
+from .common import GIB, log, read_json
+from .outcome import bad_gateway, failed, unavailable
 
 
 def perf_path():
@@ -17,39 +17,63 @@ def perf_path():
 
 
 def perf_load():
+    if not os.path.exists(perf_path()):
+        return
     try:
         with open(perf_path(), encoding="utf-8") as f:
-            state.PERF.update(json.load(f))
-    except FileNotFoundError:
-        pass
-    except Exception as e:  # noqa: BLE001
+            data = json.load(f)
+    except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
         log.warning("perf.json unlesbar: %s", e)
+        return
+    if isinstance(data, dict):
+        state.PERF.update(data)
+    else:
+        log.warning("perf.json ist kein Mapping - ignoriert")
 
 
 def perf_save():
+    tmp = perf_path() + ".tmp"
     try:
-        tmp = perf_path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state.PERF, f, ensure_ascii=False, indent=1)
         os.replace(tmp, perf_path())
-    except Exception as e:  # noqa: BLE001
+    except OSError as e:  # exception-ok: file system boundary; the data stays in memory and is written again next time
         log.warning("perf.json schreiben: %s", e)
+
+
+def _num(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
 def perf_stats(stats, ttft_s):
     """Ollama-Antwortfelder (Nanosekunden) -> tok/s und Millisekunden. None wenn unbrauchbar."""
-    try:
-        ec, ed = stats.get("eval_count") or 0, stats.get("eval_duration") or 0
-        pc, pd = stats.get("prompt_eval_count") or 0, stats.get("prompt_eval_duration") or 0
-        if ec < 2 or ed <= 0:
-            return None
-        return {"gen_tps": round(ec / (ed / 1e9), 1),
-                "prompt_tps": round(pc / (pd / 1e9), 1) if pc and pd else None,
-                "ttft_ms": round(ttft_s * 1000) if ttft_s is not None else None,
-                "load_ms": round((stats.get("load_duration") or 0) / 1e6),
-                "tokens": ec, "prompt_tokens": pc}
-    except Exception:  # noqa: BLE001
+    if not isinstance(stats, dict):
         return None
+    ec, ed, pc, pd, ld = (stats.get(k) or 0 for k in ("eval_count", "eval_duration", "prompt_eval_count", "prompt_eval_duration", "load_duration"))
+    if not all(_num(x) for x in (ec, ed, pc, pd, ld)) or ec < 2 or ed <= 0:
+        return None
+    return {"gen_tps": round(ec / (ed / 1e9), 1),
+            "prompt_tps": round(pc / (pd / 1e9), 1) if pc and pd else None,
+            "ttft_ms": round(ttft_s * 1000) if ttft_s is not None else None,
+            "load_ms": round(ld / 1e6),
+            "tokens": ec, "prompt_tokens": pc}
+
+
+async def _ollama(node, method, path, body=None, timeout=60, answer=True):
+    """Ollama auf dem Knoten fragen (Tunnel oder direkt): die JSON-Antwort als dict oder ein Problem 502 mit dem Grund.
+    answer=False: nur Erfolg zaehlt, der Koerper wird gelesen und verworfen ({}) - /api/generate zum Laden/Entladen
+    streamt NDJSON (mehrere Zeilen), das ist kein einzelnes JSON-Dokument."""
+    try:
+        async with nodes.nreq(node, method, path, json=body, timeout=ClientTimeout(total=timeout)) as r:
+            if r.status >= 400:
+                return bad_gateway(f"Ollama {r.status}: {(await r.text())[:200]}")
+            if not answer:
+                await r.read()
+                return {}
+            data = await r.json(content_type=None)
+    except (ClientError, asyncio.TimeoutError, ValueError) as e:  # exception-ok: network boundary and the node's JSON
+        return bad_gateway(f"Ollama {path}: {e or type(e).__name__}")
+    return data if isinstance(data, dict) else bad_gateway(f"Ollama {path}: keine JSON-Antwort")
 
 
 def perf_record(model, node_name, stats, ttft_s, kind="passive"):
@@ -113,24 +137,11 @@ async def bench_model(model, node):
     node.inflight += 1
     try:
         ctx = node.loaded_context(model) or 8192
-        body = {"model": model, "stream": False, "keep_alive": "5m", "options": {"num_ctx": ctx, "num_predict": 200, "temperature": 0, "seed": 42},
-                "messages": [{"role": "user", "content": BENCH_PROMPT}]}
-        runs = []
-        for i in range(3):
-            state.BENCHING[model]["step"] = "aufwärmen" if i == 0 else f"Messlauf {i}/2"
-            t0 = time.time()
-            async with nodes.nreq(node, "post", "/api/chat", json=body, timeout=ClientTimeout(total=900)) as r:
-                if r.status >= 400:
-                    raise RuntimeError(f"Ollama {r.status}: {(await r.text())[:200]}")
-                data = await r.json(content_type=None)
-            wall = time.time() - t0
-            s = perf_stats(data, None)
-            if not s:
-                raise RuntimeError("keine eval-Statistik in der Antwort")
-            # TTFT-Naeherung im Non-Stream-Modus: Wandzeit - Generierzeit - Ladezeit
-            s["ttft_ms"] = max(0, round((wall - (data.get("eval_duration") or 0) / 1e9 - (data.get("load_duration") or 0) / 1e9) * 1000))
-            if i > 0:
-                runs.append(s)
+        runs = await _bench_runs(model, node, ctx)
+        if failed(runs):
+            log.warning("bench %s on %s failed: %s", model, node.name, runs.message)
+            state.BENCHING[model].update(step="fehler", error=runs.message)
+            return
         med = lambda k: sorted(x[k] for x in runs if x[k] is not None)[len(runs) // 2]  # noqa: E731
         key = f"{model}@{node.name}"
         e = state.PERF.setdefault(key, {"model": model, "node": node.name, "samples": [], "count": 0})
@@ -142,13 +153,32 @@ async def bench_model(model, node):
                  e["bench"]["gen_tps"], e["bench"]["prompt_tps"], e["bench"]["ttft_ms"], ctx)
         state.remember({"event": "bench", "node": node.name, "model": model, "gen_tps": e["bench"]["gen_tps"]})
         state.BENCHING[model]["step"] = "fertig"
-    except Exception as ex:  # noqa: BLE001
-        log.warning("bench %s on %s failed: %s", model, node.name, ex)
-        state.BENCHING[model].update(step="fehler", error=str(ex))
     finally:
         node.inflight -= 1
         await _release_node(node, model, "bench")
         state.BENCHING.pop(model, None)
+
+
+async def _bench_runs(model, node, ctx):
+    """Aufwaermlauf + 2 Messlaeufe: die beiden Messungen oder ein Problem."""
+    body = {"model": model, "stream": False, "keep_alive": "5m", "options": {"num_ctx": ctx, "num_predict": 200, "temperature": 0, "seed": 42},
+            "messages": [{"role": "user", "content": BENCH_PROMPT}]}
+    runs = []
+    for i in range(3):
+        state.BENCHING[model]["step"] = "aufwärmen" if i == 0 else f"Messlauf {i}/2"
+        t0 = time.time()
+        data = await _ollama(node, "post", "/api/chat", body, timeout=900)
+        if failed(data):
+            return data
+        wall = time.time() - t0
+        s = perf_stats(data, None)
+        if not s:
+            return bad_gateway("keine eval-Statistik in der Antwort")
+        # TTFT-Naeherung im Non-Stream-Modus: Wandzeit - Generierzeit - Ladezeit
+        s["ttft_ms"] = max(0, round((wall - (data.get("eval_duration") or 0) / 1e9 - (data.get("load_duration") or 0) / 1e9) * 1000))
+        if i > 0:
+            runs.append(s)
+    return runs
 
 
 def _free_node_for(model, node_name=None, prefer_loaded=False):
@@ -166,11 +196,7 @@ async def _release_node(node, model, why):
     """Nach Messung oder Benchmark: Messobjekt entladen (ausser es ist ein Rang-1-Modell), Poll, Rang-1 wieder vorwaermen."""
     rank1 = {r["tiers"][0]["model"] for r in state.CFG.roles.values()}
     if not any(node.same_blob(model, m) for m in rank1):
-        try:
-            async with nodes.nreq(node, "post", "/api/generate", json={"model": model, "keep_alive": 0}, timeout=ClientTimeout(total=60)) as r:
-                await r.read()
-        except Exception:  # noqa: BLE001
-            pass
+        await _ollama(node, "post", "/api/generate", {"model": model, "keep_alive": 0}, answer=False)   # best effort: der Poll danach zeigt, was geladen blieb
     await poll.poll_node(node)
     if state.CFG.prewarm_on_free:
         state.spawn(poll.prewarm(node, 0, why))
@@ -178,9 +204,8 @@ async def _release_node(node, model, why):
 
 
 async def handle_bench(request):
-    try:
-        b = await request.json()
-    except Exception:  # noqa: BLE001
+    b = await read_json(request)
+    if not isinstance(b, dict):
         return web.json_response({"error": "invalid json"}, status=400)
     model = b.get("model")
     if not model:
@@ -214,60 +239,68 @@ def fit_linear(points):
 
 
 async def _ps_models(node):
-    async with nodes.nreq(node, "get", "/api/ps", timeout=ClientTimeout(total=10)) as r:
-        return (await r.json()).get("models", [])
+    """Geladene Modelle laut /api/ps (Liste von dicts) oder ein Problem."""
+    data = await _ollama(node, "get", "/api/ps", timeout=10)
+    if failed(data):
+        return data
+    models = data.get("models") or []
+    return [m for m in models if isinstance(m, dict)] if isinstance(models, list) else bad_gateway("Ollama /api/ps: models ist keine Liste")
 
 
 async def _ps_entry(node, model):
-    want = node.digest_of.get(model)
-    return next((m for m in await _ps_models(node) if m.get("name") == model or (want and m.get("digest") == want)), None)
+    """Eintrag des Modells in /api/ps, None wenn nicht geladen, oder ein Problem."""
+    models = await _ps_models(node)
+    return models if failed(models) else next((m for m in models if _is_model(node, m, model)), None)
 
 
 async def _load(node, model, ctx):
     node.announce_load(model, ctx)
-    body = {"model": model, "keep_alive": "2m", "options": {"num_ctx": ctx}}
-    async with nodes.nreq(node, "post", "/api/generate", json=body, timeout=ClientTimeout(total=900)) as r:
-        if r.status >= 400:
-            raise RuntimeError(f"Ollama {r.status}: {(await r.text())[:200]}")
-    entry = await _ps_entry(node, model)
-    if not entry:
-        raise RuntimeError(f"Modell nach dem Laden nicht in /api/ps (ctx {ctx})")
+    loaded = await _ollama(node, "post", "/api/generate", {"model": model, "keep_alive": "2m", "options": {"num_ctx": ctx}}, timeout=900, answer=False)
+    entry = loaded if failed(loaded) else await _ps_entry(node, model)
+    if entry is None:
+        return bad_gateway(f"Modell nach dem Laden nicht in /api/ps (ctx {ctx})")
     return entry
 
 
 async def _unload_all(node):
     """Alles entladen und warten, bis /api/ps leer ist - sonst misst der Zuwachs ein anderes Modell mit. Liefert, was
-    /api/ps vorher als size_vram meldete (GiB): so viel muss nvidia-smi danach mindestens freigeben."""
+    /api/ps vorher als size_vram meldete (GiB): so viel muss nvidia-smi danach mindestens freigeben. Oder ein Problem."""
     geladen = await _ps_models(node)
+    if failed(geladen):
+        return geladen
     for m in geladen:
-        async with nodes.nreq(node, "post", "/api/generate", json={"model": m.get("name"), "keep_alive": 0},
-                              timeout=ClientTimeout(total=60)) as r:
-            await r.read()
+        unloaded = await _ollama(node, "post", "/api/generate", {"model": m.get("name"), "keep_alive": 0}, answer=False)
+        if failed(unloaded):
+            return unloaded
     for _ in range(60):
-        if not await _ps_models(node):
+        still = await _ps_models(node)
+        if failed(still):
+            return still
+        if not still:
             return sum(m.get("size_vram", 0) for m in geladen) / GIB
         await asyncio.sleep(1)
-    raise RuntimeError("Ollama entlaedt nicht (nach 60 s noch Modelle in /api/ps)")
+    return unavailable("Ollama entlaedt nicht (nach 60 s noch Modelle in /api/ps)")
 
 
 async def _empty_used(node, before, unloaded, timeout=120):
     """Grundlast nach dem Entladen. /api/ps ist sofort leer, der Speicher wird aber erst Sekunden spaeter frei - zwei
     gleiche Heartbeats hintereinander bewiesen das nicht (0.3.5: nach dem Entladen von 26 GiB las die Messung "leer" bei
     noch voller Karte, der erste Messpunkt wurde negativ). Darum erst warten, bis nvidia-smi mindestens 90 % dessen
-    freigegeben hat, was /api/ps vorher meldete, dann die ruhige Belegung ablesen."""
+    freigegeben hat, was /api/ps vorher meldete, dann die ruhige Belegung ablesen. Oder ein Problem."""
     if before is not None and unloaded > 0.5:
         ziel = before - 0.9 * unloaded
         deadline = time.time() + timeout
         while node.vram_used_gib is None or node.vram_used_gib > ziel:
             if time.time() > deadline:
-                raise RuntimeError(f"Speicher wird nach dem Entladen nicht frei ({node.vram_used_gib} GiB, erwartet <= {ziel:.2f})")
+                return unavailable(f"Speicher wird nach dem Entladen nicht frei ({node.vram_used_gib} GiB, erwartet <= {ziel:.2f})")
             await asyncio.sleep(0.5)
     await asyncio.sleep(state.CFG.vram_settle_s)
     return await _stable_used(node, time.time())
 
 
 async def _stable_used(node, after, timeout=90):
-    """Belegung laut nvidia-smi (Heartbeat), sobald sie steht: zwei Heartbeats nach `after`, < 0,1 GiB auseinander."""
+    """Belegung laut nvidia-smi (Heartbeat), sobald sie steht: zwei Heartbeats nach `after`, < 0,1 GiB auseinander.
+    Oder ein Problem, wenn sie in `timeout` nicht zur Ruhe kommt."""
     last, last_ts = None, after
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -276,24 +309,26 @@ async def _stable_used(node, after, timeout=90):
             if last is not None and abs(node.vram_used_gib - last) < 0.1:
                 return node.vram_used_gib
             last, last_ts = node.vram_used_gib, node.hb_ts
-    raise RuntimeError("VRAM-Belegung kam nicht zur Ruhe (Heartbeats)")
+    return unavailable("VRAM-Belegung kam nicht zur Ruhe (Heartbeats)")
 
 
 async def _measure_real(model, node):
     """Seit 0.3.5: je Kontext alles entladen, Grundlast ablesen, laden, Zuwachs laut nvidia-smi = echte Belegung.
     /api/ps meldet nur einen Teil (qwen3.6:35b-a3b 21,0 statt 26,4 GiB bei 196k, laguna-xs-2.1 19,2 statt 29,7 GiB bei
     131k - gemessen 2026-09-30); mit diesen Zahlen verrechnete sich der Router bei Budget, fremdem VRAM und Grundlast.
-    Liefert {ctx: (belegt, ps_size_vram, ps_size)}."""
+    Liefert {ctx: (belegt, ps_size_vram, ps_size)} oder ein Problem."""
     res = {}
     for ctx in measure_ctxs(model):
         for versuch in range(1, MEASURE_TRIES + 1):
             punkt = await _measure_point(model, node, ctx)
+            if failed(punkt):
+                return punkt
             if isinstance(punkt, tuple):
                 res[ctx] = punkt
                 break
             log.info("measure %s@%d on %s: Versuch %d verworfen (%s)", model, ctx, node.name, versuch, punkt)
         else:
-            raise RuntimeError(f"Messung @{ctx} nach {MEASURE_TRIES} Versuchen nicht sauber: {punkt}")
+            return unavailable(f"Messung @{ctx} nach {MEASURE_TRIES} Versuchen nicht sauber: {punkt}")
     return res
 
 
@@ -307,25 +342,36 @@ def _is_model(node, m, model):
 
 async def _others_loading(node, model, timeout=300):
     """Warten, bis kein ANDERER Ladevorgang laeuft (prewarm, echte Anfrage). 0.3.5: das prewarm nach der vorigen Messung
-    lud qwen3.6 genau dann, als die naechste Messung ihre Grundlast las - /api/ps war noch leer, nichts wurde entladen."""
+    lud qwen3.6 genau dann, als die naechste Messung ihre Grundlast las - /api/ps war noch leer, nichts wurde entladen.
+    None, sobald nichts anderes mehr laedt, oder ein Problem."""
     deadline = time.time() + timeout
     while any(m != model and deadline_m > time.time() for m, (_g, deadline_m) in node.loading.items()):
         if time.time() > deadline:
-            raise RuntimeError("anderer Ladevorgang endet nicht")
+            return unavailable("anderer Ladevorgang endet nicht")
         await asyncio.sleep(1)
+    return None
 
 
 async def _measure_point(model, node, ctx):
     """Ein Messpunkt. Liefert (belegt, ps_vram, ps_size) oder einen Grund, warum er verworfen wurde (dann neu versuchen):
-    ein anderes Modell kam dazwischen, oder der Zuwachs ist kleiner als Ollamas eigene Meldung."""
-    await _others_loading(node, model)
+    ein anderes Modell kam dazwischen, oder der Zuwachs ist kleiner als Ollamas eigene Meldung. Ein Problem bricht die
+    Messung ab."""
+    waited = await _others_loading(node, model)
+    if failed(waited):
+        return waited
     state.MEASURING[model]["step"] = f"entlade fuer @{ctx}"
     vorher = node.vram_used_gib
-    leer = await _empty_used(node, vorher, await _unload_all(node))
+    unloaded = await _unload_all(node)
+    leer = unloaded if failed(unloaded) else await _empty_used(node, vorher, unloaded)
+    if failed(leer):
+        return leer
     state.MEASURING[model]["step"] = f"lade @{ctx}"
     entry = await _load(node, model, ctx)
-    voll = await _stable_used(node, time.time())
-    fremd = [m.get("name") for m in await _ps_models(node) if not _is_model(node, m, model)]
+    voll = entry if failed(entry) else await _stable_used(node, time.time())
+    geladen = voll if failed(voll) else await _ps_models(node)
+    if failed(geladen):
+        return geladen
+    fremd = [m.get("name") for m in geladen if not _is_model(node, m, model)]
     if fremd or any(m != model for m in node.loading):
         return f"anderes Modell geladen: {fremd or list(node.loading)}"
     belegt, sv = voll - leer, entry.get("size_vram", 0) / GIB
@@ -342,7 +388,9 @@ async def _measure_ps(model, node):
     for ctx in MEASURE_CTX_FIX:
         state.MEASURING[model]["step"] = f"lade @{ctx}"
         entry = await _load(node, model, ctx)
-        res[ctx] = (entry.get("size_vram", 0) / GIB, entry.get("size_vram", 0) / GIB, entry.get("size", 0) / GIB)
+        if failed(entry):
+            return entry
+        res[ctx] =(entry.get("size_vram", 0) / GIB, entry.get("size_vram", 0) / GIB, entry.get("size", 0) / GIB)
     return res
 
 
@@ -376,6 +424,10 @@ async def measure_model(model, node):
     try:
         real = bool(node.gpu_known(time.time()) and node.vram_used_gib is not None)
         res = await (_measure_real(model, node) if real else _measure_ps(model, node))
+        if failed(res):
+            log.warning("measure %s on %s failed: %s", model, node.name, res.message)
+            state.MEASURING[model].update(step="fehler", error=res.message)
+            return
         e = catalog_entry(res, node.name, real)
         ov = config.read_overrides()
         models = dict(ov.get("models", {}))
@@ -393,9 +445,6 @@ async def measure_model(model, node):
         state.remember({"event": "measure", "node": node.name, "model": model, "weights_gib": e["weights_gib"],
                         "kv_gib_per_1k": e["kv_gib_per_1k"], "real": real})
         state.MEASURING[model]["step"] = "fertig"
-    except Exception as e:  # noqa: BLE001
-        log.warning("measure %s on %s failed: %s", model, node.name, e)
-        state.MEASURING[model].update(step="fehler", error=str(e))
     finally:
         node.inflight -= 1
         node.finish_load(model)
@@ -404,9 +453,8 @@ async def measure_model(model, node):
 
 
 async def handle_measure(request):
-    try:
-        b = await request.json()
-    except Exception:  # noqa: BLE001
+    b = await read_json(request)
+    if not isinstance(b, dict):
         return web.json_response({"error": "invalid json"}, status=400)
     model = b.get("model")
     if not model:

@@ -20,6 +20,18 @@ def tun_frame(t, sid, payload=b""):
     return bytes([t]) + sid.to_bytes(4, "big") + payload
 
 
+def response_head(payload):
+    """(status, headers) aus dem RESP-Rahmen des Agenten, None wenn er unlesbar ist."""
+    try:
+        h = json.loads(payload)
+    except ValueError:  # exception-ok: untrusted JSON from the agent
+        return None
+    if not isinstance(h, dict) or isinstance(h.get("status"), bool) or not isinstance(h.get("status"), int):
+        return None
+    headers = h.get("headers") or {}
+    return (h["status"], headers) if isinstance(headers, dict) else None
+
+
 class TunnelResponse:
     """Antwort eines Tunnel-Streams. Bietet, was der Router von aiohttp.ClientResponse nutzt:
     status, headers, read()/text()/json(), `async for line in resp.content`, async-with."""
@@ -37,6 +49,7 @@ class TunnelResponse:
             return None
         r = self.deadline - time.time()
         if r <= 0:
+            # exception-ok: emulates aiohttp's ClientResponse; callers handle the timeout at their network boundary
             raise asyncio.TimeoutError()
         return r
 
@@ -49,6 +62,7 @@ class TunnelResponse:
         self.done = True
         if t == TUN_END:
             return None
+        # exception-ok: emulates aiohttp's ClientResponse; a broken stream is a ClientError at the caller's network boundary
         raise ClientError(f"tunnel {self.tunnel.name()}: {payload.decode(errors='replace')}")
 
     async def read(self):
@@ -79,7 +93,7 @@ class TunnelResponse:
                 if self.buf:
                     line, self.buf = self.buf, b""
                     return line
-                raise StopAsyncIteration
+                raise StopAsyncIteration  # exception-ok: async iterator protocol, end of the stream
             self.buf += c
 
     async def __aenter__(self):
@@ -136,7 +150,7 @@ class Tunnel:
         Huelle stand bei jedem Deploy 'Task exception was never retrieved' mit Traceback im Journal (2026-09-25)."""
         try:
             await self.send(frame)
-        except (ConnectionError, RuntimeError, ClientError) as e:
+        except (ConnectionError, RuntimeError, ClientError) as e:  # exception-ok: network boundary, the websocket is closing
             log.debug("tunnel %s: Antwort verworfen, Verbindung schliesst (%s)", self.name(), e)
 
     async def open(self, method, path, body, deadline):
@@ -159,28 +173,31 @@ class Tunnel:
         head = {"method": method, "path": path, "headers": ({"Content-Type": "application/json"} if body else {})}
         try:
             await self.send(tun_frame(TUN_REQ, sid, json.dumps(head).encode() + b"\n" + body))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001  # exception-ok: network boundary of the websocket send
             self.streams.pop(sid, None)
+            # exception-ok: emulates aiohttp; the caller handles a ClientError at its network boundary
             raise ClientError(f"tunnel {self.name()}: senden fehlgeschlagen: {e}") from e
         wait = (deadline - time.time()) if deadline else 600   # Antwortkopf kommt bei Ollama erst nach dem Modell-Load
         try:
             t, payload = await asyncio.wait_for(resp.q.get(), max(0.001, wait))
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError:  # exception-ok: deadline of the emulated request; clean up the stream, then pass it on
             self.streams.pop(sid, None)
             await self.cancel(sid)
-            raise
-        if t == TUN_RESP:
-            h = json.loads(payload)
-            resp.status, resp.headers = int(h["status"]), h.get("headers") or {}
+            raise  # exception-ok: the caller handles the timeout like aiohttp's at its network boundary
+        head = response_head(payload) if t == TUN_RESP else None
+        if head is not None:
+            resp.status, resp.headers = head
             return resp
         self.streams.pop(sid, None)
-        raise ClientError(f"tunnel {self.name()}: {payload.decode(errors='replace') if t == TUN_ERR else 'unerwarteter Rahmen'}")
+        why = payload.decode(errors="replace") if t == TUN_ERR else "unlesbarer Antwortkopf" if t == TUN_RESP else "unerwarteter Rahmen"
+        # exception-ok: emulates aiohttp; the caller handles a ClientError at its network boundary
+        raise ClientError(f"tunnel {self.name()}: {why}")
 
     async def cancel(self, sid):
         try:
             await self.send(tun_frame(TUN_CANCEL, sid))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001  # exception-ok: network boundary; a lost CANCEL ends with the tunnel anyway
+            log.debug("tunnel %s: CANCEL verworfen (%s)", self.name(), e)
 
     def name(self):
         return self.node.name if self.node is not None else f"pending-{(self.fp or '')[:12]}"
@@ -194,7 +211,8 @@ class Tunnel:
                 try:
                     poll.apply_heartbeat(self.node, json.loads(payload), time.time())
                     ack = poll.hb_ack(self.node)
-                except Exception as e:  # noqa: BLE001
+                # the heartbeat is untrusted agent input; a malformed field must not tear down the tunnel
+                except Exception as e:  # noqa: BLE001  # exception-ok: untrusted heartbeat, the reason goes back in the ack
                     ack = {"state": "", "error": str(e)}
             else:
                 ack = {"state": "pending", "busy_reason": ""}
@@ -204,7 +222,7 @@ class Tunnel:
             if self.approved and self.node is not None:
                 try:
                     msg = json.loads(payload)
-                except ValueError:   # Nutzlast eines Agenten: ob sie JSON ist, zeigt erst das Parsen
+                except ValueError:  # exception-ok: untrusted JSON from the agent; whether it parses shows only the parser
                     log.warning("node %s: Ollama-Zustand vom Agenten ist kein JSON", self.node.name)
                     return
                 poll.apply_ollama_push(self.node, msg, time.time())
