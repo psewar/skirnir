@@ -65,34 +65,35 @@ def decisions_load():
     """Beim Start: die letzten DECISIONS_KEEP Eintraege aus events.jsonl in den Ring uebernehmen und die Datei darauf
     eindampfen. Damit ueberlebt das Protokoll Neustarts und Deploys (Betreiber 2026-09-25: die Nacht war nach dem Deploy weg)."""
     global DECISIONS_FILE, _DEC_APPENDED
-    import json
+    import os
     from .common import log
     DECISIONS_FILE = decisions_path()
-    if not DECISIONS_FILE:
+    if not DECISIONS_FILE or not os.path.exists(DECISIONS_FILE):
         return 0
-    rows = []
     try:
         with open(DECISIONS_FILE, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    r = json.loads(line)
-                except ValueError:
-                    continue   # angerissene Zeile (Absturz beim Schreiben): ueberspringen
-                if isinstance(r, dict) and r.get("event") and r.get("t"):
-                    rows.append(r)
-    except FileNotFoundError:
-        return 0
-    except Exception as e:  # noqa: BLE001
+            lines = f.read().splitlines()
+    except (OSError, ValueError) as e:  # exception-ok: file system and the file's encoding (UnicodeDecodeError)
         log.warning("events.jsonl unlesbar: %s", e)
         return 0
+    rows = [r for r in map(_journal_row, lines) if r is not None]
     rows = rows[-DECISIONS_KEEP:]
     DECISIONS[:0] = rows
     del DECISIONS[:-DECISIONS_KEEP]
     _decisions_compact()
     return len(rows)
+
+
+def _journal_row(line):
+    """Eine Zeile aus events.jsonl als Eintrag, None fuer Leerzeilen und angerissene Zeilen (Absturz beim Schreiben)."""
+    import json
+    if not line.strip():
+        return None
+    try:
+        r = json.loads(line)
+    except ValueError:  # exception-ok: a line torn by a crash while writing; whether it parses shows only the parser
+        return None
+    return r if isinstance(r, dict) and r.get("event") and r.get("t") else None
 
 
 def _decisions_compact():
@@ -103,31 +104,42 @@ def _decisions_compact():
     if not DECISIONS_FILE:
         return
     tmp = DECISIONS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        for e in DECISIONS:
-            f.write(json.dumps(e, ensure_ascii=False) + "\n")
-    os.replace(tmp, DECISIONS_FILE)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            for e in DECISIONS:
+                f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        os.replace(tmp, DECISIONS_FILE)
+    except (OSError, TypeError, ValueError) as e:  # exception-ok: file system boundary; json reports unencodable entries only so
+        _warn_journal(e)
+        return
     _DEC_APPENDED = 0
+
+
+def _warn_journal(e):
+    """Schreibfehler des Journals gedrosselt melden (hoechstens alle 10 min); das Protokoll im Speicher lebt weiter."""
+    global _DEC_WARNED
+    if time.time() - _DEC_WARNED > 600:
+        _DEC_WARNED = time.time()
+        from .common import log
+        log.warning("events.jsonl schreiben: %s", e)
 
 
 def decisions_append(entry):
     """Eine Zeile anhaengen; nach 4 x DECISIONS_KEEP Zeilen eindampfen, damit die Datei nicht unbegrenzt waechst
     (~300 B je Eintrag: hoechstens ~2,5 MB). Schreibfehler werden gedrosselt gemeldet, das Protokoll im Speicher lebt weiter."""
-    global _DEC_APPENDED, _DEC_WARNED
+    global _DEC_APPENDED
     if not DECISIONS_FILE:
         return
     import json
     try:
         with open(DECISIONS_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        _DEC_APPENDED += 1
-        if _DEC_APPENDED >= 4 * DECISIONS_KEEP:
-            _decisions_compact()
-    except Exception as e:  # noqa: BLE001
-        if time.time() - _DEC_WARNED > 600:
-            _DEC_WARNED = time.time()
-            from .common import log
-            log.warning("events.jsonl schreiben: %s", e)
+    except (OSError, TypeError, ValueError) as e:  # exception-ok: file system boundary; json reports unencodable entries only so
+        _warn_journal(e)
+        return
+    _DEC_APPENDED += 1
+    if _DEC_APPENDED >= 4 * DECISIONS_KEEP:
+        _decisions_compact()
 
 
 def remember(entry):
@@ -138,8 +150,5 @@ def remember(entry):
     DECISIONS.append(entry)
     del DECISIONS[:-DECISIONS_KEEP]
     decisions_append(entry)
-    try:
-        from . import metrics   # spaet, um Importzyklen zu vermeiden
-        metrics.count_event(entry)
-    except Exception:  # noqa: BLE001
-        pass
+    from . import metrics   # spaet, um Importzyklen zu vermeiden
+    metrics.count_event(entry)

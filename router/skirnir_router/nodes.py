@@ -7,7 +7,7 @@ from collections import Counter
 from aiohttp import ClientError, Fingerprint
 
 from . import config, state
-from .common import log
+from .common import log, tls_fingerprint
 
 PUSH_STALE_S = 45   # Agent >= 0.14.0 meldet den Ollama-Zustand bei jeder Aenderung und spaetestens alle 30 s
 
@@ -22,9 +22,11 @@ def nreq(node, method, path, **kw):
     if node.tunnel is not None:
         return node.tunnel.request(method, path, **kw)
     if not node.url:
+        # exception-ok: nreq stands in for SESSION.request; callers handle an unreachable node as a ClientError at their network boundary
         raise NodeNotReady(f"{node.name}: kein Tunnel verbunden")
     if node.tls:
         if node.ssl is None:
+            # exception-ok: nreq stands in for SESSION.request; callers handle an unreachable node as a ClientError at their network boundary
             raise NodeNotReady(f"{node.name}: TLS-Fingerprint unbekannt, warte auf Heartbeat")
         kw["ssl"] = node.ssl
         h = dict(kw.get("headers") or {})
@@ -76,11 +78,13 @@ class Node(Breaker):
     is_cloud = False   # CloudTarget (cloud.py) sagt True; Proxy/Ops unterscheiden daran, kein getattr mehr noetig
 
     def set_fingerprint(self, hexfp):
-        fp = hexfp.lower().removeprefix("sha256:").replace(":", "").strip()
-        if len(fp) != 64:
-            raise ValueError(f"TLS-Fingerprint ungueltig: {hexfp!r}")
+        """TLS-Fingerprint uebernehmen. False, wenn es kein SHA-256-Fingerprint ist (der Aufrufer meldet es)."""
+        fp = tls_fingerprint(hexfp)
+        if fp is None:
+            return False
         self.tls_fp = fp
         self.ssl = Fingerprint(bytes.fromhex(fp))
+        return True
 
     def __init__(self, name, spec):
         self.name = name
@@ -97,7 +101,8 @@ class Node(Breaker):
             fp = config.cert_fingerprint(spec["ollama_tls_cert"])
         if fp:
             self.tls_mode = "fixed"
-            self.set_fingerprint(fp)
+            if not self.set_fingerprint(fp):   # config.yaml prueft das Format schon beim Laden
+                log.error("node %s: TLS-Fingerprint ungueltig: %r - Knoten bleibt unerreichbar", name, fp)
         self.vram_total_gib = float(spec.get("vram_total_gib", 0))
         self.mac = spec.get("mac")
         self.wol = bool(spec.get("wol", False))

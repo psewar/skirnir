@@ -23,10 +23,10 @@ import os
 import random
 import time
 
-from aiohttp import ClientTimeout, web
+from aiohttp import ClientError, ClientTimeout, web
 
 from . import admission, metrics, nodes, perf, scheduler, state
-from .common import log
+from .common import load_json_file, log
 
 IDEM = {}            # key -> {"t", "fut", "status", "body", "content_type", "headers"}
 IDEM_MAX = 500
@@ -64,9 +64,10 @@ async def idem_wait(key):
     _prune(now)
     e = IDEM.get(key)
     if e is not None and e.get("fut") is not None:
-        try:
-            await asyncio.wait_for(asyncio.shield(e["fut"]), timeout=state.CFG.request_timeout_s)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        # asyncio.wait bricht die laufende Erstanfrage nicht ab und meldet die Frist als Wert; wird DIESE Anfrage abgebrochen,
+        # geht das wie ueberall weiter nach oben (bis 0.8.10 schluckte ein except auch das und lief dann als Erstanfrage weiter)
+        done, _ = await asyncio.wait({e["fut"]}, timeout=state.CFG.request_timeout_s)
+        if not done:
             return None
         e = IDEM.get(key)
     if e is not None and e.get("body") is not None and now - e["t"] <= state.CFG.idempotency_ttl_s:
@@ -166,9 +167,9 @@ async def run_shadow(role, s, body, primary_node, request_id):
                     outcome = "ok"
                 else:
                     outcome = "structured_error" if out.get("format") and r.status >= 500 else "error"
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError:  # exception-ok: network boundary; the shadow run ran out of time and counts as timeout
             outcome = "timeout"
-        except Exception as e:  # noqa: BLE001
+        except (ClientError, OSError, ValueError) as e:  # exception-ok: network boundary and the node's JSON; only counted
             log.info("shadow %s on %s: %s", s["model"], node.name, e)
         finally:
             node.inflight -= 1
@@ -192,14 +193,10 @@ def manifest_path():
 
 
 def build_info():
-    try:
-        with open(manifest_path(), encoding="utf-8") as f:
-            m = json.load(f)
-        return {"present": True, **m}
-    except FileNotFoundError:
+    if not os.path.exists(manifest_path()):
         return {"present": False}
-    except Exception as e:  # noqa: BLE001
-        return {"present": False, "error": str(e)}
+    m = load_json_file(manifest_path(), "manifest.json")
+    return {"present": True, **m} if isinstance(m, dict) else {"present": False, "error": "manifest.json unlesbar"}
 
 
 def supply_chain():

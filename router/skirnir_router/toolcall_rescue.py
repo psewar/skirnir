@@ -21,6 +21,11 @@ Bedingungen und laesst im Zweifel alles unveraendert.
 import json
 import re
 
+from . import values
+from .outcome import failed
+
+INTEGER_TEXT = re.compile(r"\s*[+-]?\d+\s*")
+
 # Der Aufruf muss den ueberwiegenden Teil der Antwort ausmachen. Ein Modell, das erst
 # einen Absatz schreibt und dann etwas Call-aehnliches erwaehnt, wollte keinen Aufruf.
 MIN_ANTEIL = 0.8
@@ -60,11 +65,11 @@ def _schema(tools, name):
 def _passend(wert, typ):
     """XML liefert alles als Text. Ein `number`-Parameter als String laesst manche
     Clients auflaufen, also einmal richtig typisieren - aber nur, wenn es aufgeht."""
-    if typ in ("number", "integer"):
-        try:
-            return int(wert) if typ == "integer" else float(wert)
-        except (TypeError, ValueError):
-            return wert
+    if typ == "integer":
+        return int(wert) if isinstance(wert, str) and INTEGER_TEXT.fullmatch(wert) else wert
+    if typ == "number":
+        zahl = values.number(wert, "argument")
+        return wert if failed(zahl) else zahl
     if typ == "boolean":
         if str(wert).strip().lower() in ("true", "ja", "1"):
             return True
@@ -106,7 +111,7 @@ def extract(text, erlaubt, tools=None):
     while i >= 0:
         try:
             o, ende = dec.raw_decode(roh, i)
-        except ValueError:
+        except ValueError:  # exception-ok: raw_decode reports "no JSON object starts here" only so; scanning model output
             i = roh.find("{", i + 1)
             continue
         if isinstance(o, dict) and o.get("name") in erlaubt:
@@ -118,7 +123,7 @@ def extract(text, erlaubt, tools=None):
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
-                except ValueError:
+                except ValueError:  # exception-ok: the model's arguments are untrusted JSON; whether they parse shows only the parser
                     args = {}
             return o["name"], (args if isinstance(args, dict) else {})
         i = roh.find("{", i + 1)

@@ -69,5 +69,5 @@ class Capture:
                 os.makedirs(os.path.dirname(self.path), exist_ok=True)
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        except OSError as e:
+        except OSError as e:  # exception-ok: file system boundary; a lost capture row never fails the request
             log.warning("decision capture: %s", e)

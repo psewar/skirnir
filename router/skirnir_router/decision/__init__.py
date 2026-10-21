@@ -18,7 +18,8 @@ import os
 
 from .. import metrics, state
 from ..common import log
-from .base import DecisionRequest, DecisionResult, EngineError, apply_temperature, uncertain_reasons, uncertainty_of
+from ..outcome import failed
+from .base import DecisionRequest, DecisionResult, apply_temperature, uncertain_reasons, uncertainty_of
 from .capture import Capture
 from .jevlike import JevlikeEngine
 from .local_llm import LocalLLMEngine
@@ -115,10 +116,11 @@ class Decider:
             engines["embed"] = JevlikeEngine(em["endpoint"], em.get("model"), float(em.get("timeout_s") or 2.0), name="embed")
         tf = cfg.get("tfidf") or {}
         if tf.get("model_path"):
-            try:
-                engines["tfidf"] = TfidfEngine(tf["model_path"])
-            except (OSError, ValueError, KeyError) as e:   # Modell fehlt/kaputt: Engine faellt aus der Kette, Router startet trotzdem
-                log.warning("decision tfidf: Modell %s nicht ladbar: %s", tf["model_path"], e)
+            engine = TfidfEngine.load(tf["model_path"])
+            if failed(engine):   # Modell fehlt/kaputt: Engine faellt aus der Kette, Router startet trotzdem
+                log.warning("decision tfidf: Modell nicht ladbar: %s", engine.message)
+            else:
+                engines["tfidf"] = engine
         return engines
 
     # -- Entscheiden --
@@ -147,10 +149,9 @@ class Decider:
         policy = self.policy
         tried, last = [], None
         for engine in (engines if engines is not None else self.chain):
-            try:
-                result = await engine.decide(req)
-            except EngineError as e:
-                log.warning("decision %s: %s", engine.name, e)
+            result = await engine.decide(req)
+            if failed(result):
+                log.warning("decision %s: %s", engine.name, result.message)
                 tried.append(f"{engine.name}: ausgefallen")
                 metrics._counter("skirnir_decision_fallback_total", {"from": engine.name, "reason": "error"})
                 continue
@@ -213,7 +214,8 @@ def _load_calibration(path) -> dict:
         return {}
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError) as e:
+            data = json.load(f)
+    except (OSError, ValueError) as e:  # exception-ok: file system and the calibration file's JSON
         log.warning("decision calibration %s: %s", path, e)
         return {}
+    return data if isinstance(data, dict) else {}

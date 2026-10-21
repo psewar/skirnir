@@ -18,7 +18,8 @@ import re
 import time
 from collections import Counter
 
-from .base import DecisionEngine, DecisionRequest, DecisionResult, normalize
+from ..outcome import Problem, failed
+from .base import DecisionEngine, DecisionRequest, DecisionResult, engine_failed, normalize
 
 WORD = re.compile(r"[a-z0-9äöüß]+|[^\sa-z0-9äöüß]", re.I)
 NGRAM_RANGE = (3, 5)
@@ -59,10 +60,25 @@ def vectorize(feats: Counter, vocab: dict, idf: list) -> dict:
     return {j: v / norm for j, v in vec.items()}
 
 
-class TfidfModel:
-    def __init__(self, path: str):
+MODEL_KEYS = ("classes", "vocab", "idf", "weights", "bias")
+
+
+def load_model(path: str) -> TfidfModel | Problem:
+    """Modelldatei lesen: das Modell oder ein Problem (fehlt, unlesbar, unvollstaendig) - dann faellt die Engine aus der Kette."""
+    if not os.path.exists(path):
+        return engine_failed(f"{path} fehlt")
+    try:
         with open(path, encoding="utf-8") as f:
             m = json.load(f)
+    except (OSError, ValueError) as e:  # exception-ok: file system and the model file's JSON
+        return engine_failed(f"{path}: {e}")
+    if not isinstance(m, dict) or any(k not in m for k in MODEL_KEYS) or not isinstance(m["classes"], list):
+        return engine_failed(f"{path}: Modell unvollstaendig (braucht {', '.join(MODEL_KEYS)})")
+    return TfidfModel(m, path)
+
+
+class TfidfModel:
+    def __init__(self, m: dict, path: str):
         self.name = m.get("name") or os.path.splitext(os.path.basename(path))[0]
         self.classes = list(m["classes"])
         self.vocab = m["vocab"]                       # Merkmal -> Spaltenindex
@@ -86,9 +102,14 @@ class TfidfModel:
 class TfidfEngine(DecisionEngine):
     name = "tfidf"
 
-    def __init__(self, model_path: str):
+    def __init__(self, model: TfidfModel, model_path: str):
         self.path = model_path
-        self.model = TfidfModel(model_path)
+        self.model = model
+
+    @classmethod
+    def load(cls, model_path: str) -> TfidfEngine | Problem:
+        model = load_model(model_path)
+        return model if failed(model) else cls(model, model_path)
 
     async def decide(self, req: DecisionRequest) -> DecisionResult:
         t0 = time.perf_counter()

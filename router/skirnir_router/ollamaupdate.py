@@ -17,7 +17,6 @@ Ablauf
      vogel zuerst (`canary`, sonst der des Agent-Updates), die anderen erst nach `canary_clean_h` Stunden sauberem Betrieb.
 """
 import asyncio
-import json
 import os
 import re
 import time
@@ -26,7 +25,7 @@ import aiohttp
 from aiohttp import web
 
 from . import state
-from .common import VERSION, log
+from .common import VERSION, load_json_file, log, save_json_file
 from .outcome import bad_gateway, failed, invalid
 
 ASSETS = {("windows", "amd64"): "ollama-windows-amd64.zip", ("windows", "arm64"): "ollama-windows-arm64.zip",
@@ -59,26 +58,13 @@ def latest_path():
 
 
 def load_latest():
-    if not os.path.exists(latest_path()):
-        return
-    try:
-        with open(latest_path(), encoding="utf-8") as f:
-            d = json.load(f)
-    except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
-        log.warning("ollama-latest.json unlesbar: %s", e)
-        return
+    d = load_json_file(latest_path(), "ollama-latest.json")
     if isinstance(d, dict) and d.get("version") and isinstance(d.get("files"), dict):
         LATEST.update({k: d[k] for k in ("version", "checked", "checked_ts", "files", "source") if k in d})
 
 
 def save_latest():
-    tmp = latest_path() + ".tmp"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(LATEST, f, indent=1)
-        os.replace(tmp, latest_path())
-    except OSError as e:  # exception-ok: file system boundary; LATEST stays in memory, the next check writes again
-        log.warning("ollama-latest.json schreiben: %s", e)
+    save_json_file(latest_path(), LATEST, "ollama-latest.json", indent=1)   # klappt es nicht, bleibt LATEST im Speicher
 
 
 def parse_checksums(txt):
