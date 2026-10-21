@@ -1,8 +1,5 @@
 {
-  "router/skirnir_router/admin.py": 20,
-  "router/skirnir_router/agentupdate.py": 6,
   "router/skirnir_router/anthropic_api.py": 1,
-  "router/skirnir_router/app.py": 4,
   "router/skirnir_router/ausweich_beobachtung.py": 1,
   "router/skirnir_router/auth.py": 4,
   "router/skirnir_router/common.py": 3,
@@ -14,13 +11,9 @@
   "router/skirnir_router/ha.py": 8,
   "router/skirnir_router/metrics.py": 6,
   "router/skirnir_router/nodes.py": 3,
-  "router/skirnir_router/ollamaupdate.py": 13,
   "router/skirnir_router/openai_api.py": 2,
   "router/skirnir_router/ops.py": 5,
-  "router/skirnir_router/perf.py": 18,
   "router/skirnir_router/poll.py": 7,
-  "router/skirnir_router/registry.py": 17,
   "router/skirnir_router/state.py": 5,
-  "router/skirnir_router/toolcall_rescue.py": 3,
-  "router/skirnir_router/tunnel.py": 12
+  "router/skirnir_router/toolcall_rescue.py": 3
 }

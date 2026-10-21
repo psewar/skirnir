@@ -11,9 +11,9 @@ Die bleiben in config.yaml und kommen per Deploy - eine UI-Sitzung soll nicht di
 Pfade mit `*` gelten je Eintrag (Cloud-Anbieter, Client) - nur fuer Namen, die config.yaml schon kennt.
 """
 
-import ipaddress
 import re
 
+from . import values
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES, THINK_MODES  # noqa: E402
 from .outcome import failed, invalid  # noqa: E402
 SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open")
@@ -306,16 +306,9 @@ def coerce(path, value, c):
             return value.lower() in ("true", "1", "an")
         return invalid(f"settings.{path}: true/false erwartet")
     if t in ("int", "float"):
-        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-            return invalid(f"settings.{path}: Zahl erwartet")
-        try:
-            v = float(value)
-        except ValueError:  # exception-ok: float() is the reference parser for a numeric string (1e3, -0.5, ...)
-            return invalid(f"settings.{path}: Zahl erwartet")
-        if t == "int":
-            if v != int(v):
-                return invalid(f"settings.{path}: ganze Zahl erwartet")
-            v = int(v)
+        v = values.number(value, f"settings.{path}", integer=t == "int")
+        if failed(v):
+            return v
         lo, hi = spec.get("min"), spec.get("max")
         if (lo is not None and v < lo) or (hi is not None and v > hi):
             return invalid(f"settings.{path}: {v} liegt nicht zwischen {lo} und {hi}")
@@ -354,13 +347,9 @@ def coerce(path, value, c):
             value = [x.strip() for x in value.replace(";", ",").split(",") if x.strip()]
         if not isinstance(value, list):
             return invalid(f"settings.{path}: Liste von IP-Adressen erwartet")
-        out = []
-        for x in value:
-            try:
-                out.append(str(ipaddress.ip_address(str(x).strip())))
-            except ValueError:  # exception-ok: ipaddress is the reference parser for IPv4/IPv6 text
-                return invalid(f"settings.{path}: {x!r} ist keine IP-Adresse")
-        return out or None
+        out = [values.ip_address(x, f"settings.{path}") for x in value]
+        problem = next((p for p in out if failed(p)), None)
+        return problem or out or None
     if t == "keep_alive":
         if isinstance(value, bool):
             return invalid(f"settings.{path}: -1, 0 oder Dauer wie 5m erwartet")

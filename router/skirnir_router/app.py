@@ -1,6 +1,7 @@
 """Zusammenbau der beiden aiohttp-Apps, Hauptschleife, Kommandozeile."""
 
 import asyncio
+import importlib.util
 import logging
 import os
 import secrets
@@ -96,10 +97,9 @@ def build_apps():
 def install_uvloop():
     """uvloop statt der Standard-Schleife, wenn installiert (Router-CT: python3-uvloop 0.17). Weniger CPU je Verbindung/Frame;
     unter Windows (Tests, Dev-Env) gibt es kein uvloop -> Standard bleibt."""
-    try:
-        import uvloop
-    except ImportError:
+    if importlib.util.find_spec("uvloop") is None:
         return False
+    import uvloop
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
     return True
 
@@ -138,7 +138,8 @@ async def main(cfg_path):
     elif state.CFG.control_users:
         log.warning("Basic Auth ohne TLS: Passwoerter gehen im Klartext ueber das Netz (control_tls setzen)")
     if state.CFG.api_tls and ctl_ssl is None:
-        raise SystemExit("api_tls: true braucht control_tls (Zertifikat)")
+        log.error("api_tls: true braucht control_tls (Zertifikat) - Router startet nicht")
+        sys.exit(2)
     for app, listen, sslctx, keepalive in ((api, state.CFG.listen, ctl_ssl if state.CFG.api_tls else None, True),
                                            (ctl, state.CFG.control_listen, ctl_ssl, False)):
         runner = web.AppRunner(app, access_log=None)
@@ -171,13 +172,10 @@ async def main(cfg_path):
         decision.ensure()
         log.info("config reloaded")
 
-    try:
+    if sys.platform != "win32":   # Windows (nur Testbetrieb): die Ereignisschleife kennt keine Signal-Handler
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stop.set)
-        if hasattr(signal, "SIGHUP"):
-            loop.add_signal_handler(signal.SIGHUP, on_hup)
-    except NotImplementedError:  # Windows (nur Testbetrieb)
-        pass
+        loop.add_signal_handler(signal.SIGHUP, on_hup)
     await stop.wait()
     if ha_pub:
         ha_pub.stop()
@@ -185,10 +183,7 @@ async def main(cfg_path):
         t.cancel()
     # offene Tunnel schliessen, sonst wartet runner.cleanup() auf die WebSocket-Handler (29 s beim Deploy 2026-09-07)
     for tun in [n.tunnel for n in state.NODES.values() if n.tunnel is not None] + list(state.PENDING.values()):
-        try:
-            await asyncio.wait_for(tun.ws.close(), 3)
-        except Exception:  # noqa: BLE001
-            pass
+        await asyncio.wait({asyncio.ensure_future(registry.close_ws(tun.ws))}, timeout=3)
     if state.REG is not None and state.REG.dirty:
         state.REG.save()
     metrics.usage_save()     # letzter Stand statt bis zu 10 s Verlust

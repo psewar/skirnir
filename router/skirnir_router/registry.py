@@ -3,20 +3,26 @@
 import asyncio
 import base64
 import hashlib
+import importlib.util
 import json
 import os
+import re
 import secrets
 import time
 
 from aiohttp import web
 
-try:
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey  # Debian: python3-cryptography
-except ImportError:  # pragma: no cover
-    Ed25519PublicKey = None
+if importlib.util.find_spec("cryptography") is not None:   # Debian: python3-cryptography
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+else:  # pragma: no cover
+    InvalidSignature = Ed25519PublicKey = None
 
-from . import agentupdate, nodes, ollamaupdate, state, tunnel
-from .common import VERSION, log, normalize_mac, read_env_value, safe_node_name
+from . import agentupdate, nodes, ollamaupdate, state, tunnel, values
+from .common import VERSION, log, normalize_mac, read_env_value, read_json, safe_node_name
+from .outcome import Problem, failed, invalid, unauthenticated
+
+BASE64 = re.compile(r"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?")
 
 
 class NodeRegistry:
@@ -27,14 +33,19 @@ class NodeRegistry:
         self.last_save = 0.0
 
     def load(self):
-        try:
-            with open(self.path, encoding="utf-8") as f:
-                self.nodes = json.load(f).get("nodes", {})
-        except FileNotFoundError:
-            self.nodes = {}
-        except Exception as e:  # noqa: BLE001
-            log.error("nodes.json unlesbar (%s) - starte mit leerem Register", e)
-            self.nodes = {}
+        self.nodes = {}
+        if os.path.exists(self.path):
+            try:
+                with open(self.path, encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
+                log.error("nodes.json unlesbar (%s) - starte mit leerem Register", e)
+                data = {}
+            nodes_ = data.get("nodes") if isinstance(data, dict) else None
+            if isinstance(nodes_, dict):
+                self.nodes = nodes_
+            elif data:
+                log.error("nodes.json hat kein Mapping 'nodes' - starte mit leerem Register")
         self.drop_stale_learned()
         return self
 
@@ -54,18 +65,23 @@ class NodeRegistry:
                          e.get("name") or fp[:16])   # das Register ist nach Fingerprint geschluesselt
 
     def save(self):
+        """Register schreiben (atomar). Scheitert das Dateisystem, bleibt der Stand im Speicher gueltig und dirty - maybe_save
+        versucht es wieder; der Aufrufer bekommt das Problem."""
         tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"nodes": self.nodes, "saved": time.strftime("%Y-%m-%dT%H:%M:%S")}, f, indent=1, ensure_ascii=False)
-        os.replace(tmp, self.path)
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"nodes": self.nodes, "saved": time.strftime("%Y-%m-%dT%H:%M:%S")}, f, indent=1, ensure_ascii=False)
+            os.replace(tmp, self.path)
+        except OSError as e:  # exception-ok: file system boundary
+            log.warning("nodes.json speichern: %s", e)
+            self.dirty = True
+            return Problem(500, "nodes.json not writable")
         self.dirty, self.last_save = False, time.time()
+        return None
 
     def maybe_save(self, now):
         if self.dirty and now - self.last_save > 300:
-            try:
-                self.save()
-            except Exception as e:  # noqa: BLE001
-                log.warning("nodes.json speichern: %s", e)
+            self.save()
 
     def by_name(self, name):
         return next(((fp, e) for fp, e in self.nodes.items() if e["name"] == name), (None, None))
@@ -154,16 +170,23 @@ def activate_node(fp):
     return node
 
 
+async def close_ws(ws):
+    """WebSocket eines abgeloesten oder gesperrten Tunnels schliessen; ist die Verbindung schon weg, gibt es nichts zu tun."""
+    if ws.closed:
+        return
+    try:
+        await ws.close()
+    except Exception as e:  # noqa: BLE001  # exception-ok: network boundary, the peer may vanish while closing
+        log.debug("tunnel: schliessen: %s", e)
+
+
 async def attach_tunnel(node, tun):
     old = node.tunnel
     tun.node, tun.approved = node, True
     node.tunnel = tun
     if old is not None and old is not tun:
         old.close_all("tunnel replaced")
-        try:
-            await old.ws.close()
-        except Exception:  # noqa: BLE001
-            pass
+        await close_ws(old.ws)
     log.info("node %s: Tunnel verbunden von %s", node.name, tun.remote)
     state.remember({"event": "tunnel", "node": node.name, "state": "up"})
 
@@ -172,7 +195,7 @@ async def send_ctl(tun, msg):
     try:
         async with tun.lock:
             await tun.ws.send_json(msg)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001  # exception-ok: network boundary; a lost control message is resent on the next hello
         log.debug("tunnel %s: Steuernachricht: %s", tun.name(), e)
 
 
@@ -192,7 +215,7 @@ async def approve_node(fp, policy):
     if state.HA_PUB is not None:
         try:
             state.HA_PUB.publish_discovery()
-        except Exception as ex:  # noqa: BLE001
+        except Exception as ex:  # noqa: BLE001  # exception-ok: MQTT broker boundary; the next publish cycle repeats discovery
             log.debug("HA discovery: %s", ex)
     log.info("node %s freigegeben (wol=%s weight=%s mqtt=%s)", node.name, node.wol, node.weight, e["policy"].get("mqtt", True))
     return node
@@ -216,10 +239,7 @@ async def revoke_node(fp):
     if tun is not None:
         await send_ctl(tun, {"t": "status", "state": "revoked", "node": e["name"], "message": "in der Router-UI gesperrt"})
         tun.close_all("revoked")
-        try:
-            await tun.ws.close()
-        except Exception:  # noqa: BLE001
-            pass
+        await close_ws(tun.ws)
     state.MQTT_DIRTY.append(True)
     state.remember({"event": "node_revoked", "node": e["name"], "fp": fp[:16]})
     log.warning("node %s gesperrt (Fingerprint %s...)", e["name"], fp[:16])
@@ -232,6 +252,35 @@ async def push_config(fp):
         await send_ctl(node.tunnel, {"t": "config", "config": provision_bundle(e)})
 
 
+async def receive_hello(ws, nonce, timeout=15):
+    """Signiertes Hello des Agenten pruefen: (pub, name, hello) oder ein Problem 401 mit dem Grund."""
+    recv = asyncio.ensure_future(ws.receive())
+    done, _ = await asyncio.wait({recv}, timeout=timeout)
+    if not done:
+        recv.cancel()
+        return unauthenticated(f"kein hello innerhalb von {timeout} s")
+    msg = recv.result()
+    if msg.type != web.WSMsgType.TEXT:
+        return unauthenticated("kein Textrahmen")
+    try:
+        hello = json.loads(msg.data)
+    except ValueError:  # exception-ok: untrusted JSON from the agent
+        return unauthenticated("kein JSON")
+    if not isinstance(hello, dict) or hello.get("t") != "hello":
+        return unauthenticated("kein hello")
+    if not all(isinstance(hello.get(k), str) and BASE64.fullmatch(hello[k]) for k in ("pubkey", "sig")):
+        return unauthenticated("pubkey/sig sind kein Base64")
+    pub, sig = base64.b64decode(hello["pubkey"]), base64.b64decode(hello["sig"])
+    name = str(hello.get("node") or "")[:64]
+    if len(pub) != 32:
+        return unauthenticated("Public Key hat nicht 32 Bytes")
+    try:
+        Ed25519PublicKey.from_public_bytes(pub).verify(sig, nonce + name.encode() + pub)
+    except (InvalidSignature, ValueError):  # exception-ok: cryptography reports a wrong signature or key only as an exception
+        return unauthenticated("Signatur passt nicht")
+    return pub, name, hello
+
+
 async def handle_tunnel_v2(request):
     """WebSocket-Endpunkt fuer Agenten mit Schluessel-Identitaet: Challenge -> signiertes Hello -> Status."""
     if Ed25519PublicKey is None:
@@ -240,25 +289,14 @@ async def handle_tunnel_v2(request):
     await ws.prepare(request)
     nonce = secrets.token_bytes(32)
     await ws.send_json({"t": "challenge", "nonce": base64.b64encode(nonce).decode(), "router": VERSION})
-    try:
-        msg = await asyncio.wait_for(ws.receive(), 15)
-        if msg.type != web.WSMsgType.TEXT:
-            raise ValueError("kein Textrahmen")
-        hello = json.loads(msg.data)
-        if hello.get("t") != "hello":
-            raise ValueError("kein hello")
-        pub = base64.b64decode(hello["pubkey"])
-        sig = base64.b64decode(hello["sig"])
-        name = str(hello.get("node") or "")[:64]
-        if len(pub) != 32:
-            raise ValueError("Public Key hat nicht 32 Bytes")
-        Ed25519PublicKey.from_public_bytes(pub).verify(sig, nonce + name.encode() + pub)
-    except Exception as e:  # noqa: BLE001
-        log.warning("tunnel: Anmeldung von %s abgelehnt: %s", request.remote, e)
+    hello = await receive_hello(ws, nonce)
+    if failed(hello):
+        log.warning("tunnel: Anmeldung von %s abgelehnt: %s", request.remote, hello.message)
         await ws.close(code=4001, message=b"auth failed")
         return ws
+    pub, name, hello = hello
     fp = hashlib.sha256(pub).hexdigest()
-    facts = hello.get("facts") or {}
+    facts = hello.get("facts") if isinstance(hello.get("facts"), dict) else {}
     e = state.REG.upsert_hello(fp, name or facts.get("hostname") or fp[:12], base64.b64encode(pub).decode(), facts, request.remote)
     if e["state"] == "revoked":
         await ws.send_json({"t": "status", "state": "revoked", "node": e["name"], "message": "in der Router-UI gesperrt"})
@@ -274,16 +312,10 @@ async def handle_tunnel_v2(request):
         old = state.PENDING.get(fp)
         state.PENDING[fp] = tun
         if old is not None:
-            try:
-                await old.ws.close()
-            except Exception:  # noqa: BLE001
-                pass
+            await close_ws(old.ws)
         state.MQTT_DIRTY.append(True)
         await ws.send_json({"t": "status", "state": "pending", "node": e["name"], "message": "wartet auf Freigabe in der Router-UI"})
-    try:
-        state.REG.save()
-    except Exception as e:  # noqa: BLE001
-        log.warning("nodes.json speichern: %s", e)
+    state.REG.save()   # scheitert es, bleibt das Register dirty und maybe_save versucht es wieder
     try:
         async for msg in ws:
             if msg.type == web.WSMsgType.BINARY:
@@ -323,31 +355,42 @@ async def handle_nodes(request):
     return web.json_response({"nodes": registry_view(), "pending": [x["name"] for x in registry_view() if x["state"] == "pending"]})
 
 
+POLICY_KEYS = ("wol", "weight", "mqtt", "foreign_vram_baseline_gib", "mac", "max_inflight", "busy_gpu_util_pct", "busy_foreign_gib",
+               "gpu_guard", "auto_update", "ollama_auto_update")
+
+
+def node_policy(body):
+    """Policy-Felder aus der UI: die gesetzten Felder (None = entfernen) oder ein Problem 400."""
+    pol = {k: body.get(k) for k in POLICY_KEYS if k in body}
+    for k, lo, hi in (("busy_gpu_util_pct", 1, 100), ("busy_foreign_gib", 0.1, 64)):
+        if pol.get(k) is not None:
+            pol[k] = values.number(pol[k], k)
+            if failed(pol[k]):
+                return pol[k]
+            if not lo <= pol[k] <= hi:
+                return invalid(f"{k}: {pol[k]} is not between {lo} and {hi}")
+    for k in ("weight", "max_inflight"):
+        if pol.get(k) is not None:
+            pol[k] = values.number(pol[k], k, integer=True)
+            if failed(pol[k]):
+                return pol[k]
+    if pol.get("mac") is not None:
+        pol["mac"] = normalize_mac(pol["mac"])
+        if pol["mac"] is None:
+            return invalid("mac: six hex pairs expected (aa:bb:cc:dd:ee:ff)")
+    return pol
+
+
 async def handle_node_action(request):
     fp, action = request.match_info["fp"], request.match_info["action"]
     if fp not in state.REG.nodes:
         return web.json_response({"error": "unknown fingerprint"}, status=404)
-    try:
-        body = await request.json() if request.can_read_body else {}
-    except Exception:  # noqa: BLE001
-        body = {}
-    pol = {k: body.get(k) for k in ("wol", "weight", "mqtt", "foreign_vram_baseline_gib", "mac", "max_inflight", "busy_gpu_util_pct", "busy_foreign_gib", "gpu_guard", "auto_update", "ollama_auto_update") if k in body}
-    for k, lo, hi in (("busy_gpu_util_pct", 1, 100), ("busy_foreign_gib", 0.1, 64)):
-        if pol.get(k) is not None:
-            try:
-                pol[k] = float(pol[k])
-            except (TypeError, ValueError):
-                return web.json_response({"error": f"{k}: number expected"}, status=400)
-            if not lo <= pol[k] <= hi:
-                return web.json_response({"error": f"{k}: {pol[k]} is not between {lo} and {hi}"}, status=400)
-    if "weight" in pol and pol["weight"] is not None:
-        pol["weight"] = int(pol["weight"])
-    if pol.get("mac") is not None:
-        pol["mac"] = normalize_mac(pol["mac"])
-        if pol["mac"] is None:
-            return web.json_response({"error": "mac: six hex pairs expected (aa:bb:cc:dd:ee:ff)"}, status=400)
-    if pol.get("max_inflight") is not None:
-        pol["max_inflight"] = int(pol["max_inflight"])
+    body = (await read_json(request) if request.can_read_body else None) or {}
+    if not isinstance(body, dict):
+        return web.json_response({"error": "object expected"}, status=400)
+    pol = node_policy(body)
+    if failed(pol):
+        return web.json_response({"error": pol.message}, status=pol.status)
     if action == "approve":
         node = await approve_node(fp, pol)
         return web.json_response({"ok": True, "node": node.name})
@@ -393,10 +436,7 @@ async def handle_node_delete(request):
         return web.json_response({"error": "revoke first, then delete"}, status=400)
     tun = state.PENDING.pop(fp, None)
     if tun is not None:
-        try:
-            await tun.ws.close()
-        except Exception:  # noqa: BLE001
-            pass
+        await close_ws(tun.ws)
     del state.REG.nodes[fp]
     state.REG.save()
     state.MQTT_DIRTY.append(True)
