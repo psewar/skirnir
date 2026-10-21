@@ -123,11 +123,8 @@ class ConfigurationTests(unittest.TestCase):
             with self.subTest(shared_allow_cloud=allow_cloud):
                 raw["router"]["memory_scopes"] = {"example-team": {"data_class": "personal", "allow_cloud": allow_cloud}}
                 cfg = config.Config.__new__(config.Config)
-                if ok:
-                    cfg.parse(copy.deepcopy(raw))
-                else:
-                    with self.assertRaises(ValueError):   # genuine startup abort, as for other invalid scope grants
-                        cfg.parse(copy.deepcopy(raw))
+                result = cfg.parse(copy.deepcopy(raw))   # an invalid scope grant stops loading, as a Problem
+                self.assertEqual(failed(result), not ok, getattr(result, "message", result))
 
 
 class MemoryHarness(unittest.IsolatedAsyncioTestCase):

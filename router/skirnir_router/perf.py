@@ -9,6 +9,7 @@ from aiohttp import ClientTimeout, web
 
 from . import config, nodes, poll, state
 from .common import GIB, log
+from .outcome import failed
 
 
 def perf_path():
@@ -380,7 +381,11 @@ async def measure_model(model, node):
         models = dict(ov.get("models", {}))
         models[model] = e
         ov["models"] = models
-        config.write_overrides(ov)
+        written = config.write_overrides(ov)
+        if failed(written):   # Messung gelungen, Katalog nicht geschrieben: als Fehler melden, nicht als fertig
+            log.warning("measure %s on %s: catalog not written: %s", model, node.name, written.message)
+            state.MEASURING[model].update(step="fehler", error=written.message)
+            return
         teil = f", PARTIAL OFFLOAD bei {e['partial_offload']}" if e.get("partial_offload") else ""
         log.info("measured %s on %s (%s): weights %.2f GiB, kv %.4f GiB/1k, Punkte %s%s", model, node.name,
                  "nvidia-smi" if real else "/api/ps", e["weights_gib"], e["kv_gib_per_1k"],

@@ -14,6 +14,7 @@ from aiohttp import ClientSession, web
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
 from . import decision, memory, rerank, session_api, context_ops
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
+from .outcome import failed
 
 # TCP-Keepalive auf dem API-Port: erste Probe nach 60 s Stille, dann alle 15 s, nach 4 unbeantworteten gilt die Verbindung als tot
 KEEPALIVE = (("TCP_KEEPIDLE", 60), ("TCP_KEEPINTVL", 15), ("TCP_KEEPCNT", 4))
@@ -104,7 +105,11 @@ def install_uvloop():
 
 
 async def main(cfg_path):
-    state.CFG = config.Config(cfg_path)
+    cfg = config.Config.load(cfg_path)
+    if failed(cfg):
+        log.error("Konfiguration ungueltig, Router startet nicht: %s", cfg.message)
+        sys.exit(2)
+    state.CFG = cfg
     state.INTERNAL_TOKEN = secrets.token_urlsafe(32)   # Selbstaufruf der UI (Ausprobieren) im enforce-Modus, nur localhost
     decision.init()   # Auto-Rolle (decision_engine), wenn konfiguriert
     state.NODES = {name: nodes.Node(name, spec) for name, spec in state.CFG.nodes.items()}
@@ -158,13 +163,13 @@ async def main(cfg_path):
     stop = asyncio.Event()
 
     def on_hup():
-        try:
-            state.CFG.reload()
-            cloud.setup()
-            decision.ensure()
-            log.info("config reloaded")
-        except Exception as e:  # noqa: BLE001
-            log.error("config reload failed, keeping old: %s", e)
+        problem = state.CFG.reload()   # prueft erst an einer Probe: ungueltig = nichts geaendert
+        if failed(problem):
+            log.error("config reload failed, keeping old: %s", problem.message)
+            return
+        cloud.setup()
+        decision.ensure()
+        log.info("config reloaded")
 
     try:
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -201,14 +206,13 @@ def cli():
     if len(sys.argv) > 2 and sys.argv[1] == "--check":
         # Stufe 6: Konfiguration gegen Schema und Parser pruefen (deploy.py: lokal ohne, auf dem CT mit roles.yaml).
         # rc 0 = ok, 2 = ungueltig. --pure ignoriert eine daneben liegende roles.yaml.
-        try:
-            cfg = config.Config(sys.argv[2], use_overrides="--pure" not in sys.argv)
-            print(f"Konfiguration ok: {len(cfg.roles)} Rollen, {len(cfg.models)} Modelle im Katalog, {len(cfg.nodes)} statische Knoten, "
-                  f"client_auth {cfg.client_auth['mode']}" + ("" if "--pure" in sys.argv or not os.path.exists(cfg.overrides_path) else " (mit roles.yaml)"))
-            sys.exit(0)
-        except Exception as e:  # noqa: BLE001
-            print(f"FEHLER: {e}")
+        cfg = config.Config.load(sys.argv[2], use_overrides="--pure" not in sys.argv)
+        if failed(cfg):
+            print(f"FEHLER: {cfg.message}")
             sys.exit(2)
+        print(f"Konfiguration ok: {len(cfg.roles)} Rollen, {len(cfg.models)} Modelle im Katalog, {len(cfg.nodes)} statische Knoten, "
+              f"client_auth {cfg.client_auth['mode']}" + ("" if "--pure" in sys.argv or not os.path.exists(cfg.overrides_path) else " (mit roles.yaml)"))
+        sys.exit(0)
     logging.basicConfig(level=os.environ.get("ROUTER_LOG", "INFO"),
                         format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
     uv = install_uvloop()

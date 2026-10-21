@@ -15,6 +15,7 @@ import ipaddress
 import re
 
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES, THINK_MODES  # noqa: E402
+from .outcome import failed, invalid  # noqa: E402
 SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open")
 
 # typ: int | float | bool | str | choice | list | iplist | keep_alive | tristate
@@ -280,95 +281,96 @@ def _classes(c):
 
 
 def coerce(path, value, c):
-    """Wert fuer einen Pfad pruefen und in den Typ bringen (ValueError mit Klartext). None nur, wenn nullable."""
+    """Wert fuer einen Pfad pruefen und in den Typ bringen. Ein Problem 400 mit Klartext, wenn er nicht passt; None
+    nur, wenn nullable (darum failed() pruefen, nicht auf None)."""
     spec = spec_for(path)
     if spec is None:
-        raise ValueError(f"settings.{path}: nicht ueber die UI aenderbar (nur config.yaml)")
+        return invalid(f"settings.{path}: nicht ueber die UI aenderbar (nur config.yaml)")
     if path == "router.client_auth.mode" and ((c.get("router") or {}).get("client_auth") or {}).get("locked"):
-        raise ValueError("settings.router.client_auth.mode: gesperrt (client_auth.locked in config.yaml) - nur per Deploy aenderbar")
+        return invalid("settings.router.client_auth.mode: gesperrt (client_auth.locked in config.yaml) - nur per Deploy aenderbar")
     parts = path.split(".")
     if "*" in spec_key(path):
         # der benannte Eintrag (Anbieter/Client) muss in config.yaml existieren - die UI legt keine neuen an
         parent, ok = _get(c, parts[:-1])
         if not ok or not isinstance(parent, dict):
-            raise ValueError(f"settings.{path}: {'.'.join(parts[:-1])} gibt es in config.yaml nicht")
+            return invalid(f"settings.{path}: {'.'.join(parts[:-1])} gibt es in config.yaml nicht")
     if value is None:
         if spec.get("nullable"):
             return None
-        raise ValueError(f"settings.{path}: darf nicht leer sein")
+        return invalid(f"settings.{path}: darf nicht leer sein")
     t = spec["type"]
     if t == "bool":
         if isinstance(value, bool):
             return value
         if isinstance(value, str) and value.lower() in ("true", "false", "1", "0", "an", "aus"):
             return value.lower() in ("true", "1", "an")
-        raise ValueError(f"settings.{path}: true/false erwartet")
+        return invalid(f"settings.{path}: true/false erwartet")
     if t in ("int", "float"):
         if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-            raise ValueError(f"settings.{path}: Zahl erwartet")
+            return invalid(f"settings.{path}: Zahl erwartet")
         try:
             v = float(value)
-        except ValueError:
-            raise ValueError(f"settings.{path}: Zahl erwartet") from None
+        except ValueError:  # exception-ok: float() is the reference parser for a numeric string (1e3, -0.5, ...)
+            return invalid(f"settings.{path}: Zahl erwartet")
         if t == "int":
             if v != int(v):
-                raise ValueError(f"settings.{path}: ganze Zahl erwartet")
+                return invalid(f"settings.{path}: ganze Zahl erwartet")
             v = int(v)
         lo, hi = spec.get("min"), spec.get("max")
         if (lo is not None and v < lo) or (hi is not None and v > hi):
-            raise ValueError(f"settings.{path}: {v} liegt nicht zwischen {lo} und {hi}")
+            return invalid(f"settings.{path}: {v} liegt nicht zwischen {lo} und {hi}")
         return v
     if t == "choice":
         ch = spec["choices"]
         if ch == "data_classes":
             ch = _classes(c)
         if value not in ch:
-            raise ValueError(f"settings.{path}: {value!r} ist keine der Optionen {ch}")
+            return invalid(f"settings.{path}: {value!r} ist keine der Optionen {ch}")
         return value
     if t == "tristate":
         if value in (True, False, None):
             return value
         if isinstance(value, str) and value.lower() in ("true", "false", "null", ""):
             return {"true": True, "false": False}.get(value.lower())
-        raise ValueError(f"settings.{path}: true/false/leer erwartet")
+        return invalid(f"settings.{path}: true/false/leer erwartet")
     if t == "str":
         s = str(value).strip()
         if len(s) > spec.get("maxlen", 200):
-            raise ValueError(f"settings.{path}: zu lang")
+            return invalid(f"settings.{path}: zu lang")
         return s
     if t == "list":
         if isinstance(value, str):
             value = [x.strip() for x in value.split(",") if x.strip()]
         if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
-            raise ValueError(f"settings.{path}: Liste von Namen erwartet")
+            return invalid(f"settings.{path}: Liste von Namen erwartet")
         if spec.get("choices") == "roles":
             known = set(c.get("roles") or {}) | {"*"}
             bad = [x for x in value if x not in known]
             if bad:
-                raise ValueError(f"settings.{path}: unbekannte Rolle(n) {bad}")
+                return invalid(f"settings.{path}: unbekannte Rolle(n) {bad}")
         return [x.strip() for x in value] or spec.get("default") or []
     if t == "iplist":
         if isinstance(value, str):
             value = [x.strip() for x in value.replace(";", ",").split(",") if x.strip()]
         if not isinstance(value, list):
-            raise ValueError(f"settings.{path}: Liste von IP-Adressen erwartet")
+            return invalid(f"settings.{path}: Liste von IP-Adressen erwartet")
         out = []
         for x in value:
             try:
                 out.append(str(ipaddress.ip_address(str(x).strip())))
-            except ValueError:
-                raise ValueError(f"settings.{path}: {x!r} ist keine IP-Adresse") from None
+            except ValueError:  # exception-ok: ipaddress is the reference parser for IPv4/IPv6 text
+                return invalid(f"settings.{path}: {x!r} ist keine IP-Adresse")
         return out or None
     if t == "keep_alive":
         if isinstance(value, bool):
-            raise ValueError(f"settings.{path}: -1, 0 oder Dauer wie 5m erwartet")
+            return invalid(f"settings.{path}: -1, 0 oder Dauer wie 5m erwartet")
         if isinstance(value, (int, float)):
             return int(value)
         s = str(value).strip()
         if not _KEEP_ALIVE.match(s):
-            raise ValueError(f"settings.{path}: -1, 0 oder Dauer wie 5m/1h erwartet")
+            return invalid(f"settings.{path}: -1, 0 oder Dauer wie 5m/1h erwartet")
         return int(s) if s.lstrip("-").isdigit() else s
-    raise ValueError(f"settings.{path}: unbekannter Typ {t}")
+    return invalid(f"settings.{path}: unbekannter Typ {t}")
 
 
 def spec_key(path):
@@ -384,12 +386,15 @@ def spec_key(path):
 
 
 def apply(c, settings):
-    """settings {pfad: wert} geprueft in die (noch ungeparste) Konfiguration c legen. Liefert die geprueften Werte."""
+    """settings {pfad: wert} geprueft in die (noch ungeparste) Konfiguration c legen. Liefert die geprueften Werte
+    oder das Problem des ersten ungueltigen (dann ist c teilweise belegt - Aufrufer arbeiten auf einer Kopie)."""
     if not isinstance(settings, dict):
-        raise ValueError("settings muss ein Mapping Pfad -> Wert sein")
+        return invalid("settings muss ein Mapping Pfad -> Wert sein")
     out = {}
     for path, value in settings.items():
         v = coerce(str(path), value, c)
+        if failed(v):
+            return v
         parts = str(path).split(".")
         cur = c
         for p in parts[:-1]:
