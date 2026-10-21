@@ -34,6 +34,7 @@ func TestPublisherFolder(t *testing.T) {
 	}{
 		{"Blizzard Entertainment", "Diablo IV", `C:\Program Files (x86)\Diablo IV\`, `C:\Program Files (x86)\Diablo IV`, true},
 		{"Blizzard Entertainment", "Battle.net", `C:\Program Files (x86)\Battle.net`, "", false}, // Launcher
+		{"GOG.com", "GOG GALAXY", `C:\Program Files\GOG Galaxy\`, "", false},                     // Launcher, Schreibweise wie in der Registry
 		{"Electronic Arts", "EA app", `C:\Program Files\Electronic Arts\EA Desktop`, "", false},  // Launcher
 		{"Valve", "Counter-Strike 2", `D:\SteamLibrary\steamapps\common\CS2`, "", false},         // kein Verlag der Liste
 		{"Ubisoft", "Anno 1800", `D:\SteamLibrary\steamapps\common\Anno 1800`, "", false},        // schon ueber Steam
@@ -72,6 +73,29 @@ func TestMatchGame(t *testing.T) {
 		if g != c.game || v != c.via || ok != c.ok {
 			t.Errorf("%s: matchGame = %q,%q,%v want %q,%q,%v", c.name, g, v, ok, c.game, c.via, c.ok)
 		}
+	}
+}
+
+// GOG legt Spiele UNTER dem Launcher-Ordner ab (Registry-Eintraege in dieser Form). Der Launcher darf nicht in den Index,
+// seine Spiele schon - sonst galt GalaxyClient.exe als Spiel (2026-10-21) oder ein GOG-Spiel als keins.
+func TestGOGLauncherUndSpiel(t *testing.T) {
+	var idx gameIndex
+	for _, e := range [][3]string{
+		{"GOG.com", "GOG GALAXY", `C:\Program Files\GOG Galaxy\`},
+		{"GOG.com", "Example Game", `C:\Program Files\GOG Galaxy\Games\Example Game\`},
+	} {
+		if dir, ok := publisherFolder(e[0], e[1], e[2]); ok {
+			idx.folders = append(idx.folders, dir)
+		}
+	}
+	if len(idx.folders) != 1 || idx.folders[0] != `C:\Program Files\GOG Galaxy\Games\Example Game` {
+		t.Fatalf("Index-Ordner = %q, want nur den Spielordner", idx.folders)
+	}
+	if g, _, ok := matchGame([]procInfo{{"GalaxyClient.exe", `C:\Program Files\GOG Galaxy\GalaxyClient.exe`}}, idx); ok {
+		t.Errorf("Launcher gilt als Spiel: %q", g)
+	}
+	if g, v, ok := matchGame([]procInfo{{"ExampleGame.exe", `C:\Program Files\GOG Galaxy\Games\Example Game\ExampleGame.exe`}}, idx); !ok || v != "pfad" {
+		t.Errorf("GOG-Spiel nicht erkannt: %q,%q,%v", g, v, ok)
 	}
 }
 

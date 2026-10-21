@@ -57,9 +57,10 @@ const (
 )
 
 // Verlage, deren Installationsorte als Spielordner gelten, und ihre Launcher, die nicht als Spiel zaehlen.
+// Launcher ohne Gross-/Kleinschreibung: GOG traegt sich als "GOG GALAXY" ein (Fehlalarm 2026-10-21, GalaxyClient.exe galt als Spiel).
 var (
 	gamePublisher = regexp.MustCompile(`Blizzard|Electronic Arts|Ubisoft|Epic Games|GOG|Riot|Rockstar|Bethesda|Amazon Games`)
-	gameLauncher  = regexp.MustCompile(`Battle\.net|EA app|Ubisoft Connect|Epic Games Launcher|GOG Galaxy|Riot Client|Rockstar Games Launcher`)
+	gameLauncher  = regexp.MustCompile(`(?i)Battle\.net|EA app|Ubisoft Connect|Epic Games Launcher|GOG Galaxy|Riot Client|Rockstar Games Launcher`)
 	vdfPath       = regexp.MustCompile(`"path"\s+"([^"]+)"`)
 )
 
