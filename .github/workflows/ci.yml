@@ -31,6 +31,7 @@ jobs:
       - run: python test/selftest_kontext_teilen.py
       - run: python test/selftest_kinder_vram.py
       - run: python test/selftest_ollama_push.py
+      - run: python test/selftest_spiel_vorwaermen.py
       - run: python test/selftest_tunnel_cancel.py
       - run: python test/selftest_anthropic_messages.py
       - run: python test/selftest_keepalive.py
