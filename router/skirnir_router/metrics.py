@@ -11,12 +11,11 @@ Stopp): ein Deploy setzt sie nicht mehr auf null, die UI zeigt "gesamt" seit `si
 Prometheus, der /metrics abfragt, der richtige Ort - der Router ist keine Zeitreihendatenbank.
 """
 
-import json
 import os
 import time
 
 from . import admission, perf, scheduler, state
-from .common import VERSION, log
+from .common import VERSION, load_json_file, save_json_file
 
 DURATION_BUCKETS = (0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300)
 TTFT_BUCKETS = (0.1, 0.25, 0.5, 1, 2, 5, 15)
@@ -115,13 +114,8 @@ def _key_in(rows):
 def metrics_load():
     """Beim Start: Zaehler und Histogramme aus metrics.json uebernehmen. Liefert die Zahl der Reihen (0 = Datei fehlt)."""
     state.METRICS.setdefault("since", time.strftime("%Y-%m-%dT%H:%M:%S"))
-    try:
-        with open(metrics_path(), encoding="utf-8") as f:
-            d = json.load(f)
-    except FileNotFoundError:
-        return 0
-    except Exception as e:  # noqa: BLE001
-        log.warning("metrics.json unlesbar: %s", e)
+    d = load_json_file(metrics_path(), "metrics.json")
+    if not isinstance(d, dict):
         return 0
     n = 0
     for name, rows in (d.get("counters") or {}).items():
@@ -146,41 +140,25 @@ def metrics_load():
 
 def metrics_save():
     """Atomar nach metrics.json (tick_loop alle METRICS_SAVE_S bei Aenderung, app beim Stopp)."""
-    try:
-        d = {"since": state.METRICS.get("since"), "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-             "counters": {name: [[_key_out(k), v] for k, v in c.items()] for name, c in state.METRICS["counters"].items()},
-             "hist": {name: {"buckets": list(h["buckets"]), "series": [[_key_out(k), s] for k, s in h["series"].items()]}
-                      for name, h in state.METRICS["hist"].items()}}
-        tmp = metrics_path() + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(d, f)
-        os.replace(tmp, metrics_path())
-    except Exception as e:  # noqa: BLE001
-        log.warning("metrics.json schreiben: %s", e)
+    d = {"since": state.METRICS.get("since"), "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+         "counters": {name: [[_key_out(k), v] for k, v in c.items()] for name, c in state.METRICS["counters"].items()},
+         "hist": {name: {"buckets": list(h["buckets"]), "series": [[_key_out(k), s] for k, s in h["series"].items()]}
+                  for name, h in state.METRICS["hist"].items()}}
+    save_json_file(metrics_path(), d, "metrics.json")
 
 
 def usage_load():
-    try:
-        with open(usage_path(), encoding="utf-8") as f:
-            state.USAGE.update(json.load(f))
-    except FileNotFoundError:
-        pass
-    except Exception as e:  # noqa: BLE001
-        log.warning("usage.json unlesbar: %s", e)
+    d = load_json_file(usage_path(), "usage.json")
+    if isinstance(d, dict):
+        state.USAGE.update(d)
     state.USAGE.setdefault("days", {})
 
 
 def usage_save():
-    try:
-        days = state.USAGE.setdefault("days", {})
-        for d in sorted(days)[:-USAGE_DAYS]:
-            days.pop(d, None)
-        tmp = usage_path() + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(state.USAGE, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, usage_path())
-    except Exception as e:  # noqa: BLE001
-        log.warning("usage.json schreiben: %s", e)
+    days = state.USAGE.setdefault("days", {})
+    for d in sorted(days)[:-USAGE_DAYS]:
+        days.pop(d, None)
+    save_json_file(usage_path(), state.USAGE, "usage.json", ensure_ascii=False, indent=1)
 
 
 def _bump(d, outcome, p, c, cost=0.0):

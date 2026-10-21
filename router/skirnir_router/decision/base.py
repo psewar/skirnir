@@ -10,8 +10,11 @@ None, bis eine gemessene Kalibrierung (Temperatur aus dem Validierungssatz, deci
 
 from __future__ import annotations
 
+import abc
 import math
 from dataclasses import dataclass, field
+
+from ..outcome import Problem, unavailable
 
 KINDS = ("choice", "score", "boolean")
 
@@ -52,25 +55,36 @@ class DecisionResult:
                 "uncertainty": self.uncertainty, "fallback": list(self.fallback), **({"metadata": self.metadata} if self.metadata else {})}
 
 
-class DecisionEngine:
-    """Schnittstelle. Implementierungen: rules, jevlike, local_llm (spaeter typesafe-jev ...)."""
+class DecisionEngine(abc.ABC):
+    """Schnittstelle. Implementierungen: rules, jevlike, local_llm, tfidf.
+
+    decide() liefert ein DecisionResult oder ein Problem (outcome.py), wenn die Engine nicht erreichbar ist oder ihre Antwort
+    unbrauchbar war - dann fragt die Kette die naechste Engine."""
 
     name = "abstract"
 
-    async def decide(self, req: DecisionRequest) -> DecisionResult:
-        raise NotImplementedError
+    @abc.abstractmethod
+    async def decide(self, req: DecisionRequest) -> DecisionResult | Problem:
+        ...
 
     async def health(self) -> dict:
         return {"ok": True}
 
 
-class EngineError(Exception):
+def engine_failed(message: str) -> Problem:
     """Engine nicht erreichbar oder Antwort unbrauchbar -> naechste Engine der Kette."""
+    return unavailable(message, "engine")
 
 
 def normalize(probabilities: dict[str, float], options: list[str]) -> dict[str, float]:
-    """Nur bekannte Optionen, keine negativen Werte, Summe 1. Leer, wenn nichts Verwertbares kommt."""
-    clean = {o: max(0.0, float(probabilities.get(o, 0.0) or 0.0)) for o in options}
+    """Nur bekannte Optionen, keine negativen Werte, Summe 1. Leer, wenn nichts Verwertbares kommt (auch bei Werten,
+    die keine Zahlen sind - die Verteilung stammt aus einem fremden Dienst)."""
+    if not isinstance(probabilities, dict):
+        return {}
+    values = {o: probabilities.get(o) or 0.0 for o in options}
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values.values()):
+        return {}
+    clean = {o: max(0.0, float(v)) for o, v in values.items()}
     total = sum(clean.values())
     if total <= 0:
         return {}

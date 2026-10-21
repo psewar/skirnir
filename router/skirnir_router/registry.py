@@ -6,7 +6,6 @@ import hashlib
 import importlib.util
 import json
 import os
-import re
 import secrets
 import time
 
@@ -19,10 +18,8 @@ else:  # pragma: no cover
     InvalidSignature = Ed25519PublicKey = None
 
 from . import agentupdate, nodes, ollamaupdate, state, tunnel, values
-from .common import VERSION, log, normalize_mac, read_env_value, read_json, safe_node_name
+from .common import BASE64, VERSION, log, normalize_mac, read_env_value, read_json, safe_node_name
 from .outcome import Problem, failed, invalid, unauthenticated
-
-BASE64 = re.compile(r"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?")
 
 
 class NodeRegistry:

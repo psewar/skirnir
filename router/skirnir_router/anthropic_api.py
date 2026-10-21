@@ -15,7 +15,7 @@ import time
 from aiohttp import web
 
 from . import kontextpruefung, proxy, state
-from .common import anthropic_error, anthropic_error_body, log, parse_tool_args
+from .common import anthropic_error, anthropic_error_body, log, parse_tool_args, read_json
 
 KEEPALIVE_S = 15            # Default von router.anthropic.keepalive_s (Prefill bei 196k Kontext bis ~2 min)
 TOOL_ERROR_PREFIX = "Error: "
@@ -399,9 +399,8 @@ def note_headers(request):
 
 
 async def _body(request):
-    try:
-        b = await request.json()
-    except Exception:  # noqa: BLE001 - aiohttp wirft je nach Fall JSONDecodeError, UnicodeDecodeError oder ClientError
+    b = await read_json(request)
+    if b is None:
         return None, anthropic_error(400, "invalid json")
     if not isinstance(b, dict):
         return None, anthropic_error(400, "body must be a json object")

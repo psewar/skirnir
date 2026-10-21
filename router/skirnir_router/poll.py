@@ -6,7 +6,9 @@ import time
 from aiohttp import ClientError, ClientTimeout, web
 
 from . import agentupdate, nodes, ollamaupdate, perf, state
-from .common import GIB, log
+from .common import GIB, log, read_json
+
+NODE_FAULTS = (ClientError, asyncio.TimeoutError, OSError, ValueError)   # Netz, Tunnel, Ollamas JSON (ValueError)
 
 
 async def poll_node(node):
@@ -16,7 +18,7 @@ async def poll_node(node):
             tags = await r.json()
         async with nodes.nreq(node, "get", "/api/ps", timeout=t) as r:
             ps = await r.json()
-    except (ClientError, asyncio.TimeoutError, OSError, ValueError) as e:
+    except NODE_FAULTS as e:  # exception-ok: network boundary to the node and Ollama's JSON; a miss counts toward offline
         node.misses += 1
         if node.misses >= state.CFG.offline_after and node.state != "offline":
             node.go_offline(type(e).__name__)
@@ -85,19 +87,25 @@ async def fetch_version(node):
     try:
         async with nodes.nreq(node, "get", "/api/version", timeout=ClientTimeout(total=5)) as r:
             d = await r.json()
-        ollamaupdate.note_version(node, str(d.get("version") or "?"), source="poll")   # setzt node.ollama_version (0.3.0)
-    except Exception as e:  # noqa: BLE001
+    except NODE_FAULTS as e:  # exception-ok: network boundary to the node and Ollama's JSON; the next poll asks again
         log.debug("version %s: %s", node.name, e)
+        return
+    if isinstance(d, dict):
+        ollamaupdate.note_version(node, str(d.get("version") or "?"), source="poll")   # setzt node.ollama_version (0.3.0)
 
 
 async def fetch_caps(node, model):
     try:
         async with nodes.nreq(node, "post", "/api/show", json={"model": model}, timeout=ClientTimeout(total=10)) as r:
             d = await r.json()
-        state.CAPS[model] = d.get("capabilities", [])
-    except Exception as e:  # noqa: BLE001
-        state.CAPS.pop(model, None)
+    except NODE_FAULTS as e:  # exception-ok: network boundary to the node and Ollama's JSON; unknown caps are asked again
+        d = None
         log.debug("caps %s@%s: %s", model, node.name, e)
+    caps = d.get("capabilities", []) if isinstance(d, dict) else None
+    if isinstance(caps, list):
+        state.CAPS[model] = caps
+    else:
+        state.CAPS.pop(model, None)
 
 
 def evaluate(node, now):
@@ -218,7 +226,7 @@ async def unload_big_models(node):
                                     timeout=ClientTimeout(total=30)) as r:
                 await r.read()
             log.info("unloaded %s on %s (busy)", m, node.name)
-        except Exception as e:  # noqa: BLE001
+        except NODE_FAULTS as e:  # exception-ok: network boundary to the node; the busy check unloads again on the next poll
             log.warning("unload %s on %s failed: %s", m, node.name, e)
 
 
@@ -291,7 +299,7 @@ async def prewarm(node, delay, reason, since=None):
                 await r.read()
             log.info("prewarm %s@%d on %s (%s)", m, ctx, node.name, reason)
             state.remember({"event": "prewarm", "node": node.name, "model": m, "ctx": ctx, "reason": reason})
-        except Exception as e:  # noqa: BLE001
+        except NODE_FAULTS as e:  # exception-ok: network boundary to the node; a failed prewarm leaves the model for the first request
             log.warning("prewarm %s on %s failed: %s", m, node.name, e)
         finally:
             node.finish_load(m)
@@ -420,9 +428,8 @@ async def handle_heartbeat(request):
     node = state.NODES.get(name)
     if node is None:
         return web.json_response({"error": f"unknown node {name}"}, status=404)
-    try:
-        b = await request.json()
-    except Exception:  # noqa: BLE001
+    b = await read_json(request)
+    if not isinstance(b, dict):
         return web.json_response({"error": "invalid json"}, status=400)
     apply_heartbeat(node, b, time.time())
     return web.json_response(hb_ack(node))
@@ -497,12 +504,11 @@ def apply_heartbeat(node, b, now):
     """GPU-Fakten eines Heartbeats uebernehmen, Zustandsautomat laufen lassen, Baseline lernen."""
     node.hb_ts = now
     fp = b.get("ollama_tls_sha256")
-    if fp and node.tls and node.tls_mode == "auto" and fp.lower() != node.tls_fp:
-        try:
-            node.set_fingerprint(fp)
+    if fp and node.tls and node.tls_mode == "auto" and str(fp).lower() != node.tls_fp:
+        if node.set_fingerprint(fp):
             log.info("node %s: TLS-Fingerprint vom Agenten uebernommen (%s...)", node.name, node.tls_fp[:16])
-        except ValueError as e:
-            log.warning("node %s: %s", node.name, e)
+        else:
+            log.warning("node %s: TLS-Fingerprint ungueltig: %r", node.name, fp)
     node.gpu_util = b.get("gpu_util_pct")
     tot = b.get("vram_total_mib"); used = b.get("vram_used_mib"); free = b.get("vram_free_mib")
     node.vram_total_reported_gib = tot / 1024 if tot is not None else None

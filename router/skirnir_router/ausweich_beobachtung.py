@@ -117,7 +117,8 @@ def _write(rec, task):
             os.replace(p, p + ".1")
         with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except OSError as e:   # Platte voll, Rechte: nicht vorab sicher pruefbar; gedrosselt melden, die Anfrage ist laengst beantwortet
+    # Platte voll, Rechte: nicht vorab sicher pruefbar; gedrosselt melden, die Anfrage ist laengst beantwortet
+    except OSError as e:  # exception-ok: file system boundary
         if time.time() - _warned[0] > 600:
             _warned[0] = time.time()
             log.warning("anfragen.jsonl schreiben (%s): %s", p, e)

@@ -1,13 +1,14 @@
 """OpenAI-kompatibles /v1 als Uebersetzung auf die native Ollama-API."""
 
 import json
+import re
 import secrets
 import time
 
 from aiohttp import web
 
 from . import anthropic_api, proxy, state
-from .common import openai_error, parse_tool_args
+from .common import openai_error, parse_tool_args, read_json
 
 
 def oa_id(prefix):
@@ -263,12 +264,16 @@ class OpenAIEmbedShape:
 
 
 def oa_model_entry(t):
-    created = 0
-    try:
-        created = int(time.mktime(time.strptime(str(t.get("modified_at", ""))[:19], "%Y-%m-%dT%H:%M:%S")))
-    except (ValueError, OverflowError):
-        pass
+    stamp, created = str(t.get("modified_at", ""))[:19], 0
+    if ISO_SECONDS.fullmatch(stamp):
+        try:
+            created = int(time.mktime(time.strptime(stamp, "%Y-%m-%dT%H:%M:%S")))
+        except (ValueError, OverflowError):  # exception-ok: strptime/mktime are the reference calendar check (month 13, year 9999)
+            created = 0
     return {"id": t["name"], "object": "model", "created": created, "owned_by": "library"}
+
+
+ISO_SECONDS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
 
 async def handle_oa_models(request):
@@ -288,9 +293,8 @@ async def handle_oa_model(request):
 
 
 async def _oa_body(request):
-    try:
-        b = await request.json()
-    except Exception:  # noqa: BLE001
+    b = await read_json(request)
+    if b is None:
         return None, openai_error(400, "invalid json")
     if not isinstance(b, dict):
         return None, openai_error(400, "body must be a json object")

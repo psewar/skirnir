@@ -15,7 +15,7 @@ from .context_config import ContextConfig, parse_context_config
 from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
 from . import settings as settings_mod
-from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES, log
+from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES, log, tls_fingerprint
 from .outcome import Problem, failed, invalid
 
 
@@ -297,6 +297,9 @@ class Config:
         for step in (lambda: self._parse_modes(c["modes"]), lambda: self._parse_models(c.get("models") or {})):
             if failed(problem := step()):
                 return problem
+        bad_fp = [n for n, spec in c["nodes"].items() if spec.get("ollama_tls_fingerprint") and not tls_fingerprint(spec["ollama_tls_fingerprint"])]
+        if bad_fp:
+            return invalid(f"nodes.{bad_fp[0]}.ollama_tls_fingerprint: SHA-256 erwartet (64 Hexziffern, Doppelpunkte erlaubt)")
         self.nodes = c["nodes"]
         if failed(problem := self._parse_roles(c["roles"])):
             return problem

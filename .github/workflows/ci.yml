@@ -35,6 +35,7 @@ jobs:
       - run: python test/selftest_cloud_fehler.py
       - run: python test/selftest_config_laden.py
       - run: python test/selftest_kontrollfluss_admin.py
+      - run: python test/selftest_kontrollfluss_rest.py
       - run: python test/selftest_tunnel_cancel.py
       - run: python test/selftest_anthropic_messages.py
       - run: python test/selftest_keepalive.py
