@@ -25,8 +25,12 @@ async def chat(req):
     log("openai", b)
     if b.get("model") == "kaputt":
         return web.json_response({"error": {"message": "The server had an error", "type": "server_error"}}, status=500)
-    if b.get("model", "").endswith("nicht"):
-        return web.json_response({"error": {"message": f"The model `{b['model']}` does not exist", "type": "invalid_request_error"}}, status=404)
+    if b.get("model", "").endswith("nicht"):   # wie die echte API: der Grund steht in error.code, nicht nur im Text
+        return web.json_response({"error": {"message": f"The model `{b['model']}` does not exist or you do not have access to it.",
+                                            "type": "invalid_request_error", "param": None, "code": "model_not_found"}}, status=404)
+    if b.get("model", "").endswith("falsch"):   # Client-Fehler mit 404, aber kein unbekanntes Modell: geht an den Client
+        return web.json_response({"error": {"message": "The model endpoint rejected the request path", "type": "invalid_request_error",
+                                            "code": "unknown_url"}}, status=404)
     usage = {"prompt_tokens": 20, "completion_tokens": 30, "total_tokens": 50}
     tc = [{"id": "call_abc", "type": "function", "function": {"name": "get_time", "arguments": "{\"tz\": \"CET\"}"}}] if b.get("tools") else None
     if not b.get("stream"):

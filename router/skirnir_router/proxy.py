@@ -9,6 +9,7 @@ Cloud in kleinen Methoden abbildet. Fehler vor dem ersten Byte liefern None -> `
 import asyncio
 import json
 import time
+from dataclasses import dataclass
 
 from aiohttp import ClientError, ClientTimeout, web
 
@@ -24,13 +25,18 @@ UPSTREAM_ERRORS = (ClientError, asyncio.TimeoutError, OSError)
 CLIENT_FAULT_STATUSES = (400, 404, 413, 422)     # Cloud-Fehler, die ein anderer Knoten nicht besser kann -> an den Client
 
 
-class _Reject(Exception):
-    """Anfrage wird mit HTTP-Status und Klartext abgewiesen (im Format des Clients, siehe `err` in _route)."""
+@dataclass(frozen=True, slots=True)
+class Refusal(Problem):
+    """Anfrage wird mit HTTP-Status und Klartext abgewiesen (im Format des Clients, siehe `err` in _route). Ein Rueckgabewert
+    wie jedes Problem (0.8.9; bis dahin die Ausnahme _Reject, die quer durch den Ablauf geworfen wurde)."""
+    why: object = None   # scheduler.unavailable(): Grund-Code, Retry-After, Hindernisse je Knoten - fuer den Client
 
-    def __init__(self, status, msg, why=None):
-        super().__init__(msg)
-        self.status, self.msg = status, msg
-        self.why = why   # scheduler.unavailable(): Grund-Code, Retry-After, Hindernisse je Knoten - fuer den Client
+
+def cloud_client_fault(error):
+    """Ist ein Anbieterfehler Sache des Clients (an ihn zurueck) - oder kann ein anderer Kandidat helfen (None, weiter)?
+    Ein unbekanntes oder nicht freigegebenes Modell meldet der Anbieter in seinem strukturierten Fehlercode
+    (CloudError.model_unavailable) - dann weiter; bis 0.8.9 las der Router dafuer den Meldungstext ("the model ...")."""
+    return error.status in CLIENT_FAULT_STATUSES and not error.model_unavailable
 
 
 def _is_role(role):
@@ -62,13 +68,15 @@ async def route_request(request, path, body, shape=None, err=ollama_error):
     cached = await ops.idem_wait(key)
     if cached is not None:
         return ops.idem_replay(cached)
+    finished = False
     try:
         resp = await _route(request, path, body, shape, err)
-    except BaseException:
-        ops.idem_abort(key)
-        raise
-    ops.idem_finish(key, resp)
-    return resp
+        ops.idem_finish(key, resp)
+        finished = True
+        return resp
+    finally:
+        if not finished:   # abgebrochen oder Fehler: der Schluessel darf beim naechsten Versuch neu rechnen
+            ops.idem_abort(key)
 
 
 async def _route(request, path, body, shape, err):
@@ -81,17 +89,17 @@ async def _route(request, path, body, shape, err):
 
 
 async def _route_inner(request, path, body, shape, err):
-    try:
-        name, role, tiers, req = await _prepare(request, path, body)
-    except _Reject as e:
-        return err(e.status, e.msg)
+    prepared = await _prepare(request, path, body)
+    if failed(prepared):
+        return err(prepared.status, prepared.message)
+    name, role, tiers, req = prepared
     req.priority = _priority_for(req, role, request)
     acquire = _Acquire(name, role, tiers, req, _client_num_ctx(body), body, path, request.get("client"))
     while True:
-        try:
-            tier_idx, tier, ctx, node = await acquire.next_candidate()
-        except _Reject as e:
-            return err(e.status, e.msg, e.why)
+        pick = await acquire.next_candidate()
+        if failed(pick):
+            return err(pick.status, pick.message, getattr(pick, "why", None))
+        tier_idx, tier, ctx, node = pick
         result = await dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape, req)
         if isinstance(result, Problem):   # managed turn could not be fitted to this tier
             return err(result.status, result.message)
@@ -105,41 +113,46 @@ async def _route_inner(request, path, body, shape, err):
 # --- Vorbereitung: Name, routing-Block, Rolle, Stufen ----------------------------------------------------------------
 
 async def _prepare(request, path, body):
-    """Alles, was ohne Knoten entscheidbar ist. Liefert (name, role, tiers, req) oder wirft _Reject."""
+    """Alles, was ohne Knoten entscheidbar ist. Liefert (name, role, tiers, req) oder eine Refusal."""
     name = _requested_name(body)
-    try:
-        req = request_mod.parse(body, path, request.headers)   # Stufe 1: routing-Block, abgeleitete Anforderungen
-    except ValueError as e:
-        raise _Reject(400, str(e)) from None
+    if failed(name):
+        return name
+    req = request_mod.parse(body, path, request.headers)   # Stufe 1: routing-Block, abgeleitete Anforderungen
+    if failed(req):
+        return Refusal(400, req.message)
     policy = (auth.client_auth_cfg().get("clients", {}).get(request.get("client")) or {}).get("memory") or {}
     req.context_sensitive = bool(req.memory or req.session or policy.get("strategy") in ("auto", "hybrid", "manual"))
     too_big = request_mod.check_limits(body)
     if too_big:
-        raise _Reject(413, too_big)
+        return Refusal(413, too_big)
     name = await _decide_role(request, path, body, name, req)
+    if failed(name):
+        return name
     role, tiers = scheduler.resolve_tiers(name, body)
     if role is None:
-        raise _Reject(404, f"model '{name}' not found")
+        return Refusal(404, f"model '{name}' not found")
     decider = decision.active()
     if decider and req.decision is None:
         decider.record_client_choice(body, path, role["name"], request.get("client"), req.request_id)
     denied = auth.client_allows(request, role, concrete=not _is_role(role))
     if denied:
-        raise _Reject(403, denied)
+        return Refusal(403, denied)
     started = await managed.begin(request, path, body, req)
     if failed(started):
-        raise _Reject(started.status, "invalid managed session request" if started.status == 400 else started.message)
+        return Refusal(started.status, "invalid managed session request" if started.status == 400 else started.message)
     prepared = await memory.prepare(request, path, body, req)
     if failed(prepared):
-        raise _Reject(prepared.status, memory.PREPARE_PUBLIC.get(prepared.status, prepared.message))
+        return Refusal(prepared.status, memory.PREPARE_PUBLIC.get(prepared.status, prepared.message))
     # Recall changes the actual prompt, so limits/cloud scans must see the augmented body.
     if req.memory and not req.session:
         too_big = request_mod.check_limits(body)
         if too_big:
-            raise _Reject(413, too_big)
+            return Refusal(413, too_big)
     tiers = _with_canary(role, tiers, req)
     tiers = _cloud_ordered(request, body, tiers, req)
-    _ensure_satisfiable(name, role, tiers, req)
+    unsatisfiable = _unsatisfiable(name, role, tiers, req)
+    if unsatisfiable:
+        return unsatisfiable
     return name, role, tiers, req
 
 
@@ -152,14 +165,15 @@ async def _decide_role(request, path, body, name, req):
     req.decision = result.as_dict()
     exposed = decision.exposed_for(result.selected)
     if exposed is None:
-        raise _Reject(503, f"decision engine chose unknown role {result.selected!r}")
+        return Refusal(503, f"decision engine chose unknown role {result.selected!r}")
     return exposed
 
 
 def _requested_name(body):
+    """Angefragter Modell-/Rollenname (ohne Tag -> :latest, wenn es die Rolle so gibt) oder eine Refusal."""
     name = body.get("model") or body.get("name")
     if not name:
-        raise _Reject(400, "model is required")
+        return Refusal(400, "model is required")
     if ":" not in name and name not in state.CFG.roles and f"{name}:latest" in state.CFG.roles:
         name = f"{name}:latest"
     return name
@@ -184,16 +198,17 @@ def _cloud_ordered(request, body, tiers, req):
     return tiers
 
 
-def _ensure_satisfiable(name, role, tiers, req):
-    """Keine Stufe kann, was der Request verlangt -> Fehler des Requests (400), kein Kapazitaetsproblem (503)."""
+def _unsatisfiable(name, role, tiers, req):
+    """Keine Stufe kann, was der Request verlangt -> Refusal 400 (Fehler des Requests, kein Kapazitaetsproblem wie 503);
+    sonst None."""
     blocked = [req.tier_blocked(t) for t in tiers]
     if not all(blocked):
-        return
+        return None
     reasons = "; ".join(sorted({f"{t['model']}: {b}" for t, b in zip(tiers, blocked, strict=True)}))
     state.remember({"event": "unsatisfiable", "role": role["name"], "request_id": req.request_id, "reasons": reasons})
     if _is_role(role):
-        raise _Reject(400, f"no tier of '{name}' can serve this request ({reasons})")
-    raise _Reject(400, f"model '{name}' cannot serve this request ({reasons})")
+        return Refusal(400, f"no tier of '{name}' can serve this request ({reasons})")
+    return Refusal(400, f"model '{name}' cannot serve this request ({reasons})")
 
 
 def _client_num_ctx(body):
@@ -228,17 +243,22 @@ class _Acquire:
         self.deadline_at = time.time() + (req.deadline_ms / 1000.0 if req.deadline_ms else admission.max_wait_s(req.priority))
 
     async def next_candidate(self):
+        """(tier_idx, tier, ctx, node) des naechsten Kandidaten, oder eine Refusal (503 mit Grund), wenn keiner bleibt."""
         while True:
             now = time.time()
             pick = scheduler.choose(self.role, self.tiers, self.client_ctx, now, self.tried, self.req)
             if pick is None:
                 if await self._wait_for_load(now):
                     continue   # Ladevorgang beendet (oder Frist um): neu waehlen
-                await self._wake_or_reject()
+                refused = await self._wake_or_refuse()
+                if refused:
+                    return refused
                 continue
             node, model = pick[3], pick[1]["model"]
             if admission.saturated(node, model):
-                await self._wait_for_slot(node, now, model)
+                refused = await self._wait_for_slot(node, now, model)
+                if refused:
+                    return refused
                 continue   # neu waehlen: Platz frei, Knoten weg oder ein anderer inzwischen besser
             if self.t_enq is not None:
                 self.req.queued_ms = (time.time() - self.t_enq) * 1000
@@ -275,21 +295,23 @@ class _Acquire:
             await asyncio.sleep(0.5)
         return True
 
-    async def _wake_or_reject(self):
-        """Kandidaten erschoepft -> einmal Weckversuch, danach 503."""
+    async def _wake_or_refuse(self):
+        """Kandidaten erschoepft -> einmal Weckversuch (None: geweckt, neu waehlen), danach eine Refusal 503."""
         node = None if self.woke else scheduler.wakeable_for(self.tiers)
         if node is None:
             why = scheduler.unavailable(self.tiers, self.client_ctx, time.time(), self.tried)
             state.remember({"event": "no_node", "role": self.role["name"], "tried": sorted(self.tried),
                             "code": why["code"], "detail": why["detail"], "blockers": why["blockers"]})
-            raise _Reject(503, f"no node available for model '{self.name}': {why['detail']}", why)
+            return Refusal(503, f"no node available for model '{self.name}': {why['detail']}", why=why)
         self.woke = True
         if not await wol.wake(node):
-            raise _Reject(503, f"no node available for model '{self.name}' (wake of {node.name} failed)")
+            return Refusal(503, f"no node available for model '{self.name}' (wake of {node.name} failed)")
+        return None
 
     async def _wait_for_slot(self, node, now, model=None):
         """Stufe 3: Knoten (oder Modell, max_parallel) voll -> hier warten (mit Prioritaet und Alterung), nicht in Ollamas
-        Schlange ohne Prioritaet - die laedt bei Modellen ohne Parallelbetrieb den Runner neu."""
+        Schlange ohne Prioritaet - die laedt bei Modellen ohne Parallelbetrieb den Runner neu. None: weiter waehlen,
+        sonst eine Refusal 503 (Frist um, Warteschlange voll)."""
         limit = state.CFG.max_parallel(model) if model else None
         model_full = bool(limit) and node.inflight < node.effective_max_inflight()
         if self.t_enq is None:
@@ -306,12 +328,12 @@ class _Acquire:
                             "request_id": self.req.request_id, "waited_ms": waited, "model": model})
             what = (f"model {model} on {node.name} runs {node.inflight_models[model]}/{limit} requests (no parallel requests)"
                     if model_full else f"node {node.name} has {node.inflight}/{node.effective_max_inflight()} requests running")
-            raise _Reject(503, f"queue deadline exceeded after {waited} ms (priority {self.req.priority}, {what})")
-        try:
-            await admission.wait_for_slot(node, self.req.priority, self.t_enq, self.deadline_at, self.req.request_id, self.role["name"],
-                                          model)
-        except admission.QueueFull as e:
-            raise _Reject(503, str(e)) from None
+            return Refusal(503, f"queue deadline exceeded after {waited} ms (priority {self.req.priority}, {what})")
+        waited = await admission.wait_for_slot(node, self.req.priority, self.t_enq, self.deadline_at, self.req.request_id,
+                                               self.role["name"], model)
+        if failed(waited):   # Warteschlange voll
+            return Refusal(waited.status, waited.message)
+        return None
 
 
 # --- Eine Stufe ausfuehren ---------------------------------------------------------------------------------------------
@@ -406,11 +428,12 @@ class _Relay:
             if self.is_cloud:   # Stufe 5: Anbieter statt Knoten
                 return await self._via_cloud()
             return await self._via_node()
-        except (*UPSTREAM_ERRORS, ConnectionResetError) as e:
+        except (*UPSTREAM_ERRORS, ConnectionResetError) as e:  # exception-ok: network to the node/client mid-answer
             # Fehler nach dem ersten Byte: nichts mehr zu retten, Verbindung endet
             log.warning("stream from %s aborted: %s", self.node.name, e)
             if self.resp is not None and hasattr(self.shape, "stream_error"):
                 return await self._end_with_error(502, f"upstream {self.node.name} aborted")
+            # exception-ok: aiohttp's way to end a handler with 502 when no error event fits the client's format
             raise web.HTTPBadGateway(text=json.dumps({"error": f"upstream {self.node.name} aborted"})) from e
         finally:
             try:
@@ -492,7 +515,7 @@ class _Relay:
         timeout = ClientTimeout(total=state.CFG.request_timeout_s, sock_connect=CONNECT_TIMEOUT_S, sock_read=state.CFG.request_timeout_s)
         try:
             upstream = await self._connect(timeout)
-        except UPSTREAM_ERRORS as e:
+        except UPSTREAM_ERRORS as e:  # exception-ok: network; a node can fail between choosing and connecting
             log.warning("node %s connect failed: %s", self.node.name, e)
             self._fail("timeout" if isinstance(e, asyncio.TimeoutError) else "error", f"connect: {type(e).__name__}")
             if self.resp is not None:   # Stream schon offen (Keep-alive): kein Ausweich-Kandidat mehr
@@ -540,7 +563,7 @@ class _Relay:
             self._fail("error", f"HTTP {upstream.status}")
         try:
             j = json.loads(txt)
-        except ValueError:   # Ollama-Fehler sind JSON; was sonst kommt (Proxy, abgeschnitten), geht als Text weiter
+        except ValueError:  # exception-ok: upstream data; Ollama errors are JSON, anything else (proxy, cut off) stays text
             j = None
         msg = (j.get("error") if isinstance(j, dict) else None) or txt
         return await self._end_with_error(upstream.status, f"upstream {self.node.name}: {msg}")
@@ -569,9 +592,10 @@ class _Relay:
         if not self.shape:
             return web.Response(status=upstream.status, body=txt, content_type="application/json", headers=self.headers)
         try:
-            msg = json.loads(txt).get("error") or txt.decode(errors="replace")
-        except ValueError:
-            msg = txt.decode(errors="replace")
+            parsed = json.loads(txt)
+        except ValueError:  # exception-ok: upstream data; json.loads is the only full validity check
+            parsed = None
+        msg = (parsed.get("error") if isinstance(parsed, dict) else None) or txt.decode(errors="replace")
         return self.shape.error(upstream.status, str(msg))
 
     async def _answer_problem(self, problem):
@@ -592,7 +616,7 @@ class _Relay:
             data = await upstream.read()
         try:
             j = json.loads(data)
-        except ValueError:
+        except ValueError:  # exception-ok: upstream data; json.loads is the only full validity check
             if self.managed_capture is not None:
                 return await self._answer_problem(bad_gateway("invalid managed upstream JSON"))
             if self.shape:
@@ -661,7 +685,7 @@ class _Relay:
         (leere Liste) oder in zwei aufspalten (gehaltener Text + Rest) - darum die Schleife; ohne Rettung ein Durchlauf."""
         try:
             j = json.loads(line)
-        except ValueError:
+        except ValueError:  # exception-ok: upstream data; json.loads is the only full validity check
             return None
         if self.managed_capture is not None and (not isinstance(j, dict) or j.get("error")):
             self.managed_problem = bad_gateway("managed upstream stream failed")
@@ -711,13 +735,13 @@ class _Relay:
         (Anbieterfehler vor dem ersten Byte, Breaker zaehlt mit)."""
         try:
             cinfo, result = await cloud.run(self.node, self.path, self.out, self.model, self.stream)
-        except cloud.CloudError as e:
+        except cloud.CloudError as e:  # exception-ok: provider HTTP error (raised in the stream generator too, see CloudError)
             log.warning("%s: %s -> HTTP %s: %s", self.node.name, self.model, e.status, e)
             self._fail("timeout" if e.status == 408 else "error", f"HTTP {e.status}")
-            if e.status in CLIENT_FAULT_STATUSES and not str(e).lower().startswith("the model"):
+            if cloud_client_fault(e):
                 return self._client_error(e.status, str(e))
             return None
-        except UPSTREAM_ERRORS as e:
+        except UPSTREAM_ERRORS as e:  # exception-ok: network to the provider
             log.warning("%s connect failed: %s", self.node.name, e)
             return self._fail("timeout" if isinstance(e, asyncio.TimeoutError) else "error", f"connect: {type(e).__name__}")
         if not self.stream:
@@ -743,12 +767,13 @@ class _Relay:
                 line = self.shape.chunk(j) if self.shape else (json.dumps(j) + "\n").encode()
                 if line:
                     await resp.write(line)
-        except cloud.CloudError as e:
+        except cloud.CloudError as e:  # exception-ok: provider HTTP error raised by the stream generator (its only channel)
             if resp is None:   # noch nichts gesendet -> naechster Kandidat
                 log.warning("%s: %s -> HTTP %s: %s", self.node.name, self.model, e.status, e)
                 return self._fail("error", f"HTTP {e.status}")
             if hasattr(self.shape, "stream_error"):
                 return await self._end_with_error(502, f"{self.node.name} aborted: {e}")
+            # exception-ok: aiohttp's way to end a handler with 502 when no error event fits the client's format
             raise web.HTTPBadGateway(text=json.dumps({"error": f"{self.node.name} aborted: {e}"})) from e
         if resp is None:   # leerer Stream: trotzdem sauber abschliessen
             resp = await self._open_stream()
@@ -885,7 +910,7 @@ async def handle_show(request):
                               timeout=ClientTimeout(total=15)) as r:
             data = await r.read()
             return web.Response(status=r.status, body=data, content_type="application/json")
-    except UPSTREAM_ERRORS as e:
+    except UPSTREAM_ERRORS as e:  # exception-ok: network to the node
         return ollama_error(502, f"show via {n.name} failed: {e}")
 
 

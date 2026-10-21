@@ -135,7 +135,7 @@ def _load_key(spec):
             v = read_env_value(path, env, strip_quotes=True)
             if v:
                 return v, path
-        except OSError as e:
+        except OSError as e:  # exception-ok: file system; the file can vanish or lose permissions between check and read
             log.warning("secrets_file %s: %s", path, e)
     return None, None
 
@@ -462,14 +462,22 @@ async def _sse(resp):
                 return
             try:
                 yield json.loads(data)
-            except ValueError:
+            except ValueError:  # exception-ok: provider data; json.loads is the only full validity check
                 continue
 
 
 class CloudError(Exception):
-    def __init__(self, status, msg):
+    """A provider's HTTP error. A class, not a return value, because the streaming answer is an async generator: its first
+    read raises at the caller, which handles stream and unary errors in one place (proxy._via_cloud).
+    model_unavailable: the provider says the model does not exist or this key may not use it (OpenAI error.code
+    model_not_found, Anthropic 404 not_found_error) - another candidate may serve, so it is no client fault. Taken from the
+    provider's structured error, never from its message text (until 0.8.9 proxy.py checked for "the model ..." in it)."""
+
+    def __init__(self, status, msg, code=None):
         super().__init__(msg)
         self.status = status
+        self.code = code or ""
+        self.model_unavailable = self.code in ("model_not_found", "not_found_error") and status in (400, 403, 404)
 
 
 async def run(target, path, body, model, stream):
@@ -481,13 +489,13 @@ async def run(target, path, body, model, stream):
     timeout = ClientTimeout(total=float(target.spec.get("timeout_s", state.CFG.request_timeout_s)), sock_connect=10)
     if path in ("/api/embed", "/api/embeddings"):
         if kind == "anthropic":
-            raise CloudError(501, f"{target.provider}: keine Embeddings")
+            raise CloudError(501, f"{target.provider}: keine Embeddings")  # exception-ok: same signal as a provider error (CloudError)
         inp = body.get("input") if "input" in body else body.get("prompt")
         req = {"model": model_id, "input": inp}
         async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout) as r:
             data = await r.read()
             if r.status >= 400:
-                raise CloudError(r.status, _err_text(data))
+                raise CloudError(r.status, *_err_info(data))  # exception-ok: provider HTTP error (CloudError)
             j = json.loads(data)
         embs = [d.get("embedding") for d in sorted(j.get("data") or [], key=lambda d: d.get("index", 0))]
         p_tok = int((j.get("usage") or {}).get("prompt_tokens") or 0)
@@ -500,7 +508,7 @@ async def run(target, path, body, model, stream):
         async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout) as r:
             data = await r.read()
             if r.status >= 400:
-                raise CloudError(r.status, _err_text(data))
+                raise CloudError(r.status, *_err_info(data))  # exception-ok: provider HTTP error (CloudError)
             j = json.loads(data)
         if kind == "anthropic":
             content, tcs = _an_content_to_native(j.get("content"))
@@ -516,8 +524,8 @@ async def run(target, path, body, model, stream):
 
     async def gen():
         async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout) as r:
-            if r.status >= 400:
-                raise CloudError(r.status, _err_text(await r.read()))
+            if r.status >= 400:   # inside the streaming generator: raising is its only error channel (CloudError)
+                raise CloudError(r.status, *_err_info(await r.read()))  # exception-ok: provider HTTP error in the stream
             if kind == "anthropic":
                 tool_blocks, tool_args = {}, {}
                 async for ev in _sse(r):
@@ -568,15 +576,18 @@ async def run(target, path, body, model, stream):
     return info, gen()
 
 
-def _err_text(data):
+def _err_info(data):
+    """(message, code) of a provider error body. code = OpenAI error.code, else error.type (Anthropic), else "" - the
+    structured part a caller may decide on; the message is for logs and the client only."""
     try:
         j = json.loads(data)
-        e = j.get("error")
-        if isinstance(e, dict):
-            return str(e.get("message") or e)
-        return str(e or j)[:300]
-    except ValueError:
-        return data.decode(errors="replace")[:300]
+    except ValueError:  # exception-ok: provider data; json.loads is the only full validity check
+        return data.decode(errors="replace")[:300], ""
+    e = j.get("error") if isinstance(j, dict) else None
+    if isinstance(e, dict):
+        code = e.get("code") if isinstance(e.get("code"), str) else e.get("type") if isinstance(e.get("type"), str) else ""
+        return str(e.get("message") or e)[:300], code
+    return str(e or j)[:300], ""
 
 
 def view():
