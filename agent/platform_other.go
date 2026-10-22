@@ -10,9 +10,9 @@ import (
 	"syscall"
 )
 
-// Gegenstuecke zu platform_windows.go fuer Linux/macOS. Der Agent laeuft dort im Vordergrund (run) oder per
-// systemd-Unit; Dienst-Installation ueber die eigenen Verben gibt es noch nicht. Nichts hier verbaut das:
-// Schluessel, Tunnel, Heartbeat, MQTT, Supervisor sind plattformneutral.
+// Counterparts to platform_windows.go for Linux/macOS. The agent runs in the foreground (run) or via
+// a systemd unit; service installation via custom verbs is not yet available. Nothing here prevents this:
+// Keys, tunnel, heartbeat, MQTT, and supervisor are platform-neutral.
 
 func hideWindow(cmd *exec.Cmd) {}
 
@@ -22,13 +22,13 @@ type childGroup struct{}
 
 func newChildGroup() (*childGroup, error) { return &childGroup{}, nil }
 
-// procTree: auf Linux ist die Prozessgruppe des Kindes (Setpgid) der Baum. Sie bleibt bestehen, solange ein
-// Mitglied lebt - auch wenn der Hauptprozess schon beendet ist. Gegenstueck zum Job-Objekt unter Windows.
+// procTree: on Linux, the child's process group (Setpgid) is the tree. It persists as long as any
+// member is alive - even if the main process has already exited. Counterpart to the Job object on Windows.
 type procTree struct{ pgid int }
 
 func (g *childGroup) track(pid int) (*procTree, error) { return &procTree{pgid: pid}, nil }
 
-// alive: auf Linux ohne Zaehlung (-1 = unbekannt); kill(-pgid, 0) sagt nur "mindestens einer lebt".
+// alive: on Linux without counting (-1 = unknown); kill(-pgid, 0) only indicates "at least one is alive".
 func (t *procTree) alive() int {
 	if t == nil || t.pgid <= 0 {
 		return -1
@@ -47,7 +47,7 @@ func (t *procTree) kill() {
 
 func (t *procTree) release() {}
 
-// killChild beendet die ganze Prozessgruppe des Kindes (Setpgid oben).
+// killChild terminates the entire process group of the child (Setpgid above).
 func killChild(cmd *exec.Cmd) {
 	if cmd.Process != nil {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
@@ -61,7 +61,7 @@ func runService(cfgPath, name string) error {
 	return errors.New("service mode exists only on Windows; on Linux start 'run' via a systemd unit")
 }
 
-// Kein DPAPI: der Schluessel liegt als Datei mit Modus 0600. Spaeter: Kernel-Keyring oder TPM.
+// No DPAPI: the key is stored as a file with mode 0600. Later: Kernel Keyring or TPM.
 func protectBytes(b []byte) ([]byte, error) { return b, nil }
 
 func unprotectBytes(b []byte) ([]byte, error) { return b, nil }

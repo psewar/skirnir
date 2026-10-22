@@ -28,8 +28,8 @@ type memoryStatusEx struct {
 	AvailExtendedVirtual uint64
 }
 
-// memoryFact: verfuegbarer RAM (inkl. Standby) und freier Commit - dieselben Zahlen wie FreePhysicalMemory /
-// FreeVirtualMemory des Spiel-Waechters. TotalPageFile ist das Commit-Limit (RAM + Auslagerungsdatei).
+// memoryFact: available RAM (incl. Standby) and free commit - same numbers as FreePhysicalMemory /
+// FreeVirtualMemory of the game watcher. TotalPageFile is the commit limit (RAM + page file).
 func memoryFact() (MemFact, bool) {
 	var m memoryStatusEx
 	m.Length = uint32(unsafe.Sizeof(m))
@@ -40,9 +40,9 @@ func memoryFact() (MemFact, bool) {
 	return MemFact{RAMAvailableGiB: gib(m.AvailPhys), RAMTotalGiB: gib(m.TotalPhys), CommitFreeGiB: &free, CommitLimitGiB: &limit}, true
 }
 
-// listProcesses: alle Prozesse mit vollem Pfad. Der Agent laeuft als LocalSystem und liest damit fast alle Pfade;
-// geschuetzte Prozesse (Anti-Cheat) verweigern auch ihm OpenProcess - das laesst sich nicht vorab pruefen, ihr Pfad bleibt
-// leer und matchGame wertet sie ueber den Namen.
+// listProcesses: all processes with full path. The agent runs as LocalSystem and thus reads almost all paths;
+// protected processes (anti-cheat) deny OpenProcess to it as well - this cannot be checked in advance, their path remains
+// empty and matchGame evaluates them by name.
 func listProcesses() []procInfo {
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
@@ -53,7 +53,7 @@ func listProcesses() []procInfo {
 	e.Size = uint32(unsafe.Sizeof(e))
 	var out []procInfo
 	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
-		if e.ProcessID == 0 || e.ProcessID == 4 { // Leerlauf- und System-Prozess: kein Programm
+		if e.ProcessID == 0 || e.ProcessID == 4 { // Idle and system process: no program
 			continue
 		}
 		out = append(out, procInfo{Name: windows.UTF16ToString(e.ExeFile[:]), Path: processPath(e.ProcessID), PID: e.ProcessID})
@@ -75,8 +75,8 @@ func processPath(pid uint32) string {
 	return windows.UTF16ToString(buf[:n])
 }
 
-// gameFolders: Steam-Bibliotheken plus Installationsorte bekannter Verlage aus den Deinstallationseintraegen
-// (HKLM 64/32 Bit und jeder geladene Benutzer-Zweig - der Agent ist LocalSystem, HKCU waere seiner).
+// gameFolders: Steam libraries plus install locations of known publishers from uninstall entries
+// (HKLM 64/32-bit and every loaded user hive - the agent is LocalSystem, HKCU would be its own).
 func gameFolders() []string {
 	var folders []string
 	steam := `C:\Program Files (x86)\Steam`
@@ -104,7 +104,7 @@ func gameFolders() []string {
 	for _, r := range roots {
 		k, err := registry.OpenKey(r.key, r.path, registry.ENUMERATE_SUB_KEYS)
 		if err != nil {
-			continue // Zweig ohne Uninstall-Schluessel (Dienstkonten, Standardprofil)
+			continue // Hive without Uninstall key (service accounts, default profile)
 		}
 		names, _ := k.ReadSubKeyNames(-1)
 		k.Close()

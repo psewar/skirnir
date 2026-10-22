@@ -11,7 +11,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// Logger schreibt in eine rotierte Datei und optional auf die Konsole (run-Modus).
+// Logger writes to a rotated file and optionally to the console (run mode).
 type Logger struct {
 	*log.Logger
 	debug bool
@@ -48,12 +48,12 @@ func (l *Logger) Debugf(format string, a ...any) {
 	}
 }
 
-// childWriter ist das Ziel fuer stdout/stderr eines Kindprozesses: eigene rotierte Datei,
-// jede Zeile mit Zeitstempel, damit man Absturzzeitpunkte findet.
+// childWriter is the target for a child process's stdout/stderr: its own rotated file,
+// each line timestamped to locate crash times.
 type childWriter struct {
 	lj     *lumberjack.Logger
 	buf    []byte
-	onLine func(line string) // optional: jede vollstaendige Zeile (ohne Zeitstempel), z. B. fuer den Kuerzungswaechter
+	onLine func(line string) // optional: each complete line (without timestamp), e.g. for the truncation watcher
 }
 
 func newChildWriter(cfg LogCfg, name string) *childWriter {
@@ -78,7 +78,7 @@ func (w *childWriter) Write(p []byte) (int, error) {
 		}
 		w.buf = w.buf[i+1:]
 	}
-	if len(w.buf) > 64*1024 { // eine endlose Zeile nicht im Speicher sammeln
+	if len(w.buf) > 64*1024 { // do not accumulate an endless line in memory
 		fmt.Fprintf(w.lj, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), w.buf)
 		w.buf = w.buf[:0]
 	}

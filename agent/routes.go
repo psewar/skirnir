@@ -10,23 +10,23 @@ import (
 	"time"
 )
 
-// Tunnel-Routen (Vertrag Reranker, 2026-10-20): Ohne tunnel.routes geht jede Tunnel-Anfrage wie bisher an tunnel.upstream
-// (Ollama). Mit routes gehen die gelisteten Pfade an ihren eigenen lokalen Dienst (z. B. den Reranker als Agent-Kind), und nur
-// mit den gelisteten Methoden; eine andere Methode beantwortet der Agent selbst mit 405, ohne Ollama zu fragen. Der Agent prueft
-// jeden Dienst alle 5 s ueber dessen Gesundheitspfad und meldet das Ergebnis im Heartbeat als
-// routes: {<name>: {up, reason}}, damit der Router einen kranken Dienst gar nicht erst anfragt.
+// Tunnel routes (Reranker contract, 2026-10-20): Without tunnel.routes, all tunnel requests go to tunnel.upstream
+// (Ollama) as before. With routes, listed paths go to their own local service (e.g., the Reranker as an agent child), and only
+// with the listed methods; any other method is answered by the agent itself with 405, without asking Ollama. The agent checks
+// each service every 5 s via its health path and reports the result in the Heartbeat as
+// routes: {<name>: {up, reason}}, so the router does not query a sick service at all.
 
-// Gruende in RouteHealth.Reason (leer, wenn up).
+// Reasons in RouteHealth.Reason (empty if up).
 const (
-	routeUnreachable    = "unreachable"     // keine Verbindung zum Upstream
-	routeUnhealthy      = "unhealthy"       // Antwort, aber nicht 200 und kein bekannter Zustand
-	routeStarting       = "starting"        // Dienst meldet "starting", oder der Agent hat noch nicht geprueft
-	routeSelftestFailed = "selftest_failed" // Dienst meldet, dass seine Selbstpruefung gescheitert ist
+	routeUnreachable    = "unreachable"     // no connection to upstream
+	routeUnhealthy      = "unhealthy"       // response, but not 200 and no known state
+	routeStarting       = "starting"        // service reports "starting", or the agent has not checked yet
+	routeSelftestFailed = "selftest_failed" // service reports that its self-check failed
 )
 
 const routeHealthEvery = 5 * time.Second
 
-// RouteHealth ist der Eintrag je Route im Heartbeat-Feld routes.
+// RouteHealth is the entry per route in the Heartbeat field routes.
 type RouteHealth struct {
 	Up     bool   `json:"up"`
 	Reason string `json:"reason"`
@@ -43,7 +43,7 @@ type Routes struct {
 	health map[string]RouteHealth
 }
 
-// newRoutes: nil ohne Routen; alle Methoden sind nil-fest, damit Tunnel und Heartbeat dann genau wie bisher arbeiten.
+// newRoutes: nil without routes; all methods are nil-safe, so Tunnel and Heartbeat work exactly as before.
 func newRoutes(cfg []RouteCfg, log *Logger) *Routes {
 	if len(cfg) == 0 {
 		return nil
@@ -52,12 +52,12 @@ func newRoutes(cfg []RouteCfg, log *Logger) *Routes {
 		client: &http.Client{Timeout: 2 * time.Second}, health: map[string]RouteHealth{}}
 	for _, rc := range cfg {
 		r.byPath[rc.Path] = rc
-		r.health[rc.Name] = RouteHealth{Up: false, Reason: routeStarting} // bis zur ersten Pruefung nicht bereit
+		r.health[rc.Name] = RouteHealth{Up: false, Reason: routeStarting} // not ready until the first check
 	}
 	return r
 }
 
-// Lookup: Route fuer den Pfad einer Tunnel-Anfrage. Verglichen wird der Pfad ohne Query, exakt.
+// Lookup: Route for the path of a tunnel request. Compared is the path without query, exact.
 func (r *Routes) Lookup(path string) (RouteCfg, bool) {
 	if r == nil {
 		return RouteCfg{}, false
@@ -76,7 +76,7 @@ func (rc RouteCfg) allows(method string) bool {
 	return false
 }
 
-// Run prueft alle Routen im Takt, bis ctx endet.
+// Run checks all routes in the tick, until ctx ends.
 func (r *Routes) Run(ctx context.Context) {
 	for {
 		r.checkAll(ctx)
@@ -92,7 +92,7 @@ func (r *Routes) checkAll(ctx context.Context) {
 	for _, rc := range r.list {
 		h := r.check(ctx, rc)
 		if ctx.Err() != nil {
-			return // Abbruch beim Beenden ist kein Befund ueber den Dienst
+			return // Abort on shutdown is not a finding about the service
 		}
 		r.mu.Lock()
 		old := r.health[rc.Name]
@@ -109,12 +109,12 @@ func (r *Routes) checkAll(ctx context.Context) {
 	}
 }
 
-// check fragt den Gesundheitspfad ab. 200 heisst bereit; sonst gilt der Zustand, den der Dienst selbst im Feld status meldet
-// (starting, selftest_failed), und ohne einen solchen "unhealthy".
+// check queries the health path. 200 means ready; otherwise the state reported by the service itself in the status field applies
+// (starting, selftest_failed), and without such a state "unhealthy".
 func (r *Routes) check(ctx context.Context, rc RouteCfg) RouteHealth {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rc.Upstream+rc.Health, nil)
 	if err != nil {
-		return RouteHealth{Reason: routeUnhealthy} // URL ist beim Laden geprueft; bleibt fuer den Fall eines Programmfehlers
+		return RouteHealth{Reason: routeUnhealthy} // URL is checked on load; remains for the case of a programming error
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
@@ -134,7 +134,7 @@ func (r *Routes) check(ctx context.Context, rc RouteCfg) RouteHealth {
 	return RouteHealth{Reason: routeUnhealthy}
 }
 
-// Report: Zustand aller Routen fuer Heartbeat und /health; nil ohne Routen (dann fehlt das Feld ganz).
+// Report: State of all routes for Heartbeat and /health; nil without routes (then the field is missing entirely).
 func (r *Routes) Report() map[string]RouteHealth {
 	if r == nil {
 		return nil

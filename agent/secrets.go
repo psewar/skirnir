@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-// fetchSecret holt ein Secret per Universal Auth aus dem Secret-Store.
-// Muster wie render-env.sh auf router-host; hier ohne Datei-Cache, weil der Dienst das
-// Passwort nur beim (Re-)Connect braucht und bei Ausfall des Secret-Stores einfach spaeter neu versucht.
+// fetchSecret retrieves a secret via Universal Auth from the secret store.
+// Pattern like render-env.sh on router-host; no file cache here, since the service only needs the
+// password on (re-)connect and simply retries later if the secret store is down.
 func fetchSecret(ctx context.Context, m SecretStoreCfg, key string) (string, error) {
 	hc := &http.Client{Timeout: 20 * time.Second}
 	login, _ := json.Marshal(map[string]string{"clientId": m.ClientID, "clientSecret": m.ClientSecret})

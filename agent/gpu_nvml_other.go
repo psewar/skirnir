@@ -4,8 +4,8 @@ package main
 
 import "errors"
 
-// Unter Linux waere libnvidia-ml.so der Weg; der Linux-Agent ist heute nur Testbetrieb, dort bleibt nvidia-smi
-// (gpu.go fragt dort auch Temperatur, Leistung, Luefter und Drosselgruende ab).
+// On Linux, libnvidia-ml.so would be the way; the Linux agent is currently in test mode, so nvidia-smi remains there
+// (gpu.go also queries temperature, power, fans, and throttling reasons there).
 type nvmlDev struct{ gpuName string }
 
 func openNVML() (*nvmlDev, error) { return nil, errors.New("NVML is only bound on Windows") }

@@ -12,9 +12,9 @@ import (
 
 const uninstallKey = `Software\Microsoft\Windows\CurrentVersion\Uninstall`
 
-// syncUninstallEntries setzt alle Deinstallationseintraege, deren InstallLocation der Ollama-Ordner dir ist, auf version.
-// Durchsucht HKLM und jeden geladenen Benutzer-Zweig unter HKEY_USERS (der Agent laeuft als LocalSystem, die Pro-Benutzer-
-// Installation steht im Zweig des Benutzers). Geschrieben wird nur ein Eintrag, der wirklich veraltet ist.
+// syncUninstallEntries sets all uninstall entries whose InstallLocation is the Ollama dir to version.
+// Scans HKLM and each loaded user branch under HKEY_USERS (the agent runs as LocalSystem, the per-user
+// installation is in the user's branch). Only writes an entry if it is actually outdated.
 func syncUninstallEntries(dir, version string) ([]string, error) {
 	type root struct {
 		label string
@@ -35,7 +35,7 @@ func syncUninstallEntries(dir, version string) ([]string, error) {
 	for _, r := range roots {
 		k, err := registry.OpenKey(r.key, r.path, registry.ENUMERATE_SUB_KEYS)
 		if err != nil {
-			continue // Zweig ohne Uninstall-Schluessel (Dienstkonten, Standardprofil): nichts zu tun
+			continue // Branch without Uninstall key (service accounts, default profile): nothing to do
 		}
 		names, _ := k.ReadSubKeyNames(-1)
 		k.Close()

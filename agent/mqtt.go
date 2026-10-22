@@ -15,12 +15,12 @@ import (
 	paho "github.com/eclipse/paho.mqtt.golang"
 )
 
-// MQTTModule ersetzt das fruehere Python-Skript: gleiches Geraet, gleiche unique_ids, gleiche Topics,
-// damit die HA-Entitaeten und die Cloud-Fallback-Automation unveraendert weiterlaufen.
+// MQTTModule replaces the former Python script: same device, same unique_ids, same topics,
+// so HA entities and the cloud fallback automation keep working unchanged.
 type MQTTModule struct {
 	cfg           MQTTCfg
 	secretStore   SecretStoreCfg
-	legacyCleared bool // Discovery-Configs frueherer Object-IDs einmal je Lauf geleert
+	legacyCleared bool // Discovery configs for previous object IDs cleared once per run
 	node          string
 	log           *Logger
 	gpu           *GPU
@@ -35,11 +35,11 @@ type MQTTModule struct {
 	lastPub   time.Time
 	lastErr   string
 	published int
-	applies   map[string]bool // optionale Entitaetsgruppe -> gilt auf diesem Knoten (fehlt = noch unbekannt)
-	announced map[string]bool // objID -> Discovery-Config steht im Broker
+	applies   map[string]bool // optional entity group -> applies on this node (missing = still unknown)
+	announced map[string]bool // objID -> Discovery config is in the broker
 }
 
-// Familien, deren Modelle HAs ai_task-Structured-Output nicht koennen (Beleg 2026-08-23).
+// Families whose models cannot handle HA's ai_task structured output (evidence 2026-08-23).
 var familiesWithoutStructure = map[string]bool{"gptoss": true}
 
 type sensorDef struct {
@@ -47,9 +47,9 @@ type sensorDef struct {
 	extra                          map[string]any
 }
 
-// entityNames: englischer Name der Entity-ID, wo er von objID abweicht (seit 0.20.0, design/english-names.md). objID
-// bestimmt unique_id und Discovery-Thema und bleibt fuer bestehende Entitaeten fest - eine neue unique_id liesse Verlauf
-// und Automationen an einer Waise.
+// entityNames: English name of the entity ID where it differs from objID (since 0.20.0, design/english-names.md). objID
+// determines unique_id and discovery topic and remains fixed for existing entities - a new unique_id would orphan history
+// and automations.
 var entityNames = map[string]string{
 	"ollama_kuerzungen":      "ollama_truncations",
 	"ollama_letzte_kuerzung": "ollama_last_truncation",
@@ -63,7 +63,7 @@ func (s sensorDef) entityName() string {
 	return s.objID
 }
 
-// 1:1 aus dem frueheren Python-Skript.
+// 1:1 from the former Python script.
 var sensorDefs = []sensorDef{
 	{"binary_sensor", "stt", "STT-Dienst", "stt", "mdi:microphone-message", nil},
 	{"binary_sensor", "ollama", "Ollama", "ollama", "mdi:robot", nil},
@@ -73,17 +73,17 @@ var sensorDefs = []sensorDef{
 	{"sensor", "vram_used_mb", "VRAM belegt", "vram_used_mb", "mdi:memory", map[string]any{"unit_of_measurement": "MB", "state_class": "measurement"}},
 	{"sensor", "ollama_loaded", "Ollama geladene Modelle", "ollama_loaded", "mdi:layers", map[string]any{"state_class": "measurement"}},
 	{"sensor", "ollama_loaded_names", "Ollama geladen", "ollama_loaded_names", "mdi:format-list-bulleted", nil},
-	// neu: Sicht des Dienstes selbst
+	// new: view of the service itself
 	{"sensor", "agent_version", "Agent Version", "agent_version", "mdi:package-variant", map[string]any{"entity_category": "diagnostic"}},
 	{"binary_sensor", "router_heartbeat", "Router-Heartbeat", "router_heartbeat", "mdi:heart-pulse", map[string]any{"entity_category": "diagnostic"}},
-	// Stille Kuerzungen im Ollama-Log (truncation.go): Zaehler seit Dienststart, Zeitpunkt + Details der letzten,
-	// und ein Ereignis je Kuerzung fuer Automationen (Topic <device>/kuerzung, nicht retained).
+	// Silent truncations in the Ollama log (truncation.go): counter since service start, timestamp + details of the last,
+	// and an event per truncation for automations (topic <device>/kuerzung, not retained).
 	{"sensor", "ollama_kuerzungen", "Ollama Kürzungen", "ollama_truncations", "mdi:content-cut", map[string]any{"state_class": "total_increasing"}},
 	{"sensor", "ollama_letzte_kuerzung", "Ollama letzte Kürzung", "ollama_last_truncation", "mdi:clock-alert-outline",
 		map[string]any{"device_class": "timestamp", "json_attributes_template": "{{ value_json.truncation_details | tojson }}"}},
 	{"event", "ollama_kuerzung", "Ollama Kürzung", "", "mdi:content-cut",
 		map[string]any{"event_types": []string{truncationInput, truncationContextFull}}},
-	// Sensoren (0.6.0). Gruppe "gpu": NVML bzw. nvidia-smi; Gruppe "gpuz": nur wo GPU-Z einmal gesehen wurde.
+	// Sensors (0.6.0). Group "gpu": NVML or nvidia-smi; group "gpuz": only where GPU-Z was seen once.
 	{"sensor", "gpu_temp_c", "GPU Temperatur", "gpu_temp_c", "mdi:thermometer", tempExtra},
 	{"sensor", "gpu_power_w", "GPU Leistung", "gpu_power_w", "mdi:flash", powerExtra},
 	{"sensor", "gpu_power_limit_w", "GPU Power-Limit", "gpu_power_limit_w", "mdi:flash-alert", map[string]any{"unit_of_measurement": "W", "device_class": "power", "entity_category": "diagnostic"}},
@@ -96,7 +96,7 @@ var sensorDefs = []sensorDef{
 	{"sensor", "gpu_pin16_voltage_v", "GPU 16-Pin Spannung", "gpu_pin16_voltage_v", "mdi:power-plug-outline", map[string]any{"unit_of_measurement": "V", "device_class": "voltage", "state_class": "measurement", "suggested_display_precision": 2}},
 	{"sensor", "gpu_perfcap", "GPU PerfCap", "gpu_perfcap", "mdi:car-brake-alert", map[string]any{"entity_category": "diagnostic"}},
 	{"sensor", "cpu_temp_c", "CPU Temperatur", "cpu_temp_c", "mdi:thermometer", tempExtra},
-	// GPU-Schutz (0.7.0, guard.go): Zustand mit Attributen, Problem-Sensor, Ereignisse auf <device>/gpu_guard
+	// GPU guard (0.7.0, guard.go): state with attributes, problem sensor, events on <device>/gpu_guard
 	{"sensor", "gpu_guard_state", "GPU-Schutz", "gpu_guard_state", "mdi:shield-half-full",
 		map[string]any{"json_attributes_template": "{{ value_json.gpu_guard_details | tojson }}"}},
 	{"binary_sensor", "gpu_guard_problem", "GPU-Schutz Problem", "gpu_guard_problem", "mdi:shield-alert", map[string]any{"device_class": "problem"}},
@@ -110,11 +110,11 @@ var (
 	powerExtra = map[string]any{"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"}
 )
 
-// Entitaeten, die es nicht auf jedem Knoten gibt: objID -> Gruppe. Eine Gruppe wird nur angelegt, wenn sie auf
-// diesem Rechner etwas bedeutet - sonst haengen auf fremden Knoten Sensoren im HA, die ewig OFF stehen.
+// Entities not present on every node: objID -> group. A group is only created if it means something on
+// this machine - otherwise sensors hang in HA on foreign nodes, staying OFF forever.
 //
-//	stt   = ein Kindprozess mit dem Namen mqtt.stt_child ist konfiguriert
-//	alias = das Modell mqtt.alias_model liegt in der lokalen Ollama (leer = Gruppe aus)
+//	stt   = a child process named mqtt.stt_child is configured
+//	alias = the model mqtt.alias_model is in local Ollama (empty = group off)
 var sensorGroup = map[string]string{
 	"stt":                   "stt",
 	"alias_model_structure": "alias",
@@ -140,16 +140,16 @@ func newMQTT(cfg MQTTCfg, secretStore SecretStoreCfg, node string, log *Logger, 
 		announced: map[string]bool{}}
 }
 
-// setApplies merkt, ob eine optionale Gruppe auf diesem Knoten gilt. Nur mit sicherer Auskunft aufrufen:
-// "Ollama war nicht erreichbar" darf keine Entitaet loeschen.
+// setApplies notes if an optional group applies on this node. Only call with reliable info:
+// "Ollama was not reachable" must not delete an entity.
 func (m *MQTTModule) setApplies(group string, yes bool) {
 	m.mu.Lock()
 	m.applies[group] = yes
 	m.mu.Unlock()
 }
 
-// wanted sagt, ob eine Entitaet auf diesem Knoten existieren soll. Solange eine Gruppe unbekannt ist, wird nichts
-// angelegt und nichts geloescht (zweiter Rueckgabewert false).
+// wanted says if an entity should exist on this node. While a group is unknown, nothing is
+// created and nothing is deleted (second return value false).
 func (m *MQTTModule) wanted(objID string) (bool, bool) {
 	g, ok := sensorGroup[objID]
 	if !ok {
@@ -181,7 +181,7 @@ func (m *MQTTModule) password(ctx context.Context) (string, error) {
 }
 
 func (m *MQTTModule) Run(ctx context.Context) {
-	// Passwort holen, bei Ausfall des Secret-Stores geduldig wiederholen (der Dienst darf deswegen nicht sterben).
+	// Fetch password, patiently retry on secret store failure (the service must not die because of it).
 	var pw string
 	for delay := 5 * time.Second; ; delay = min(delay*2, 5*time.Minute) {
 		var err error
@@ -206,10 +206,10 @@ func (m *MQTTModule) Run(ctx context.Context) {
 		SetOnConnectHandler(func(c paho.Client) {
 			m.mu.Lock()
 			m.connected = true
-			m.announced = map[string]bool{} // nach einem Reconnect die retained Configs neu abgleichen
+			m.announced = map[string]bool{} // reconcile retained configs after a reconnect
 			m.mu.Unlock()
 			m.log.Infof("mqtt: connected to %s", m.broker())
-			st := m.collect(ctx) // erst nachsehen, was es hier gibt, dann die passenden Entitaeten anlegen
+			st := m.collect(ctx) // first check what exists here, then create the matching entities
 			m.syncDiscovery(c)
 			c.Publish(m.availTopic(), 1, true, "online")
 			m.publishStateOf(c, st)
@@ -240,14 +240,14 @@ func (m *MQTTModule) Run(ctx context.Context) {
 	}
 	for {
 		select {
-		case e := <-guardEv: // GPU-Schutz-Ereignis sofort melden, Zustand gleich mit
+		case e := <-guardEv: // report GPU guard event immediately, state along with it
 			if c.IsConnected() {
 				m.publishGuardEvent(c, e)
 				m.publishState(ctx, c)
 			}
 		case e := <-truncation:
-			// sofort melden statt bis zum naechsten Intervall zu warten; ohne Verbindung verfaellt die Meldung,
-			// der Zaehler im naechsten State stimmt trotzdem
+			// report immediately instead of waiting for the next interval; without connection the report expires,
+			// the counter in the next state is still correct
 			if c.IsConnected() {
 				m.publishTruncation(c, e)
 				m.publishState(ctx, c)
@@ -277,13 +277,13 @@ func (m *MQTTModule) device() map[string]any {
 	}
 }
 
-// legacyObjIDs: Object-IDs aelterer Agent-Versionen; ihre retained Discovery-Configs werden beim ersten Sync geleert,
-// sonst blieben die Entitaeten in HA als Leichen stehen.
+// legacyObjIDs: Object IDs of older agent versions; their retained discovery configs are cleared on first sync,
+// otherwise the entities would remain in HA as corpses.
 var legacyObjIDs = []struct{ comp, objID string }{{"sensor", "local_assist_model"}, {"binary_sensor", "local_assist_structure"}}
 
-// syncDiscovery bringt die retained Discovery-Configs im Broker mit dem in Deckung, was dieser Knoten wirklich hat:
-// fehlende anlegen, ueberzaehlige mit leerem Payload loeschen. Wird bei jedem Connect und nach jedem State-Zyklus
-// aufgerufen, damit eine Gruppe auch nachtraeglich auftauchen oder verschwinden darf (z. B. Alias nachtraeglich gepullt).
+// syncDiscovery aligns the retained discovery configs in the broker with what this node actually has:
+// create missing ones, delete surplus ones with empty payload. Called on every connect and after every state cycle
+// so a group can appear or disappear retroactively (e.g. alias pulled later).
 func (m *MQTTModule) syncDiscovery(c paho.Client) {
 	dev := m.device()
 	var added, removed int
@@ -293,7 +293,7 @@ func (m *MQTTModule) syncDiscovery(c paho.Client) {
 			continue
 		}
 		m.mu.Lock()
-		have, decided := m.announced[s.objID] // fehlender Eintrag = noch nichts geschickt, also auch einmal loeschen
+		have, decided := m.announced[s.objID] // missing entry = nothing sent yet, so delete once as well
 		m.mu.Unlock()
 		if decided && want == have {
 			continue
@@ -343,7 +343,7 @@ func (m *MQTTModule) discoveryPayload(s sensorDef, dev map[string]any) []byte {
 	if s.comp == "binary_sensor" {
 		cfg["payload_on"], cfg["payload_off"] = "ON", "OFF"
 	}
-	if s.comp == "event" { // HA liest event_type direkt aus dem JSON-Payload des Ereignis-Topics
+	if s.comp == "event" { // HA reads event_type directly from the JSON payload of the event topic
 		delete(cfg, "value_template")
 		cfg["state_topic"] = m.eventTopic()
 		if s.objID == "gpu_guard" {
@@ -357,7 +357,7 @@ func (m *MQTTModule) discoveryPayload(s sensorDef, dev map[string]any) []byte {
 	return b
 }
 
-// publishKuerzung schickt ein HA-Ereignis je Kuerzung (event_type + Details als Attribute).
+// publishKuerzung sends an HA event per truncation (event_type + details as attributes).
 func (m *MQTTModule) publishTruncation(c paho.Client, e Truncation) {
 	p := map[string]any{"event_type": e.Type, "kind": e.Kind, "at": e.At.Format(time.RFC3339)}
 	if e.Type == truncationInput {
@@ -369,7 +369,7 @@ func (m *MQTTModule) publishTruncation(c paho.Client, e Truncation) {
 	c.Publish(m.eventTopic(), 1, false, b)
 }
 
-// kuerzungState: Zaehler und letzte Kuerzung fuer den regulaeren State. "None" = HA setzt den Zeitsensor auf unbekannt.
+// kuerzungState: counter and last truncation for the regular state. "None" = HA sets the time sensor to unknown.
 func (m *MQTTModule) truncationState(st map[string]any) {
 	st["ollama_truncations"], st["ollama_last_truncation"] = 0, "None"
 	if m.sup == nil {
@@ -390,7 +390,7 @@ func (m *MQTTModule) truncationState(st map[string]any) {
 	st["truncation_details"] = d
 }
 
-// clearDiscovery loescht die retained Discovery-Configs (Verb mqtt-clear, z. B. fuer Test-Geraete).
+// clearDiscovery deletes the retained discovery configs (verb mqtt-clear, e.g. for test devices).
 func (m *MQTTModule) clearDiscovery(ctx context.Context) error {
 	pw, err := m.password(ctx)
 	if err != nil {
@@ -411,9 +411,9 @@ func (m *MQTTModule) clearDiscovery(ctx context.Context) error {
 	return nil
 }
 
-// collect entspricht dem frueheren Python-Skript, mit zwei Aenderungen:
-// gaming_mode kommt aus der Router-Antwort (busy) statt aus dem toten Gaming-Watcher,
-// stt aus dem eigenen Kindprozess statt aus einem Port-Raten.
+// collect corresponds to the former Python script, with two changes:
+// gaming_mode comes from the router response (busy) instead of the dead Gaming-Watcher,
+// stt from its own child process instead of a port rate.
 func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 	st := map[string]any{
 		"gaming_mode": "OFF", "alias_model": "unbekannt", "alias_model_structure": "OFF",
@@ -449,9 +449,9 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 			st["alias_model_structure"] = "ON"
 		}
 	case isStatus(err, http.StatusNotFound):
-		m.setApplies("alias", false) // Ollama antwortet und kennt das Modell nicht -> auf diesem Knoten gibt es den Alias nicht
+		m.setApplies("alias", false) // Ollama responds but doesn't know the model -> the alias doesn't exist on this node
 	default:
-		// Ollama nicht erreichbar: nichts entscheiden, sonst verschwinden Entitaeten bei jedem Ollama-Neustart
+		// Ollama unreachable: don't decide, otherwise entities disappear on every Ollama restart
 		m.log.Debugf("mqtt: api/show %s: %v", m.cfg.AliasModel, err)
 	}
 	var ps struct {
@@ -474,8 +474,8 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 			st["ollama_loaded_names"] = strings.Join(names, ", ")
 		}
 	}
-	// STT gibt es nur, wo ein STT-Kindprozess konfiguriert ist; der Port ist der Rueckfallweg, falls der Dienst
-	// von Hand statt ueber den Supervisor laeuft. Ohne Kind entfaellt die Entitaet - und der Portversuch gleich mit.
+	// STT exists only where an STT child process is configured; the port is the fallback if the service
+	// runs manually instead of via the supervisor. Without a child, the entity is omitted - and the port attempt too.
 	cs, hasChild := m.sup.Child(m.cfg.SttChild)
 	m.setApplies("stt", hasChild)
 	if hasChild && ((cs.Running && cs.Healthy) || portOpen(m.cfg.SttFallbackPort)) {
@@ -484,9 +484,9 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 	return st
 }
 
-// sensorState: Zusatzsensoren aus dem letzten GPU-Sample. Die Gruppen "gpu" und "gpuz" werden angelegt, sobald sie
-// einmal Werte hatten, und danach nicht mehr entfernt - schliesst jemand GPU-Z, zeigen die Entitaeten "unbekannt"
-// (null) statt zu verschwinden und beim naechsten Start wieder aufzutauchen.
+// sensorState: Additional sensors from the last GPU sample. The groups "gpu" and "gpuz" are created once they
+// have had values, and never removed afterwards - if someone closes GPU-Z, the entities show "unknown"
+// (null) instead of disappearing and reappearing on the next start.
 func (m *MQTTModule) sensorState(st map[string]any) {
 	var sens *GPUSensors
 	if m.gpu != nil {
@@ -503,7 +503,7 @@ func (m *MQTTModule) sensorState(st map[string]any) {
 	}
 }
 
-// guardState: Zustand des GPU-Schutzes fuer den regulaeren State (Attribute: Quelle, Limits, Warnungen, letztes Ereignis).
+// guardState: State of the GPU guard for the regular State (Attributes: Source, Limits, Warnings, last event).
 func (m *MQTTModule) guardState(st map[string]any) {
 	g := m.guard.Status()
 	st["gpu_guard_state"] = g.State
@@ -528,7 +528,7 @@ func (m *MQTTModule) publishGuardEvent(c paho.Client, e guardEvent) {
 
 func (m *MQTTModule) publishState(ctx context.Context, c paho.Client) {
 	st := m.collect(ctx)
-	m.syncDiscovery(c) // eine Gruppe darf im Betrieb dazukommen oder wegfallen
+	m.syncDiscovery(c) // a group may be added or removed during operation
 	m.publishStateOf(c, st)
 }
 
@@ -565,7 +565,7 @@ func (m *MQTTModule) ollama(ctx context.Context, path string, payload any, out a
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// statusError trennt "Ollama hat geantwortet, aber mit Fehlercode" von "Ollama war nicht erreichbar".
+// statusError distinguishes "Ollama responded, but with an error code" from "Ollama was unreachable".
 type statusError struct{ code int }
 
 func (e statusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }

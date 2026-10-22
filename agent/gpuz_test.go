@@ -14,7 +14,7 @@ func putUTF16(b []byte, s string) {
 	}
 }
 
-// fakeGPUZ baut einen Shared-Memory-Block wie GPU-Z ihn schreibt.
+// fakeGPUZ builds a shared memory block as written by GPU-Z.
 func fakeGPUZ(sensors map[string]float64) []byte {
 	b := make([]byte, gpuzSize)
 	binary.LittleEndian.PutUint32(b[0:], 1)
@@ -65,7 +65,7 @@ func TestParseGPUZ(t *testing.T) {
 	if _, ok := d.value("Crossbar Clock"); ok {
 		t.Fatal("NaN darf nicht als Wert gelten")
 	}
-	// Nichts aus den statischen Daten darf im Sensorblock landen
+	// Nothing from the static data may end up in the sensor block.
 	st := map[string]any{}
 	s.mqttState(st)
 	for k, v := range st {

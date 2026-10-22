@@ -312,7 +312,7 @@ In HA erscheinen drei Entitaeten: `Ollama Kürzungen` (Zaehler seit Dienststart,
 `Ollama letzte Kürzung` (Zeitstempel, Details als Attribute) und das Ereignis `Ollama Kürzung` fuer Automationen
 (Topic `<device_id>/kuerzung`, nicht retained, sofort bei der Kuerzung statt im Melde-Intervall). Die Zeile landet
 zusaetzlich als Warnung im `agent.log`. Gegenprobe: `SKIRNIR_OLLAMA_LOGS=<logordner>` und der Test
-`TestEchteOllamaLogs` zaehlt die Treffer in vorhandenen Logs (PSEWAR-2026 bis 2026-09-24: 1 + 7 in 449 487 Zeilen,
+`TestRealOllamaLogs` zaehlt die Treffer in vorhandenen Logs (Desktop-Knoten bis 2026-09-24: 1 + 7 in 449 487 Zeilen,
 kein Treffer in den 5 132 Normalzeilen `truncated = 0`).
 
 ## Betrieb

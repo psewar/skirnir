@@ -4,7 +4,7 @@ package main
 
 import "errors"
 
-// GPU-Z gibt es nur unter Windows; hier bleiben Leser und Relay leer.
+// GPU-Z is only available on Windows; the reader and relay remain empty here.
 type gpuzReader struct{}
 
 func newGPUZReader(*Logger) *gpuzReader { return nil }

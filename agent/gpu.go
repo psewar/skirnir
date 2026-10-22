@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// GPUSample sind die rohen Messwerte. Windows (WDDM) liefert kein Prozess-VRAM, deshalb nur Gesamtwerte; die Deutung
-// (fremdes VRAM, busy) macht der Router. Sensors (0.6.0) traegt Temperatur, Leistung, Drosselgruende und - falls
-// GPU-Z laeuft - dessen Zusatzwerte; der Block fehlt, wenn die Quelle nichts davon kann.
+// GPUSample holds raw measurements. Windows (WDDM) provides no per-process VRAM, so only totals; interpretation
+// (foreign VRAM, busy) is done by the router. Sensors (0.6.0) carries temperature, power, throttling reasons, and - if
+// GPU-Z is running - its extra values; the block is missing if the source cannot provide them.
 type GPUSample struct {
 	Name     string      `json:"name"`
 	UtilPct  int         `json:"gpu_util_pct"`
@@ -27,23 +27,23 @@ type GPUSample struct {
 }
 
 type GPU struct {
-	smi    string      // Pfad zu nvidia-smi.exe (Rueckfallweg) oder "nvml"
+	smi    string      // Path to nvidia-smi.exe (fallback) or "nvml"
 	nvml   *nvmlDev    // NVML direkt (Windows), nil = nvidia-smi
 	source string      // "nvml" | "nvidia-smi"
-	gpuz   *gpuzReader // GPU-Z-Shared-Memory (Windows, optional), nil = aus
-	gpuzOn bool        // Konfiguration gpuz.enabled (Standard an); gilt auch fuer das Relay
-	// Relay: GPU-Z-Werte, die `gpuz-relay` aus der Anmeldesitzung per POST /gpuz schickt, wenn der Dienst das Objekt
-	// selbst nicht oeffnen darf (virtuelles Dienstkonto). Gelten 15 s.
+	gpuz   *gpuzReader // GPU-Z shared memory (Windows, optional), nil = off
+	gpuzOn bool        // Config gpuz.enabled (default on); also applies to the relay
+	// Relay: GPU-Z values sent by `gpuz-relay` from the login session via POST /gpuz when the service cannot open the object
+	// itself (virtual service account). Valid for 15 s.
 	relayMu    sync.Mutex
 	relay      *GPUSensors
 	relayAt    time.Time
 	mu         sync.Mutex
 	last       *GPUSample
 	err        error
-	failStreak int // Zaehler NVML-Fehler -> nach 3 in Folge dauerhaft auf nvidia-smi
+	failStreak int // NVML error counter -> after 3 consecutive, permanently fall back to nvidia-smi
 }
 
-// newGPU: NVML zuerst (Mikrosekunden je Messung, kein Prozessstart), sonst nvidia-smi.exe wie bisher.
+// newGPU: NVML first (microseconds per measurement, no process start), otherwise nvidia-smi.exe as before.
 func newGPU() (*GPU, error) {
 	g := &GPU{}
 	if d, err := openNVML(); err == nil {
@@ -61,10 +61,10 @@ func newGPU() (*GPU, error) {
 	return g, nil
 }
 
-// enableGPUZ schaltet den GPU-Z-Leser zu (Konfiguration gpuz.enabled, Standard an). Ohne laufendes GPU-Z bleibt er still.
+// enableGPUZ toggles the GPU-Z reader (config gpuz.enabled, default on). Remains silent if GPU-Z is not running.
 func (g *GPU) enableGPUZ(log *Logger) { g.gpuz, g.gpuzOn = newGPUZReader(log), true }
 
-// SetRelayed nimmt GPU-Z-Werte vom Relay an (false = GPU-Z ist per Konfiguration aus).
+// SetRelayed accepts GPU-Z values from the relay (false = GPU-Z disabled via config).
 func (g *GPU) SetRelayed(s *GPUSensors) bool {
 	if !g.gpuzOn || s == nil || !s.GPUZ {
 		return g.gpuzOn
@@ -75,7 +75,7 @@ func (g *GPU) SetRelayed(s *GPUSensors) bool {
 	return true
 }
 
-// RelayAge: Alter der letzten Relay-Werte (fuer /health), 0 = nie.
+// RelayAge: age of the last relay values (for /health), 0 = never.
 func (g *GPU) RelayAge() time.Duration {
 	g.relayMu.Lock()
 	defer g.relayMu.Unlock()
@@ -85,11 +85,11 @@ func (g *GPU) RelayAge() time.Duration {
 	return time.Since(g.relayAt)
 }
 
-// Source: womit gemessen wird (Log, /health).
+// Source: measurement method (log, /health).
 func (g *GPU) Source() string { g.mu.Lock(); defer g.mu.Unlock(); return g.source }
 
-// dev liefert das NVML-Geraet unter dem Lock (nil = nvidia-smi). Heartbeat, Guard und /health rufen gleichzeitig; der
-// Rueckfall auf nvidia-smi setzt g.nvml auf nil - ohne Lock waere das ein nil-Zugriff im anderen Aufrufer (Review 2026-09-25).
+// dev returns the NVML device under lock (nil = nvidia-smi). Heartbeat, Guard, and /health call concurrently; the
+// fallback to nvidia-smi sets g.nvml to nil - without a lock, this would be a nil access in the other caller (Review 2026-09-25).
 func (g *GPU) dev() *nvmlDev { g.mu.Lock(); defer g.mu.Unlock(); return g.nvml }
 
 // GPUZActive: ob im letzten Sample frische GPU-Z-Werte waren.
@@ -117,15 +117,15 @@ func findNvidiaSmi() (string, error) {
 	return "", fmt.Errorf("nvidia-smi.exe not found")
 }
 
-// smiFields: was wir nvidia-smi abfragen (Reihenfolge = Spalten der Antwort). Die ersten fuenf sind Pflicht,
-// der Rest darf "N/A" sein.
+// smiFields: what we query from nvidia-smi (order = response columns). The first five are required,
+// the rest may be "N/A".
 var smiFields = []string{
 	"utilization.gpu", "memory.total", "memory.used", "memory.free", "name",
 	"temperature.gpu", "power.draw", "power.limit", "power.default_limit", "fan.speed", "utilization.memory",
 	"clocks_throttle_reasons.active",
 }
 
-// Sample misst per NVML, sonst per nvidia-smi (ohne Konsolenfenster), und merkt sich den letzten Wert.
+// Sample measures via NVML, otherwise via nvidia-smi (no console window), and stores the last value.
 func (g *GPU) Sample(ctx context.Context) (*GPUSample, error) {
 	if nv := g.dev(); nv != nil {
 		util, memUtil, total, used, free, err := nv.sample()
@@ -186,7 +186,7 @@ func (g *GPU) Sample(ctx context.Context) (*GPUSample, error) {
 	return s, nil
 }
 
-// smiSensors deutet die optionalen Spalten der nvidia-smi-Antwort; "N/A" und "[N/A]" heissen: kein Wert.
+// smiSensors parses optional columns of the nvidia-smi response; "N/A" and "[N/A]" mean: no value.
 func smiSensors(f []string) *GPUSensors {
 	s := &GPUSensors{}
 	get := func(i int) (string, bool) {
@@ -229,8 +229,8 @@ func smiSensors(f []string) *GPUSensors {
 	return s
 }
 
-// addGPUZ mischt die GPU-Z-Werte dazu: direkt aus dem Shared Memory, wenn wir es oeffnen duerfen, sonst die frischen
-// Werte des Relays aus der Anmeldesitzung.
+// addGPUZ mixes in GPU-Z values: directly from shared memory if we can open it, otherwise fresh
+// relay values from the login session.
 func (g *GPU) addGPUZ(s *GPUSensors) {
 	if !g.gpuzOn || s == nil {
 		return
@@ -248,7 +248,7 @@ func (g *GPU) addGPUZ(s *GPUSensors) {
 	}
 }
 
-// PowerLimits liest aktuelles, Standard-, Min- und Max-Limit (Watt): per NVML, sonst per nvidia-smi.
+// PowerLimits reads current, default, min, and max limits (Watt): via NVML, otherwise via nvidia-smi.
 func (g *GPU) PowerLimits() guardLimits {
 	if nv := g.dev(); nv != nil {
 		return nv.limits()
@@ -279,8 +279,8 @@ func (g *GPU) PowerLimits() guardLimits {
 	return guardLimits{Cur: v[0], Def: v[1], Min: v[2], Max: v[3], OK: true}
 }
 
-// SetPowerLimit setzt das Power-Limit (Watt): NVML (Admin) oder `nvidia-smi -pl` (root). Der Guard klemmt den Wert
-// vorher auf [Min, Standard]; hier wird nichts mehr geprueft.
+// SetPowerLimit sets the power limit (Watt): NVML (Admin) or `nvidia-smi -pl` (root). The Guard clamps the value
+// to [Min, Default] beforehand; no further checks here.
 func (g *GPU) SetPowerLimit(w float64) error {
 	if nv := g.dev(); nv != nil {
 		return nv.setLimit(w)
@@ -300,7 +300,7 @@ func (g *GPU) SetPowerLimit(w float64) error {
 
 func (g *GPU) setErr(err error) { g.mu.Lock(); g.err = err; g.mu.Unlock() }
 
-// Last liefert den letzten erfolgreichen Messwert (fuer MQTT und /health), ohne neu abzufragen.
+// Last returns the last successful measurement (for MQTT and /health) without re-querying.
 func (g *GPU) Last() (*GPUSample, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

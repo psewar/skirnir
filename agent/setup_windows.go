@@ -17,14 +17,14 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Einrichtung per Doppelklick (0.10.0): `skirnir-agent.exe` ohne Argumente (oder mit `setup`) hebt sich per UAC an, fragt
-// beim ersten Mal nach Router-URL, Update-Schluessel und dem Benutzer, der den Dienst steuern darf, legt die Konfiguration
-// als LocalSystem-Dienst an, kopiert sich nach Program Files, installiert oder aktualisiert den Dienst "Skirnir Agent",
-// legt die GPU-Z-Relay-Aufgabe an und zeigt am Ende Zustand und Fingerprint. Ersetzt Install-Service.ps1 fuer Menschen;
-// das Skript bleibt fuer Sonderfaelle (alte Tasks entfernen, Firewall-Regeln des Ollama-Installers).
+// Double-click setup (0.10.0): `skirnir-agent.exe` without arguments (or with `setup`) elevates via UAC, asks
+// on first run for Router-URL, update key, and the user allowed to control the service, creates the configuration
+// as a LocalSystem service, copies itself to Program Files, installs or updates the "Skirnir Agent" service,
+// creates the GPU-Z relay task, and displays status and fingerprint at the end. Replaces Install-Service.ps1 for humans;
+// the script remains for edge cases (removing old tasks, Ollama installer firewall rules).
 //
-// Anlass 2026-09-25: Install-Service.ps1 pruefte die Admin-Rolle ueber den ENGLISCHEN Gruppennamen und verweigerte auf einem
-// deutschen Windows trotz erhoehter PowerShell. Hier entscheidet das Token (IsElevated), nicht ein Gruppenname.
+// Reason 2026-09-25: Install-Service.ps1 checked the admin role via the ENGLISH group name and failed on a
+// German Windows despite elevated PowerShell. Here the token (IsElevated) decides, not a group name.
 
 const (
 	setupDstDir = `C:\Program Files\skirnir-agent`
@@ -40,7 +40,7 @@ func isElevated() bool {
 	return t.IsElevated()
 }
 
-// relaunchElevated startet dieselbe Binary mit UAC-Abfrage neu (eigenes Konsolenfenster).
+// relaunchElevated restarts the same binary with UAC prompt (own console window).
 func relaunchElevated(args []string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -56,8 +56,8 @@ func relaunchElevated(args []string) error {
 	return windows.ShellExecute(0, verb, file, arg, nil, windows.SW_SHOWNORMAL)
 }
 
-// ownConsole: true, wenn dieses Fenster nur uns gehoert (Doppelklick oder UAC-Neustart) - dann am Ende auf Enter warten,
-// sonst verschwindet die Ausgabe mit dem Fenster.
+// ownConsole: true if this window belongs only to us (double-click or UAC restart) - then wait for Enter at the end,
+// otherwise the output disappears with the window.
 func ownConsole() bool {
 	k := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetConsoleProcessList")
 	var pids [4]uint32
@@ -86,8 +86,8 @@ func ask(r *bufio.Reader, prompt, def string) string {
 	return s
 }
 
-// setupInteractive: die ganze Einrichtung; ruft install/apply-rules/start ueber die INSTALLIERTE Binary auf, damit der
-// Dienst im SCM auf Program Files zeigt und nicht auf den Download-Ordner.
+// setupInteractive: the full setup; calls install/apply-rules/start via the INSTALLED binary so the
+// service in SCM points to Program Files, not the download folder.
 func setupInteractive(cfgPath string) error {
 	fmt.Printf("Skirnir Agent %s - setup\n\n", version)
 	if !isElevated() {
@@ -99,14 +99,14 @@ func setupInteractive(cfgPath string) error {
 		return nil
 	}
 	err := setupBody(cfgPath)
-	if err != nil { // vor der Enter-Pause ausgeben, damit es im UAC-Fenster nicht untergeht (2026-09-26)
+	if err != nil { // print before the Enter pause so it doesn't get lost in the UAC window (2026-09-26)
 		fmt.Printf("\n*** ERROR: %v ***\n", err)
 	}
 	pause()
 	return err
 }
 
-// setupBody: die eigentliche Einrichtung (erhoeht).
+// setupBody: the actual setup (elevated).
 func setupBody(cfgPath string) error {
 	in := bufio.NewReader(os.Stdin)
 	if moved, err := migrateLegacyInstall(&cfgPath); err != nil {
@@ -135,7 +135,7 @@ func setupBody(cfgPath string) error {
 	st, _ := serviceState(name)
 	exists := st != serviceNotInstalled
 
-	// Dienst und Relay anhalten, damit die Binary ersetzt werden kann
+	// Stop service and relay so the binary can be replaced
 	if exists {
 		fmt.Printf("service %s: %s -> stop\n", name, st)
 		_ = controlService(name, "stop")
@@ -150,7 +150,7 @@ func setupBody(cfgPath string) error {
 		}
 		fmt.Println("binary copied to", dst)
 	}
-	// Konto geaendert (z. B. NT SERVICE -> LocalSystem)? Dann neu anlegen - das Konto laesst sich nur beim Anlegen setzen.
+	// Account changed (e.g. NT SERVICE -> LocalSystem)? Recreate - the account can only be set at creation time.
 	if exists {
 		if acct, err := serviceAccount(name); err == nil && !sameAccount(acct, cfg.Install.Account) {
 			fmt.Printf("service account is %q, configuration wants %q -> service is recreated (identity and logs stay)\n", acct, firstNonEmpty(cfg.Install.Account, "LocalSystem"))
@@ -191,14 +191,14 @@ func setupBody(cfgPath string) error {
 	return nil
 }
 
-// migrateLegacyInstall (0.11.0): liegt die Konfiguration noch unter ollama-router-agent und die neue fehlt, wird das
-// Verzeichnis (Config, Identitaet, Provisionierung, Logs) nach skirnir-agent verschoben, Pfade in der Config nachgezogen,
-// der alte Dienst samt Aufgabe entfernt. Danach zeigt cfgPath auf die neue Datei; install legt den Dienst SkirnirAgent an.
+// migrateLegacyInstall (0.11.0): if config is still under ollama-router-agent and the new one is missing, move the
+// directory (Config, Identity, Provisioning, Logs) to skirnir-agent, update paths in config,
+// remove old service and task. Then cfgPath points to the new file; install creates the SkirnirAgent service.
 func migrateLegacyInstall(cfgPath *string) (bool, error) {
 	newDefault, _ := filepath.Abs(strings.TrimSuffix(`C:\ProgramData\skirnir-agent\config.yaml`, ""))
 	cur, _ := filepath.Abs(*cfgPath)
 	if !strings.EqualFold(cur, newDefault) && !strings.EqualFold(cur, legacyConfigPathWindows) {
-		return false, nil // ausdruecklich anderer Pfad: nichts verschieben
+		return false, nil // explicitly different path: do not move
 	}
 	if _, err := os.Stat(newDefault); err == nil {
 		*cfgPath = newDefault
@@ -209,8 +209,8 @@ func migrateLegacyInstall(cfgPath *string) (bool, error) {
 		return false, nil
 	}
 	fmt.Println("Old installation found - moving to skirnir-agent (service, directory, task) ...")
-	// Erst die umgeschriebene Konfiguration pruefen, dann anfassen: ein Umzug, der an der Konfiguration scheitert, liesse den
-	// Knoten ohne Dienst zurueck (gesehen 2026-09-26 auf einem Knoten mit alter Config).
+	// Check the rewritten configuration first, then touch it: a migration failing on config would leave the
+	// node without a service (seen 2026-09-26 on a node with old config).
 	raw, err := os.ReadFile(legacyConfigPathWindows)
 	if err != nil {
 		return false, err
@@ -246,7 +246,7 @@ func migrateLegacyInstall(cfgPath *string) (bool, error) {
 	return true, nil
 }
 
-// upgradeConfigText: Pfade und Namen der alten Installation, alter Blockname mimir: -> secret_store: (gleiche Schluessel).
+// upgradeConfigText: paths and names of old installation, old block name mimir: -> secret_store: (same keys).
 func upgradeConfigText(s string) string {
 	for old, repl := range map[string]string{`\ollama-router-agent\`: `\skirnir-agent\`, "OllamaRouterAgent": "SkirnirAgent", "Ollama Router Agent": "Skirnir Agent"} {
 		s = strings.ReplaceAll(s, old, repl)
@@ -293,7 +293,7 @@ func setupWriteConfig(in *bufio.Reader, cfgPath string) error {
 	return nil
 }
 
-// setupUpgradeConfig: bestehende Datei behutsam nachziehen - Update-Schluessel ergaenzen, altes NT-SERVICE-Konto auf
+// setupUpgradeConfig: carefully update existing file - add update key, change old NT-SERVICE account to
 // LocalSystem, alter Blockname mimir: melden.
 func setupUpgradeConfig(in *bufio.Reader, cfgPath string) error {
 	raw, err := os.ReadFile(cfgPath)
@@ -326,7 +326,7 @@ func setupUpgradeConfig(in *bufio.Reader, cfgPath string) error {
 		changed = true
 	}
 	if _, err := loadConfig(cfgPath); err == nil {
-		// Probe der geaenderten Fassung, bevor sie geschrieben wird
+		// Test the modified version before writing it
 		probe := filepath.Join(os.TempDir(), "skirnir-agent-probe.yaml")
 		if os.WriteFile(probe, []byte(s), 0o600) == nil {
 			if _, perr := loadConfig(probe); perr != nil {
@@ -381,8 +381,8 @@ func stopRelayProcesses() {
 	time.Sleep(time.Second)
 }
 
-// installRelayTask: wie Install-GpuzRelayTask in Install-Service.ps1 - Aufgabe bei Anmeldung, Gruppe Benutzer, versteckt,
-// conhost --headless (ein Terminalfenster wuerde sonst mit der Sitzung sterben).
+// installRelayTask: like Install-GpuzRelayTask in Install-Service.ps1 - task at logon, group Users, hidden,
+// conhost --headless (a terminal window would otherwise die with the session).
 func installRelayTask(exe, cfgPath string) error {
 	ps := `$tn = '` + gpuzRelayTaskName + `'; ` +
 		`$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument ('--headless "' + '` + exe + `' + '" gpuz-relay --config "' + '` + cfgPath + `' + '"'); ` +

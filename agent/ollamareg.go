@@ -6,21 +6,21 @@ import (
 	"time"
 )
 
-// Windows-Eintrag der Ollama-Installation nachfuehren (0.16.0). Der Ollama-Installer legt unter "Apps" einen
-// Deinstallationseintrag an (DisplayName "Ollama version X", DisplayVersion X); winget und UniGetUI lesen die installierte
-// Version nur daraus. Tauscht der Agent die Dateien selbst (ollamaupdate.go), blieb der Eintrag auf der alten Version stehen:
-// winget bot dann jedes Release als Update an, und der Installer scheiterte am Ollama, das als Kind des Dienstes laeuft
-// (2026-10-01: Eintrag 0.34.0, laufend 0.35.0). Jetzt setzt der Agent den Eintrag nach jedem Tausch und gleicht ihn beim
-// Start und stuendlich ab - ein Benutzer-Zweig der Registry ist nur geladen, solange der Benutzer angemeldet ist.
+// Track the Windows registry entry for the Ollama installation (0.16.0). The Ollama installer creates an
+// uninstall entry under "Apps" (DisplayName "Ollama version X", DisplayVersion X); winget and UniGetUI read the installed
+// version only from there. If the agent swaps the files itself (ollamaupdate.go), the entry remained on the old version:
+// winget then offered every release as an update, and the installer failed on Ollama running as a child of the service
+// (2026-10-01: entry 0.34.0, running 0.35.0). Now the agent updates the entry after each swap and reconciles it on
+// startup and hourly - a user registry hive is only loaded while the user is logged in.
 
-// normDir vergleicht Ordnerpfade unabhaengig von Gross-/Kleinschreibung, Schraegstrich-Art und abschliessendem Trenner.
+// normDir compares directory paths ignoring case, slash type, and trailing separators.
 func normDir(d string) string {
 	d = strings.ReplaceAll(d, "/", `\`)
 	return strings.ToLower(strings.TrimRight(d, `\`))
 }
 
-// uninstallUpdate: neue Werte fuer einen Deinstallationseintrag, wenn er zur Ollama-Installation in dir gehoert und nicht
-// version zeigt. DisplayName wird nur angepasst, wenn er dem Muster des Ollama-Installers folgt ("Ollama version X").
+// uninstallUpdate: new values for an uninstall entry if it belongs to the Ollama installation in dir and does not
+// show version. DisplayName is only adjusted if it follows the Ollama installer pattern ("Ollama version X").
 func uninstallUpdate(installLocation, displayName, displayVersion, dir, version string) (name, ver string, change bool) {
 	if installLocation == "" || dir == "" || normDir(installLocation) != normDir(dir) {
 		return "", "", false
@@ -32,8 +32,8 @@ func uninstallUpdate(installLocation, displayName, displayVersion, dir, version 
 	return name, ver, name != displayName || ver != displayVersion
 }
 
-// syncRegistration bringt den Windows-Eintrag auf version. Nur wenn Ollama ein Kind dieses Agenten ist: eine Tray-Installation
-// aktualisiert sich mit ihrem eigenen Installer, der den Eintrag selbst pflegt.
+// syncRegistration brings the Windows entry to version. Only if Ollama is a child of this agent: a tray installation
+// updates itself with its own installer, which maintains the entry.
 func (u *OllamaUpdater) syncRegistration(version string) {
 	if !u.Managed() || version == "" {
 		return
@@ -47,7 +47,7 @@ func (u *OllamaUpdater) syncRegistration(version string) {
 	}
 }
 
-// RegistrationLoop gleicht den Windows-Eintrag 30 s nach dem Start und danach stuendlich mit der laufenden Version ab.
+// RegistrationLoop reconciles the Windows entry 30 s after startup and then hourly with the running version.
 func (u *OllamaUpdater) RegistrationLoop(ctx context.Context) {
 	if !u.Managed() {
 		return

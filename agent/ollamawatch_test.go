@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// fakeOllama spielt /api/ps und /api/tags mit austauschbarem Inhalt; down = 500 auf alles.
+// fakeOllama serves /api/ps and /api/tags with swappable content; down = 500 for all.
 type fakeOllama struct {
 	mu   sync.Mutex
 	ps   string
@@ -47,7 +47,7 @@ func TestOllamaWatcher(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	w := newOllamaWatcher(srv.URL, quietLogger())
-	w.tagsEvery = 0 // jede Runde auch /api/tags
+	w.tagsEvery = 0 // each round also /api/tags
 	ctx := context.Background()
 	now := time.Now()
 	qwen := `{"name":"qwen:27b","digest":"aa","size":1}`
@@ -64,7 +64,7 @@ func TestOllamaWatcher(t *testing.T) {
 	if !have || !st.Up || st.Rev != 1 || len(st.Tags) != 1 || len(st.PS) != 0 {
 		t.Fatalf("erste Abfrage: %+v %v", st, have)
 	}
-	// nichts geladen: die Nutzlast muss eine leere Liste tragen, nicht null (0.14.0 schickte "ps":null)
+	// nothing loaded: the payload must carry an empty list, not null (0.14.0 sent "ps":null)
 	if b, _ := json.Marshal(st); !strings.Contains(string(b), `"ps":[]`) || !strings.Contains(string(b), `"tags":[{`) {
 		t.Fatalf("leere Liste als [] erwartet: %s", b)
 	}
@@ -128,7 +128,7 @@ func TestOllamaWatcherDownFromStart(t *testing.T) {
 	if b, _ := json.Marshal(st); strings.Contains(string(b), "null") {
 		t.Fatalf("auch im Zustand down keine null-Listen: %s", b)
 	}
-	// Ollama kommt hoch, nichts geladen und nichts installiert: erste Antwort ist eine Aenderung, beide Listen []
+	// Ollama is up, nothing loaded and nothing installed: first response is a change, both lists []
 	f.set("", "", false)
 	w.poll(context.Background(), time.Now())
 	st, _ = w.Snapshot()

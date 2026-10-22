@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// App verdrahtet die Module. Laeuft identisch im Dienst und im Konsolen-Modus (run), auf Windows wie auf Linux.
+// App wires up the modules. Runs identically as a service and in console mode (run), on Windows and Linux.
 type App struct {
 	cfg     *Config
 	log     *Logger
@@ -31,13 +31,13 @@ type App struct {
 	prov     *Provision
 	guard    *Guard         // GPU-Schutz (guard.go)
 	updater  *Updater       // Selbst-Update (updater.go)
-	ollamaUp *OllamaUpdater // Ollama-Update ueber den Router (ollamaupdate.go, 0.12.0)
-	ollamaW  *OllamaWatcher // Ollama-Zustand beobachten und melden (ollamawatch.go, 0.14.0)
+	ollamaUp *OllamaUpdater // Ollama update via the router (ollamaupdate.go, 0.12.0)
+	ollamaW  *OllamaWatcher // Monitor and report Ollama status (ollamawatch.go, 0.14.0)
 	game     *GameWatch     // Spielerkennung (game.go, 0.17.0)
-	routes   *Routes        // Tunnel-Routen zu weiteren lokalen Diensten (routes.go); nil ohne tunnel.routes
+	routes   *Routes        // Tunnel routes to other local services (routes.go); nil without tunnel.routes
 	rootCtx  context.Context
-	crashed  string // Modul, das mit Panic endete (Run liefert dann einen Fehler, der Dienst startet neu)
-	ctlToken string // Token fuer POST /restart-child (Datei control.token neben der Config; Review 2026-09-25)
+	crashed  string // Module that ended with a panic (Run then returns an error, the service restarts)
+	ctlToken string // Token for POST /restart-child (file control.token next to the Config; Review 2026-09-25)
 }
 
 func newApp(cfg *Config, log *Logger) (*App, error) {
@@ -103,7 +103,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	return a, nil
 }
 
-// effectiveMQTT: lokale Config gewinnt (explizit gesetzter Host), sonst das vom Router provisionierte Paket.
+// effectiveMQTT: local Config wins (explicitly set Host), otherwise the package provisioned by the router.
 func (a *App) effectiveMQTT() *MQTTCfg {
 	if a.cfg.MQTT.Enabled != nil && !*a.cfg.MQTT.Enabled {
 		return nil
@@ -117,8 +117,8 @@ func (a *App) effectiveMQTT() *MQTTCfg {
 	a.mu.Unlock()
 	if prov != nil && prov.MQTT != nil {
 		c := *prov.MQTT
-		// Knoten-lokale Angaben ueberlagern das Provisionierte: welcher Alias hier liegt und welches Kind der STT-Server ist,
-		// weiss nur dieser Rechner.
+		// Node-local settings override the provisioned ones: which alias is here and which child is the STT server,
+		// only this machine knows.
 		if a.cfg.MQTT.AliasModel != "" {
 			c.AliasModel = a.cfg.MQTT.AliasModel
 		}
@@ -151,7 +151,7 @@ func (a *App) startMQTT(cfg *MQTTCfg) {
 	go a.mq.Run(ctx)
 }
 
-// onTunnelStatus: Freigabe/Sperre/Konfigurationspaket vom Router.
+// onTunnelStatus: Release/Block/Config package from the router.
 func (a *App) onTunnelStatus(state, node string, p *Provision) {
 	if p == nil {
 		if state == "revoked" {
@@ -180,7 +180,7 @@ func (a *App) onTunnelStatus(state, node string, p *Provision) {
 	a.startMQTT(a.effectiveMQTT())
 }
 
-// Run blockiert bis ctx endet; dann werden alle Module gestoppt (Kinder inklusive).
+// Run blocks until ctx ends; then all modules are stopped (including children).
 func (a *App) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -197,8 +197,8 @@ func (a *App) Run(ctx context.Context) error {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					// Nicht still weiterlaufen: ohne das Modul (z. B. Tunnel) waere der Dienst ein gesunder Zombie, den kein
-					// Recovery neu startet. Alles stoppen, Run liefert einen Fehler, der SCM/systemd startet neu.
+					// Do not keep running silently: without the module (e.g. Tunnel) the service would be a healthy zombie that no
+					// recovery restarts. Stop everything, Run returns an error, the SCM/systemd restarts.
 					a.log.Errorf("%s: panic: %v - service is stopping", name, r)
 					a.mu.Lock()
 					if a.crashed == "" {
@@ -218,7 +218,7 @@ func (a *App) Run(ctx context.Context) error {
 	if a.routes != nil {
 		run("tunnel-routen", a.routes.Run)
 	}
-	run("ollama-registrierung", a.ollamaUp.RegistrationLoop) // Windows-Eintrag der Installation mit der laufenden Version abgleichen
+	run("ollama-registrierung", a.ollamaUp.RegistrationLoop) // Sync the Windows installation entry with the running version
 	run("gpu-guard", a.guard.Run)
 	run("game", a.game.Run)
 	run("health", (&HealthServer{app: a}).Run)
@@ -248,8 +248,8 @@ func (a *App) Run(ctx context.Context) error {
 	return nil
 }
 
-// loadOrCreateControlToken: zufaelliges Token in control.token neben der Config (Verzeichnis-ACL: SYSTEM, Administratoren,
-// Dienstkonto). Wer /restart-child aufrufen will, muss es lesen koennen. Ohne Config-Pfad (Tests) nur im Speicher.
+// loadOrCreateControlToken: random token in control.token next to the Config (Directory ACL: SYSTEM, Administrators,
+// Service account). Whoever wants to call /restart-child must be able to read it. Without a Config path (tests) only in memory.
 func loadOrCreateControlToken(cfgPath string, log *Logger) string {
 	fresh := func() string {
 		b := make([]byte, 24)

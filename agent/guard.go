@@ -9,16 +9,16 @@ import (
 	"time"
 )
 
-// GPU-Schutz (gpu_guard, seit 0.7.0; Entwurf design/gpu-guard.md): Der 12V-2x6-Stecker einer RTX 5090 fuehrt bei 575 W
-// rund 48 A ueber sechs Adern ohne Einzelpin-Messung. Software sieht keinen schlechten Kontakt, kann aber den Gesamtstrom
-// senken (Power-Limit), Dauer-Vollast begrenzen und frueh warnen (Spannungsabfall am Stecker, Speichertemperatur).
+// GPU guard (gpu_guard, since 0.7.0; draft in design/gpu-guard.md): At 575 W the 12V-2x6 connector of an RTX 5090 carries
+// about 48 A over six wires without per-pin measurement. Software cannot detect a bad contact, but can reduce total current
+// (Power Limit), cap sustained load, and warn early (voltage drop at the connector, memory temperature).
 //
-// Der Kern ist eine reine Funktion (guardEngine.step) ueber Messwerte und Zeit - testbar ohne Karte. Das Setzen des
-// Limits geht ueber die eingehaengten Funktionen limits/setLimit (NVML unter Windows, nvidia-smi sonst). Der Guard
-// senkt nur, erhoeht nie ueber das Standardlimit, und klemmt jedes Ziel auf [Min-Limit, Standardlimit].
+// The core is a pure function (guardEngine.step) over measurements and time - testable without a card. Setting the
+// limit goes through the hooked functions limits/setLimit (NVML on Windows, nvidia-smi otherwise). The guard
+// only lowers, never raises above the standard limit, and clamps every target to [Min-Limit, Standard-Limit].
 //
-// Zustaende: off | unavailable | normal | high_load | throttled | recovery (seit 0.20.0 englisch, design/english-names.md). Die Abwahl (enabled: false) gilt auf
-// Wunsch des Betreibers als Problem (HA), damit eine vergessene Abwahl auffaellt.
+// States: off | unavailable | normal | high_load | throttled | recovery (English since 0.20.0, design/english-names.md). Disabling (enabled: false) counts as a
+// Problem (HA) at the operator's request, so a forgotten disable is noticed.
 
 const (
 	guardOff         = "off"
@@ -40,31 +40,31 @@ const (
 	guardEvDeselected      = "deselected"
 
 	guardRecoveryReportS = 60.0
-	guardVRefMaxSamples  = 1440 // eine Leerlauf-Spannungsprobe je Minute, 24 h
+	guardVRefMaxSamples  = 1440 // one idle voltage probe per minute, 24 h
 )
 
-// GuardCfg: Block gpu_guard in der Agent-Konfiguration. Fehlende Werte = Standard (guardDefaults).
+// GuardCfg: gpu_guard block in the agent configuration. Missing values = defaults (guardDefaults).
 type GuardCfg struct {
 	Enabled       *bool    `yaml:"enabled" json:"enabled,omitempty"`
-	PowerLimitPct *float64 `yaml:"power_limit_pct" json:"power_limit_pct,omitempty"` // Dauerlimit in % des Standardlimits
-	PowerLimitW   *float64 `yaml:"power_limit_w" json:"power_limit_w,omitempty"`     // alternativ absolut; gewinnt vor pct
+	PowerLimitPct *float64 `yaml:"power_limit_pct" json:"power_limit_pct,omitempty"` // Sustained limit as % of the standard limit
+	PowerLimitW   *float64 `yaml:"power_limit_w" json:"power_limit_w,omitempty"`     // or absolute; takes precedence over pct
 	ReapplyS      *float64 `yaml:"reapply_s" json:"reapply_s,omitempty"`
-	HighLoadPct   *float64 `yaml:"high_load_pct" json:"high_load_pct,omitempty"`     // Hochlast ab % des aktiven Limits ...
-	HighLoadS     *float64 `yaml:"high_load_s" json:"high_load_s,omitempty"`         // ... so lange -> Stufe 2
-	HighLoadGapS  *float64 `yaml:"high_load_gap_s" json:"high_load_gap_s,omitempty"` // Luecken unter der Schwelle bis zu so lange zaehlen nicht als Unterbrechung
-	Stage2Pct     *float64 `yaml:"stage2_pct" json:"stage2_pct,omitempty"`           // Limit in Stufe 2 (% des Standardlimits)
-	RecoveryS     *float64 `yaml:"recovery_s" json:"recovery_s,omitempty"`           // Dauer von Stufe 2
+	HighLoadPct   *float64 `yaml:"high_load_pct" json:"high_load_pct,omitempty"`     // High load above % of the active limit ...
+	HighLoadS     *float64 `yaml:"high_load_s" json:"high_load_s,omitempty"`         // ... for this long -> stage 2
+	HighLoadGapS  *float64 `yaml:"high_load_gap_s" json:"high_load_gap_s,omitempty"` // Gaps below the threshold up to this duration do not count as interruptions
+	Stage2Pct     *float64 `yaml:"stage2_pct" json:"stage2_pct,omitempty"`           // Limit in stage 2 (% of the standard limit)
+	RecoveryS     *float64 `yaml:"recovery_s" json:"recovery_s,omitempty"`           // Duration of stage 2
 	VoltageWarnV  *float64 `yaml:"voltage_warn_v" json:"voltage_warn_v,omitempty"`
 	VoltageDropV  *float64 `yaml:"voltage_drop_v" json:"voltage_drop_v,omitempty"`
 	VoltageHoldS  *float64 `yaml:"voltage_hold_s" json:"voltage_hold_s,omitempty"`
-	VoltageLoadW  *float64 `yaml:"voltage_load_w" json:"voltage_load_w,omitempty"` // Spannung zaehlt nur ab dieser 16-Pin-Leistung
+	VoltageLoadW  *float64 `yaml:"voltage_load_w" json:"voltage_load_w,omitempty"` // Voltage counts only above this 16-pin power
 	MemTempWarnC  *float64 `yaml:"mem_temp_warn_c" json:"mem_temp_warn_c,omitempty"`
 	HotspotWarnC  *float64 `yaml:"hotspot_warn_c" json:"hotspot_warn_c,omitempty"`
 }
 
 func (c *GuardCfg) on() bool { return c.Enabled == nil || *c.Enabled }
 
-// guardParams: aufgeloeste Werte.
+// guardParams: resolved values.
 type guardParams struct {
 	enabled                                        bool
 	limitPct, limitW, reapplyS                     float64
@@ -88,14 +88,14 @@ func (c GuardCfg) resolved() guardParams {
 	}
 }
 
-// guardLimits: was die Karte ueber ihr Limit sagt (Watt). ok=false = nicht lesbar (kein NVML, Karte ohne Limit).
+// guardLimits: what the card reports about its limit (Watts). ok=false = unreadable (no NVML, card without limit).
 type guardLimits struct {
 	Cur, Def, Min, Max float64
 	OK                 bool
 	Err                string
 }
 
-// guardInput: eine Messung.
+// guardInput: a measurement.
 type guardInput struct {
 	Now      time.Time
 	Limits   guardLimits
@@ -108,7 +108,7 @@ type guardInput struct {
 	GPUZ     bool
 }
 
-// GuardStatus geht in Heartbeat, /health und MQTT.
+// GuardStatus goes into Heartbeat, /health, and MQTT.
 type GuardStatus struct {
 	State         string   `json:"state"`
 	Source        string   `json:"source"`
@@ -133,19 +133,19 @@ type guardEvent struct {
 	At     time.Time `json:"at"`
 }
 
-// guardEngine haelt den Zustand zwischen zwei Messungen. Nicht nebenlaeufig sicher - der Aufrufer serialisiert.
+// guardEngine holds state between two measurements. Not concurrency-safe - the caller serializes.
 type guardEngine struct {
 	p        guardParams
-	setLimit func(w float64) error // nil = kein Hebel (Tests: Attrappe)
+	setLimit func(w float64) error // nil = no lever (Tests: Mock)
 
 	state          string
 	highSince      time.Time
-	lowSince       time.Time // seit wann die Last unter der Schwelle liegt (Luecke); leer = gerade hoch
+	lowSince       time.Time // how long load has been below the threshold (gap); empty = currently high
 	stage2Since    time.Time
 	recoverySince  time.Time
 	lastApply      time.Time
-	lastWant       float64 // zuletzt angestrebter Wert (Wechsel -> sofort anwenden, sonst alle reapply_s)
-	lastSetW       float64 // was wir zuletzt erfolgreich gesetzt haben (0 = nie)
+	lastWant       float64 // last targeted value (change -> apply immediately, otherwise every reapply_s)
+	lastSetW       float64 // what we last successfully set (0 = never)
 	conflicts      int
 	denied         string
 	deniedAt       time.Time
@@ -164,7 +164,7 @@ func newGuardEngine(cfg GuardCfg, setLimit func(float64) error) *guardEngine {
 
 func clampf(v, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, v)) }
 
-// targets: Dauerlimit und Stufe-2-Limit, geklemmt auf [Min, Standard]. Ueber den Standard geht es nie.
+// targets: Sustained limit and stage-2 limit, clamped to [Min, Standard]. Never above standard.
 func (g *guardEngine) targets(l guardLimits) (sustained, stage2 float64) {
 	lo := l.Min
 	if lo <= 0 {
@@ -190,7 +190,7 @@ func (g *guardEngine) vrefMedian() *float64 {
 	return fptr(math.Round(c[len(c)/2]*1000) / 1000)
 }
 
-// step wertet eine Messung aus, setzt bei Bedarf das Limit (ueber setLimit) und liefert Status und Ereignisse.
+// step evaluates a measurement, sets the limit if needed (via setLimit), and returns status and events.
 func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 	var evs []guardEvent
 	ev := func(t, msg string, w float64) {
@@ -204,7 +204,7 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 		st.LimitW, st.DefaultLimitW = fptr(in.Limits.Cur), fptr(in.Limits.Def)
 	}
 
-	// Warnungen, die unabhaengig vom Limit gelten (auch bei aus/unverfuegbar): Spannung, Temperatur, Hardware-Drossel.
+	// Warnings that apply regardless of the limit (also when off/unavailable): Voltage, Temperature, Hardware throttling.
 	g.watchVoltage(in, &st, ev)
 	g.watchTemperature(in, &st, ev)
 	g.watchHardware(in, &st, ev)
@@ -224,13 +224,13 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 	}
 	sustained, stage2 := g.targets(in.Limits)
 
-	// Lastmass: Board Power aus NVML. Sie enthaelt den Slot-Anteil, liegt also nie unter der 16-Pin-Leistung, und das
-	// Limit gilt fuer sie. Die 16-Pin-Werte aus GPU-Z kommen ueber das Relay (POST /gpuz, jeder lokale Prozess koennte
-	// sie schicken) - sie bleiben Anzeige und Warnung, entscheiden aber nicht ueber das Limit (Review 2026-09-25).
+	// Load metric: Board Power from NVML. It includes the slot share, so it is never below the 16-pin power, and the
+	// limit applies to it. The 16-pin values from GPU-Z come via the relay (POST /gpuz, any local process could
+	// send them) - they remain for display and warning, but do not decide the limit (Review 2026-09-25).
 	load := in.PowerW
-	// Hochlast: Leistung >= highPct des aktiven Limits. Zwischen zwei Anfragen faellt die Leistung fuer Sekundenbruchteile
-	// ab (Warteschlange, Antwort); gemessen 2026-09-25: mit 2-s-Abtastung kam der Zaehler bei Dauer-Batchlast nie ueber
-	// wenige Sekunden. Darum gilt eine Luecke erst nach highGapS unter der Schwelle als Unterbrechung.
+	// High load: Power >= highPct of the active limit. Between two requests, power drops for milliseconds
+	// (queue, response); measured 2026-09-25: with 2-s sampling, the counter never exceeded
+	// a few seconds under sustained batch load. Therefore, a gap counts as an interruption only after highGapS below the threshold.
 	high := load != nil && in.Limits.Cur > 0 && *load >= in.Limits.Cur*g.p.highPct/100
 	if high {
 		g.lowSince = time.Time{}
@@ -239,7 +239,7 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 			g.lowSince = in.Now
 		}
 		if in.Now.Sub(g.lowSince).Seconds() < g.p.highGapS {
-			high = true // kurze Luecke: Zaehler laeuft weiter
+			high = true // short gap: counter continues
 		}
 	}
 	switch g.state {
@@ -252,7 +252,7 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 		if in.Now.Sub(g.recoverySince).Seconds() >= guardRecoveryReportS {
 			g.state = guardNormal
 		}
-		if high { // waehrend der Erholung gleich wieder Vollast: Zaehler laeuft normal weiter
+		if high { // full load again during recovery: counter continues normally
 			if g.highSince.IsZero() {
 				g.highSince = in.Now
 			}
@@ -284,17 +284,17 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 		st.HighLoadS = int(in.Now.Sub(g.highSince).Seconds())
 	}
 
-	// Limit anwenden: gewuenscht = Stufe 2 in gedrosselt, sonst Dauerlimit. Nur senken; tiefer als gewuenscht bleibt.
+	// Apply limit: desired = stage 2 if throttled, else sustained limit. Only lower; stays lower if desired is higher.
 	want := sustained
 	if g.state == guardThrottled {
 		want = stage2
 	}
 	st.TargetW = fptr(want)
 	cur := in.Limits.Cur
-	// Senken immer; anheben nur von einem Wert, den wir selbst gesetzt haben (Stufe 2 -> Dauerlimit). Ein Fremdtool,
-	// das tiefer stellt, bleibt unangetastet - und ueber das Standardlimit geht es nie (targets klemmt).
-	// "Selbst gesetzt" heisst auch: das Limit steht auf einem unserer Zielwerte. lastSetW lebt nur im Speicher; nach
-	// einem Dienstneustart mitten in Stufe 2 bliebe die Karte sonst fuer immer auf 70 % (Review 2026-09-25).
+	// Lower always; raise only from a value we set ourselves (stage 2 -> sustained limit). An external tool,
+	// set deeper, remains untouched - and it never exceeds the default limit (targets clamp).
+	// "Self-set" means: the limit is at one of our target values. lastSetW lives only in memory; after
+	// a service restart mid-stage 2, the card would otherwise stay at 70 % forever (Review 2026-09-25).
 	ownValue := (g.lastSetW > 0 && math.Abs(cur-g.lastSetW) < 0.5) || math.Abs(cur-stage2) < 0.5 || math.Abs(cur-sustained) < 0.5
 	needSet := cur > want+0.5 || (cur < want-0.5 && ownValue)
 	due := g.lastApply.IsZero() || in.Now.Sub(g.lastApply).Seconds() >= g.p.reapplyS || g.lastWant != want
@@ -308,7 +308,7 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 			}
 			g.denied, g.deniedAt = err.Error(), in.Now
 		} else {
-			// Fremdeingriff: wir hatten schon auf diesen Wert gesetzt, jemand hat ihn wieder angehoben
+			// External interference: we had already set this value, someone raised it again
 			if g.lastSetW == want && cur > want+0.5 {
 				g.conflicts++
 				if g.conflicts >= 3 && !g.externalWarned {
@@ -325,10 +325,10 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 	} else if !needSet {
 		g.conflicts, g.externalWarned = 0, false
 		if g.denied != "" && in.Now.Sub(g.deniedAt).Seconds() >= g.p.reapplyS {
-			g.denied = "" // Limit stimmt inzwischen (jemand anders hat gesetzt): kein Problem mehr
+			g.denied = "" // Limit is now correct (someone else set it): no problem anymore
 		}
 	}
-	if g.denied != "" { // der Automat laeuft weiter, nach aussen zaehlt: der Hebel fehlt
+	if g.denied != "" { // the automaton continues, externally counts: the lever is missing
 		st.State, st.Problem, st.Reason = guardUnavailable, true, "Limit nicht setzbar: "+g.denied
 		return st, evs
 	}
@@ -350,7 +350,7 @@ func (g *guardEngine) reasonFor(want, sustained, def float64) string {
 	return fmt.Sprintf("Dauerlimit %.0f %% von %.0f W", g.p.limitPct, def)
 }
 
-// watchVoltage: Referenz im Leerlauf lernen (< 60 W, eine Probe je Minute, 24 h), unter Last Abfall pruefen.
+// watchVoltage: learn idle reference (< 60 W, one sample per minute, 24 h), check drop under load.
 func (g *guardEngine) watchVoltage(in guardInput, st *GuardStatus, ev func(string, string, float64)) {
 	if in.Pin16V == nil || in.Pin16W == nil {
 		return
@@ -407,7 +407,7 @@ func (g *guardEngine) watchTemperature(in guardInput, st *GuardStatus, ev func(s
 	}
 }
 
-// watchHardware: hw_slowdown / hw_thermal / hw_power_brake heisst, die Karte bremst selbst - etwas ist ernsthaft falsch.
+// watchHardware: hw_slowdown / hw_thermal / hw_power_brake means the card is throttling itself - something is seriously wrong.
 func (g *guardEngine) watchHardware(in guardInput, st *GuardStatus, ev func(string, string, float64)) {
 	hw := false
 	for _, r := range in.Throttle {
@@ -426,8 +426,8 @@ func (g *guardEngine) watchHardware(in guardInput, st *GuardStatus, ev func(stri
 	}
 }
 
-// Guard: Laufzeitmodul um die Engine - tickt alle 2 s mit dem letzten GPU-Sample, haelt Status und Ereignisse fuer
-// Heartbeat, /health und MQTT.
+// Guard: runtime module around the engine - ticks every 2 s with the last GPU sample, holds status and events for
+// Heartbeat, /health and MQTT.
 type Guard struct {
 	cfg    GuardCfg
 	gpu    *GPU
@@ -450,7 +450,7 @@ func newGuard(cfg GuardCfg, gpu *GPU, log *Logger) *Guard {
 	return g
 }
 
-// inputFrom baut die Engine-Eingabe aus einem Sample und den Limits der Karte.
+// inputFrom builds the engine input from a sample and the card's limits.
 func inputFrom(now time.Time, s *GPUSample, lim guardLimits) guardInput {
 	in := guardInput{Now: now, Limits: lim}
 	if s == nil || s.Sensors == nil {
@@ -515,7 +515,7 @@ func (g *Guard) emit(e guardEvent) {
 	}
 }
 
-// Status: Kopie fuer Heartbeat und /health.
+// Status: copy for Heartbeat and /health.
 func (g *Guard) Status() GuardStatus {
 	if g == nil {
 		return GuardStatus{State: guardUnavailable, Source: "-", Reason: "kein Guard"}
@@ -525,7 +525,7 @@ func (g *Guard) Status() GuardStatus {
 	return g.status
 }
 
-// LastEvent: letztes Ereignis und Gesamtzahl (MQTT-Attribute).
+// LastEvent: last event and total count (MQTT attributes).
 func (g *Guard) LastEvent() (*guardEvent, int) {
 	if g == nil {
 		return nil, 0

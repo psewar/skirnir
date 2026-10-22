@@ -5,12 +5,12 @@ import (
 	"strings"
 )
 
-// GPUSensors sind die Zusatzwerte seit 0.6.0: was NVML ueber Auslastung und VRAM hinaus liefert (Temperatur, Leistung,
-// Limit, Luefter, Drosselgruende) und - nur wenn GPU-Z laeuft - dessen Shared-Memory-Sensoren (Speichertemperatur,
-// Hot Spot, Spannung, 16-Pin-Leistung). Jeder Wert ist optional (nil = auf diesem Knoten nicht messbar); der Router
-// nimmt den Block unveraendert in den Knotenzustand, das MQTT-Geraet macht daraus HA-Sensoren.
+// GPUSensors are the additional values since 0.6.0: what NVML provides beyond utilization and VRAM (temperature, power,
+// limit, fans, throttle reasons) and - only when GPU-Z is running - its shared memory sensors (memory temperature,
+// hot spot, voltage, 16-pin power). Each value is optional (nil = not measurable on this node); the router
+// takes the block unchanged into the node state, the MQTT device turns it into HA sensors.
 type GPUSensors struct {
-	// NVML (geht ohne Anmeldung, auch als Dienst)
+	// NVML (works without login, also as a service)
 	TempC           *int     `json:"temp_c,omitempty"`
 	PowerW          *float64 `json:"power_w,omitempty"`
 	PowerLimitW     *float64 `json:"power_limit_w,omitempty"`
@@ -19,7 +19,7 @@ type GPUSensors struct {
 	MemUtilPct      *int     `json:"mem_util_pct,omitempty"`
 	ThrottleMask    *uint64  `json:"throttle_mask,omitempty"`
 	ThrottleReasons []string `json:"throttle_reasons,omitempty"`
-	// GPU-Z (nur Windows, nur wenn das Programm laeuft; Quelle = "gpuz")
+	// GPU-Z (Windows only, only when the program is running; source = "gpuz")
 	MemTempC      *float64 `json:"mem_temp_c,omitempty"`
 	HotSpotC      *float64 `json:"hotspot_c,omitempty"`
 	GPUVoltageV   *float64 `json:"gpu_voltage_v,omitempty"`
@@ -32,7 +32,7 @@ type GPUSensors struct {
 	GPUZ          bool     `json:"gpuz,omitempty"` // true = GPU-Z-Werte in diesem Sample frisch
 }
 
-// nvmlThrottleBits: nvmlClocksThrottleReasons (nvml.h). Idle ist kein Problem, alles andere heisst "gedrosselt weil".
+// nvmlThrottleBits: nvmlClocksThrottleReasons (nvml.h). Idle is not a problem, everything else means "throttled because".
 var nvmlThrottleBits = []struct {
 	bit  uint64
 	name string
@@ -50,14 +50,14 @@ func decodeThrottle(mask uint64) []string {
 			rest &^= b.bit
 		}
 	}
-	if rest != 0 { // undokumentierte Bits (auf einer RTX 5090 gesehen: 0x400 bei GPU-Z-PerfCap "vRel") sichtbar lassen
+	if rest != 0 { // keep undocumented bits visible (seen on an RTX 5090: 0x400 with GPU-Z PerfCap "vRel")
 		out = append(out, fmt.Sprintf("bit_0x%x", rest))
 	}
 	return out
 }
 
-// gpuzPerfCapBits: Bedeutung der PerfCap-Bits, wie GPU-Z sie anzeigt (Pwr, Thrm, vRel, VOp, Util, SLI). Zuordnung nach
-// gaengigen Lesern des NVAPI-Perf-Policy-Blocks; ohne offizielle Doku - deshalb wandert die Rohzahl mit.
+// gpuzPerfCapBits: meaning of the PerfCap bits as displayed by GPU-Z (Pwr, Thrm, vRel, VOp, Util, SLI). Mapping based on
+// common readers of the NVAPI Perf Policy block; no official docs - so the raw number is passed along.
 var gpuzPerfCapBits = []struct {
 	bit  int
 	name string
@@ -75,8 +75,8 @@ func decodePerfCap(mask int) []string {
 	return out
 }
 
-// mqttState schreibt die Werte in den MQTT-Zustand. Fehlende Werte werden als null gesendet, damit HA "unbekannt"
-// zeigt statt den letzten Wert stehen zu lassen.
+// mqttState writes the values to the MQTT state. Missing values are sent as null so HA shows "unknown"
+// instead of keeping the last value.
 func (s *GPUSensors) mqttState(st map[string]any) {
 	put := func(k string, v any) { st[k] = v }
 	if s == nil {
@@ -112,7 +112,7 @@ func (s *GPUSensors) mqttState(st map[string]any) {
 	}
 }
 
-// mergeGPUZ uebernimmt die GPU-Z-Felder aus src (z. B. vom Relay aus der Anmeldesitzung) in s.
+// mergeGPUZ takes over the GPU-Z fields from src (e.g. from the Relay from the login session) into s.
 func (s *GPUSensors) mergeGPUZ(src *GPUSensors) {
 	if s == nil || src == nil || !src.GPUZ {
 		return
@@ -123,14 +123,14 @@ func (s *GPUSensors) mergeGPUZ(src *GPUSensors) {
 	s.GPUZ = true
 }
 
-// hasNVML / hasGPUZ: ob die jeweilige Gruppe auf diesem Knoten ueberhaupt existiert (fuer die HA-Entitaetsgruppen).
+// hasNVML / hasGPUZ: whether the respective group exists on this node at all (for the HA entity groups).
 func (s *GPUSensors) hasNVML() bool { return s != nil && (s.TempC != nil || s.PowerW != nil) }
 func (s *GPUSensors) hasGPUZ() bool { return s != nil && s.GPUZ }
 
 func fptr(v float64) *float64 { return &v }
 func iptr(v int) *int         { return &v }
 
-// fval/ival: Zeiger -> Wert oder echtes nil (ein typisierter nil-Zeiger in einem any waere fuer Vergleiche nicht nil).
+// fval/ival: pointer -> value or true nil (a typed nil pointer in an any would not be nil for comparisons).
 func fval(p *float64) any {
 	if p == nil {
 		return nil

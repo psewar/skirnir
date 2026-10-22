@@ -31,7 +31,7 @@ func TestRoutesConfig(t *testing.T) {
 	if _, err := loadConfig(writeCfg(t, strings.Replace(routeCfgOK, "127.0.0.1:8090/", "[::1]:8090", 1))); err != nil {
 		t.Fatalf("::1 abgelehnt: %v", err)
 	}
-	// ohne routes: Config wie bisher, keine Routen
+	// without routes: Config as before, no routes
 	c, err = loadConfig(writeCfg(t, "router:\n  url: https://r.example.net\n"))
 	if err != nil || len(c.Tunnel.Routes) != 0 {
 		t.Fatalf("ohne routes: %v %+v", err, c.Tunnel.Routes)
@@ -70,7 +70,7 @@ func TestRoutesConfig(t *testing.T) {
 	}
 }
 
-// Das auskommentierte Beispiel in config.example.yaml muss einkommentiert laden und genau die Vertrags-Route ergeben.
+// The commented-out example in config.example.yaml must load when uncommented and yield exactly the contract route.
 func TestRoutesExampleConfig(t *testing.T) {
 	raw, err := os.ReadFile("config.example.yaml")
 	if err != nil {
@@ -99,7 +99,7 @@ func TestRoutesExampleConfig(t *testing.T) {
 	}
 }
 
-// countingServer zaehlt Aufrufe und antwortet mit einem festen Text.
+// countingServer counts calls and responds with fixed text.
 type countingServer struct {
 	mu    sync.Mutex
 	hits  []string
@@ -124,7 +124,7 @@ type tunFrame struct {
 	payload []byte
 }
 
-// runHandle schickt eine Anfrage durch Tunnel.handle und sammelt die Rahmen bis END oder ERR.
+// runHandle sends a request through Tunnel.handle and collects frames until END or ERR.
 func runHandle(t *testing.T, tun *Tunnel, method, path, body string) []tunFrame {
 	t.Helper()
 	head, _ := json.Marshal(map[string]any{"method": method, "path": path, "headers": map[string]string{"Content-Type": "application/json"}})
@@ -161,7 +161,7 @@ func runHandle(t *testing.T, tun *Tunnel, method, path, body string) []tunFrame 
 	}
 }
 
-// respOf: Status und Header aus dem RESP-Rahmen, Body aus den DATA-Rahmen.
+// respOf: Status and headers from the RESP frame, body from the DATA frames.
 func respOf(t *testing.T, fr []tunFrame) (int, map[string]string, string) {
 	t.Helper()
 	if len(fr) < 2 || fr[0].typ != tunResp || fr[len(fr)-1].typ != tunEnd {
@@ -194,7 +194,7 @@ func TestTunnelRoutes(t *testing.T) {
 	defer rsrv.Close()
 	routes := newRoutes([]RouteCfg{{Name: "rerank", Path: "/rerank", Methods: []string{"POST"}, Upstream: rsrv.URL, Health: "/health"}}, quietLogger())
 
-	// ohne routes: alles an Ollama, auch /rerank (Verhalten wie bisher)
+	// without routes: everything goes to Ollama, including /rerank (behavior as before)
 	st, _, body := respOf(t, runHandle(t, newTestTunnel(osrv.URL, nil), "POST", "/rerank", `{}`))
 	if st != 200 || body != ollama.reply || len(rerank.calls()) != 0 {
 		t.Fatalf("ohne routes: %d %q, Reranker-Aufrufe %v", st, body, rerank.calls())
@@ -222,7 +222,7 @@ func TestTunnelRoutes(t *testing.T) {
 		t.Fatalf("405 hat einen Upstream aufgerufen: ollama %v, rerank %v", ollama.calls(), rerank.calls())
 	}
 
-	// nicht gelistete Pfade gehen weiter an Ollama; der Vergleich ist exakt
+	// unlisted paths pass through to Ollama; the comparison is exact
 	for _, p := range []string{"/api/chat", "/rerank/", "/RERANK"} {
 		st, _, body = respOf(t, runHandle(t, tun, "POST", p, `{}`))
 		if st != 200 || body != ollama.reply {
@@ -277,7 +277,7 @@ func TestRoutesHealth(t *testing.T) {
 	if got := r.Report()["rerank"]; got != (RouteHealth{Reason: routeUnreachable}) {
 		t.Fatalf("Dienst weg: %+v", got)
 	}
-	// Report ist eine Kopie
+	// Report is a copy
 	rep := r.Report()
 	rep["rerank"] = RouteHealth{Up: true}
 	if r.Report()["rerank"].Up {
@@ -285,7 +285,7 @@ func TestRoutesHealth(t *testing.T) {
 	}
 }
 
-// Ohne routes bleibt alles wie bisher: kein Objekt, kein Heartbeat-Feld, Lookup findet nichts.
+// Without routes, everything remains as before: no object, no Heartbeat field, Lookup finds nothing.
 func TestRoutesWithoutConfiguration(t *testing.T) {
 	r := newRoutes(nil, quietLogger())
 	if r != nil {

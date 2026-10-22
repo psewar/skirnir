@@ -7,14 +7,14 @@ import (
 	"time"
 )
 
-// Kuerzungswaechter: Ollama kuerzt zu lange Prompts still - der Client bekommt eine normale Antwort, nur fehlt ihm
-// ein Teil des Verlaufs. Einzige Spur ist Ollamas eigenes Log. Gesehen 2026-09-18..24 auf PSEWAR-2026: 7x Kontext
-// voll ("n_tokens = 65535, truncated = 1"), 1x Eingabe von 65536 auf 32770 Token halbiert. Der Waechter liest die
-// Zeilen mit, die der Supervisor ohnehin ins Kind-Log schreibt, zaehlt beide Arten und meldet jede sofort per MQTT.
+// Truncation guard: Ollama silently truncates overly long prompts - the client receives a normal response, but part of the
+// history is missing. The only trace is Ollama's own log. Observed 2026-09-18..24 on a desktop node: 7x context
+// full ("n_tokens = 65535, truncated = 1"), 1x input halved from 65536 to 32770 tokens. The guard reads the
+// lines the supervisor writes to the child log anyway, counts both types, and reports each immediately via MQTT.
 
 const (
-	truncationInput       = "input_truncated" // Ollama hat den Prompt vor der Verarbeitung abgeschnitten
-	truncationContextFull = "context_full"    // das Kontextfenster lief waehrend der Verarbeitung voll
+	truncationInput       = "input_truncated" // Ollama truncated the prompt before processing
+	truncationContextFull = "context_full"    // the context window filled up during processing
 )
 
 var (
@@ -27,10 +27,10 @@ var (
 type Truncation struct {
 	Type        string    `json:"type"`
 	At          time.Time `json:"at"`
-	Kind        string    `json:"kind"`                   // Kindprozess, dessen Log die Zeile enthielt
+	Kind        string    `json:"kind"`                   // child process whose log contained the line
 	Limit       int       `json:"limit,omitempty"`        // input_truncated: erlaubte Laenge
 	Prompt      int       `json:"prompt,omitempty"`       // input_truncated: angelieferte Laenge
-	TruncatedTo int       `json:"truncated_to,omitempty"` // input_truncated: Laenge nach dem Kuerzen
+	TruncatedTo int       `json:"truncated_to,omitempty"` // input_truncated: length after truncation
 	NTokens     int       `json:"n_tokens,omitempty"`
 }
 
@@ -38,7 +38,7 @@ type Truncations struct {
 	mu     sync.Mutex
 	counts map[string]int
 	last   *Truncation
-	fresh  chan Truncation // gepuffert; voll = Meldung verworfen, der Zaehler stimmt trotzdem
+	fresh  chan Truncation // buffered; full = message dropped, the counter is still correct
 	nowFn  func() time.Time
 }
 
@@ -48,7 +48,7 @@ func newTruncations() *Truncations {
 
 func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 
-// pruefe wertet eine Log-Zeile aus. Liefert true, wenn sie eine Kuerzung war.
+// check evaluates a log line. Returns true if it was a truncation.
 func (k *Truncations) inspect(kind, logLine string) bool {
 	var e Truncation
 	if m := reInput.FindStringSubmatch(logLine); m != nil {
@@ -70,7 +70,7 @@ func (k *Truncations) inspect(kind, logLine string) bool {
 	return true
 }
 
-// Stand liefert die Zaehler seit Dienststart und die letzte Kuerzung (nil = keine).
+// status returns the counters since service start and the last truncation (nil = none).
 func (k *Truncations) Snapshot() (map[string]int, *Truncation) {
 	k.mu.Lock()
 	defer k.mu.Unlock()

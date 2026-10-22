@@ -19,21 +19,21 @@ import (
 	"time"
 )
 
-// Ollama-Update ueber den Router (0.12.0; Router ollamaupdate.py). Seit Ollama als Kind des Dienstes laeuft, greift der
-// Updater der Tray-App nicht mehr: er laeuft unter dem Benutzer, und der Installer ist ein Pro-Benutzer-Installer (unter
-// LocalSystem landete er im SYSTEM-Profil). Der Router prueft die neueste Version auf GitHub und schickt im Nachtfenster,
-// wenn der Knoten frei ist, {"t":"ollama-update", version, file, sha256, size}.
+// Ollama update via the router (0.12.0; router ollamaupdate.py). Since Ollama runs as a child of the service, the
+// tray app updater no longer works: it runs as the user, and the installer is a per-user installer (under
+// LocalSystem it ended up in the SYSTEM profile). The router checks the latest version on GitHub and sends in the night window,
+// if the node is free, {"t":"ollama-update", version, file, sha256, size}.
 //
-// Der Agent laedt das Release-Archiv (ollama.exe + lib/ollama, kein Installer) SELBST von der festen Quelle
-// (ollama_update.source, Standard: GitHub-Releases von ollama/ollama), holt dort auch sha256sum.txt und vergleicht mit dem
-// Auftrag - der Router kann also nur die Version waehlen, nicht den Code. Dann: entpacken in einen Staging-Ordner neben
-// der Installation, `ollama --version` der neuen Binary, Kind anhalten, ollama.exe + lib in eine Sicherung schieben, neue
-// Dateien einsetzen, Kind starten; /api/version muss die Zielversion melden, sonst zurueck auf die Sicherung.
-// Tray-App und Deinstallationseintrag von Windows bleiben auf der alten Version stehen (kosmetisch).
+// The agent downloads the release archive (ollama.exe + lib/ollama, no installer) ITSELF from the fixed source
+// (ollama_update.source, default: GitHub releases of ollama/ollama), fetches sha256sum.txt there and compares with the
+// request - so the router can only choose the version, not the code. Then: extract to a staging folder next to
+// the installation, `ollama --version` of the new binary, stop child, move ollama.exe + lib to a backup, new
+// files in place, start child; /api/version must report the target version, otherwise roll back to the backup.
+// Tray app and Windows uninstall entry remain on the old version (cosmetic).
 
 type OllamaUpdateCfg struct {
 	Enabled *bool  `yaml:"enabled"`
-	Source  string `yaml:"source"` // URL-Praefix der Releases: <source>v<version>/<datei> und <source>v<version>/sha256sum.txt
+	Source  string `yaml:"source"` // Release URL prefix: <source>v<version>/<file> and <source>v<version>/sha256sum.txt
 }
 
 const ollamaSourceDefault = "https://github.com/ollama/ollama/releases/download/"
@@ -51,7 +51,7 @@ func (c *OllamaUpdateCfg) source() string {
 	return s
 }
 
-// OllamaUpdateOrder: Steuernachricht {"t":"ollama-update", ...} des Routers.
+// OllamaUpdateOrder: Control message {"t":"ollama-update", ...} from the router.
 type OllamaUpdateOrder struct {
 	Version string
 	File    string
@@ -63,24 +63,24 @@ type OllamaUpdater struct {
 	cfg      OllamaUpdateCfg
 	sup      *Supervisor
 	log      *Logger
-	child    string // Name des Kindes, das Ollama ist ("" = keins -> Auftraege werden abgelehnt)
-	dir      string // Installationsordner (Ordner der ollama.exe)
-	upstream string // http://127.0.0.1:11434 - /api/version nach dem Tausch
+	child    string // Name of the child that is Ollama ("" = none -> requests are rejected)
+	dir      string // Installation folder (folder of ollama.exe)
+	upstream string // http://127.0.0.1:11434 - /api/version after the swap
 
 	mu     sync.Mutex
 	busy   bool
 	report *UpdateReport
 
-	// austauschbar fuer Tests
-	archive    func() (string, error)            // Archivname fuer dieses System
-	probe      func(exe string) (string, error)  // Version der entpackten Binary (`ollama --version`)
-	live       func(ctx context.Context) string  // Version des laufenden Ollama (/api/version)
-	free       func(path string) (uint64, error) // freier Platz auf dem Datentraeger
+	// swappable for tests
+	archive    func() (string, error)            // Archive name for this system
+	probe      func(exe string) (string, error)  // Version of the extracted binary (`ollama --version`)
+	live       func(ctx context.Context) string  // Version of the running Ollama (/api/version)
+	free       func(path string) (uint64, error) // free space on the data drive
 	http       *http.Client
-	verifyWait time.Duration // so lange darf das neue Ollama brauchen, bis /api/version die Zielversion nennt
+	verifyWait time.Duration // how long the new Ollama may take until /api/version reports the target version
 	verifyPoll time.Duration
-	swapWait   time.Duration // so lange wartet ein fertig geladenes Update auf die Freigabe des Routers (0.15.0)
-	swapCh     chan string   // Freigabe {"t":"ollama-swap", version} vom Router
+	swapWait   time.Duration // how long a fully downloaded update waits for router approval (0.15.0)
+	swapCh     chan string   // Approval {"t":"ollama-swap", version} from the router
 }
 
 func newOllamaUpdater(cfg OllamaUpdateCfg, specs []ChildSpec, sup *Supervisor, upstream string, log *Logger) *OllamaUpdater {
@@ -101,18 +101,18 @@ func newOllamaUpdater(cfg OllamaUpdateCfg, specs []ChildSpec, sup *Supervisor, u
 
 func isOllamaExe(cmd string) bool {
 	b := cmd
-	if i := strings.LastIndexAny(cmd, `\/`); i >= 0 { // beide Trenner, unabhaengig von der Plattform des Aufrufers
+	if i := strings.LastIndexAny(cmd, `\/`); i >= 0 { // both separators, independent of the caller's platform
 		b = cmd[i+1:]
 	}
 	b = strings.ToLower(b)
 	return b == "ollama.exe" || b == "ollama"
 }
 
-// SwapGate: der Agent tauscht erst nach Freigabe durch den Router (0.15.0, Fakt ollama_swap_gate). Bis dahin laeuft Ollama
-// waehrend Download und Pruefung normal weiter und bedient Anfragen; erst der Router weiss, wann der Knoten leer ist.
+// SwapGate: the agent swaps only after router approval (0.15.0, fact ollama_swap_gate). Until then Ollama
+// continues to run normally during download and check and serves requests; only the router knows when the node is idle.
 func (u *OllamaUpdater) SwapGate() bool { return u.Managed() }
 
-// Swap: Freigabe des Routers {"t":"ollama-swap", version}. Wirkt nur auf einen wartenden Auftrag derselben Version.
+// Swap: Router approval {"t":"ollama-swap", version}. Only affects a pending request of the same version.
 func (u *OllamaUpdater) Swap(version string) {
 	if u == nil {
 		return
@@ -123,7 +123,7 @@ func (u *OllamaUpdater) Swap(version string) {
 	}
 }
 
-// awaitSwap wartet auf die Freigabe des Routers; ohne sie wird nichts getauscht.
+// awaitSwap waits for router approval; without it, nothing is swapped.
 func (u *OllamaUpdater) awaitSwap(ctx context.Context, version string) error {
 	t := time.NewTimer(u.swapWait)
 	defer t.Stop()
@@ -142,7 +142,7 @@ func (u *OllamaUpdater) awaitSwap(ctx context.Context, version string) error {
 	}
 }
 
-// Managed: laeuft Ollama als Kind dieses Agenten (dann kann der Router ein Update anstossen)?
+// Managed: does Ollama run as a child of this agent (then the router can trigger an update)?
 func (u *OllamaUpdater) Managed() bool { return u != nil && u.child != "" }
 
 func (u *OllamaUpdater) Report() *UpdateReport {
@@ -167,7 +167,7 @@ func (u *OllamaUpdater) set(state, version, msg string) {
 	}
 }
 
-// Handle nimmt einen Auftrag an; ein Auftrag zur Zeit, der Rest passiert im Hintergrund.
+// Handle accepts a request; one request at a time, the rest happens in the background.
 func (u *OllamaUpdater) Handle(o OllamaUpdateOrder) {
 	u.mu.Lock()
 	if u.busy {
@@ -191,8 +191,8 @@ func (u *OllamaUpdater) Handle(o OllamaUpdateOrder) {
 	}()
 }
 
-// ollamaArchiveName: Archiv des Releases fuer dieses System. Linux-Archive sind tar.zst (Zstandard ist nicht in der
-// Go-Standardbibliothek) - dort meldet der Agent den Auftrag als nicht unterstuetzt.
+// ollamaArchiveName: Release archive for this system. Linux archives are tar.zst (Zstandard is not in the
+// Go standard library) - there the agent reports the request as unsupported.
 func ollamaArchiveName() (string, error) {
 	switch runtime.GOOS + "/" + runtime.GOARCH {
 	case "windows/amd64":
@@ -203,7 +203,7 @@ func ollamaArchiveName() (string, error) {
 	return "", fmt.Errorf("Ollama-Update fuer %s/%s noch nicht unterstuetzt (Linux-Archive sind tar.zst)", runtime.GOOS, runtime.GOARCH)
 }
 
-// ollamaExeName: Name der Binary im Archiv (Zip = Windows).
+// ollamaExeName: Name of the binary in the archive (Zip = Windows).
 func ollamaExeName(archive string) string {
 	if strings.HasSuffix(archive, ".zip") {
 		return "ollama.exe"
@@ -236,7 +236,7 @@ func (u *OllamaUpdater) verifyOrder(o OllamaUpdateOrder) error {
 	return nil
 }
 
-// fetchChecksum: sha256sum.txt des Releases von der festen Quelle holen und den Eintrag der Datei liefern.
+// fetchChecksum: Fetch sha256sum.txt of the release from the fixed source and return the entry for the file.
 func (u *OllamaUpdater) fetchChecksum(ctx context.Context, version, file string) (string, error) {
 	url := u.cfg.source() + "v" + version + "/sha256sum.txt"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -255,7 +255,7 @@ func (u *OllamaUpdater) fetchChecksum(ctx context.Context, version, file string)
 	return parseChecksum(string(body), file)
 }
 
-// parseChecksum: Zeilen "<hex>  ./<datei>" (GNU-Format, auch "*<datei>" oder ohne Praefix).
+// parseChecksum: Lines "<hex>  ./<file>" (GNU format, also "*<file>" or without prefix).
 func parseChecksum(txt, file string) (string, error) {
 	for _, l := range strings.Split(txt, "\n") {
 		f := strings.Fields(l)
@@ -270,7 +270,7 @@ func parseChecksum(txt, file string) (string, error) {
 	return "", fmt.Errorf("%s steht nicht in sha256sum.txt", file)
 }
 
-// download holt das Archiv, prueft Groesse und SHA-256 und meldet den Fortschritt in Zehnerschritten.
+// download fetches the archive, checks size and SHA-256 and reports progress in ten-percent steps.
 func (u *OllamaUpdater) download(ctx context.Context, url, dst string, size int64, sum, version string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -331,7 +331,7 @@ func (u *OllamaUpdater) download(ctx context.Context, url, dst string, size int6
 	return nil
 }
 
-// extractZip entpackt nach dst; Pfade, die aus dst hinausfuehren, werden abgelehnt (Zip-Slip).
+// extractZip extracts to dst; paths leading out of dst are rejected (Zip-Slip).
 func extractZip(src, dst string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
@@ -377,8 +377,8 @@ func extractOne(f *zip.File, p string) error {
 	return out.Close()
 }
 
-// probeOllamaVersion: `ollama --version` der entpackten Binary. OLLAMA_HOST auf einen toten Port, damit sie nicht den
-// laufenden Server fragt, sondern ihre eigene Version nennt ("Warning: client version is X").
+// probeOllamaVersion: `ollama --version` of the extracted binary. OLLAMA_HOST set to a dead port so it does not query the
+// running server but reports its own version ("Warning: client version is X").
 func probeOllamaVersion(exe string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -392,8 +392,8 @@ func probeOllamaVersion(exe string) (string, error) {
 var clientVersionRe = regexp.MustCompile(`client version is ([0-9][0-9A-Za-z.+-]*)`)
 var serverVersionRe = regexp.MustCompile(`ollama version is ([0-9][0-9A-Za-z.+-]*)`)
 
-// parseOllamaVersion: "client version is X" hat Vorrang (steht da, sobald Client und erreichbarer Server verschieden sind
-// oder kein Server antwortet), sonst "ollama version is X".
+// parseOllamaVersion: "client version is X" takes precedence (present as soon as client and reachable server differ
+// or no server responds), otherwise "ollama version is X".
 func parseOllamaVersion(out string) (string, error) {
 	if m := clientVersionRe.FindStringSubmatch(out); m != nil {
 		return m[1], nil
@@ -404,7 +404,7 @@ func parseOllamaVersion(out string) (string, error) {
 	return "", fmt.Errorf("keine Version in %q", strings.TrimSpace(out))
 }
 
-// renameRetry: Umbenennen mit Wiederholung - ein Virenscanner oder der gerade beendete Prozess haelt Dateien kurz fest.
+// renameRetry: Rename with retry - a virus scanner or the just-terminated process may hold files briefly.
 func renameRetry(from, to string) error {
 	var err error
 	for i := 0; i < 10; i++ {
@@ -416,8 +416,8 @@ func renameRetry(from, to string) error {
 	return err
 }
 
-// swapTop setzt die obersten Eintraege des neuen Ordners (ollama.exe, lib) in dir ein; Vorhandenes wandert nach backup.
-// Liefert die eingesetzten Namen (fuer rollbackTop).
+// swapTop places the top entries of the new folder (ollama.exe, lib) into dir; existing items move to backup.
+// Returns the applied names (for rollbackTop).
 func swapTop(dir, newDir, backup string) ([]string, error) {
 	entries, err := os.ReadDir(newDir)
 	if err != nil {
@@ -441,7 +441,7 @@ func swapTop(dir, newDir, backup string) ([]string, error) {
 	return moved, nil
 }
 
-// rollbackTop macht swapTop rueckgaengig: neue Dateien zurueck nach newDir, Sicherung wieder an ihren Platz.
+// rollbackTop reverses swapTop: new files back to newDir, backup restored to its place.
 func rollbackTop(dir, newDir, backup string, names []string) error {
 	var first error
 	for _, name := range names {
@@ -476,7 +476,7 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
-	for drained := false; !drained; { // alte Freigabe aus einem frueheren Auftrag verwerfen
+	for drained := false; !drained; { // Discard old release from a previous task
 		select {
 		case <-u.swapCh:
 		default:
@@ -497,7 +497,7 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return fmt.Errorf("Staging-Ordner: %w", err)
 	}
-	defer os.RemoveAll(staging) // Erfolg: alte Dateien weg; Fehler: neue Dateien weg (die Sicherung ist dann schon zurueck)
+	defer os.RemoveAll(staging) // Success: old files removed; Error: new files removed (backup is already restored)
 	if free, err := u.free(parent); err == nil && o.Size > 0 && free < uint64(o.Size)*3 {
 		return fmt.Errorf("zu wenig Platz auf dem Datentraeger: %d MB frei, %d MB noetig (Archiv + entpackt)", free>>20, (o.Size*3)>>20)
 	}
@@ -515,9 +515,9 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 	if v, err := u.probe(filepath.Join(newDir, ollamaExeName(o.File))); err != nil || v != o.Version {
 		return fmt.Errorf("entpackte Binary meldet %q statt %s (%v)", v, o.Version, err)
 	}
-	// Bis hier lief Ollama unveraendert weiter. Jetzt meldet der Agent "ready"; der Router nimmt den Knoten aus dem Routing,
-	// wartet, bis keine Anfrage mehr laeuft, und gibt den Tausch frei (2026-10-01: vorher war der Knoten waehrend des ganzen
-	// Downloads gesperrt, und ein Vorwaermen lud ein Modell, das der Tausch gleich wieder beendete).
+	// Up to this point, Ollama continued running unchanged. Now the agent reports "ready"; the router removes the node from routing,
+	// waits until no requests are running, and releases the swap (2026-10-01: previously the node was locked during the entire
+	// download, and a prewarm loaded a model that the swap immediately terminated).
 	u.set("ready", o.Version, "geladen und geprueft - wartet auf die Freigabe des Routers")
 	if err := u.awaitSwap(ctx, o.Version); err != nil {
 		return err
@@ -538,13 +538,13 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 	}
 	u.release()
 	u.set("applied", o.Version, "Dateien getauscht, Ollama startet neu")
-	// Nachweis: das laufende Ollama muss die Zielversion melden
+	// Proof: the running Ollama must report the target version
 	deadline := time.Now().Add(u.verifyWait)
 	for time.Now().Before(deadline) {
 		time.Sleep(u.verifyPoll)
 		if v := u.live(ctx); v == o.Version {
 			u.log.Infof("ollama-update: Ollama runs %s", v)
-			u.syncRegistration(v) // Windows-Eintrag (Apps, winget) nachfuehren, sonst bietet winget das Release weiter an
+			u.syncRegistration(v) // Update Windows entry (Apps, winget), otherwise winget continues to offer the release
 			return nil
 		}
 	}

@@ -4,7 +4,7 @@ package main
 
 import "syscall"
 
-// diskFree: freier Platz fuer den aufrufenden Benutzer auf dem Datentraeger von path (statfs).
+// diskFree: free space for the calling user on the volume of path (statfs).
 func diskFree(path string) (uint64, error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {

@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 )
 
-// Provision: das Konfigurationspaket, das der Router nach der Freigabe durch den Tunnel schickt (und bei Aenderungen
-// nachschiebt). Der Agent braucht dadurch lokal nur noch die Router-URL; MQTT-Zugang und Intervalle kommen vom Router.
-// Wird DPAPI-geschuetzt (Windows) unter <identity_dir>/provisioned.json abgelegt, damit der Agent auch startet, wenn
-// der Router gerade nicht erreichbar ist.
+// Provision: the configuration package the router sends through the tunnel after release (and pushes
+// on changes). The agent thus only needs the router URL locally; MQTT access and intervals come from the router.
+// Stored DPAPI-protected (Windows) at <identity_dir>/provisioned.json so the agent starts even if
+// the router is currently unreachable.
 type Provision struct {
 	HeartbeatIntervalS float64  `json:"heartbeat_interval_s,omitempty"`
 	MQTT               *MQTTCfg `json:"mqtt,omitempty"`
-	Node               string   `json:"node,omitempty"` // Name, unter dem der Router den Knoten fuehrt
+	Node               string   `json:"node,omitempty"` // Name under which the router manages the node
 }
 
 func provisionPath(dir string) string { return filepath.Join(dir, "provisioned.json") }

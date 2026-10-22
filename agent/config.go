@@ -13,14 +13,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config ist die eine lokale Konfigurationsdatei des Agenten (YAML). Seit dem Tunnel mit Schluessel-Identitaet
-// braucht ein Knoten nur noch router.url; Name, GPU, MAC meldet der Agent selbst, MQTT-Zugang und Intervalle
-// provisioniert der Router nach der Freigabe. Lokale Angaben hier ueberschreiben das Provisionierte.
+// Config is the agent's local configuration file (YAML). Since the tunnel with key identity
+// a node only needs router.url; the agent reports Name, GPU, MAC itself, and the Router provisions MQTT access and intervals
+// after release. Local settings here override the provisioned ones.
 type Config struct {
 	Node         string `yaml:"node"` // leer = Hostname (klein)
 	Router       RouterCfg
-	MQTT         MQTTCfg                 // optional: lokale Ueberschreibung (Host gesetzt) oder enabled: false
-	SecretStore  SecretStoreCfg          `yaml:"secret_store"` // optional: nur fuer mqtt.password_secret (Universal-Auth-API)
+	MQTT         MQTTCfg                 // optional: local override (Host set) or enabled: false
+	SecretStore  SecretStoreCfg          `yaml:"secret_store"` // optional: only for mqtt.password_secret (Universal-Auth-API)
 	Health       struct{ Listen string } `yaml:"health"`
 	Logging      LogCfg
 	Children     []ChildSpec `yaml:"children"`
@@ -28,40 +28,40 @@ type Config struct {
 	OllamaProxy  ProxyCfg        `yaml:"ollama_proxy"`
 	Tunnel       TunnelCfg       `yaml:"tunnel"`
 	GPUZ         GPUZCfg         `yaml:"gpuz"`          // GPU-Z-Sensoren als Zusatzquelle (Windows), Standard an
-	GPUGuard     GuardCfg        `yaml:"gpu_guard"`     // GPU-Schutz: Power-Limit, Hochlast-Stufe, Warnungen (guard.go), Standard an
-	Update       UpdateCfg       `yaml:"update"`        // Selbst-Update ueber den Router (updater.go): public_key des Betreibers, enabled
-	OllamaUpdate OllamaUpdateCfg `yaml:"ollama_update"` // Ollama-Update ueber den Router (ollamaupdate.go, 0.12.0): enabled, source
-	path         string          // Pfad der geladenen Datei (fuer den Neustart nach einem Update)
+	GPUGuard     GuardCfg        `yaml:"gpu_guard"`     // GPU guard: Power limit, high-load stage, warnings (guard.go), enabled by default
+	Update       UpdateCfg       `yaml:"update"`        // Self-update via the Router (updater.go): operator's public_key, enabled
+	OllamaUpdate OllamaUpdateCfg `yaml:"ollama_update"` // Ollama update via the Router (ollamaupdate.go, 0.12.0): enabled, source
+	path         string          // Path of the loaded file (for restart after an update)
 	Identity     struct {
 		Dir string `yaml:"dir"`
 	} `yaml:"identity"`
 }
 
-// TunnelCfg: ausgehende Dauerverbindung zum Router, durch die der Router Ollama aufruft. Seit 0.9.1 der einzige Weg
-// (der HTTP-Heartbeat mit Token und `tunnel.enabled` sind weg).
+// TunnelCfg: outgoing persistent connection to the Router, through which the Router calls Ollama. Since 0.9.1 the only way
+// (the HTTP-Heartbeat with token and `tunnel.enabled` are gone).
 type TunnelCfg struct {
 	Upstream string     `yaml:"upstream"`
-	Routes   []RouteCfg `yaml:"routes"` // optional: weitere lokale Dienste nach Pfad (routes.go); leer = alles an upstream
+	Routes   []RouteCfg `yaml:"routes"` // optional: additional local services by path (routes.go); empty = all to upstream
 }
 
-// RouteCfg: ein Pfad, den der Tunnel statt an Ollama an einen anderen lokalen Dienst gibt (z. B. den Reranker).
+// RouteCfg: a path that the tunnel routes to another local service instead of Ollama (e.g. the Reranker).
 type RouteCfg struct {
 	Name     string   `yaml:"name"`     // Schluessel im Heartbeat-Feld routes
-	Path     string   `yaml:"path"`     // exakter Vergleich mit dem Pfad der Anfrage (ohne Query)
+	Path     string   `yaml:"path"`     // exact match with the request path (without query)
 	Methods  []string `yaml:"methods"`  // erlaubte Methoden; andere bekommen 405
-	Upstream string   `yaml:"upstream"` // nur Loopback: http://127.0.0.1:<port> oder http://[::1]:<port>
-	Health   string   `yaml:"health"`   // Pfad der Gesundheitspruefung am Upstream, alle 5 s
+	Upstream string   `yaml:"upstream"` // loopback only: http://127.0.0.1:<port> or http://[::1]:<port>
+	Health   string   `yaml:"health"`   // Path of the health check on the upstream, every 5 s
 }
 
 // GPUZCfg: GPU-Z-Shared-Memory als Zusatzquelle (Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung). Standard an;
-// laeuft GPU-Z nicht, passiert nichts. `enabled: false` schaltet den Leser ganz ab.
+// if GPU-Z is not running, nothing happens. `enabled: false` disables the reader entirely.
 type GPUZCfg struct {
 	Enabled *bool `yaml:"enabled"`
 }
 
 func (g *GPUZCfg) on() bool { return g.Enabled == nil || *g.Enabled }
 
-// ProxyCfg: TLS-Vorschaltstelle vor dem lokalen Ollama (Opt-in, Alternative ohne Tunnel).
+// ProxyCfg: TLS front-end before local Ollama (Opt-in, alternative without tunnel).
 type ProxyCfg struct {
 	Enabled      *bool  `yaml:"enabled"`
 	Listen       string `yaml:"listen"`
@@ -75,10 +75,10 @@ func (p *ProxyCfg) requireToken() bool { return p.RequireToken == nil || *p.Requ
 
 type RouterCfg struct {
 	URL   string `yaml:"url"`
-	Token string `yaml:"token"` // nur fuer die TLS-Vorschaltstelle (ollama_proxy: X-Router-Token)
+	Token string `yaml:"token"` // only for the TLS front-end (ollama_proxy: X-Router-Token)
 }
 
-// MQTTCfg wird sowohl lokal (YAML) als auch vom Router provisioniert (JSON) gelesen.
+// MQTTCfg is read both locally (YAML) and provisioned by the Router (JSON).
 type MQTTCfg struct {
 	Enabled         *bool   `yaml:"enabled" json:"enabled,omitempty"`
 	Host            string  `yaml:"host" json:"host"`
@@ -86,7 +86,7 @@ type MQTTCfg struct {
 	TLS             bool    `yaml:"tls" json:"tls"`
 	Username        string  `yaml:"username" json:"username"`
 	Password        string  `yaml:"password" json:"password"`
-	PasswordSecret  string  `yaml:"password_secret" json:"-"` // Key in Secret-Store (nur lokal)
+	PasswordSecret  string  `yaml:"password_secret" json:"-"` // Key in Secret-Store (local only)
 	DeviceID        string  `yaml:"device_id" json:"device_id"`
 	DeviceName      string  `yaml:"device_name" json:"device_name"`
 	Manufacturer    string  `yaml:"manufacturer" json:"manufacturer"`
@@ -99,7 +99,7 @@ type MQTTCfg struct {
 	SttFallbackPort int     `yaml:"stt_fallback_port" json:"stt_fallback_port"`
 }
 
-// SecretStoreCfg: Zugang zu einem Secret-Store mit Universal-Auth-API (Client-ID/-Secret -> Token -> Secret je Schluessel).
+// SecretStoreCfg: access to a Secret-Store with Universal-Auth-API (Client-ID/-Secret -> Token -> Secret per key).
 type SecretStoreCfg struct {
 	Domain       string `yaml:"domain"`
 	ProjectID    string `yaml:"project_id"`
@@ -116,7 +116,7 @@ type LogCfg struct {
 	Debug      bool   `yaml:"debug"`
 }
 
-// ChildSpec beschreibt einen ueberwachten Kindprozess (z. B. den Wyoming-STT-Server).
+// ChildSpec describes a monitored child process (e.g. the Wyoming-STT-Server).
 type ChildSpec struct {
 	Name          string   `yaml:"name"`
 	Enabled       *bool    `yaml:"enabled"`
@@ -128,12 +128,12 @@ type ChildSpec struct {
 	StartupGraceS float64  `yaml:"startup_grace_s"`
 }
 
-// InstallCfg wird nur von den Verben install/uninstall/apply-rules gelesen (Windows).
+// InstallCfg is only read by the install/uninstall/apply-rules verbs (Windows).
 type InstallCfg struct {
 	ServiceName       string   `yaml:"service_name"`
 	DisplayName       string   `yaml:"display_name"`
 	Description       string   `yaml:"description"`
-	Account           string   `yaml:"account"` // "" = LocalSystem, sonst z. B. NT SERVICE\SkirnirAgent
+	Account           string   `yaml:"account"` // "" = LocalSystem, otherwise e.g. NT SERVICE\SkirnirAgent
 	GrantRead         []string `yaml:"grant_read"`
 	GrantModify       []string `yaml:"grant_modify"`
 	AllowControlUsers []string `yaml:"allow_control_users"`
@@ -145,22 +145,22 @@ type InstallCfg struct {
 	} `yaml:"firewall"`
 }
 
-// Umbenennung 2026-09-25 (0.11.0): ollama-router-agent -> skirnir-agent. Eine alte Installation bleibt lesbar, bis `setup`
-// sie umgezogen hat - auch nach einem Selbst-Update unter dem alten Dateinamen.
+// Rename 2026-09-25 (0.11.0): ollama-router-agent -> skirnir-agent. An old installation remains readable until `setup`
+// has moved it - even after a self-update under the old filename.
 const (
 	legacyConfigPathWindows = `C:\ProgramData\ollama-router-agent\config.yaml`
 	legacyConfigPathOther   = "/etc/ollama-router-agent/config.yaml"
 	legacyServiceName       = "OllamaRouterAgent"
 )
 
-// defaultConfigPath: Windows ProgramData, sonst /etc; fehlt die neue Datei und die alte ist da, gilt die alte.
+// defaultConfigPath: Windows ProgramData, otherwise /etc; if the new file is missing and the old one exists, the old one applies.
 var defaultConfigPath = func() string {
 	p, legacy := "/etc/skirnir-agent/config.yaml", legacyConfigPathOther
 	if runtime.GOOS == "windows" {
 		p, legacy = `C:\ProgramData\skirnir-agent\config.yaml`, legacyConfigPathWindows
 	}
 	if _, err := os.Stat(p); err != nil {
-		if _, err := os.Stat(legacy); err == nil || os.IsPermission(err) { // "kein Zugriff" heisst: da (Steuer-Benutzer duerfen nicht lesen)
+		if _, err := os.Stat(legacy); err == nil || os.IsPermission(err) { // "no access" means: present (Control users must not read)
 			return legacy
 		}
 	}
@@ -190,8 +190,8 @@ func (c *Config) applyDefaults() {
 			c.Node = strings.ToLower(h)
 		}
 	}
-	// Basisordner fuer identity/logs/tls: der Ordner der geladenen Config, nicht der Standardpfad - sonst teilt ein
-	// Testlauf mit --config X die Identitaet und Provisionierung des Dienstes (Review 2026-09-25)
+	// Base folder for identity/logs/tls: the folder of the loaded Config, not the default path - otherwise a
+	// test run with --config X shares the identity and provisioning of the service (Review 2026-09-25)
 	base := filepath.Dir(defaultConfigPath)
 	if c.path != "" {
 		if abs, err := filepath.Abs(c.path); err == nil {
@@ -252,14 +252,14 @@ func (c *Config) applyDefaults() {
 		in.ServiceName = "SkirnirAgent"
 	}
 	if in.DisplayName == "" {
-		in.DisplayName = "Skirnir Agent" // Anzeigename (services.msc); der technische Name SkirnirAgent bleibt
+		in.DisplayName = "Skirnir Agent" // Display name (services.msc); the technical name SkirnirAgent remains
 	}
 	if in.Description == "" {
 		in.Description = "Skirnir Agent: tunnel to the router with GPU heartbeat and GPU guard, MQTT device for Home Assistant, supervision of local AI services (Ollama, STT)."
 	}
 }
 
-// mqttDefaults fuellt Luecken einer MQTT-Konfiguration (lokal oder vom Router provisioniert).
+// mqttDefaults fills gaps in an MQTT configuration (local or provisioned by the Router).
 func mqttDefaults(m *MQTTCfg, node string) {
 	if m.Port == 0 {
 		m.Port = 1883
@@ -276,7 +276,7 @@ func mqttDefaults(m *MQTTCfg, node string) {
 	if m.OllamaURL == "" {
 		m.OllamaURL = "http://127.0.0.1:11434"
 	}
-	// AliasModel bleibt leer, wenn nicht gesetzt: keine Alias-Entitaeten. Lokal in mqtt.alias_model setzen (z. B. "assist:latest").
+	// AliasModel remains empty if not set: no alias entities. Set locally in mqtt.alias_model (e.g. "assist:latest").
 	if m.SttChild == "" {
 		m.SttChild = "stt"
 	}
@@ -298,7 +298,7 @@ func (c *Config) validate() error {
 	if c.Router.URL == "" {
 		return fmt.Errorf("router.url missing")
 	}
-	if c.MQTT.on() && c.MQTT.Host != "" { // lokale MQTT-Config nur pruefen, wenn gesetzt (sonst provisioniert der Router)
+	if c.MQTT.on() && c.MQTT.Host != "" { // only check local MQTT-Config if set (otherwise the Router provisions it)
 		if c.MQTT.Password == "" && c.MQTT.PasswordSecret == "" {
 			return fmt.Errorf("mqtt.password or mqtt.password_secret missing")
 		}
@@ -330,8 +330,8 @@ var (
 	httpMethods = map[string]bool{"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "OPTIONS": true}
 )
 
-// validateRoutes: tunnel.routes darf nur auf diesen Rechner zeigen. Ein Upstream im Netz machte den Tunnel zu einem Weg vom
-// Router in fremde Dienste; deshalb laedt die Config dann nicht, statt die Route still auszulassen.
+// validateRoutes: tunnel.routes may only point to this machine. An upstream on the network would make the tunnel a path from the
+// Router to foreign services; therefore the Config fails to load, instead of silently omitting the route.
 func validateRoutes(routes []RouteCfg) error {
 	names, paths := map[string]bool{}, map[string]bool{}
 	for _, r := range routes {
@@ -367,8 +367,8 @@ func validateRoutes(routes []RouteCfg) error {
 	return nil
 }
 
-// loopbackUpstream: http(s) auf 127.0.0.1 oder ::1, ohne Pfad, Query und Zugangsdaten. "localhost" zaehlt nicht: der Name
-// geht durch die Namensaufloesung und kann dort anders landen.
+// loopbackUpstream: http(s) on 127.0.0.1 or ::1, without path, query and credentials. "localhost" does not count: the name
+// goes through name resolution and may land elsewhere.
 func loopbackUpstream(s string) bool {
 	u, err := url.Parse(s)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {

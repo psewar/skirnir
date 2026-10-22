@@ -2,5 +2,5 @@
 
 package main
 
-// syncUninstallEntries: auf Linux gibt es keinen Deinstallationseintrag, den winget liest.
+// syncUninstallEntries: On Linux, there is no uninstall entry for winget to read.
 func syncUninstallEntries(dir, version string) ([]string, error) { return nil, nil }

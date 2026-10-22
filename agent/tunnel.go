@@ -16,27 +16,27 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Tunnel: der Agent baut eine ausgehende WebSocket-Verbindung zum Router auf und haelt sie. Der Router schickt
-// seine Ollama-Aufrufe als Streams durch diese Verbindung zurueck; der Agent fuehrt sie gegen das lokale Ollama aus.
-// Damit braucht ein Knoten keine eingehende Firewall-Regel, kein eigenes Zertifikat und keine feste IP.
+// Tunnel: the agent establishes and maintains an outgoing WebSocket connection to the router. The router sends
+// its Ollama calls as streams back through this connection; the agent executes them against local Ollama.
+// This means a node needs no inbound firewall rule, no own certificate, and no static IP.
 //
 // Anmeldung (Textrahmen, JSON):
 //
 //	Router->Agent {"t":"challenge","nonce":base64}
 //	Agent->Router {"t":"hello","node":..,"pubkey":base64,"sig":base64(sign(nonce|node|pubkey)),"facts":{...}}
-//	Router->Agent {"t":"status","state":"pending|approved|revoked","node":..,"config":{...}}   (spaeter auch "config")
+//	Router->Agent {"t":"status","state":"pending|approved|revoked","node":..,"config":{...}}   (later also "config")
 //
-// Datenrahmen (binaer): typ(1) | stream_id(4, big endian) | payload
+// Data frame (binary): type(1) | stream_id(4, big endian) | payload
 //
 //	REQ    Router->Agent  JSON {method,path,headers} + "\n" + Body
 //	RESP   Agent->Router  JSON {status,headers}
-//	DATA   Agent->Router  Antwort-Bytes (gestreamt, ein Rahmen pro Chunk)
-//	END    Agent->Router  Antwort fertig
-//	ERR    Agent->Router  Text (Upstream-Fehler)
-//	CANCEL Router->Agent  Anfrage abbrechen
-//	OLLAMA Agent->Router  Ollama-Zustand (JSON OllamaState, stream 0): bei jeder Aenderung und spaetestens alle 30 s (0.14.0)
+//	DATA   Agent->Router  Response bytes (streamed, one frame per chunk)
+//	END    Agent->Router  Response complete
+//	ERR    Agent->Router  Text (Upstream error)
+//	CANCEL Router->Agent  Abort request
+//	OLLAMA Agent->Router  Ollama state (JSON OllamaState, stream 0): on every change and at least every 30 s (0.14.0)
 //	HB     Agent->Router  Heartbeat (JSON, stream 0)
-//	HBACK  Router->Agent  Antwort auf den Heartbeat (JSON {state,busy_reason}, stream 0)
+//	HBACK  Router->Agent  Heartbeat response (JSON {state,busy_reason}, stream 0)
 const (
 	tunReq    byte = 1
 	tunResp   byte = 2
@@ -49,7 +49,7 @@ const (
 	tunOllama byte = 9
 )
 
-// ollamaResync: so oft geht der Ollama-Zustand auch ohne Aenderung vollstaendig raus (Router haelt ihn 45 s fuer frisch).
+// ollamaResync: how often the Ollama state is sent fully even without changes (Router keeps it fresh for 45 s).
 const ollamaResync = 30 * time.Second
 
 type Tunnel struct {
@@ -61,12 +61,12 @@ type Tunnel struct {
 	facts          func(context.Context) Facts
 	hb             *Heartbeat
 	onStatus       func(state, node string, p *Provision)
-	onUpdate       func(UpdateOrder)       // Auftrag {"t":"update"} vom Router
-	onOllamaUpdate func(OllamaUpdateOrder) // Auftrag {"t":"ollama-update"} vom Router (0.12.0)
-	onOllamaSwap   func(version string)    // Freigabe {"t":"ollama-swap"} vom Router (0.15.0)
+	onUpdate       func(UpdateOrder)       // Task {"t":"update"} from Router
+	onOllamaUpdate func(OllamaUpdateOrder) // Task {"t":"ollama-update"} from Router (0.12.0)
+	onOllamaSwap   func(version string)    // Release {"t":"ollama-swap"} from Router (0.15.0)
 	ollama         *OllamaWatcher          // lokaler Ollama-Zustand, geht als Rahmen OLLAMA raus (0.14.0); nil = Router pollt
-	ollamaKick     chan struct{}           // sofort vollstaendig senden (Freigabe: vorher verwirft der Router den Rahmen)
-	routes         *Routes                 // tunnel.routes: Pfade fuer andere lokale Dienste (routes.go); nil = alles an upstream
+	ollamaKick     chan struct{}           // send fully immediately (Release: Router discards the frame beforehand)
+	routes         *Routes                 // tunnel.routes: Paths for other local services (routes.go); nil = everything to upstream
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -78,7 +78,7 @@ type Tunnel struct {
 	lastErr   string
 	hbEvery   time.Duration
 
-	wmu     sync.Mutex // gorilla erlaubt nur einen Schreiber gleichzeitig
+	wmu     sync.Mutex // gorilla allows only one writer at a time
 	smu     sync.Mutex
 	streams map[uint32]context.CancelFunc
 }
@@ -89,7 +89,7 @@ func newTunnel(routerURL, upstream string, id *Identity, hb *Heartbeat, facts fu
 	u = strings.Replace(u, "http://", "ws://", 1)
 	return &Tunnel{url: u + "/v1/tunnel", upstream: strings.TrimRight(upstream, "/"), log: log, id: id, hb: hb, facts: facts,
 		http: &http.Client{Timeout: 0, Transport: &http.Transport{
-			MaxIdleConns: 64, MaxIdleConnsPerHost: 32, IdleConnTimeout: 90 * time.Second, // Streams laufen parallel zu Ollama; Default haelt nur 2 Leerlauf-Verbindungen
+			MaxIdleConns: 64, MaxIdleConnsPerHost: 32, IdleConnTimeout: 90 * time.Second, // Streams run parallel to Ollama; Default keeps only 2 idle connections
 			DisableCompression: true, ForceAttemptHTTP2: false, ResponseHeaderTimeout: 0}},
 		streams: map[uint32]context.CancelFunc{}, state: "connecting", hbEvery: 3 * time.Second, ollamaKick: make(chan struct{}, 1)}
 }
@@ -120,7 +120,7 @@ func (t *Tunnel) Run(ctx context.Context) {
 		}
 		attempt++
 		if t.getState() == "revoked" {
-			d = 5 * time.Minute // gesperrt: nicht hämmern, aber nach Freigabe von selbst zurueckkommen
+			d = 5 * time.Minute // locked: do not hammer, but return automatically after release
 		}
 		t.mu.Lock()
 		t.lastErr = err.Error()
@@ -208,7 +208,7 @@ func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 	t.mu.Unlock()
 	t.log.Infof("tunnel: connected to %s, status %s (node %s, fingerprint %s)", t.url, st.State, t.getNode(), t.id.Fingerprint()[:16])
 
-	// Heartbeat durch den Tunnel
+	// Heartbeat through the Tunnel
 	hbCtx, hbCancel := context.WithCancel(ctx)
 	defer hbCancel()
 	go t.heartbeatLoop(hbCtx, conn)
@@ -257,7 +257,7 @@ func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 	}
 }
 
-// applyStatus verarbeitet status/config-Nachrichten des Routers (Freigabe, Sperre, Konfigurationspaket).
+// applyStatus processes status/config messages from the Router (release, lock, config package).
 func (t *Tunnel) applyStatus(m ctlMsg) {
 	if m.T == "update" {
 		if t.onUpdate != nil {
@@ -338,8 +338,8 @@ func (t *Tunnel) heartbeatLoop(ctx context.Context, conn *websocket.Conn) {
 	}
 }
 
-// ollamaLoop meldet den Ollama-Zustand: zu Beginn jeder Sitzung, bei jeder neuen Revision, nach der Freigabe und spaetestens
-// alle ollamaResync. Der Blick auf die Revision alle 250 ms ist ein Speicherzugriff, keine Abfrage bei Ollama.
+// ollamaLoop reports Ollama state: at the start of each session, on every new revision, after release and at least
+// every ollamaResync. Checking the revision every 250 ms is a memory access, not a query to Ollama.
 func (t *Tunnel) ollamaLoop(ctx context.Context, conn *websocket.Conn) {
 	if t.ollama == nil {
 		return
@@ -451,8 +451,8 @@ func (t *Tunnel) handle(ctx context.Context, conn *websocket.Conn, sid uint32, p
 	}
 }
 
-// methodNotAllowed beantwortet eine Anfrage an einen gerouteten Pfad mit nicht gelisteter Methode selbst: 405 mit Allow,
-// ohne den Dienst und ohne Ollama aufzurufen.
+// methodNotAllowed answers a request to a routed path with an unlisted method itself: 405 with Allow,
+// without calling the service or Ollama.
 func (t *Tunnel) methodNotAllowed(conn *websocket.Conn, sid uint32, rc RouteCfg) {
 	hb, _ := json.Marshal(map[string]any{"status": http.StatusMethodNotAllowed,
 		"headers": map[string]string{"Allow": strings.Join(rc.Methods, ", "), "Content-Type": "application/json"}})

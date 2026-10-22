@@ -21,22 +21,22 @@ import (
 	"time"
 )
 
-// Selbst-Update ueber den Router (0.8.0; Router agentupdate.py): der Router schickt durch den Tunnel einen Auftrag mit
-// Version, Dateiname, Download-URL, Einmal-Token, dem signierten Manifest (kompaktes JSON) und der Signatur des
-// Betreiber-Schluessels. Der Agent prueft ZUERST die Signatur (Ed25519, oeffentlicher Schluessel in update.public_key),
-// dann ob Datei/OS/Arch/SHA-256 im Manifest stehen, laedt die Binary neben sich, prueft den Hash, laesst sie `version`
-// sagen, tauscht (laufende Datei wird umbenannt, geht unter Windows) und startet den Dienst neu. Die alte Binary bleibt
-// als .old liegen; beim naechsten Start raeumt Cleanup auf. Ein kompromittierter Router allein kann so keinen Code
-// auf den Knoten bringen - ohne den privaten Schluessel des Betreibers ist kein Manifest gueltig.
+// Self-update via the router (0.8.0; router agentupdate.py): the router sends an order through the tunnel with
+// version, filename, download URL, one-time token, the signed manifest (compact JSON), and the signature of the
+// operator key. The agent checks the signature FIRST (Ed25519, public key in update.public_key),
+// then verifies file/OS/arch/SHA-256 in the manifest, downloads the binary next to itself, checks the hash, runs `version`
+// to verify, swaps (running file is renamed, works on Windows), and restarts the service. The old binary remains
+// as .old; cleanup removes it on the next start. A compromised router alone cannot push code
+// to the node - without the operator's private key, no manifest is valid.
 
 type UpdateCfg struct {
 	Enabled   *bool  `yaml:"enabled"`
-	PublicKey string `yaml:"public_key"` // base64, Ed25519; deploy.py --agent zeigt ihn nach dem Signieren
+	PublicKey string `yaml:"public_key"` // base64, Ed25519; deploy.py --agent displays it after signing
 }
 
 func (c *UpdateCfg) on() bool { return c.Enabled == nil || *c.Enabled }
 
-// UpdateOrder: Steuernachricht {"t":"update", ...} des Routers.
+// UpdateOrder: control message {"t":"update", ...} from the router.
 type UpdateOrder struct {
 	Version   string
 	File      string
@@ -44,32 +44,32 @@ type UpdateOrder struct {
 	Sha256    string
 	Size      int64
 	Token     string
-	Manifest  string // kompaktes JSON, genau die signierten Bytes
+	Manifest  string // compact JSON, exactly the signed bytes
 	Signature string // base64
 }
 
-// UpdateReport geht mit dem Heartbeat an den Router (Block `update`).
+// UpdateReport is sent to the router with the heartbeat (block `update`).
 type UpdateReport struct {
 	Version string `json:"version"`
 	State   string `json:"state"` // downloading | applied | failed
 	Message string `json:"message,omitempty"`
-	// Kind: feste Fehlerart (0.19.1), "" ohne besondere Art. Immer gesendet, auch leer: so erkennt der Router an der
-	// Anwesenheit des Felds, dass er die Meldung nicht mehr nach Text durchsuchen muss (agentupdate.retry_after).
+	// Kind: fixed error type (0.19.1), "" for no specific type. Always sent, even if empty: this lets the router detect the
+	// presence of the field and avoid text-searching the message (agentupdate.retry_after).
 	Kind string `json:"kind"`
 	TS   string `json:"ts"`
 }
 
-// updateKindAppControl: Smart App Control oder eine WDAC-Richtlinie hat die neue Binary blockiert. Der Router versucht es
-// dann schon nach 30 min wieder, weil das Cloud-Urteil ueber eine neue Datei oft binnen Minuten bis Stunden kippt.
+// updateKindAppControl: Smart App Control or a WDAC policy blocked the new binary. The router retries
+// after 30 min, as the cloud verdict on a new file often flips within minutes to hours.
 const updateKindAppControl = "app_control"
 
 // appControlBlocked: Windows-Fehlercodes "An Application Control policy has blocked this file" (winerror.h,
 // ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION 4551, _REPUTATION_MALICIOUS/_PUA/_DANGEROUS_EXT/_OFFLINE 4556-4559,
-// _REPUTATION_UNFRIENDLY_FILE/_UNATTAINABLE/_EXPLICIT_DENY_FILE/_WHQL_FAILURE 4580-4583), mit denen CreateProcess eine
-// blockierte Binary ablehnt. Gesehen 2026-09-26 beim Rauchtest `version` der unsignierten 0.11.0.
+// _REPUTATION_UNFRIENDLY_FILE/_UNATTAINABLE/_EXPLICIT_DENY_FILE/_WHQL_FAILURE 4580-4583), with which CreateProcess rejects a
+// blocked binary. Observed 2026-09-26 during smoke test `version` of unsigned 0.11.0.
 var appControlBlocked = []syscall.Errno{4551, 4556, 4557, 4558, 4559, 4580, 4581, 4582, 4583}
 
-// updateKind ordnet einen Fehlschlag am Windows-Fehlercode einer festen Art zu (nie am lokalisierten Meldungstext).
+// updateKind maps a failure at the Windows error code to a fixed type (never the localized message text).
 func updateKind(err error) string {
 	for _, code := range appControlBlocked {
 		if errors.Is(err, code) {
@@ -114,7 +114,7 @@ func (u *Updater) set(state, version, msg, kind string) {
 	u.mu.Unlock()
 }
 
-// Handle nimmt einen Auftrag an; ein Auftrag zur Zeit, der Rest passiert im Hintergrund.
+// Handle accepts a request; one request at a time, the rest happens in the background.
 func (u *Updater) Handle(o UpdateOrder) {
 	u.mu.Lock()
 	if u.busy {
@@ -146,7 +146,7 @@ type manifestFile struct {
 	Size   int64  `json:"size"`
 }
 
-// verifyOrder prueft Signatur und Manifest und liefert den passenden Dateieintrag.
+// verifyOrder checks signature and manifest and returns the matching file entry.
 func (u *Updater) verifyOrder(o UpdateOrder) (*manifestFile, error) {
 	if !u.cfg.on() {
 		return nil, errors.New("Update per Konfiguration abgewaehlt (update.enabled: false)")
@@ -187,7 +187,7 @@ func (u *Updater) verifyOrder(o UpdateOrder) (*manifestFile, error) {
 	return nil, fmt.Errorf("%s fuer %s/%s steht nicht im signierten Manifest", o.File, runtime.GOOS, runtime.GOARCH)
 }
 
-// download holt die Datei mit dem Einmal-Token und prueft Groesse und SHA-256.
+// download fetches the file with the one-time token and checks size and SHA-256.
 func (u *Updater) download(ctx context.Context, url, token, dst string, want *manifestFile) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -245,13 +245,13 @@ func (u *Updater) run(o UpdateOrder) error {
 		return err
 	}
 	u.log.Infof("update: %s downloaded and verified (SHA-256 %s...)", entry.Name, entry.Sha256[:16])
-	// Rauchtest: die neue Binary muss ihre Version nennen (nach Signatur- und Hashpruefung, nie davor)
+	// Smoke test: the new binary must report its version (after signature and hash check, never before)
 	if err := smokeTest(newPath, o.Version); err != nil {
 		os.Remove(newPath)
 		return err
 	}
-	// ... und sie muss die vorhandene Konfiguration annehmen: sonst startet der getauschte Dienst im Kreis, statt dass der
-	// Auftrag sauber als failed endet (z. B. nach entfernten Konfig-Schluesseln, 0.9.1: tunnel.enabled, mimir:)
+	// ... and it must accept the existing configuration: otherwise the swapped service restarts in a loop, instead of the
+	// order ending cleanly as failed (e.g. after removed config keys, 0.9.1: tunnel.enabled, mimir:)
 	if u.cfgPath != "" {
 		chk := exec.Command(newPath, "check-config", "--config", u.cfgPath)
 		hideWindow(chk)
@@ -260,10 +260,10 @@ func (u *Updater) run(o UpdateOrder) error {
 			return fmt.Errorf("neue Binary lehnt die Konfiguration ab: %s", strings.TrimSpace(string(out)))
 		}
 	}
-	// Tausch: laufende Datei umbenennen (geht unter Windows und Linux), neue an ihren Platz; bei Fehler zurueck
+	// Swap: rename running file (works on Windows and Linux), move new one into place; revert on error
 	old := exe + ".old"
 	if err := os.Remove(old); err != nil && !os.IsNotExist(err) {
-		// .old vom letzten Update ist noch in Benutzung (gesehen 2026-09-25): unter einem anderen Namen parken statt scheitern
+		// .old from last update is still in use (observed 2026-09-25): park under a different name instead of failing
 		old = fmt.Sprintf("%s.old-%d", exe, time.Now().Unix())
 	}
 	if err := os.Rename(exe, old); err != nil {
@@ -276,13 +276,13 @@ func (u *Updater) run(o UpdateOrder) error {
 	}
 	u.set("applied", o.Version, "Binary getauscht, Neustart", "")
 	u.log.Infof("update: %s -> %s installed, service restarts", version, o.Version)
-	time.Sleep(3 * time.Second) // ein Heartbeat mit 'applied' soll noch raus
+	time.Sleep(3 * time.Second) // one heartbeat with 'applied' should still go out
 	u.restart(exe)
 	return nil
 }
 
-// smokeTest: die Binary unter path muss `version` mit want beantworten. Ein Startfehler bleibt mit %w eingepackt, damit
-// updateKind den Windows-Fehlercode findet (Smart App Control / WDAC blockt schon CreateProcess).
+// smokeTest: the binary at path must answer `version` with want. A start error is wrapped with %w so that
+// updateKind finds the Windows error code (Smart App Control / WDAC blocks CreateProcess).
 func smokeTest(path, want string) error {
 	cmd := exec.Command(path, "version")
 	hideWindow(cmd)
@@ -297,8 +297,8 @@ func smokeTest(path, want string) error {
 	return nil
 }
 
-// Cleanup beim Start: Reste eines Tauschs entfernen (.old, .old-<ts>, .new); unter Windows das GPU-Z-Relay neu starten,
-// das noch mit der alten Binary laeuft.
+// Cleanup on start: remove swap leftovers (.old, .old-<ts>, .new); on Windows restart the GPU-Z relay,
+// which is still running with the old binary.
 func (u *Updater) Cleanup() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -314,14 +314,14 @@ func (u *Updater) Cleanup() {
 	go cleanupOld(exe, func() { afterSwap(exe, u.log) }, 5*time.Second, u.log)
 }
 
-// oldBinaries: <exe>.old und geparkte <exe>.old-<ts> (updater.go run: gesperrte .old wird unter Zeitstempel geparkt).
+// oldBinaries: <exe>.old and parked <exe>.old-<ts> (updater.go run: locked .old is parked with timestamp).
 func oldBinaries(exe string) []string {
 	m, _ := filepath.Glob(exe + ".old*")
 	return m
 }
 
-// cleanupOld: Relay neu starten (after), dann alle alten Binaries entfernen; der alte Dienstprozess und das alte Relay
-// geben die Datei erst nach ihrem Ende frei, darum bis zu 12 Versuche im Abstand von wait. Liefert true, wenn alles weg ist.
+// cleanupOld: restart relay (after), then remove all old binaries; the old service process and old relay
+// release the file only after they exit, so up to 12 attempts spaced by wait. Returns true if all are gone.
 func cleanupOld(exe string, after func(), wait time.Duration, log *Logger) bool {
 	if after != nil {
 		after()

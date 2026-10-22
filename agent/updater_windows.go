@@ -17,12 +17,12 @@ const (
 	createBreakawayFromJob  = 0x01000000
 	detachedProcess         = 0x00000008
 	gpuzRelayTaskName       = "SkirnirAgent-GpuzRelay"
-	legacyRelayTaskName     = "OllamaRouterAgent-GpuzRelay" // bis 0.10.0
+	legacyRelayTaskName     = "OllamaRouterAgent-GpuzRelay" // up to 0.10.0
 	restartFallbackExitWait = 60 * time.Second
 )
 
-// restartSelf startet den Dienst ueber die NEUE Binary neu: `restart` (SCM stop + start) laeuft in einem eigenen,
-// vom Job losgeloesten Prozess, der den Stopp des Dienstes ueberlebt. Im Konsolenbetrieb reicht Beenden.
+// restartSelf restarts the service using the NEW binary: `restart` (SCM stop + start) runs in a separate,
+// process detached from the job, surviving the service stop. In console mode, termination is sufficient.
 func restartSelf(exe, cfgPath string, log *Logger) {
 	if !runningAsService() {
 		log.Infof("update: console mode - exiting, please restart")
@@ -35,7 +35,7 @@ func restartSelf(exe, cfgPath string, log *Logger) {
 		os.Exit(4)
 	}
 	log.Infof("update: restart triggered (PID %d)", cmd.Process.Pid)
-	// Falls der SCM-Stopp nicht kommt (Steuerrecht fehlt o. ae.): nach einer Frist selbst beenden, Recovery startet neu.
+	// If the SCM stop doesn't arrive (missing control rights, etc.): self-terminate after a timeout; Recovery restarts it.
 	go func() {
 		time.Sleep(restartFallbackExitWait)
 		log.Warnf("update: no stop from the service manager after %s - exiting myself", restartFallbackExitWait)
@@ -43,13 +43,13 @@ func restartSelf(exe, cfgPath string, log *Logger) {
 	}()
 }
 
-// afterSwap: das GPU-Z-Relay (Aufgabe in der Anmeldesitzung) laeuft noch aus der alten Binary - neu starten, damit es
-// die neue nutzt und die .old-Datei freigibt. Kein Fehler, wenn es die Aufgabe nicht gibt.
+// afterSwap: the GPU-Z relay (task in the logon session) is still running from the old binary - restart it so it
+// uses the new one and releases the .old file. No error if the task doesn't exist.
 func afterSwap(exe string, log *Logger) {
-	// `schtasks /End` beendet nicht zuverlaessig das Relay aus der alten Binary (gesehen 2026-09-25: das alte Relay lief
-	// weiter, hielt die .old-Datei und liess das naechste Update am Umbenennen scheitern). Darum die Relay-Prozesse
-	// dieser Binary gezielt beenden - nur die mit `gpuz-relay` in der Kommandozeile, nicht jeden Aufruf der Binary
-	// (status, identity, ein zweiter Dienst mit anderer Config).
+	// `schtasks /End` does not reliably terminate the relay from the old binary (observed 2026-09-25: the old relay kept
+	// running, held the .old file, and caused the next update to fail during rename). Therefore, specifically terminate the relay processes
+	// of this binary - only those with `gpuz-relay` in the command line, not every invocation of the binary
+	// (status, identity, a second service with different config).
 	ps := fmt.Sprintf(`Get-CimInstance Win32_Process -Filter "Name = '%s'" | Where-Object { $_.CommandLine -like '*gpuz-relay*' -and $_.ProcessId -ne %d } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }`,
 		filepath.Base(exe), os.Getpid())
 	kill := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
@@ -59,7 +59,7 @@ func afterSwap(exe string, log *Logger) {
 	} else if err != nil {
 		log.Debugf("update: ending relay processes: %v %s", err, strings.TrimSpace(string(out)))
 	}
-	for _, tn := range []string{gpuzRelayTaskName, legacyRelayTaskName} { // alter Aufgabenname bis setup umgezogen hat
+	for _, tn := range []string{gpuzRelayTaskName, legacyRelayTaskName} { // old task name until setup migrated it
 		ok := true
 		for _, args := range [][]string{{"/End", "/TN", tn}, {"/Run", "/TN", tn}} {
 			cmd := exec.Command("schtasks.exe", args...)
