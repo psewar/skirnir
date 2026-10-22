@@ -18,12 +18,12 @@ def check(name, cond, info=""):
         FAILS.append(name)
 
 
-class Knoten:
-    def __init__(self, geladen):
-        self.geladen, self.state = geladen, "free"
+class FakeNode:
+    def __init__(self, loaded):
+        self.loaded, self.state = loaded, "free"
 
     def loaded_context(self, model):
-        return self.geladen.get(model)
+        return self.loaded.get(model)
 
 
 class Cfg:
@@ -32,29 +32,29 @@ class Cfg:
 
 
 state.CFG = Cfg()
-ROLLE = {"exposed": "assist:latest"}
-KONKRET = {"exposed": "qwen3.8:27b"}
-STUFE = {"model": "qwen3.8:27b", "num_ctx": 131072}
+ROLE = {"exposed": "assist:latest"}
+CONCRETE = {"exposed": "qwen3.8:27b"}
+TIER = {"model": "qwen3.8:27b", "num_ctx": 131072}
 BODY = {"model": "assist:latest", "options": {"num_ctx": 65536}}
 
-out, ctx = proxy._backend_body(BODY, ROLLE, STUFE, 65536, Knoten({"qwen3.8:27b": 131072}))
-check("Rolle, Modell mit 131k geladen, Client 65k -> 131k (kein Neuladen)", ctx == 131072 and out["options"]["num_ctx"] == 131072, ctx)
+out, ctx = proxy._backend_body(BODY, ROLE, TIER, 65536, FakeNode({"qwen3.8:27b": 131072}))
+check("Role, model with 131k loaded, Client 65k -> 131k (no reload)", ctx == 131072 and out["options"]["num_ctx"] == 131072, ctx)
 
-out, ctx = proxy._backend_body(BODY, ROLLE, STUFE, 65536, Knoten({}))
-check("Rolle, Modell nicht geladen -> Client-Kontext 65k (kein unnoetiges VRAM)", ctx == 65536, ctx)
+out, ctx = proxy._backend_body(BODY, ROLE, TIER, 65536, FakeNode({}))
+check("Role, model not loaded -> Client context 65k (no unnecessary VRAM)", ctx == 65536, ctx)
 
-out, ctx = proxy._backend_body(BODY, ROLLE, STUFE, 65536, Knoten({"qwen3.8:27b": 32768}))
-check("Rolle, mit kleinerem Kontext geladen -> 65k (Neuladen noetig und richtig)", ctx == 65536, ctx)
+out, ctx = proxy._backend_body(BODY, ROLE, TIER, 65536, FakeNode({"qwen3.8:27b": 32768}))
+check("Role, loaded with smaller context -> 65k (reload needed and correct)", ctx == 65536, ctx)
 
-out, ctx = proxy._backend_body(BODY, ROLLE, {"model": "qwen3.8:27b", "num_ctx": 65536}, 65536, Knoten({"qwen3.8:27b": 131072}))
-check("Rolle, geladen groesser als die Stufe erlaubt -> Stufe bleibt Obergrenze (65k)", ctx == 65536, ctx)
+out, ctx = proxy._backend_body(BODY, ROLE, {"model": "qwen3.8:27b", "num_ctx": 65536}, 65536, FakeNode({"qwen3.8:27b": 131072}))
+check("Role, loaded larger than the tier allows -> Tier remains upper limit (65k)", ctx == 65536, ctx)
 
-out, ctx = proxy._backend_body({"model": "qwen3.8:27b", "options": {"num_ctx": 65536}}, KONKRET,
-                               {"model": "qwen3.8:27b", "num_ctx": 65536}, 65536, Knoten({"qwen3.8:27b": 131072}))
-check("konkretes Modell mit eigenem num_ctx -> bleibt beim Client-Wunsch", ctx == 65536, ctx)
+out, ctx = proxy._backend_body({"model": "qwen3.8:27b", "options": {"num_ctx": 65536}}, CONCRETE,
+                               {"model": "qwen3.8:27b", "num_ctx": 65536}, 65536, FakeNode({"qwen3.8:27b": 131072}))
+check("specific model with own num_ctx -> stays at Client request", ctx == 65536, ctx)
 
-out, ctx = proxy._backend_body(BODY, ROLLE, STUFE, 131072, Knoten({"qwen3.8:27b": 131072}))
-check("Rolle, gleicher Kontext -> unveraendert", ctx == 131072, ctx)
+out, ctx = proxy._backend_body(BODY, ROLE, TIER, 131072, FakeNode({"qwen3.8:27b": 131072}))
+check("Role, same context -> unchanged", ctx == 131072, ctx)
 
 print(f"\n{'ALLE GRUEN' if not FAILS else f'{len(FAILS)} FEHLER: {FAILS}'}")
 sys.exit(1 if FAILS else 0)

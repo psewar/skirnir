@@ -9,8 +9,8 @@ import os
 import sys
 import time
 
-HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, "..", "router"))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "router"))
 from skirnir_router import config, nodes, poll, state   # noqa: E402
 
 FAILS = []
@@ -22,11 +22,11 @@ def check(name, cond, info=""):
         FAILS.append(name)
 
 
-state.CFG = config.Config(os.path.join(HIER, "..", "router", "config.example.yaml"), use_overrides=False)
+state.CFG = config.Config(os.path.join(HERE, "..", "router", "config.example.yaml"), use_overrides=False)
 poll.evaluate = lambda node, now: None   # the state machine is not the subject here
 
 
-def knoten():
+def add_node():
     n = nodes.Node("gpu-desktop", {"vram_total_gib": 31.8, "foreign_vram_baseline_gib": 2.0})
     n.state, n.hb_ts = "free", time.time()
     return n
@@ -34,32 +34,32 @@ def knoten():
 
 HB = {"gpu_util_pct": 25, "vram_total_mib": 32607, "vram_used_mib": int(8.2 * 1024), "vram_free_mib": 32607 - int(8.2 * 1024)}
 
-n = knoten()
+n = add_node()
 poll.apply_heartbeat(n, dict(HB), time.time())
-check("ohne Meldung (Agent < 0.13): Whisper zaehlt als fremd (6,2 GiB)", abs(n.foreign_vram_gib() - 6.2) < 0.05, f"{n.foreign_vram_gib():.2f}")
-check("ohne Meldung: children_vram_gib 0", n.children_vram_gib == 0.0)
+check("no report (Agent < 0.13): Whisper counts as foreign (6.2 GiB)", abs(n.foreign_vram_gib() - 6.2) < 0.05, f"{n.foreign_vram_gib():.2f}")
+check("no report: children_vram_gib 0", n.children_vram_gib == 0.0)
 
-n = knoten()
+n = add_node()
 poll.apply_heartbeat(n, dict(HB, children_vram_mib={"stt": 2587}), time.time())
-check("mit Meldung: Kinder 2,53 GiB erkannt", abs(n.children_vram_gib - 2587 / 1024) < 0.01, f"{n.children_vram_gib:.2f}")
-check("mit Meldung: fremd nur noch Desktop-Rest + Spiel (3,67 GiB)", abs(n.foreign_vram_gib() - (8.2 - 2587 / 1024 - 2.0)) < 0.05,
+check("with report: children 2.53 GiB detected", abs(n.children_vram_gib - 2587 / 1024) < 0.01, f"{n.children_vram_gib:.2f}")
+check("with report: foreign only Desktop remainder + game (3.67 GiB)", abs(n.foreign_vram_gib() - (8.2 - 2587 / 1024 - 2.0)) < 0.05,
       f"{n.foreign_vram_gib():.2f}")
-check("mit Meldung: unter der foreign-Schwelle (kein busy nur wegen STT)", n.foreign_vram_gib() < n.busy_foreign_threshold(),
+check("with report: below foreign threshold (no busy solely due to STT)", n.foreign_vram_gib() < n.busy_foreign_threshold(),
       f"{n.foreign_vram_gib():.2f} < {n.busy_foreign_threshold()}")
 
 poll.apply_heartbeat(n, dict(HB), time.time())
-check("Kind beendet (Feld fehlt wieder) -> 0", n.children_vram_gib == 0.0)
+check("Child terminated (field missing again) -> 0", n.children_vram_gib == 0.0)
 poll.apply_heartbeat(n, dict(HB, children_vram_mib={"stt": "kaputt", "x": 100}), time.time())
-check("unsinnige Werte werden uebergangen", abs(n.children_vram_gib - 100 / 1024) < 0.001, f"{n.children_vram_gib}")
+check("nonsensical values are ignored", abs(n.children_vram_gib - 100 / 1024) < 0.001, f"{n.children_vram_gib}")
 
 # Baseline learning: learned value is busy minus children, otherwise foreign_vram_gib would deduct it a second time
-n = knoten()
-gesehen = []
-n.learn_baseline = lambda now, sample: gesehen.append(sample)
+n = add_node()
+seen = []
+n.learn_baseline = lambda now, sample: seen.append(sample)
 n.polled_ok = time.time()
 poll.apply_heartbeat(n, dict(HB, gpu_util_pct=1, vram_used_mib=int(4.6 * 1024), children_vram_mib={"stt": 2587}), time.time())
-check("Grundlast lernt ohne den Kinder-Speicher (4,6 - 2,53 = 2,07 GiB)", gesehen and abs(gesehen[-1] - (4.6 - 2587 / 1024)) < 0.05,
-      str(gesehen))
+check("baseline learns without child memory (4.6 - 2.53 = 2.07 GiB)", seen and abs(seen[-1] - (4.6 - 2587 / 1024)) < 0.05,
+      str(seen))
 check("Knotenzustand zeigt children_vram_gib", n.snapshot(time.time()).get("children_vram_gib") == round(2587 / 1024, 2))
 
 print(f"\n{'ALLE GRUEN' if not FAILS else f'{len(FAILS)} FEHLER: {FAILS}'}")

@@ -103,22 +103,22 @@ async def infer(req):
     # Model writes the call in the wrong dialect: Ollama does not parse it and returns it
     # as text. This is how qwen3-coder:30b came back above ~12k tokens on 2026-09-15.
     if b.get("broken_tool_call"):
-        kaputt = "\n".join(["<function=get_time>", "<parameter=tz>", "CET",
+        broken = "\n".join(["<function=get_time>", "<parameter=tz>", "CET",
                             "</parameter>", "</function>", "</tool_call>"])
-        zaehler = {"eval_count": 12, "eval_duration": int(0.2e9), "prompt_eval_count": 40,
+        counter = {"eval_count": 12, "eval_duration": int(0.2e9), "prompt_eval_count": 40,
                    "prompt_eval_duration": int(0.02e9), "load_duration": int(5e6)}
         if not b.get("stream", True):
             await asyncio.sleep(delay)
-            return web.json_response({"model": m, "message": {"role": "assistant", "content": kaputt},
-                                      "done": True, "done_reason": "stop", **zaehler})
+            return web.json_response({"model": m, "message": {"role": "assistant", "content": broken},
+                                      "done": True, "done_reason": "stop", **counter})
         resp = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
         await resp.prepare(req)
-        for tok in [kaputt[i:i + 12] for i in range(0, len(kaputt), 12)]:   # chunked, like real
+        for tok in [broken[i:i + 12] for i in range(0, len(broken), 12)]:   # chunked, like real
             await asyncio.sleep(delay)
             await resp.write((json.dumps({"model": m, "message": {"role": "assistant", "content": tok},
                                           "done": False}) + "\n").encode())
         await resp.write((json.dumps({"model": m, "message": {"role": "assistant", "content": ""},
-                                      "done": True, "done_reason": "stop", **zaehler}) + "\n").encode())
+                                      "done": True, "done_reason": "stop", **counter}) + "\n").encode())
         await resp.write_eof()
         return resp
 

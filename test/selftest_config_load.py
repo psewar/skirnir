@@ -12,13 +12,13 @@ import tempfile
 
 import yaml
 
-HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, "..", "router"))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "router"))
 from skirnir_router import config, settings   # noqa: E402
 from skirnir_router.outcome import failed   # noqa: E402
 
 FAILS = []
-EXAMPLE = os.path.join(HIER, "..", "router", "config.example.yaml")
+EXAMPLE = os.path.join(HERE, "..", "router", "config.example.yaml")
 
 
 def check(name, cond, info=""):
@@ -34,36 +34,36 @@ try:
     base = yaml.safe_load(open(EXAMPLE, encoding="utf-8"))
 
     cfg = config.Config.load(path, use_overrides=False)
-    check("gueltige Konfiguration: Config.load liefert ein Config", isinstance(cfg, config.Config) and cfg.roles, type(cfg).__name__)
+    check("valid configuration: Config.load returns a Config", isinstance(cfg, config.Config) and cfg.roles, type(cfg).__name__)
 
     bad = copy.deepcopy(base)
     bad["router"].setdefault("anthropic", {})["think"] = "vielleicht"
     yaml.safe_dump(bad, open(path, "w", encoding="utf-8"), allow_unicode=True)
     problem = config.Config.load(path, use_overrides=False)
-    check("ungueltig (anthropic.think): Config.load liefert Problem 400 mit Klartext", failed(problem) and problem.status == 400
+    check("invalid (anthropic.think): Config.load returns Problem 400 with plaintext", failed(problem) and problem.status == 400
           and "anthropic.think" in problem.message, getattr(problem, "message", problem))
 
     bad2 = copy.deepcopy(base)
     bad2["roles"][next(iter(bad2["roles"]))]["tiers"][0]["model"] = "gibt-es-nicht:1b"
     yaml.safe_dump(bad2, open(path, "w", encoding="utf-8"), allow_unicode=True)
     problem = config.Config.load(path, use_overrides=False)
-    check("ungueltig (Rollenstufe ohne Katalogeintrag): Problem", failed(problem) and "missing from the model catalog" in problem.message,
+    check("invalid (role tier without catalog entry): Problem", failed(problem) and "missing from the model catalog" in problem.message,
           getattr(problem, "message", problem))
 
     # Reload: valid load, then a file with an error LATE in the flow (decision_engine, after roles and models)
     shutil.copy(EXAMPLE, path)
     cfg = config.Config.load(path, use_overrides=False)
-    vorher_roles, vorher_listen, vorher_raw = dict(cfg.roles), cfg.listen, cfg.raw
+    before_roles, before_lists, before_raw = dict(cfg.roles), cfg.listen, cfg.raw
     late = copy.deepcopy(base)
     late["router"]["listen"] = "127.0.0.1:19999"   # would be applied early in parse()
     late["decision_engine"] = {"enabled": True, "role": "auto", "options": ["gibt-es-nicht"], "chain": ["rules"]}
     yaml.safe_dump(late, open(path, "w", encoding="utf-8"), allow_unicode=True)
     problem = cfg.reload()
-    check("Neuladen mit spaetem Fehler: Problem", failed(problem) and "decision_engine" in problem.message, getattr(problem, "message", problem))
-    check("... und NICHTS uebernommen (vorher: listen schon neu, Rest alt)", cfg.listen == vorher_listen and cfg.raw is vorher_raw
-          and cfg.roles == vorher_roles, f"listen {cfg.listen}")
+    check("Reload with late error: Problem", failed(problem) and "decision_engine" in problem.message, getattr(problem, "message", problem))
+    check("... and NOTHING adopted (before: lists already new, rest old)", cfg.listen == before_lists and cfg.raw is before_raw
+          and cfg.roles == before_roles, f"listen {cfg.listen}")
     shutil.copy(EXAMPLE, path)
-    check("gueltiges Neuladen danach: None", cfg.reload() is None)
+    check("valid reload afterwards: None", cfg.reload() is None)
 
     # Constructor: for tests/tools without the Problem path, it still raises on invalid files
     yaml.safe_dump(bad, open(path, "w", encoding="utf-8"), allow_unicode=True)
@@ -72,18 +72,18 @@ try:
         config.Config(path, use_overrides=False)
     except ValueError as e:  # exception-ok: test of the documented constructor contract
         raised = "anthropic.think" in str(e)
-    check("... ValueError mit derselben Meldung", raised)
+    check("... ValueError with the same message", raised)
 
     # settings: coerce/apply return Problems
     locked = {"router": {"client_auth": {"mode": "enforce", "locked": True}}}
     p = settings.coerce("router.client_auth.mode", "observe", locked)
-    check("settings.coerce: gesperrter Modus -> Problem 400", failed(p) and p.status == 400 and "locked" in p.message)
-    check("settings.coerce: gueltig -> Wert", settings.coerce("router.client_auth.mode", "observe", {"router": {"client_auth": {}}}) == "observe")
+    check("settings.coerce: locked mode -> Problem 400", failed(p) and p.status == 400 and "locked" in p.message)
+    check("settings.coerce: valid -> value", settings.coerce("router.client_auth.mode", "observe", {"router": {"client_auth": {}}}) == "observe")
     p = settings.coerce("router.request_timeout_s", "schnell", {"router": {}})
-    check("settings.coerce: keine Zahl -> Problem", failed(p) and "number" in p.message)
+    check("settings.coerce: not a number -> Problem", failed(p) and "number" in p.message)
     p = settings.apply({"router": {}}, {"router.request_timeout_s": 30, "router.ollama_poll_s": "nie"})
-    check("settings.apply: erster ungueltiger Wert -> sein Problem", failed(p) and "ollama_poll_s" in p.message)
-    check("settings.apply: kein Mapping -> Problem", failed(settings.apply({}, ["x"])))
+    check("settings.apply: first invalid value -> its Problem", failed(p) and "ollama_poll_s" in p.message)
+    check("settings.apply: no mapping -> Problem", failed(settings.apply({}, ["x"])))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

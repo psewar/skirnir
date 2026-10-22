@@ -13,8 +13,8 @@ import time
 
 from aiohttp import ClientError
 
-HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, "..", "router"))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "router"))
 from skirnir_router import tunnel   # noqa: E402
 
 FAILS = []
@@ -79,9 +79,9 @@ async def scenarios():
     except asyncio.CancelledError:   # the abort must reach the caller
         cancelled = True
     await settle()
-    check("Abbruch kommt beim Aufrufer an", cancelled)
-    check("Abbruch: Stream entfernt", tun.streams == {}, str(tun.streams))
-    check("Abbruch: genau ein CANCEL fuer den Stream", ws.cancels() == ws.requests() == [1], f"{ws.cancels()} {ws.requests()}")
+    check("Cancellation reaches the caller", cancelled)
+    check("Cancellation: Stream removed", tun.streams == {}, str(tun.streams))
+    check("Cancel: exactly one CANCEL for the stream", ws.cancels() == ws.requests() == [1], f"{ws.cancels()} {ws.requests()}")
 
     # 2. External timeout shorter than the tunnel deadline (like proxy._connect with `await call`)
     tun, ws = make()
@@ -91,8 +91,8 @@ async def scenarios():
     except TimeoutError:   # asyncio.wait_for reports the expiry as TimeoutError
         timed_out = True
     await settle()
-    check("aeussere Zeitgrenze: TimeoutError beim Aufrufer", timed_out)
-    check("aeussere Zeitgrenze: Stream entfernt, CANCEL gesendet", tun.streams == {} and ws.cancels() == [1], f"{tun.streams} {ws.cancels()}")
+    check("outer time limit: TimeoutError at the caller", timed_out)
+    check("outer time limit: stream removed, CANCEL sent", tun.streams == {} and ws.cancels() == [1], f"{tun.streams} {ws.cancels()}")
 
     # 3. Tunnel's own deadline: cleaned up as before, no double CANCEL
     tun, ws = make()
@@ -102,7 +102,7 @@ async def scenarios():
     except TimeoutError:
         own_timeout = True
     await settle()
-    check("eigene Frist: TimeoutError, Stream entfernt, genau ein CANCEL",
+    check("own deadline: TimeoutError, stream removed, exactly one CANCEL",
           own_timeout and tun.streams == {} and ws.cancels() == [1], f"{tun.streams} {ws.cancels()}")
 
     # 4. Abort while REQ send is still hanging (WebSocket backpressure)
@@ -117,16 +117,16 @@ async def scenarios():
         pass
     gate.set()
     await settle()
-    check("Abbruch beim Versand: Stream entfernt", tun.streams == {}, str(tun.streams))
-    check("Abbruch beim Versand: CANCEL nachgeschickt (Agent ignoriert unbekannte Streams)", ws.cancels() == [1], str(ws.cancels()))
+    check("Cancellation on send: Stream removed", tun.streams == {}, str(tun.streams))
+    check("Cancellation on send: CANCEL resent (Agent ignores unknown streams)", ws.cancels() == [1], str(ws.cancels()))
 
     # 5. Normal case unchanged: response header, body, stream removed after reading, no CANCEL
     tun, ws = make(answer="ok")
     async with tun.request("POST", "/api/chat", json={}) as r:
         status, body = r.status, await r.read()
     await settle()
-    check("Normalfall: 200 und Body", status == 200 and body == b"{}", f"{status} {body}")
-    check("Normalfall: Stream weg, kein CANCEL", tun.streams == {} and ws.cancels() == [], f"{tun.streams} {ws.cancels()}")
+    check("Normal case: 200 and body", status == 200 and body == b"{}", f"{status} {body}")
+    check("Normal case: stream gone, no CANCEL", tun.streams == {} and ws.cancels() == [], f"{tun.streams} {ws.cancels()}")
 
     # 6. Agent ERR frame: ClientError as before, stream removed, no CANCEL
     tun, ws = make(answer="err")
@@ -136,7 +136,7 @@ async def scenarios():
     except ClientError:
         err = True
     await settle()
-    check("ERR-Rahmen: ClientError, Stream weg, kein CANCEL", err and tun.streams == {} and ws.cancels() == [], f"{tun.streams} {ws.cancels()}")
+    check("ERR frame: ClientError, stream gone, no CANCEL", err and tun.streams == {} and ws.cancels() == [], f"{tun.streams} {ws.cancels()}")
 
 
 asyncio.run(scenarios())

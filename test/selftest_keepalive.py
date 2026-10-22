@@ -30,14 +30,14 @@ def main():
     try:
         check("lauschender Socket: SO_KEEPALIVE an", srv.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) != 0)
         check("angenommene Verbindung: SO_KEEPALIVE an (geerbt)", conn.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) != 0)
-        for name, wert in app.KEEPALIVE:
+        for name, value in app.KEEPALIVE:
             if not hasattr(socket, name):
                 print(f"SKIP {name}: gibt es auf {sys.platform} nicht")
                 continue
-            ist = conn.getsockopt(socket.IPPROTO_TCP, getattr(socket, name))
-            check(f"angenommene Verbindung: {name} = {wert} (geerbt)", ist == wert, f"ist {ist}")
+            actual = conn.getsockopt(socket.IPPROTO_TCP, getattr(socket, name))
+            check(f"angenommene Verbindung: {name} = {value} (geerbt)", actual == value, f"ist {actual}")
         if sys.platform.startswith("linux"):
-            check("auf Linux sind alle TCP_KEEP*-Optionen vorhanden (der Router laeuft auf Linux)",
+            check("on Linux all TCP_KEEP*-options are present (the router runs on Linux)",
                   all(hasattr(socket, n) for n, _ in app.KEEPALIVE))
     finally:
         conn.close()
