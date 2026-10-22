@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Selbsttest POST /rerank (rerank.py): TEI-Draht, Client-Recht, Knotenwahl, 424 ohne Retry-After, Antwortpruefung, Metriken.
+"""Self-test POST /rerank (rerank.py): TEI wire, client permissions, node selection, 424 without Retry-After, response validation, metrics.
 
-Laeuft ohne Netz, Agent und Reranker: die Knoten tragen eine Tunnel-Attrappe, die Antworten nach Drehbuch liefert, und fuer
-den Weg durch den echten Tunnel (tunnel.Tunnel) eine WebSocket-Attrappe, die die Rahmen des Agenten zurueckschickt."""
+Runs without network, agent, or reranker: nodes carry a tunnel stub that serves scripted responses, and a WebSocket stub for the real tunnel path (tunnel.Tunnel) that echoes agent frames."""
 import asyncio
 import copy
 import json
@@ -22,7 +21,7 @@ from skirnir_router.rerank_config import parse_rerank_config   # noqa: E402
 
 FAILS = []
 EXAMPLE = os.path.join(HIER, "..", "router", "config.example.yaml")
-OTHER_TOKEN = "changeme"   # Beispiel-Token der Clients in config.example.yaml (home-assistant ohne Rerank-Recht)
+OTHER_TOKEN = "changeme"   # Example client tokens in config.example.yaml (home-assistant without rerank permission)
 
 
 def check(name, cond, info=""):
@@ -32,7 +31,7 @@ def check(name, cond, info=""):
 
 
 def load(rerank=None, client_rerank=True, inference=None):
-    """config.example.yaml plus rerank-Abschnitt und ein Client, der per Quell-IP (Loopback des Testservers) erkannt wird."""
+    """config.example.yaml plus rerank section and a client identified by source IP (test server loopback)."""
     raw = copy.deepcopy(config.load_yaml(EXAMPLE))
     if rerank is not None:
         raw["router"]["rerank"] = rerank
@@ -40,7 +39,7 @@ def load(rerank=None, client_rerank=True, inference=None):
     if inference is not None:
         raw["router"]["client_auth"]["clients"]["memory-service"]["inference"] = inference
     cfg = config.Config(EXAMPLE, use_overrides=False)
-    problem = cfg.parse(raw)   # 0.8.9: ungueltig = Problem statt ValueError
+    problem = cfg.parse(raw)   # 0.8.9: invalid = Problem instead of ValueError
     return problem if failed(problem) else cfg
 
 
@@ -89,7 +88,7 @@ check("up muss ein echter Boolean sein, unbekannter Grund wird unhealthy",
       poll.route_health({"rerank": {"up": "true", "reason": "neu"}}) == {"rerank": {"up": False, "reason": "unhealthy"}})
 check("bekannter Grund bleibt", poll.route_health({"rerank": {"up": False, "reason": "starting"}})["rerank"]["reason"] == "starting")
 state.CFG = load()
-poll.evaluate = lambda node, now: None   # der Zustandsautomat ist hier nicht Gegenstand
+poll.evaluate = lambda node, now: None   # the state machine is not the subject here
 hb_node = nodes.Node("gpu-hb", {})
 poll.apply_heartbeat(hb_node, {"routes": {"rerank": {"up": True, "reason": ""}}}, time.time())
 check("apply_heartbeat setzt routes", hb_node.routes == {"rerank": {"up": True, "reason": ""}})
@@ -119,7 +118,7 @@ class FakeCall:
             raise ClientError("tunnel weg")
         body = self.kw["json"]
         n = len(body["texts"])
-        # Score = Anteil gemeinsamer Woerter mit der Frage; absichtlich unsortiert geliefert (Router sortiert nach Pruefung)
+        # Score = fraction of words shared with the question; intentionally unsorted (router sorts after check)
         q = set(body["query"].split())
         rows = [{"index": i, "score": len(q & set(t.split())) / (1 + len(q))} for i, t in enumerate(body["texts"])]
         if mode == "short":
@@ -268,7 +267,7 @@ async def scenarios():
         dt = time.monotonic() - t0
         check("Zeitgrenze timeout_s haelt (0,5 s), ein Versuch", 0.4 <= dt < 2.0 and len(n.tunnel.calls) == 1, f"{dt:.2f} s")
 
-        # Durch den echten Tunnel: Rahmen REQ hin, RESP/DATA/END zurueck (wie agent/tunnel.go)
+        # Through the real tunnel: REQ frame out, RESP/DATA/END back (like agent/tunnel.go)
         class FakeWS:
             def __init__(self, answer):
                 self.answer, self.seen = answer, []
@@ -280,7 +279,7 @@ async def scenarios():
                 head, _, body = frame[5:].partition(b"\n")
                 self.seen.append((json.loads(head), json.loads(body)))
                 if self.answer is None:
-                    return   # Agent schweigt: die Frist des Tunnels muss greifen
+                    return   # Agent silent: tunnel timeout must trigger
                 loop = asyncio.get_running_loop()
                 loop.call_soon(real.dispatch, tunnel.tun_frame(tunnel.TUN_RESP, sid, json.dumps({"status": 200, "headers": {}}).encode()))
                 loop.call_soon(real.dispatch, tunnel.tun_frame(tunnel.TUN_DATA, sid, self.answer))
@@ -312,7 +311,7 @@ async def scenarios():
         check("/metrics zeigt beide Reihen", 'skirnir_rerank_requests_total{outcome="timeout"} 2' in text
               and "skirnir_rerank_duration_seconds_bucket" in text)
 
-        # --- Client mit inference: false: nur POST /rerank und GET /info, alles andere 403 inference_disabled
+        # --- Client with inference: false: only POST /rerank and GET /info, everything else 403 inference_disabled
         s, _ = await info(client)
         r = await client.get("/api/tags")
         check("inference Standard (true): Client darf weiter Inferenz-Endpunkte", s == 200 and r.status == 200, f"{s} {r.status}")

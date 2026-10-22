@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Stufe 2 als lokaler Dienst: Embedding (ONNX Runtime, CPU) + Klassifikationskopf, gleiches Protokoll wie decision-jevlike.
+"""Tier 2 as a local service: Embedding (ONNX Runtime, CPU) + classification head, same protocol as decision-jevlike.
 
     python server.py --model-dir models/e5-small [--mode mix|logreg|knn] [--port 8082] [--threads 4]
     POST /decide {"context": "...", "options": [...]}  ->  {"probabilities": {...}, "model": ..., "encoder": ..., "latency_ms": ...}
     GET  /health
-Zur Laufzeit nur numpy, onnxruntime, tokenizers - kein torch, kein transformers, kein Netz (Modell und Kopf liegen im Ordner).
+Runtime dependencies: numpy, onnxruntime, tokenizers only - no torch, no transformers, no network (model and head are in the folder).
 """
 
 from __future__ import annotations

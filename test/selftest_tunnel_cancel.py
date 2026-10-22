@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Selbsttest Tunnel.open: ein abgebrochener Aufrufer hinterlaesst keinen Stream, und der Agent bekommt CANCEL.
+"""Self-test Tunnel.open: an aborted caller leaves no stream, and the agent receives CANCEL.
 
-Anlass: Wurde die Coroutine, die auf den Antwortkopf wartet, von aussen abgebrochen (Client trennt waehrend des Prefills,
-aeussere Zeitgrenze wie asyncio.wait_for oder asyncio.timeout), blieb der Eintrag in `tunnel.streams` bis zum Tunnelende
-liegen, und der Agent rechnete die Anfrage zu Ende. Laeuft ohne Router, Netz und Agent: eine WebSocket-Attrappe nimmt die
-Rahmen entgegen und antwortet nach Drehbuch."""
+Trigger: If the coroutine awaiting the response header was aborted externally (client disconnects during prefill,
+external timeout like asyncio.wait_for or asyncio.timeout), the entry in `tunnel.streams` remained until tunnel end,
+and the agent finished processing the request. Runs without router, network, or agent: a WebSocket mock receives
+frames and responds according to a script."""
 import asyncio
 import json
 import os
@@ -27,8 +27,8 @@ def check(name, cond, info=""):
 
 
 class FakeWS:
-    """Agent-Seite: merkt sich gesendete Rahmen. answer: None = schweigt, "ok" = RESP 200, "err" = ERR-Rahmen.
-    hold_send: REQ-Versand haengt, bis das Ereignis gesetzt ist (WebSocket staut)."""
+    """Agent side: records sent frames. answer: None = silent, "ok" = RESP 200, "err" = ERR frame.
+    hold_send: REQ send hangs until the event is set (WebSocket backpressure)."""
 
     def __init__(self, answer=None, hold_send=None):
         self.answer, self.hold_send, self.frames, self.tun = answer, hold_send, [], None
@@ -63,12 +63,12 @@ def make(**kw):
 
 
 async def settle():
-    for _ in range(5):   # gespawnte CANCEL-Sendung und call_soon-Rahmen laufen lassen
+    for _ in range(5):   # let spawned CANCEL send and call_soon frames run
         await asyncio.sleep(0)
 
 
 async def scenarios():
-    # 1. Aufrufer wird abgebrochen, waehrend der Agent noch rechnet (Client trennt waehrend des Prefills)
+    # 1. Caller is aborted while the agent is still computing (client disconnects during prefill)
     tun, ws = make()
     task = asyncio.create_task(tun.open("POST", "/api/chat", b"{}", None))
     await asyncio.sleep(0.05)
@@ -76,25 +76,25 @@ async def scenarios():
     try:
         await task
         cancelled = False
-    except asyncio.CancelledError:   # der Abbruch muss beim Aufrufer ankommen
+    except asyncio.CancelledError:   # the abort must reach the caller
         cancelled = True
     await settle()
     check("Abbruch kommt beim Aufrufer an", cancelled)
     check("Abbruch: Stream entfernt", tun.streams == {}, str(tun.streams))
     check("Abbruch: genau ein CANCEL fuer den Stream", ws.cancels() == ws.requests() == [1], f"{ws.cancels()} {ws.requests()}")
 
-    # 2. Aeussere Zeitgrenze kuerzer als die Frist des Tunnels (wie proxy._connect mit `await call`)
+    # 2. External timeout shorter than the tunnel deadline (like proxy._connect with `await call`)
     tun, ws = make()
     try:
         await asyncio.wait_for(tun.request("POST", "/api/chat", json={}), 0.1)
         timed_out = False
-    except TimeoutError:   # asyncio.wait_for meldet den Ablauf als TimeoutError
+    except TimeoutError:   # asyncio.wait_for reports the expiry as TimeoutError
         timed_out = True
     await settle()
     check("aeussere Zeitgrenze: TimeoutError beim Aufrufer", timed_out)
     check("aeussere Zeitgrenze: Stream entfernt, CANCEL gesendet", tun.streams == {} and ws.cancels() == [1], f"{tun.streams} {ws.cancels()}")
 
-    # 3. Eigene Frist des Tunnels: wie bisher aufgeraeumt, kein doppeltes CANCEL
+    # 3. Tunnel's own deadline: cleaned up as before, no double CANCEL
     tun, ws = make()
     try:
         await tun.open("POST", "/api/chat", b"{}", time.time() + 0.05)
@@ -105,7 +105,7 @@ async def scenarios():
     check("eigene Frist: TimeoutError, Stream entfernt, genau ein CANCEL",
           own_timeout and tun.streams == {} and ws.cancels() == [1], f"{tun.streams} {ws.cancels()}")
 
-    # 4. Abbruch, waehrend der REQ-Versand noch haengt (WebSocket staut)
+    # 4. Abort while REQ send is still hanging (WebSocket backpressure)
     gate = asyncio.Event()
     tun, ws = make(hold_send=gate)
     task = asyncio.create_task(tun.open("POST", "/api/chat", b"{}", None))
@@ -120,7 +120,7 @@ async def scenarios():
     check("Abbruch beim Versand: Stream entfernt", tun.streams == {}, str(tun.streams))
     check("Abbruch beim Versand: CANCEL nachgeschickt (Agent ignoriert unbekannte Streams)", ws.cancels() == [1], str(ws.cancels()))
 
-    # 5. Normalfall unveraendert: Antwortkopf, Body, Stream nach dem Lesen weg, kein CANCEL
+    # 5. Normal case unchanged: response header, body, stream removed after reading, no CANCEL
     tun, ws = make(answer="ok")
     async with tun.request("POST", "/api/chat", json={}) as r:
         status, body = r.status, await r.read()
@@ -128,7 +128,7 @@ async def scenarios():
     check("Normalfall: 200 und Body", status == 200 and body == b"{}", f"{status} {body}")
     check("Normalfall: Stream weg, kein CANCEL", tun.streams == {} and ws.cancels() == [], f"{tun.streams} {ws.cancels()}")
 
-    # 6. ERR-Rahmen des Agenten: ClientError wie bisher, Stream weg, kein CANCEL
+    # 6. Agent ERR frame: ClientError as before, stream removed, no CANCEL
     tun, ws = make(answer="err")
     try:
         await tun.open("POST", "/api/chat", b"{}", None)

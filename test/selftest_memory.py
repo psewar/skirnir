@@ -456,7 +456,7 @@ class MemoryHttpTests(MemoryHarness):
                              ("query_filtered", "memory query rejected by sensitive-data filter"))
             self.assertNotIn("items", value)
         self.assertEqual(self.calls, [])
-        # Inference goes on without recall and says why.
+        # Inference continues without recall and explains why.
         r = await self.client.post("/api/chat", headers={"Authorization": "Bearer client-a"}, json={
             "model": "example:latest", "stream": False, "messages": [{"role": "user", "content": "internal address " + PRIVATE}],
             "routing": {"memory": {"project": PROJECT, "recall": True}}})

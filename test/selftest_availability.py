@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Selbsttest der Grund-Codes fuer "kein Knoten" (scheduler.blockers / scheduler.unavailable). Laeuft ohne Router und
-ohne Netz, mit Attrappen fuer Knoten und Konfiguration.
+"""Self-test for base codes for "no node" (scheduler.blockers / scheduler.unavailable). Runs without router and
+without network, using stubs for nodes and configuration.
 
-Anlass 2026-09-29: ein Spiel belegte auf gpu-desktop 5 GiB VRAM, qwen3.6@131k passte nicht mehr ins Budget, der Knoten
-stand aber auf "free". Der Router antwortete nur "no node available"; der Agent-Client konnte weder warten noch sagen, woran es
-lag. Wichtig ist hier die Abgrenzung: gpu_busy nur, wenn das fremde VRAM (oder der busy-Zustand) wirklich der Grund
-ist - ein Modell, das auch auf die leere Karte nicht passt, ist model_too_large, und darauf zu warten waere sinnlos.
+Trigger 2026-09-29: a game occupied 5 GiB VRAM on gpu-desktop, qwen3.6@131k no longer fit the budget, but the node
+was marked "free". The router only replied "no node available"; the agent client could neither wait nor state the reason. Key distinction here: gpu_busy only if foreign VRAM (or busy state) is truly the cause - a model that doesn't fit even on an empty card is model_too_large, and waiting for it would be pointless.
 """
 import os
 import sys
@@ -32,7 +30,7 @@ class Cfg:
 
 
 class Knoten:
-    """Nur was _node_block liest. budget_gib wie Node.budget_gib: freies VRAM + Ollamas eigenes - Reserve."""
+    """Only what _node_block reads. budget_gib like Node.budget_gib: free VRAM + Ollama's own - reserve."""
 
     def __init__(self, name, models, st="free", free=30.0, total=31.8, foreign=0.0, loaded=(), breaker="closed",
                  draining_until=0.0, busy_reason="", gpu_util=0, game=None, memory=None, mem_pressure=False):
@@ -67,7 +65,7 @@ def knoten(*ns):
 state.CFG = Cfg()
 NACHT = [{"model": "qwen3.6:35b-a3b", "num_ctx": 131072, "busy_ok": False}]
 
-# --- der Fall vom 2026-09-29: free, aber ein Spiel belegt 5 GiB -> Budget 19.4 < 24 ---
+# --- case from 2026-09-29: free, but a game occupies 5 GiB -> budget 19.4 < 24 ---
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=20.4, foreign=5.0, gpu_util=35))
 u = S.unavailable(NACHT, None, 0)
 b = u["blockers"][0] if u["blockers"] else {}
@@ -76,32 +74,32 @@ check("... mit Zahlen fuer den Client", b.get("need_gib") == 24.0 and b.get("bud
 check("... Grund foreign_vram, Retry-After gesetzt", b.get("busy_reason") == "foreign_vram" and u["retry_after_s"] == S.RETRY_AFTER_S[S.GPU_BUSY], str(u))
 check("... Klartext nennt Knoten, fremde GiB und Bedarf", all(s in u["detail"] for s in ("gpu-desktop", "5.0 GiB", "24.0 GiB")), u["detail"])
 
-# --- Gegenprobe: ohne fremdes VRAM fehlt der Platz aus anderem Grund -> nicht gpu_busy ---
+# --- counter-check: without foreign VRAM, space is missing for another reason -> not gpu_busy ---
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=20.4, foreign=0.0))
 check("Platz fehlt ohne fremdes VRAM -> vram_full, nicht gpu_busy", S.unavailable(NACHT, None, 0)["code"] == S.VRAM_FULL)
 
-# --- fremdes VRAM da, haette aber auch ohne es nicht gereicht -> vram_full ---
+# --- foreign VRAM present, but would not have fit without it -> vram_full ---
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=10.0, foreign=2.0))
 check("fremdes VRAM zu klein, um die Luecke zu erklaeren -> vram_full", S.unavailable(NACHT, None, 0)["code"] == S.VRAM_FULL)
 
-# --- Modell passt auch auf die leere Karte nicht -> model_too_large, kein Retry-After ---
+# --- model doesn't fit on empty card -> model_too_large, no Retry-After ---
 riesig = [{"model": "riesig:1t", "num_ctx": 8192, "busy_ok": False}]
 knoten(Knoten("gpu-desktop", ["riesig:1t"], free=20.0, foreign=5.0))
 u = S.unavailable(riesig, None, 0)
 check("passt nie -> model_too_large ohne Retry-After", u["code"] == S.MODEL_TOO_LARGE and u["retry_after_s"] is None, str(u))
 
-# --- Knoten busy (Spiel mit GPU-Last) -> gpu_busy mit busy_reason ---
+# --- node busy (game with GPU load) -> gpu_busy with busy_reason ---
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], st="busy", free=25.0, foreign=4.3, busy_reason="gpu_util", gpu_util=65))
 u = S.unavailable(NACHT, None, 0)
 check("busy durch gpu_util -> gpu_busy", u["code"] == S.GPU_BUSY and u["blockers"][0]["busy_reason"] == "gpu_util", str(u))
 
-# --- Agent >= 0.17.0: Spiel als Fakt -> gpu_busy nennt das Spiel ---
+# --- Agent >= 0.17.0: game as fact -> gpu_busy names the game ---
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], st="busy", busy_reason="game", game={"name": "Diablo IV.exe"}))
 u = S.unavailable(NACHT, None, 0)
 check("busy durch Spiel -> gpu_busy mit Spielname", u["code"] == S.GPU_BUSY and u["blockers"][0].get("game") == "Diablo IV.exe"
       and "Diablo IV.exe" in u["detail"], str(u))
 
-# --- Speicher knapp: kalt laden gesperrt, warm geladen bleibt bedienbar ---
+# --- memory tight: cold load blocked, warm load remains serviceable ---
 knapp = {"ram_available_gib": 2.5, "commit_free_gib": 1.8, "ram_total_gib": 64.0}
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=30.0, memory=knapp, mem_pressure=True))
 u = S.unavailable(NACHT, None, 0)
@@ -110,21 +108,21 @@ check("Speicher knapp + kalt -> memory_pressure mit Zahlen", u["code"] == S.MEMO
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=30.0, memory=knapp, mem_pressure=True, loaded=["qwen3.6:35b-a3b"]))
 check("Speicher knapp + warm geladen -> kein Hindernis", S.blockers(NACHT, None, 0) == [])
 
-# --- busy_ok-Stufe laeuft trotz busy: kein Hindernis ---
+# --- busy_ok tier runs despite busy: no blocker ---
 knoten(Knoten("gpu-desktop", ["klein:8b"], st="busy", free=25.0))
 check("busy_ok-Stufe mit Platz -> keine Hindernisse", S.blockers([{"model": "klein:8b", "num_ctx": 8192, "busy_ok": True}], None, 0) == [])
 
-# --- warm geladen: kein Budget noetig, kein Hindernis ---
+# --- warm loaded: no budget needed, no blocker ---
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=1.0, foreign=5.0, loaded=["qwen3.6:35b-a3b"]))
 check("warm geladenes Modell ist kein Hindernis, auch bei vollem VRAM", S.blockers(NACHT, None, 0) == [])
 
-# --- zwei Knoten: einer offline, einer busy -> gpu_busy gewinnt (vergeht von selbst) ---
+# --- two nodes: one offline, one busy -> gpu_busy wins (resolves itself) ---
 knoten(Knoten("mary", ["qwen3.6:35b-a3b"], st="offline"),
        Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], st="busy", busy_reason="foreign_vram"))
 u = S.unavailable(NACHT, None, 0)
 check("offline + busy -> gpu_busy, beide als Hindernis gelistet", u["code"] == S.GPU_BUSY and len(u["blockers"]) == 2, str(u))
 
-# --- nur offline ---
+# --- only offline ---
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], st="offline"))
 check("nur offline -> node_offline", S.unavailable(NACHT, None, 0)["code"] == S.NODE_OFFLINE)
 
@@ -134,7 +132,7 @@ check("Agent-Update laeuft -> node_draining", S.unavailable(NACHT, None, 0)["cod
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], breaker="open"))
 check("Breaker offen -> node_failing", S.unavailable(NACHT, None, 0)["code"] == S.NODE_FAILING)
 
-# --- kein Knoten hat das Modell ---
+# --- no node has the model ---
 knoten(Knoten("gpu-desktop", ["klein:8b"]))
 check("Modell nirgends vorhanden -> model_missing", S.unavailable(NACHT, None, 0)["code"] == S.MODEL_MISSING)
 
@@ -143,7 +141,7 @@ knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=30.0))
 u = S.unavailable(NACHT, None, 0, exclude={"gpu-desktop"})
 check("bedienbarer Knoten in tried -> attempt_failed", u["code"] == S.ATTEMPT_FAILED, str(u))
 
-# --- Client-Kontext kleiner als die Stufe wird uebernommen ---
+# --- client context smaller than the tier is adopted ---
 knoten(Knoten("gpu-desktop", ["qwen3.6:35b-a3b"], free=20.4, foreign=5.0))
 check("num_ctx des Clients steht im Hindernis", S.blockers(NACHT, 32768, 0)[0]["num_ctx"] == 32768)
 

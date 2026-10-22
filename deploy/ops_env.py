@@ -1,21 +1,21 @@
-"""Private Betriebsparameter fuer die Deploy- und Messskripte - aus einem Ordner AUSSERHALB des Repos.
+"""Private operational parameters for deploy and measurement scripts - from a directory OUTSIDE the repo.
 
-Gesucht wird `deploy.env` in $SKIRNIR_OPS, sonst im Geschwisterordner `../skirnir-ops` des Repos. Optional:
-  AGENT_SIGN_THUMBPRINT  SHA-1-Thumbprint des Code-Signing-Zertifikats; deploy.py --agent verlangt dann eine gueltige Authenticode-
-                         Signatur der Windows-Binary (agent/sign.ps1), ohne Eintrag nur eine Warnung.
-Schluessel:
-    HOST_FILE       Datei mit einer Zeile <HOST_VAR>=<host oder url> des LXC-Hosts (SSH)
-    HOST_VAR        Name dieser Variable (Standard LXC_HOST); HOST_USER SSH-Benutzer (Standard root)
-    HOST_PASS_ENV   Umgebungsvariable mit dem SSH-Passwort, gefuellt vom Secrets-Modul (Standard LXC_HOST_PASS)
-    CT_EXEC         Kommando-Vorlage fuer 'im Container ausfuehren', Platzhalter {ct} {cmd}; Standard LXD: lxc exec {ct} -- bash -lc {cmd}
-    CT_PUSH         Vorlage fuer 'Datei in den Container', Platzhalter {ct} {src} {dst} {mode}; Standard LXD: lxc file push {src} {ct}{dst} --mode={mode}
-    SECRETS_DIR     Ordner mit dem Secrets-Modul (laedt das SSH-Passwort, ROUTER_UI_*_PASS ... aus dem Secret-Store in die Umgebung)
-    SECRETS_MODULE  Name dieses Moduls (Standard secret_store_env); es muss eine Funktion load() ohne Argumente anbieten
-    CT              Nummer des LXC-Containers, in dem der Router laeuft
-    ROUTER_HOST     oeffentlicher Hostname des Routers (TLS-Zertifikat lautet darauf)
-    UI_USER / UI_PASS_ENV   Basic-Auth-Konto fuer /admin/* und der Name der Umgebungsvariable mit dem Passwort
-Im selben Ordner liegen router/config.yaml (Produktivkonfiguration) und router/render-env.conf (Secret-Store-Zugang des CT).
-Das Repo selbst enthaelt nur router/config.example.yaml.
+Looks for `deploy.env` in $SKIRNIR_OPS, otherwise in the sibling directory `../skirnir-ops` of the repo. Optional:
+  AGENT_SIGN_THUMBPRINT  SHA-1 thumbprint of the code-signing certificate; deploy.py --agent then requires a valid Authenticode
+                         signature of the Windows binary (agent/sign.ps1); without an entry, only a warning.
+Keys:
+    HOST_FILE       File with one line <HOST_VAR>=<host or url> of the LXC host (SSH)
+    HOST_VAR        Name of this variable (default LXC_HOST); HOST_USER SSH user (default root)
+    HOST_PASS_ENV   Environment variable with the SSH password, populated by the secrets module (default LXC_HOST_PASS)
+    CT_EXEC         Command template for 'execute in container', placeholders {ct} {cmd}; default LXD: lxc exec {ct} -- bash -lc {cmd}
+    CT_PUSH         Template for 'push file to container', placeholders {ct} {src} {dst} {mode}; default LXD: lxc file push {src} {ct}{dst} --mode={mode}
+    SECRETS_DIR     Directory with the secrets module (loads the SSH password, ROUTER_UI_*_PASS ... from the secret store into the environment)
+    SECRETS_MODULE  Name of this module (default secret_store_env); it must provide a load() function with no arguments
+    CT              Number of the LXC container where the router runs
+    ROUTER_HOST     Public hostname of the router (TLS certificate is issued for this)
+    UI_USER / UI_PASS_ENV   Basic-Auth account for /admin/* and the name of the environment variable with the password
+In the same directory are router/config.yaml (production configuration) and router/render-env.conf (secret store access of the CT).
+The repo itself only contains router/config.example.yaml.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def load() -> dict:
 
 
 def ct_host(cfg: dict) -> str:
-    """Hostname des LXC-Hosts aus HOST_FILE (Zeile <HOST_VAR>=host oder URL)."""
+    """Hostname of the LXC host from HOST_FILE (line <HOST_VAR>=host or URL)."""
     key = cfg["HOST_VAR"] + "="
     for line in open(cfg["HOST_FILE"], encoding="utf-8"):
         line = line.strip()
@@ -63,7 +63,7 @@ def ct_host(cfg: dict) -> str:
 
 
 def load_secrets(cfg: dict):
-    """<SECRETS_MODULE>.load() aus SECRETS_DIR: fuellt <HOST_PASS_ENV>, ROUTER_UI_*_PASS usw. in os.environ."""
+    """<SECRETS_MODULE>.load() from SECRETS_DIR: populates <HOST_PASS_ENV>, ROUTER_UI_*_PASS etc. into os.environ."""
     if cfg["SECRETS_DIR"] not in sys.path:
         sys.path.insert(0, cfg["SECRETS_DIR"])
     import importlib

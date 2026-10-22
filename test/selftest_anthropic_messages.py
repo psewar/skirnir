@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Selbsttest der Anthropic-Messages-API (/v1/messages): Uebersetzung Anthropic -> Ollama /api/chat, Antwortform,
-SSE-Ereignisfolge, Fehlerformen und Anmeldung per x-api-key/Bearer. Laeuft ohne Router und ohne Netz.
+"""Self-test of the Anthropic Messages API (/v1/messages): Anthropic -> Ollama /api/chat translation, response format,
+SSE event sequence, error formats, and authentication via x-api-key/Bearer. Runs without a router and without network.
 
-Anlass 2026-10-01: ein Claude-Code-Agent sprach Ollamas eigenes /v1/messages, am Router vorbei.
-Ollama kennt dort kein num_ctx, lud das Modell mit seinem Default-Kontext neu und verdraengte den Runner aller anderen
-Clients. Die Ereignisfolge im Stream muss exakt stimmen: Claude Code setzt Bloecke anhand von Index und Typ zusammen.
+Trigger 2026-10-01: a Claude Code agent spoke Ollama's own /v1/messages, bypassing the router.
+Ollama does not know num_ctx there, reloaded the model with its default context, and evicted the runner for all other
+clients. The event sequence in the stream must be exact: Claude Code assembles blocks based on index and type.
 """
 import json
 import os
@@ -28,7 +28,7 @@ def check(name, cond, info=""):
 
 
 def events(raw):
-    """SSE-Bytes -> [(event, data)]; prueft nebenbei, dass jede Zeile 'event:' und 'data:' als Paar kommt."""
+    """SSE bytes -> [(event, data)]; also checks that every line comes as an 'event:' and 'data:' pair."""
     out = []
     for frame in raw.decode().split("\n\n"):
         if not frame.strip():
@@ -42,7 +42,7 @@ def events(raw):
 
 
 def kinds(evs):
-    """Kurzform fuer Vergleiche: content_block_start:text, content_block_delta:text_delta, ..."""
+    """Shorthand for comparisons: content_block_start:text, content_block_delta:text_delta, ..."""
     out = []
     for ev, d in evs:
         if ev == "content_block_start":
@@ -156,7 +156,7 @@ def t_verlauf():
     check("tool_use/tool_result-Paare, id -> tool_name, is_error-Praefix", out == want, json.dumps(out, ensure_ascii=False))
     check("thinking/redacted_thinking im Verlauf verworfen", "Ich lese beide." not in json.dumps(out) and "xyz" not in json.dumps(out))
 
-    # Claude Code 2.1.284: role system mitten im Verlauf (Textblock mit cache_control) - die oeffentliche API kennt das nicht
+    # Claude Code 2.1.284: role system in the middle of the conversation (text block with cache_control) - the public API does not know this
     out, err = A.messages_to_native([
         {"role": "user", "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]},
         {"role": "system", "content": [{"type": "text", "text": "Hinweis", "cache_control": {"type": "ephemeral"}}]},

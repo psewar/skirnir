@@ -36,7 +36,7 @@ func TestPublisherFolder(t *testing.T) {
 		{"Blizzard Entertainment", "Battle.net", `C:\Program Files (x86)\Battle.net`, "", false}, // Launcher
 		{"GOG.com", "GOG GALAXY", `C:\Program Files\GOG Galaxy\`, "", false},                     // Launcher, spelling as in the registry
 		{"Electronic Arts", "EA app", `C:\Program Files\Electronic Arts\EA Desktop`, "", false},  // Launcher
-		{"Valve", "Counter-Strike 2", `D:\SteamLibrary\steamapps\common\CS2`, "", false},         // no list mutation
+		{"Valve", "Counter-Strike 2", `D:\SteamLibrary\steamapps\common\CS2`, "", false},         // publisher not on the list
 		{"Ubisoft", "Anno 1800", `D:\SteamLibrary\steamapps\common\Anno 1800`, "", false},        // already via Steam
 		{"Bethesda Softworks", "Starfield", "", "", false},                                       // without location
 		{"Microsoft Corporation", "Office", `C:\Program Files\Microsoft Office`, "", false},

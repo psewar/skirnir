@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Selbsttest (Router 0.8.9): Anbieterfehler werden am strukturierten Fehlercode unterschieden, nie am Meldungstext.
+"""Self-test (Router 0.8.9): Provider errors are distinguished by structured error code, never by message text.
 
-Bis 0.8.9 entschied proxy._via_cloud per str(e).lower().startswith("the model"), ob ein 4xx des Anbieters an den Client
-geht oder ein anderer Kandidat helfen kann. Jetzt traegt CloudError den Code aus dem Fehlerkoerper (OpenAI error.code,
-Anthropic error.type) und model_unavailable; proxy.cloud_client_fault entscheidet daran. Laeuft ohne Netz."""
+Up to 0.8.9, proxy._via_cloud used str(e).lower().startswith("the model") to decide whether a provider 4xx goes to the client
+or if another candidate can help. Now CloudError carries the code from the error body (OpenAI error.code,
+Anthropic error.type) and model_unavailable; proxy.cloud_client_fault decides based on that. Runs without network."""
 import json
 import os
 import sys

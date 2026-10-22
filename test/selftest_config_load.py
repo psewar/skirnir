@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Selbsttest (Router 0.8.9): Konfigurationsfehler sind Werte (Problem), und ein gescheitertes Neuladen aendert nichts.
+"""Self-test (Router 0.8.9): Config errors are values (Problem), and a failed reload changes nothing.
 
-Bis 0.8.9 warf Config.parse() mitten im Uebernehmen einen ValueError. SIGHUP fing ihn ab und meldete "keeping old" - die
-Konfiguration war da aber schon halb ueberschrieben. Jetzt: Config.load() liefert Config oder Problem, reload() prueft erst an
-einer Probe, settings.coerce/apply liefern Probleme. Laeuft ohne Router und Netz, mit Kopien von config.example.yaml."""
+Up to 0.8.9, Config.parse() raised a ValueError mid-apply. SIGHUP caught it and reported "keeping old" - but the
+config was already half-overwritten. Now: Config.load() returns Config or Problem, reload() checks first on a
+probe, settings.coerce/apply return Problems. Runs without Router and network, using copies of config.example.yaml."""
 import copy
 import os
 import shutil
@@ -50,12 +50,12 @@ try:
     check("ungueltig (Rollenstufe ohne Katalogeintrag): Problem", failed(problem) and "missing from the model catalog" in problem.message,
           getattr(problem, "message", problem))
 
-    # Neuladen: gueltig geladen, dann eine Datei mit einem Fehler SPAET im Ablauf (decision_engine, nach Rollen und Modellen)
+    # Reload: valid load, then a file with an error LATE in the flow (decision_engine, after roles and models)
     shutil.copy(EXAMPLE, path)
     cfg = config.Config.load(path, use_overrides=False)
     vorher_roles, vorher_listen, vorher_raw = dict(cfg.roles), cfg.listen, cfg.raw
     late = copy.deepcopy(base)
-    late["router"]["listen"] = "127.0.0.1:19999"   # wuerde frueh in parse() uebernommen
+    late["router"]["listen"] = "127.0.0.1:19999"   # would be applied early in parse()
     late["decision_engine"] = {"enabled": True, "role": "auto", "options": ["gibt-es-nicht"], "chain": ["rules"]}
     yaml.safe_dump(late, open(path, "w", encoding="utf-8"), allow_unicode=True)
     problem = cfg.reload()
@@ -65,7 +65,7 @@ try:
     shutil.copy(EXAMPLE, path)
     check("gueltiges Neuladen danach: None", cfg.reload() is None)
 
-    # Konstruktor: fuer Tests/Werkzeuge ohne Problem-Pfad wirft er bei ungueltiger Datei weiter
+    # Constructor: for tests/tools without the Problem path, it still raises on invalid files
     yaml.safe_dump(bad, open(path, "w", encoding="utf-8"), allow_unicode=True)
     raised = False
     try:
@@ -74,7 +74,7 @@ try:
         raised = "anthropic.think" in str(e)
     check("... ValueError mit derselben Meldung", raised)
 
-    # settings: coerce/apply liefern Probleme
+    # settings: coerce/apply return Problems
     locked = {"router": {"client_auth": {"mode": "enforce", "locked": True}}}
     p = settings.coerce("router.client_auth.mode", "observe", locked)
     check("settings.coerce: gesperrter Modus -> Problem 400", failed(p) and p.status == 400 and "locked" in p.message)

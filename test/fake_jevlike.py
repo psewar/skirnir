@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Fake-Jevlike fuer die Tests: spricht das Protokoll aus decision/jevlike.py, entscheidet nach Markern im Kontext.
+"""Fake Jevlike for tests: speaks the protocol from decision/jevlike.py, decides based on markers in the context.
 
     python fake_jevlike.py <port>
-Kontext enthaelt "[[code]]" (Optionsname in doppelten Klammern) -> diese Option 0,85, Rest verteilt.
-Kontext enthaelt "UNSICHER" -> Platz 1 0,46, Platz 2 0,43 (Abschnitt 8: soll als unsicher gelten).
-Kontext enthaelt "AUSFALL"  -> HTTP 500 (Engine faellt aus -> naechste in der Kette).
-Sonst: erste Option 0,7.
+Context contains "[[code]]" (option name in double brackets) -> this option 0.85, rest distributed.
+Context contains "UNSICHER" -> rank 1 0.46, rank 2 0.43 (Section 8: should be considered uncertain).
+Context contains "AUSFALL"  -> HTTP 500 (Engine fails -> next in the chain).
+Otherwise: first option 0.7.
 """
 import sys
 import time

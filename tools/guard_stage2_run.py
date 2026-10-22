@@ -1,6 +1,6 @@
-"""Nachtlauf Stufe 2 (design/gpu-guard.md, Zustandsfolge): Dauer-Vollast, bis der Guard 'gedrosselt' meldet, dann Last weg und
-Erholung beobachten. Kein Admin noetig - der Guard setzt die Limits selbst. Zeichnet /health alle 2 s auf.
-Aufruf: python guard_stage2_run.py <ops-ordner> <ausgabe.json> [modell] [worker]"""
+"""Night run stage 2 (design/gpu-guard.md, state sequence): sustained full load until the guard reports 'throttled', then remove load and
+observe recovery. No admin needed - the guard sets the limits itself. Records /health every 2 s.
+Usage: python guard_stage2_run.py <ops-folder> <output.json> [model] [worker]"""
 import base64, json, os, random, ssl, sys, threading, time, urllib.request
 
 OPS, OUT = sys.argv[1], sys.argv[2]
@@ -14,7 +14,7 @@ ops = ops_env.load(); ops_env.load_secrets(ops)
 AUTH = "Basic " + base64.b64encode(f"{ops['UI_USER']}:{os.environ[ops['UI_PASS_ENV']]}".encode()).decode()
 ROUTER = f"https://{ops['ROUTER_HOST']}:11435"
 CTX = ssl.create_default_context()
-MAX_LOAD_S = 16 * 60      # Notbremse: laenger wird nicht belastet
+MAX_LOAD_S = 16 * 60      # Emergency stop: no longer applying load
 RECOVER_MAX_S = 9 * 60
 LOG, ROWS, REQS = [], [], []
 stop_load = threading.Event()
@@ -83,7 +83,7 @@ def main():
                     t_stage2 = time.time()
             if int(time.time() - t_start) % 60 < 2:
                 say(f"  t+{int(time.time() - t_start)} s: {row['state']} hochlast_s {row['hochlast_s']} pin16 {row['pin16_w']} W board {row['power_w']} W {row['pin16_v']} V limit {row['limit_w']} throttle {row['throttle']} Anfragen {len(REQS)}")
-            if t_stage2 and time.time() - t_stage2 >= 40:   # Stufe 2 bestaetigt (Limit steht) -> Last weg
+            if t_stage2 and time.time() - t_stage2 >= 40:   # Stage 2 confirmed (limit set) -> remove load
                 break
             if time.time() - t_start > MAX_LOAD_S:
                 say("Notbremse: keine Stufe 2 innerhalb der Frist"); break
@@ -91,7 +91,7 @@ def main():
     finally:
         stop_load.set()
         say(f"Last beendet nach {int(time.time() - t_start)} s, {len(REQS)} Anfragen")
-    # Erholung beobachten, bis normal (oder Zeitlimit)
+    # Observe recovery until normal (or time limit)
     t_rec = time.time()
     while time.time() - t_rec < RECOVER_MAX_S:
         row = sample()

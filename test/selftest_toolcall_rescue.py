@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Selbsttest der Tool-Call-Rettung. Laeuft ohne Router und ohne Netz.
+"""Self-test for tool call rescue. Runs without router and network.
 
-Die Positivfaelle sind WOERTLICH die Ausgaben, an denen qwen3-coder:30b am
-2026-09-15 durchgefallen ist (Messreihe local-toolcall-context) - kein
-nachgebautes Wunschbild. Die Negativfaelle sind wichtiger als die Positivfaelle:
-eine Rettung, die zu viel rettet, fuehrt beim Client ein Werkzeug aus.
+The positive cases are VERBATIM the outputs where qwen3-coder:30b failed on
+2026-09-15 (measurement series local-toolcall-context) - not a
+reconstructed ideal. The negative cases are more important than the positive ones:
+a rescue that saves too much causes the client to execute a tool.
 """
 import os
 import sys
@@ -28,7 +28,7 @@ TOOLS = [
         "entity": {"type": "string"}, "state": {"type": "string"}, "helligkeit": {"type": "integer"}}}}},
 ]
 
-# --- genau so kam es aus Ollama zurueck ---
+# --- this is exactly how it came back from Ollama ---
 ECHT_XML = ("<function=read_note>\n<parameter=note_id>\nZ7QX-4417-VULPES\n</parameter>\n"
             "</function>\n</tool_call>")
 ECHT_XML_EINZEILIG = "<function=read_note> <parameter=note_id> Z7QX-4417-VULPES </parameter> </function> </tool_call>"
@@ -50,7 +50,7 @@ def t_positiv():
     msg = {"role": "assistant", "content": '<tool_call>{"name":"read_note","arguments":{"note_id":"AB-2"}}</tool_call>'}
     check("rettet JSON im tool_call-Mantel", tr.rescue_message(msg, TOOLS) == "read_note", str(msg.get("tool_calls")))
 
-    # Typisierung: XML liefert Text, das Schema sagt integer
+    # Typing: XML yields text, schema says integer
     msg = {"role": "assistant", "content": "<function=set_light><parameter=entity>licht.kueche</parameter>"
                                            "<parameter=state>on</parameter><parameter=helligkeit>80</parameter></function>"}
     tr.rescue_message(msg, TOOLS)
@@ -59,15 +59,15 @@ def t_positiv():
 
 
 def t_negativ():
-    """Hier darf NICHTS passieren."""
+    """Nothing should happen here."""
     msg = {"role": "assistant", "content": "Die Notiz Z7QX-4417-VULPES habe ich nicht gefunden."}
     check("laesst Prosa in Ruhe", tr.rescue_message(msg, TOOLS) is None and "tool_calls" not in msg)
 
-    # Werkzeug, das der Client gar nicht angeboten hat -> halluziniert, nicht retten
+    # Tool not offered by the client -> hallucinated, do not rescue
     msg = {"role": "assistant", "content": "<function=run_shell><parameter=command>rm -rf /</parameter></function>"}
     check("rettet KEIN unangebotenes Werkzeug", tr.rescue_message(msg, TOOLS) is None, str(msg.get("tool_calls")))
 
-    # Erklaertext mit beilaeufiger Erwaehnung -> kein Aufruf gewollt
+    # Explanatory text with incidental mention -> no call intended
     lang = ("Ich koennte hier read_note verwenden. Ein Aufruf saehe etwa so aus: "
             "<function=read_note><parameter=note_id>X</parameter></function> "
             "Aber dafuer brauche ich erst die Kennung, und die hast du mir nicht genannt. "
@@ -75,7 +75,7 @@ def t_negativ():
     msg = {"role": "assistant", "content": lang}
     check("rettet nicht aus Erklaertext", tr.rescue_message(msg, TOOLS) is None, str(msg.get("tool_calls")))
 
-    # schon geglueckter Aufruf -> nicht anfassen
+    # Already successful call -> do not touch
     msg = {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "read_note", "arguments": {}}}]}
     check("ruehrt echten tool_call nicht an", tr.rescue_message(msg, TOOLS) is None)
 
@@ -86,7 +86,7 @@ def t_negativ():
 
 
 def _stream(stuecke, tools=TOOLS, done_extra=None):
-    """Spielt Upstream-Chunks durch den Rescuer und gibt die herausgelassenen zurueck."""
+    """Plays upstream chunks through the rescuer and returns the emitted ones."""
     r = tr.StreamRescuer(tools)
     raus = []
     for s in stuecke:
@@ -99,7 +99,7 @@ def _stream(stuecke, tools=TOOLS, done_extra=None):
 
 
 def t_stream():
-    # Aufruf kommt stueckweise -> nichts davon darf als Text beim Client landen
+    # Call arrives in pieces -> none of it may land as text on the client
     r, raus = _stream(["<function=read_note>", "<parameter=note_id>", "Z7QX-4417-VULPES",
                        "</parameter>", "</function>"])
     text = "".join((c.get("message") or {}).get("content") or "" for c in raus)
@@ -113,42 +113,42 @@ def t_stream():
     check("Stream: Zaehler bleiben am Ende",
           any(c.get("done") and c.get("eval_count") == 12 for c in raus), str(raus)[-140:])
 
-    # Normale Prosa -> vollstaendig und in Reihenfolge durchreichen
+    # Normal prose -> pass through completely and in order
     r, raus = _stream(["Hal", "lo ", "Welt"])
     text = "".join((c.get("message") or {}).get("content") or "" for c in raus)
     check("Stream: Prosa unveraendert", text == "Hallo Welt", repr(text))
     check("Stream: genau ein Abschluss", sum(1 for c in raus if c.get("done")) == 1, str(len(raus)))
 
-    # Prosa, die wie ein Aufruf beginnt, dann doch keiner ist
+    # Prose that starts like a call but isn't one
     r, raus = _stream(["{", "\"a\": 1} ", "war nur JSON im Text"])
     text = "".join((c.get("message") or {}).get("content") or "" for c in raus)
     check("Stream: Fehlstart wird nachgereicht", text == '{"a": 1} war nur JSON im Text', repr(text))
 
-    # Ollama schafft den Aufruf selbst -> durchreichen, nichts verschlucken
+    # Ollama handles the call itself -> pass through, swallow nothing
     r = tr.StreamRescuer(TOOLS)
     raus = r.chunk({"model": "m", "done": False, "message": {"role": "assistant", "content": "",
                     "tool_calls": [{"function": {"name": "read_note", "arguments": {"note_id": "Q"}}}]}})
     check("Stream: echter tool_call geht durch",
           len(raus) == 1 and (raus[0].get("message") or {}).get("tool_calls"), str(raus)[:100])
 
-    # ohne Werkzeuge gar nicht erst eingreifen
+    # do not intervene at all without tools
     r, raus = _stream(["<function=read_note>", "</function>"], tools=[])
     text = "".join((c.get("message") or {}).get("content") or "" for c in raus)
     check("Stream: ohne Werkzeuge unveraendert", text == "<function=read_note></function>", repr(text)[:60])
 
 
 def t_verloren():
-    """Der Fall, den die Stufe NICHT heilt - er soll wenigstens auffallen."""
+    """The case the tier does NOT fix - it should at least be noticeable."""
     fremd = "<function=run_shell><parameter=command>ls</parameter></function>"
     check("verdacht: fremdes Werkzeug faellt auf", tr.suspicious(fremd) is True)
     check("verdacht: Prosa nicht", tr.suspicious("Die Notiz gibt es leider nicht.") is False)
     check("verdacht: leer nicht", tr.suspicious("") is False)
-    # Zusammenspiel: nicht gerettet UND verdaechtig = der meldepflichtige Fall
+    # Interaction: not rescued AND suspicious = the reportable case
     msg = {"role": "assistant", "content": fremd}
     check("nicht gerettet, aber gemeldet",
           tr.rescue_message(msg, TOOLS) is None and tr.suspicious(msg["content"]) is True)
 
-    # Stream: unbekannter Dialekt -> Text geht raus (nicht verschlucken!) und wird gemeldet
+    # Stream: unknown dialect -> text goes out (do not swallow!) and is reported
     r, raus = _stream(["<function=run_shell>", "<parameter=command>ls</parameter>", "</function>"])
     text = "".join((c.get("message") or {}).get("content") or "" for c in raus)
     check("Stream: unrettbarer Call wird NICHT verschluckt", text == fremd, repr(text)[:80])

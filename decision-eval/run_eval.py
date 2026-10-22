@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Decision-Engines gegen den Testdatensatz messen (Abschnitt 10): Rules vs. Jevlike Byte vs. Jevlike+Encoder vs. lokales LLM.
+"""Benchmark decision engines against the test dataset (Section 10): Rules vs. Jevlike Byte vs. Jevlike+Encoder vs. local LLM.
 
-Quellen:
-  * Jevlike-Varianten: direkt am Dienst (server.py) oder ein Checkpoint, den dieses Skript selbst als Dienst startet
-    (--jevlike NAME=PFAD.pt, mehrfach; braucht die venv aus decision-jevlike).
-  * rules / local_llm: ueber den Router, POST /admin/decide {"engine": ...} (Dev-Umgebung http://127.0.0.1:21435 oder
-    Produktion mit Basic Auth per --router-auth user:pass; ohne Angabe werden diese Engines ausgelassen).
+Sources:
+  * Jevlike variants: directly via the service (server.py) or a checkpoint started by this script as a service
+    (--jevlike NAME=PATH.pt, multiple allowed; requires the decision-jevlike venv).
+  * rules / local_llm: via the router, POST /admin/decide {"engine": ...} (Dev environment http://127.0.0.1:21435 or
+    Production with Basic Auth via --router-auth user:pass; if unspecified, these engines are skipped).
 
-Kennzahlen je Engine: Top-1, Top-3, Konfusionsmatrix, Latenz p50/p95/p99, Fallback-Rate unter der Policy, ECE (15 Bins),
-Temperatur-Kalibrierung auf dem Validierungssatz (ECE vorher/nachher) -> calibration.json fuer den Router. Ausserdem die
-"Routing Accuracy" der Kette (erste sichere Engine gewinnt, sonst Fallback) fuer die konfigurierten Ketten.
+Metrics per engine: Top-1, Top-3, confusion matrix, latency p50/p95/p99, Fallback rate under the policy, ECE (15 bins),
+Temperature calibration on the validation set (ECE before/after) -> calibration.json for the router. Additionally, the
+"Routing Accuracy" of the chain (first safe engine wins, otherwise Fallback) for the configured chains.
 
     ..\\decision-jevlike\\.venv\\Scripts\\python run_eval.py --jevlike tiny=..\\decision-jevlike\\models\\skirnir-router-tiny.pt --router http://127.0.0.1:21435
 """
@@ -47,7 +47,7 @@ def http(url, body=None, headers=None, timeout=120):
 # --- Engines als Aufrufer ---------------------------------------------------------------------------------------------
 
 class JevlikeService:
-    """Startet server.py fuer einen Checkpoint auf einem freien Port (oder nutzt --endpoint)."""
+    """Starts server.py for a checkpoint on a free port (or uses --endpoint)."""
 
     def __init__(self, name, checkpoint=None, endpoint=None, port=18100, device="auto"):
         self.name, self.proc, self.endpoint = name, None, endpoint
@@ -98,7 +98,7 @@ def uncertain(unc, policy=POLICY):
 
 
 def ece(rows, bins=15):
-    """Expected Calibration Error ueber die Konfidenz der Top-1-Wahl."""
+    """Expected Calibration Error over the confidence of the Top-1 choice."""
     buckets = collections.defaultdict(list)
     for r in rows:
         buckets[min(bins - 1, int(r["top"] * bins))].append(r)
@@ -113,7 +113,7 @@ def apply_temperature(probs, t):
 
 
 def fit_temperature(results):
-    """Temperatur mit minimaler negativer Log-Likelihood auf dem Validierungssatz (Rastersuche 0,5 .. 5)."""
+    """Temperature with minimal negative Log-Likelihood on the validation set (grid search 0.5 .. 5)."""
     best = (None, float("inf"))
     for t in [x / 20 for x in range(10, 101)]:
         nll = 0.0
@@ -169,7 +169,7 @@ def summarize(name, results, options, temperature=None):
 
 
 def chain_accuracy(order, per_engine, default):
-    """Routing Accuracy einer Kette: je Beispiel die erste sichere Engine, sonst die letzte, sonst default."""
+    """Routing Accuracy of a chain: for each example, the first safe engine, otherwise the last, otherwise default."""
     n = len(next(iter(per_engine.values())))
     correct = fallbacks = 0
     for i in range(n):

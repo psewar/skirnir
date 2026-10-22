@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Stufe 1: TF-IDF (Zeichen-n-Gramme + Woerter) und Softmax-Regression fuer die Rollenwahl trainieren - numpy reicht.
+"""Stage 1: Train TF-IDF (char n-grams + words) and Softmax Regression for role selection - numpy is sufficient.
 
     python train_tfidf.py [--out ../router/decision-tfidf.json] [--min-df 2] [--l2 1e-5] [--epochs 3000] [--lr 1.0]
-Merkmale kommen aus router/skirnir_router/decision/tfidf.py (dieselbe Funktion wie im Router). Modell = JSON mit Vokabular,
-IDF, Gewichten, Bias, Klassen und Kennzahlen; der Router laedt es ueber decision_engine.tfidf.model_path.
-Training: Vollbatch-Gradientenabstieg mit L2-Strafe, Wahl der Epoche mit der besten Validierungs-NLL (kein Ueberfitten
-auf den Testsatz). Danach Top-1 auf Validierung und Test.
+Features come from router/skirnir_router/decision/tfidf.py (same function as in the Router). Model = JSON with vocabulary,
+IDF, weights, bias, classes, and metrics; the Router loads it via decision_engine.tfidf.model_path.
+Training: Full-batch gradient descent with L2 penalty, selecting the epoch with the best validation NLL (no overfitting
+to the test set). Then Top-1 on validation and test.
 """
 
 from __future__ import annotations

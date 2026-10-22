@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Selbsttest (Router 0.8.11): der Rest des Routers meldet erwartete Faelle als Wert, und die Baseline ist leer.
+"""Self-test (Router 0.8.11): the rest of the router reports expected cases as a value, and the baseline is empty.
 
-Decision-Engines liefern ein Problem statt EngineError, Dateien (JSON, Journal, Modell) werden vorher geprueft, Basic Auth
-und Passwort-Hashes per Muster, der TLS-Fingerprint per Muster schon beim Laden der Konfiguration, und ein abgebrochener
-Idempotency-Wartender laeuft nicht mehr als Erstanfrage weiter. Laeuft ohne Router und Netz."""
+Decision engines return a Problem instead of EngineError, files (JSON, journal, model) are pre-checked, Basic Auth
+and password hashes via pattern, the TLS fingerprint via pattern already when loading the configuration, and an aborted
+Idempotency waiter no longer continues as the first request. Runs without router and network."""
 import asyncio
 import base64
 import json
@@ -35,12 +35,12 @@ def check(name, cond, info=""):
 
 tmp = tempfile.mkdtemp(prefix="skirnir-kf4-")
 
-# --- Baseline: kein Altbestand mehr
+# --- Baseline: no legacy data left
 with open(os.path.join(HIER, "control_flow_baseline.json"), encoding="utf-8") as f:
     check("Baseline leer: jede Ausnahme im Router ist markiert oder ersetzt", json.load(f) == {})
 check("check_control_flow: keine Fundstelle im Router", not any(check_control_flow.findings(p) for p in check_control_flow.SOURCES))
 
-# --- Decision: Engines liefern Problem, die Kette faellt weiter
+# --- Decision: Engines return Problem, the chain falls through
 check("normalize: Text statt Zahl -> leer", normalize({"a": "viel", "b": 1}, ["a", "b"]) == {})
 check("normalize: kein dict -> leer", normalize(["a"], ["a"]) == {})
 check("normalize: gueltig", normalize({"a": 3, "b": 1}, ["a", "b"]) == {"a": 0.75, "b": 0.25})
@@ -92,7 +92,7 @@ check("read_env_value: Datei fehlt -> None", common.read_env_value(os.path.join(
 check("Journal: angerissene Zeile -> None", state._journal_row('{"event": "x", "t"') is None)
 check("Journal: gueltige Zeile", state._journal_row('{"event": "x", "t": 1}') == {"event": "x", "t": 1})
 
-# --- Auth und TLS
+# --- Auth and TLS
 cred = base64.b64encode(b"admin:geheim").decode()
 check("basic_credentials: gueltig", common.basic_credentials(cred) == ("admin", "geheim"))
 check("basic_credentials: kein Base64 -> None", common.basic_credentials("@@@") is None)
@@ -106,14 +106,14 @@ check("tls_fingerprint: mit Doppelpunkten", common.tls_fingerprint("sha256:" + f
 check("tls_fingerprint: zu kurz -> None", common.tls_fingerprint("abcd") is None)
 check("tls_fingerprint: kein Hex -> None", common.tls_fingerprint("zz" * 32) is None)
 
-# --- Werkzeugaufruf-Rettung typisiert nur, was aufgeht
+# --- Tool call rescue only types what fits
 check("rescue: integer", toolcall_rescue._fit_type(" 12 ", "integer") == 12)
 check("rescue: integer mit Komma bleibt Text", toolcall_rescue._fit_type("1,5", "integer") == "1,5")
 check("rescue: number", toolcall_rescue._fit_type("1.5", "number") == 1.5)
 check("rescue: number unendlich bleibt Text", toolcall_rescue._fit_type("inf", "number") == "inf")
 
 
-# --- Idempotency: Abbruch des Wartenden geht weiter nach oben
+# --- Idempotency: Aborting the waiter propagates upward
 async def idem_cases():
     state.CFG = SimpleNamespace(request_timeout_s=0.2, idempotency_ttl_s=60)
     ops.IDEM.clear()

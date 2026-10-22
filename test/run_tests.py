@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-End-Tests gegen den Router mit zwei Fake-Ollama-Knoten. Start: python run_tests.py"""
+"""End-to-end tests against the router with two fake Ollama nodes. Start: python run_tests.py"""
 import json
 import os
 import subprocess
@@ -25,7 +25,7 @@ import hashlib
 AUTH = {"Authorization": "Basic " + base64.b64encode(b"tester:geheim").decode()}
 
 
-LAST_HEADERS = {}   # Antwort-Header der letzten http()-Anfrage (Stufe 1: X-Skirnir-*)
+LAST_HEADERS = {}   # Response headers of the last http() request (tier 1: X-Skirnir-*)
 
 
 def http(url, body=None, headers=None, method=None, timeout=30, auth=True):
@@ -46,12 +46,12 @@ def http(url, body=None, headers=None, method=None, timeout=30, auth=True):
         return e.code, e.read()
 
 
-REQ_T = 0.0   # Zeitpunkt der letzten Anfrage, fuer route()
+REQ_T = 0.0   # Timestamp of the last request, for route()
 
 
 class Decision(dict):
-    """dict, das bei fehlenden Schluesseln None liefert: fand route() nichts, soll die Pruefung sauber scheitern
-    statt den ganzen Lauf mit KeyError abzubrechen."""
+    """dict that returns None for missing keys: if route() found nothing, the check should fail cleanly
+    instead of aborting the whole run with a KeyError."""
 
     def __missing__(self, key):
         return None
@@ -68,10 +68,10 @@ def chat(model, ctx=None, stream=True, **extra):
 
 
 def route(since=None):
-    """Die Routing-Entscheidung zur letzten Anfrage (oder ab `since`).
+    """The routing decision for the last request (or since `since`).
 
-    NICHT decisions[-1] nehmen: dazwischen landen free-, busy-, prewarm- oder unload-Ereignisse, die nichts mit
-    der eigenen Anfrage zu tun haben - genau daran ist der Test 'warm zuerst' sporadisch gescheitert.
+    Do NOT use decisions[-1]: free-, busy-, prewarm- or unload-events may land in between, unrelated to
+    your own request - this is exactly why the 'warm first' test failed sporadically.
     """
     t0 = REQ_T if since is None else since
     ds = [d for d in state()["decisions"] if d["event"] == "route" and d.get("t", 0) >= t0]
@@ -101,12 +101,12 @@ def last_route(node_proc_out, n=1):
 def main():
     procs = []
     logs = {}
-    # selbstsigniertes Zertifikat für den TLS-Control-Port (openssl aus Git for Windows / System)
+    # self-signed certificate for the TLS control port (openssl from Git for Windows / System)
     if not os.path.exists(os.path.join(HERE, "test-cert.pem")):
         subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
                         "-keyout", "test-key.pem", "-out", "test-cert.pem", "-days", "30", "-subj", "/CN=localhost"],
                        cwd=HERE, check=True, capture_output=True)
-    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl", "metrics.json", "agent-update.pub", "agent/manifest.json", "ollama-latest.json", "fake-agent-tray.key"):   # usage.json: sonst zaehlen Cloud-Kosten des Vorlaufs mit   # Reste aus fruehrem Lauf entfernen
+    for f in ("roles.yaml", "perf.json", "nodes.json", "fake-agent-big.key", "audit.jsonl", "usage.json", "decisions.jsonl", "events.jsonl", "metrics.json", "agent-update.pub", "agent/manifest.json", "ollama-latest.json", "fake-agent-tray.key"):   # usage.json: otherwise cloud costs of the previous run are counted   # remove leftovers from earlier run
         try:
             os.remove(os.path.join(HERE, f))
         except FileNotFoundError:
@@ -118,7 +118,7 @@ def main():
                                       stdout=logs[name], stderr=subprocess.STDOUT))
     logs["jevlike"] = open(os.path.join(HERE, "fake-jevlike.log"), "w+")   # Decision Engine: Fake-Jevlike
     procs.append(subprocess.Popen([PY, os.path.join(HERE, "fake_jevlike.py"), "21020"], cwd=HERE, stdout=logs["jevlike"], stderr=subprocess.STDOUT))
-    logs["cloud"] = open(os.path.join(HERE, "fake-cloud.log"), "w+")   # Stufe 5: OpenAI- und Anthropic-Fake auf einem Port
+    logs["cloud"] = open(os.path.join(HERE, "fake-cloud.log"), "w+")   # Tier 5: OpenAI and Anthropic fakes on one port
     procs.append(subprocess.Popen([PY, os.path.join(HERE, "fake_cloud.py"), "21010", "cloud-test-key", "claude-test-key"], cwd=HERE,
                                   stdout=logs["cloud"], stderr=subprocess.STDOUT))
     open(os.path.join(HERE, "secrets.env"), "w", encoding="utf-8").write("CLOUD_TEST_KEY=cloud-test-key\nCLAUDE_TEST_KEY=claude-test-key\n")
@@ -126,13 +126,13 @@ def main():
     router = subprocess.Popen([PY, os.path.join(HERE, "..", "router", "router.py"), os.path.join(HERE, "test-config.yaml")],
                               stdout=rlog, stderr=subprocess.STDOUT, cwd=HERE)
     procs.append(router)
-    # big kommt per Tunnel: Fake-Agent verbindet sich zum Router und reicht an das Fake-Ollama (TLS + Token) weiter
+    # big comes via tunnel: fake agent connects to the router and forwards to the fake Ollama (TLS + token)
     logs["agent-big"] = open(os.path.join(HERE, "fake-agent-big.log"), "w+")
     agent = subprocess.Popen([PY, os.path.join(HERE, "fake_agent.py"), "wss://127.0.0.1:21435", "big", "https://127.0.0.1:21001", os.path.join(HERE, "fake-agent-big.key"), "testtoken"],
                              stdout=logs["agent-big"], stderr=subprocess.STDOUT, cwd=HERE)
     procs.append(agent)
     try:
-        # Registrierung: big kennt der Router nicht -> Schluessel landet als "wartet auf Freigabe" im Register
+        # Registration: router does not know big -> key lands as "awaiting approval" in the register
         reg = None
         for _ in range(30):
             time.sleep(0.5)
@@ -176,7 +176,7 @@ def main():
         st, raw = http(R + "/api/show", {"model": "standard"})
         check("/api/show für Rolle ohne Tag", st == 200 and "tools" in raw.decode(), f"{st}")
 
-        time.sleep(5)   # prewarm wartet bis 4 s auf einen Heartbeat (keiner da -> Knoten ohne Agent)
+        time.sleep(5)   # prewarm waits up to 4 s for a heartbeat (none present -> node without agent)
         pre = [d for d in state()["decisions"] if d["event"] == "prewarm"]
         check("prewarm beim Online-Gehen: qwen auf big vorgeladen", any(p["node"] == "big" and p["model"] == "qwen3.6:35b-a3b" and p["ctx"] == 65536 for p in pre), str(pre))
         st, txt = chat("standard:latest", ctx=65536)
@@ -191,23 +191,23 @@ def main():
         j = json.loads(txt)
         check("non-stream + Name ohne Tag; ctx nach unten begrenzt", st == 200 and j["model"] == "standard:latest", txt[:100])
         d = route()
-        # seit Router 0.3.7: qwen ist mit 65536 geladen (<= Stufe) -> die Rolle bekommt den geladenen Kontext statt eines Reloads
-        # auf 8192 (qwen3.8 teilt den Runner nicht ueber verschiedene num_ctx; proxy._backend_body, selftest_kontext_teilen.py)
+        # since router 0.3.7: qwen is loaded with 65536 (<= tier) -> the role gets the loaded context instead of a reload
+        # to 8192 (qwen3.8 does not share the runner across different num_ctx; proxy._backend_body, selftest_context_sharing.py)
         check("Rolle mit kleinerem num_ctx nimmt den geladenen Kontext (65536 <= Stufe, kein Reload)", d["ctx"] == 65536, str(d["ctx"]))
 
         time.sleep(1.5)  # Poll holt /api/ps -> qwen geladen
-        hb("big", 2, 26600, 6000)   # 5.9 GiB frei: qwen (21.4) passt nur, weil geladenes Ollama-VRAM (20.6) verdrängbar zählt
+        hb("big", 2, 26600, 6000)   # 5.9 GiB free: qwen (21.4) fits only because loaded Ollama VRAM (20.6) counts as evictable
         st, txt = chat("local-assist")
         d = route()
         check("Alias (gleicher Digest) als konkretes Modell -> warm auf big", st == 200 and d["node"] == "big" and d["warm"] is True, str(d))
         logs["big"].seek(0); sent = last_route(logs["big"].read())[-1]
-        # qwen ist weiter mit 65536 geladen (die 8192-Anfrage oben hat ihn mitbenutzt) -> Alias-Request sendet 65536, nicht den Ollama-Default
+        # qwen is still loaded with 65536 (the 8192 request above used it) -> alias request sends 65536, not the Ollama default
         check("Alias ohne num_ctx uebernimmt geladenen Kontext (65536, kein Reload)", sent["num_ctx"] == 65536, str(sent))
-        # Fremd-VRAM-Transiente (Modellwechsel): ein einzelner Ausreisser darf nicht busy machen
+        # Foreign VRAM transients (model switch): a single outlier must not make it busy
         hb("big", 5, 30000, 2600); time.sleep(0.6); hb("big", 5, 26600, 6000)
         check("einzelner Fremd-VRAM-Ausreisser bleibt free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["busy_reason"])
-        # GPU-Schutz (Agent >= 0.7.0): Status im Heartbeat -> Deckel, HA-Problem, Ereignis; kein Einfluss auf free/busy.
-        # Die ersten drei Meldungen kommen wie von einem Agenten vor 0.20.0 (deutsch), die vierte mit den Namen ab 0.20.0.
+        # GPU guard (agent >= 0.7.0): status in heartbeat -> cap, HA problem, event; no effect on free/busy.
+        # The first three messages come as from an agent before 0.20.0 (German), the fourth with the names from 0.20.0.
         base_cap = state()["nodes"]["big"]["max_inflight"]
         st, txt = hb("big", 5, 26600, 6000, gpu_guard={"state": "gedrosselt", "limit_w": 403, "target_w": 403, "default_limit_w": 575, "problem": False, "quelle": "nvml"})
         n = state()["nodes"]["big"]
@@ -227,7 +227,7 @@ def main():
         m_txt = http(C + "/metrics")[1]
         m_txt = m_txt.decode() if isinstance(m_txt, bytes) else str(m_txt)
         check("Metrik skirnir_node_gpu_guard", 'skirnir_node_gpu_guard{node="big",state="normal"} 1' in m_txt, "")
-        # Entscheidungsprotokoll persistent: events.jsonl neben der Config, eine Zeile je Eintrag; ein frischer Prozess laedt es
+        # Decision log persistent: events.jsonl next to the config, one line per entry; a fresh process loads it
         decs = state()["decisions"]
         ev_lines = [json.loads(l) for l in open(os.path.join(HERE, "events.jsonl"), encoding="utf-8") if l.strip()]
         check("events.jsonl: jeder Eintrag des Protokolls steht als Zeile in der Datei", len(ev_lines) >= len(decs) and ev_lines[-1]["ts"] == decs[-1]["ts"] and ev_lines[-1]["event"] == decs[-1]["event"], f"{len(ev_lines)} Zeilen, {len(decs)} im Speicher")
@@ -238,7 +238,7 @@ def main():
         st, txt = chat("assist:latest")
         d = route()
         check("assist: warmes Modell (tier0 geladen) gewinnt", d["tier"] == 0 and d["warm"] is True, str(d))
-        # 0.6.6: interactive weicht aus, wenn das warme Modell an seiner max_parallel-Grenze belegt ist; normal wartet weiter
+        # 0.6.6: interactive falls back if the warm model is at its max_parallel limit; normal keeps waiting
         qwen_kat = {"weights_gib": 20.6, "kv_gib_per_1k": 0.001}
         st_q, raw_q = http(C + "/admin/config", {"models": {"qwen3.6:35b-a3b": {**qwen_kat, "max_parallel": 1}}}, method="PUT")
         lang = {}
@@ -247,8 +247,8 @@ def main():
         th_l.start()
         time.sleep(0.6)
         t_i = time.time()
-        # num_ctx 4096: granite passt so auch auf small (8 GB; @16384 nicht) - sonst bliebe nur big, und das Ausweichmodell auf big
-        # verschoebe die VRAM-Rechnung der Busy-Tests weiter unten (so passiert beim ersten Lauf)
+        # num_ctx 4096: granite fits on small (8 GB; @16384 does not) - otherwise only big remains, and the fallback model on big
+        # would shift the VRAM calculation of the busy tests further down (as happens on the first run)
         st_i, raw_i = http(R + "/api/chat", {"model": "assist:latest", "stream": False, "options": {"num_ctx": 4096},
                                              "messages": [{"role": "user", "content": "Licht an"}]})
         dt_i = time.time() - t_i
@@ -271,12 +271,12 @@ def main():
         d = route()
         check("code 65536: 17.3+6.3+0.8=24.4 passt in 31.8-1 -> tier0", d["tier"] == 0 and d["model"] == "qwen3-coder:30b", str(d))
 
-        # big wird busy: 60 % Auslastung, 2 s sustain
-        # Erst: nur Auslastung, kein fremdes VRAM (= anderer Ollama-Client) -> darf NICHT busy werden
+        # big becomes busy: 60 % utilization, 2 s sustain
+        # First: only utilization, no foreign VRAM (= other Ollama client) -> must NOT become busy
         for _ in range(4):
             hb("big", 65, 31300, 1300); time.sleep(0.7)    # 30.6 GiB belegt = 23.6 coder@65k (17.3+0.096*65.5) + 7 Baseline -> foreign 0
         check("Auslastung ohne fremdes VRAM bleibt free (anderer Ollama-Client)", state()["nodes"]["big"]["state"] == "free")
-        # Dann: Spiel -> Auslastung + 1.7 GiB fremdes VRAM
+        # Then: game -> utilization + 1.7 GiB foreign VRAM
         for _ in range(4):
             hb("big", 65, 33400, 0); time.sleep(0.7)       # 32.6 = 23.6 + 7 + 2.0 fremd
         s = state()
@@ -284,18 +284,18 @@ def main():
               json.dumps({k: s["nodes"]["big"].get(k) for k in ("state", "busy_reason", "gpu_util", "vram_used_gib", "vram_free_gib", "foreign_vram_gib", "baseline_gib", "loaded", "inflight", "gpu_known", "heartbeat_age_s", "breaker")}))
         time.sleep(0.5)
         for _ in range(2):
-            hb("big", 65, 9000, 23600); time.sleep(0.5)    # qwen entladen: 8.8 GiB = 7 Baseline + 1.8 Spiel
+            hb("big", 65, 9000, 23600); time.sleep(0.5)    # qwen unloaded: 8.8 GiB = 7 baseline + 1.8 game
         logs["big"].seek(0); out = logs["big"].read()
         check("unload_on_busy entlädt das grosse Modell (nicht granite)", '"unload": "qwen3-coder:30b"' in out and '"unload": "granite4.2:8b"' not in out)
 
         st, txt = chat("standard:latest", ctx=65536)
         d = route()
         check("standard bei busy big -> granite tier1 (busy_ok)", st == 200 and d["model"] == "granite4.2:8b" and d["tier"] == 1, str(d))
-        # big busy: 20.1-2 = 18.1 GiB Budget -> granite@32768 (4.95+5.2+0.8=10.9) passt auf big; small (8-1=7) nicht
+        # big busy: 20.1-2 = 18.1 GiB budget -> granite@32768 (4.95+5.2+0.8=10.9) fits on big; small (8-1=7) does not
         check("... und zwar auf big (small zu klein für 32k)", d["node"] == "big", d["node"])
         st, txt = chat("gross:latest")
         check("gross bei busy big ohne Fallback -> 503", st == 503, f"{st} {txt[:80]}")
-        # Router 0.3.4: der Client bekommt den Grund als Code + Retry-After, nicht nur "no node available"
+        # Router 0.3.4: the client gets the reason as code + Retry-After, not just "no node available"
         e503 = json.loads(txt) if st == 503 else {}
         check("... mit Grund-Code gpu_busy, Retry-After und Hindernis je Knoten", e503.get("code") == "gpu_busy"
               and LAST_HEADERS.get("Retry-After") == "30" and any(b.get("node") == "big" for b in e503.get("blockers", [])),
@@ -321,8 +321,8 @@ def main():
               and ha["roles"]["gross"].get("limited_by_busy") is True and "gross" in ha["roles_limited"]
               and not any("gross" in p for p in ha["problems"]), json.dumps({"problems": ha["problems"], "limited": ha["roles_limited"]}))
 
-        # Sicherheitsnetz: grosses Modell landet trotz busy im VRAM (z. B. Load-Race) -> Router entlaedt es nachtraeglich.
-        # Heartbeats laufen dabei durchgehend weiter (sonst wird der Knoten durch Heartbeat-Staleness kurz free).
+        # Safety net: large model lands in VRAM despite busy (e.g. load race) -> router unloads it afterwards.
+        # Heartbeats keep running throughout (otherwise the node becomes briefly free due to heartbeat staleness).
         for _ in range(3):
             hb("big", 65, 33400, 0); time.sleep(0.7)
         def unloads():
@@ -330,8 +330,8 @@ def main():
         before = unloads()
         http("https://127.0.0.1:21001/api/generate", {"model": "qwen3-coder:30b", "keep_alive": -1, "options": {"num_ctx": 8192}}, headers={"X-Router-Token": "testtoken"}, auth=False)
         after = before
-        # bis ~7 s: Mindestabstand des Sicherheitsnetzes (unload_on_busy_interval_s, im Test 2 s) + Poll (1 s) +
-        # asynchroner Unload; used > total, damit trotz Extra-Modell fremdes VRAM bleibt
+        # up to ~7 s: minimum interval of the safety net (unload_on_busy_interval_s, 2 s in test) + poll (1 s) +
+        # asynchronous unload; used > total, so foreign VRAM remains despite extra model
         for _ in range(10):
             hb("big", 65, 45000, 0); time.sleep(0.7)
             after = unloads()
@@ -339,10 +339,10 @@ def main():
                 break
         check("busy-Sicherheitsnetz: nachtraeglich geladenes grosses Modell wird wieder entladen", after > before and state()["nodes"]["big"]["state"] == "busy",
               f"unloads {before} -> {after}, state {state()['nodes']['big']['state']}")
-        # 0.6.8 Hysterese: ein Spiel mit Last zwischen Austritts- (20 %) und Eintrittsschwelle (40 %) und wenig fremdem VRAM
-        # (1,8 GiB: unter or_foreign_vram_gib 3.0, ueber util_requires_foreign_gib 1.0) haelt busy laenger als below_for_s (2 s)
-        # Ausgangspunkt ist die Rechnung des Routers selbst (belegt - fremd = Ollama + Kinder + Grundverbrauch); die Summe der
-        # geladenen Modelle traf es nicht (erster Lauf: fremd 0,0, Ollama-Prozess zaehlt mehr als die Modellgroessen)
+        # 0.6.8 hysteresis: a game with load between exit (20 %) and entry threshold (40 %) and little foreign VRAM
+        # (1.8 GiB: below or_foreign_vram_gib 3.0, above util_requires_foreign_gib 1.0) keeps busy longer than below_for_s (2 s)
+        # Starting point is the router's own calculation (busy - foreign = Ollama + children + baseline); the sum of
+        # loaded models did not match (first run: foreign 0.0, Ollama process counts more than model sizes)
         nb = state()["nodes"]["big"]
         used_spiel = int((nb["vram_used_gib"] - nb["foreign_vram_gib"] + 1.8) * 1024)
         for _ in range(6):
@@ -350,23 +350,23 @@ def main():
         nb = state()["nodes"]["big"]
         check("Hysterese: Spiel mit 25 % Last und ~1,8 GiB fremdem VRAM haelt busy (free erst unter 20 %), kein Flattern",
               nb["state"] == "busy", f"{nb['state']} util {nb['gpu_util']} fremd {nb['foreign_vram_gib']} geladen {nb.get('loaded')}")
-        # busy vorbei: Heartbeats bis der Knoten free ist, dann SOFORT weiter (die naechste Pruefung muss vor dem
-        # prewarm-on-free liegen, der 6 s nach dem Wechsel startet)
+        # busy over: heartbeats until the node is free, then continue IMMEDIATELY (the next check must be before the
+        # prewarm-on-free, which starts 6 s after the switch)
         for _ in range(12):
             hb("big", 3, 8000, 24600); time.sleep(0.7)
             if state()["nodes"]["big"]["state"] == "free":
                 break
         check("big -> free nach Ruhe", state()["nodes"]["big"]["state"] == "free")
 
-        # big ist wieder free, granite (tier 2) noch warm, qwen kalt: warm zuerst -> granite; strikt -> qwen kalt
+        # big is free again, granite (tier 2) still warm, qwen cold: warm first -> granite; strict -> qwen cold
         st, txt = chat("standard:latest", ctx=16384)
         d = route()
         check("warm zuerst: warmes granite (tier 2) schlaegt kaltes qwen", d["node"] == "big" and d["model"] == "granite4.2:8b" and d["warm"] is True,
-              f"{d} geladen={list(state()['nodes']['big']['loaded'])}")   # bei Fehlschlag sofort sichtbar, ob prewarm schon qwen geholt hat
+              f"{d} geladen={list(state()['nodes']['big']['loaded'])}")   # visible immediately on failure whether prewarm has already fetched qwen
         st, txt = chat("strikt:latest", ctx=16384)
         d = route()
         check("strikt (latency_first=false): tier0 qwen trotz Kaltstart", d["model"] == "qwen3-coder:30b" and d["tier"] == 0, str(d))
-        for _ in range(10):   # ~7 s mit laufenden Heartbeats: prewarm on free (6 s) holt das Rang-1-Modell zurueck
+        for _ in range(10):   # ~7 s with running heartbeats: prewarm on free (6 s) fetches the rank-1 model back
             hb("big", 3, 8000, 24600); time.sleep(0.7)
         pre = [d for d in state()["decisions"] if d["event"] == "prewarm" and d.get("reason") == "free"]
         check("prewarm nach busy->free: Rang-1 wieder vorgeladen", any(p["node"] == "big" for p in pre), str(pre[-2:]))
@@ -374,28 +374,28 @@ def main():
         d = route()
         check("standard nach prewarm -> tier0 qwen warm", d["node"] == "big" and d["tier"] == 0 and d["warm"] is True, str(d))
 
-        # Residenz: ein konkret angefordertes Fremdmodell (gpt-oss, in keiner Rolle Rang 1) verdraengt qwen (Fake-Ollama
-        # wirft bei >31.8 GiB das aelteste raus: granite, dann qwen). Ohne die Regel bliebe qwen kalt und "warm zuerst"
-        # naehme fortan die Ausweichstufe; mit ihr kommt qwen nach residency_idle_s (3 s im Test) zurueck - aber nur,
-        # weil der Verdraenger seit dann nicht mehr angefragt wurde.
-        # Modellwechsel: waehrend gpt-oss laedt (slow_load 2.5 s, qwen zaehlt bis zum naechsten Poll als geladen), darf eine
-        # zweite Anfrage auf dasselbe Modell nicht mit 503 'no node' abgewiesen werden, sondern wartet auf das Laden.
-        hb("big", 2, 26600, 6000)   # 5.9 GiB frei: ohne qwen in /api/ps reicht das Budget fuer gpt-oss (12.8) nicht -> frueher 503
+        # Residency: a specifically requested foreign model (gpt-oss, not rank 1 in any role) evicts qwen (Fake-Ollama
+        # throws out the oldest at >31.8 GiB: granite, then qwen). Without the rule, qwen would stay cold and "warm first"
+        # would take the fallback tier; with it, qwen returns after residency_idle_s (3 s in test) - but only,
+        # because the evictor has not been requested since then.
+        # Model switch: while gpt-oss is loading (slow_load 2.5 s, qwen counts as loaded until next poll), a
+        # second request for the same model must not be rejected with 503 'no node', but wait for the load.
+        hb("big", 2, 26600, 6000)   # 5.9 GiB free: without qwen in /api/ps, the budget for gpt-oss (12.8) is insufficient -> previously 503
         first = {}
         th = threading.Thread(target=lambda: first.update(zip(("st", "txt"), chat("gpt-oss:20b", ctx=8192, slow_load=6), strict=True)))
-        th.start(); time.sleep(2.5)   # Poll hat die Verdraengung gesehen, gpt-oss noch nicht da
+        th.start(); time.sleep(2.5)   # Poll saw the eviction, gpt-oss not yet there
         st2, txt2 = chat("gpt-oss:20b", ctx=8192)
         th.join()
         waits = [d for d in state()["decisions"] if d.get("event") == "wait_load"]
         check("Modellwechsel: zweite Anfrage wartet auf das Laden statt 503", first.get("st") == 200 and st2 == 200 and waits and waits[-1]["model"] == "gpt-oss:20b",
               f"erste {first.get('st')} zweite {st2} {txt2[:80] if st2 != 200 else ''} wait_load {len(waits)}")
         st, txt = chat("gpt-oss:20b", ctx=8192)
-        time.sleep(0.8)   # der Kaltstart stoesst einen sofortigen Poll an; kurz warten, bis /api/ps eingelesen ist
+        time.sleep(0.8)   # Cold start triggers an immediate poll; wait briefly until /api/ps is read
         n = state()["nodes"]["big"]
         check("konkretes Fremdmodell verdraengt qwen (Vorbedingung)", st == 200 and "gpt-oss:20b" in n["loaded"] and "qwen3.6:35b-a3b" not in n["loaded"],
               f"geladen {list(n['loaded'])}")
-        for _ in range(12):   # Heartbeats halten den Knoten free/gpu_known; Regel prueft jede Sekunde, Leerlauf 3 s
-            hb("big", 3, 18000, 14600); time.sleep(0.6)   # 17.6 GiB belegt: gpt-oss 12 + Desktop, kein fremdes VRAM
+        for _ in range(12):   # Heartbeats keep the node free/gpu_known; rule checks every second, idle 3 s
+            hb("big", 3, 18000, 14600); time.sleep(0.6)   # 17.6 GiB used: gpt-oss 12 + Desktop, no foreign VRAM
             if state()["nodes"]["big"]["loaded"].get("qwen3.6:35b-a3b"):
                 break
         n = state()["nodes"]["big"]
@@ -406,23 +406,23 @@ def main():
         d = route()
         check("... und standard laeuft wieder warm auf tier0", d["node"] == "big" and d["tier"] == 0 and d["warm"] is True, str(d))
 
-        # Warm-Fit: ein schon geladenes Modell braucht kein weiteres VRAM. Der Heartbeat direkt nach einer Antwort
-        # zeigt wenig freies VRAM (Rechenpuffer); mit Budgetpruefung (1.27 + 20.6 - 1 = 20.9 < 21.5 GiB) fiele der
-        # warme Knoten durch und die Anfrage ginge auf die Ausweichstufe - so lief am 2026-09-10 die zweite
-        # Sprachrunde auf gpu-laptop/gemma statt auf dem warmen qwen.
+        # Warm-Fit: an already loaded model needs no extra VRAM. The heartbeat right after a response
+        # shows little free VRAM (compute buffer); with budget check (1.27 + 20.6 - 1 = 20.9 < 21.5 GiB) the
+        # warm node would fail and the request would go to the fallback tier - this happened on 2026-09-10 for the second
+        # voice round on gpu-laptop/gemma instead of the warm qwen.
         hb("big", 2, 31300, 1300)
-        st, txt = chat("standard:latest", ctx=16384)   # qwen ist mit 16384 geladen (letzte Anfrage), also warm fuer <= 16384
+        st, txt = chat("standard:latest", ctx=16384)   # qwen is loaded with 16384 (last request), so warm for <= 16384
         d = route()
         check("Warm-Fit: geladenes Modell wird trotz knappem freiem VRAM genommen", st == 200 and d["node"] == "big" and d["tier"] == 0 and d["warm"] is True, str(d))
 
-        # --- Stufe 1: Request-Semantik (design/roadmap.md). Der Client beschreibt (routing-Block, Anforderungen aus dem
-        # Request), der Router entscheidet und sagt in der Antwort, was er getan hat. ---
+        # --- Tier 1: Request semantics (design/roadmap.md). The client describes (routing block, requirements from the
+        # request), the router decides and states in the response what it did. ---
         hb("big", 3, 8000, 24600); time.sleep(0.3)   # wieder normal viel freies VRAM
         msg = [{"role": "user", "content": "hi"}]
         body = {"model": "standard:latest", "messages": msg, "stream": False,
                 "routing": {"min_context": 40000, "request_id": "req-42", "session_id": "sess-1"}}
         REQ_T = time.time(); st, raw = http(R + "/api/chat", body)
-        h1 = dict(LAST_HEADERS)   # vor route()/state(), die ueberschreiben LAST_HEADERS
+        h1 = dict(LAST_HEADERS)   # before route()/state(), which overwrite LAST_HEADERS
         j = json.loads(raw) if st == 200 else {}
         ri = j.get("routing") or {}
         d = route()
@@ -445,12 +445,12 @@ def main():
         h1 = dict(LAST_HEADERS)
         d = route()
         check("workload:standard ist ein Alias der Rolle standard", st == 200 and d["role"] == "standard" and d["node"] == "big", f"{st} {d}")
-        # abgeleitete Anforderungen: tools im Request, gpt-oss kann (im Fake) keine -> konkretes Modell 400
+        # derived requirements: tools in request, gpt-oss cannot (in Fake) -> specific model 400
         tool = [{"type": "function", "function": {"name": "f", "description": "x", "parameters": {"type": "object", "properties": {}}}}]
         st, raw = http(R + "/api/chat", {"model": "gpt-oss:20b", "messages": msg, "stream": False, "tools": tool})
         check("konkretes Modell ohne Faehigkeit tools -> 400 mit Klartext", st == 400 and "tools" in raw.decode(), f"{st} {raw[:120]!r}")
-        # Tool-Call im falschen Dialekt: Ollama verwirft ihn still (leerer content, keine tool_calls).
-        # Die Rettungsstufe holt ihn zurueck - gemessen 2026-09-15 an qwen3-coder:30b, 80 % Verlust ab ~12k Token.
+        # Tool call in wrong dialect: Ollama discards it silently (empty content, no tool_calls).
+        # The rescue tier fetches it back - measured 2026-09-15 on qwen3-coder:30b, 80 % loss at ~12k tokens.
         tool_t = [{"type": "function", "function": {"name": "get_time", "description": "Zeit",
                    "parameters": {"type": "object", "properties": {"tz": {"type": "string"}}}}}]
         st, raw = http(R + "/api/chat", {"model": "qwen3.6:35b-a3b", "messages": msg, "stream": False,
@@ -471,7 +471,7 @@ def main():
               st == 200 and len(tcs_r) == 1 and text_ == "", f"{st} {text_[:80]!r}")
         check("Stream: Zaehler ueberleben die Rettung",
               any(z.get("done") and z.get("eval_count") == 12 for z in zeilen), raw.decode()[-120:])
-        # Gegenprobe: mit format ist die Stufe aus - eine JSON-Antwort ist dort das gewollte Ergebnis
+        # Counter-test: with format, the tier is off - a JSON response is the desired result there
         st, raw = http(R + "/api/chat", {"model": "qwen3.6:35b-a3b", "messages": msg, "stream": False,
                                          "tools": tool_t, "format": {"type": "object"}, "broken_tool_call": True})
         jr = json.loads(raw) if st == 200 else {}
@@ -479,19 +479,19 @@ def main():
               st == 200 and not (jr.get("message") or {}).get("tool_calls")
               and "<function=" in ((jr.get("message") or {}).get("content") or ""),
               f"{st} {raw[:120]!r}")
-        # Rolle: alle Stufen fallen weg -> 400 (Fehler des Requests), nicht 503 (Kapazitaet)
+        # Role: all tiers fall away -> 400 (request error), not 503 (capacity)
         st, raw = http(R + "/api/chat", {"model": "strikt:latest", "messages": msg, "stream": False, "routing": {"require": ["vision"]}})
         check("routing.require vision: keine Stufe der Rolle kann es -> 400", st == 400 and "vision" in raw.decode(), f"{st} {raw[:120]!r}")
-        # Rolle strikt (coder -> granite) mit think: coder denkt nicht (Fake) -> Stufe 0 uebersprungen, granite@16384 bedient
+        # Role strict (coder -> granite) with think: coder does not think (Fake) -> tier 0 skipped, granite@16384 serves
         st, raw = http(R + "/api/chat", {"model": "strikt:latest", "messages": msg, "stream": False, "think": True, "routing": {}})
         ri = (json.loads(raw) if st == 200 else {}).get("routing") or {}
         check("think in Rolle strikt: coder-Stufe uebersprungen (fehlende Faehigkeit thinking), granite bedient",
               st == 200 and ri.get("model") == "granite4.2:8b" and ri.get("tier") == 1 and len(ri.get("skipped", [])) == 1
               and "thinking" in ri["skipped"][0]["reason"] and ri.get("required") == ["thinking"], f"{st} {ri}")
-        # granite wieder von big entladen, damit der Unload-Test unten nur qwen vorfindet
+        # granite unloaded from big again, so the unload test below only finds qwen
         http("https://127.0.0.1:21001/api/generate", {"model": "granite4.2:8b", "keep_alive": 0}, headers={"X-Router-Token": "testtoken"}, auth=False)
         time.sleep(1.2)
-        # Katalog-Override: gpt-oss structured:false -> format-Schema wird abgelehnt, bevor Ollama 500 liefert
+        # Catalog override: gpt-oss structured:false -> format schema rejected before Ollama returns 500
         st, raw = http(R + "/api/chat", {"model": "gpt-oss:20b", "messages": msg, "stream": False, "format": {"type": "object"}})
         check("Katalog-Override capabilities.structured=false -> 400 bei format-Schema", st == 400 and "structured" in raw.decode(), f"{st} {raw[:120]!r}")
         st, raw = http(R + "/api/chat", {"model": "standard:latest", "messages": msg, "stream": False, "routing": {"require": ["telepathie"]}})
@@ -501,7 +501,7 @@ def main():
         st, raw = http(R + "/api/chat", {"model": "standard:latest", "stream": False,
                                          "messages": [{"role": "user", "content": "hi", "images": ["AA==", "AA==", "AA=="]}]})
         check("Limit max_images 2: drei Bilder -> 413", st == 413 and "images" in raw.decode(), f"{st} {raw[:120]!r}")
-        # /v1: derselbe routing-Block, Info im Objekt und Header
+        # /v1: same routing block, info in object and header
         st, raw = http(R + "/v1/chat/completions", {"model": "standard", "messages": msg, "routing": {"request_id": "oa-7"}})
         j = json.loads(raw) if st == 200 else {}
         check("/v1: routing-Block angenommen, Routing-Info im chat.completion + Header", st == 200
@@ -515,7 +515,7 @@ def main():
               and "structured" in caps.get("qwen3.6:35b-a3b", []) and "tools" not in caps.get("gpt-oss:20b", ["tools"])
               and "thinking" not in caps.get("qwen3-coder:30b", ["thinking"]), str({k: caps.get(k) for k in ("gpt-oss:20b", "qwen3-coder:30b")}))
 
-        # --- Stufe 3: Scheduler - Score, Statistik, Circuit Breaker, Admission Control mit Prioritaeten ---
+        # --- Tier 3: Scheduler - Score, Statistics, Circuit Breaker, Admission Control with priorities ---
         st, raw = http(R + "/api/chat", {"model": "standard:latest", "messages": msg, "stream": False, "routing": {}})
         ri = (json.loads(raw) if st == 200 else {}).get("routing") or {}
         cands = ri.get("candidates") or []
@@ -524,8 +524,8 @@ def main():
         pe = state()["perf"].get("qwen3.6:35b-a3b@big") or {}
         check("Statistik: EWMA tok/s und Ergebniszaehler je Modell@Knoten", (pe.get("ewma") or {}).get("gen_tps") and (pe.get("outcomes") or {}).get("ok", 0) >= 1
               and ri.get("priority") == "normal", str({k: pe.get(k) for k in ("ewma", "outcomes")}))
-        # Circuit Breaker: drei Backend-Fehler (500 vor dem ersten Byte) -> big OPEN (2 s im Test); Anfragen gehen auf small,
-        # obwohl qwen auf big warm ist; nach open_s eine Probe (half_open) -> Erfolg -> closed
+        # Circuit Breaker: three backend errors (500 before first byte) -> big OPEN (2 s in test); requests go to small,
+        # although qwen is warm on big; after open_s a probe (half_open) -> success -> closed
         for _ in range(3):
             st, raw = http(R + "/api/chat", {"model": "qwen3.6:35b-a3b", "messages": msg, "stream": False, "fail_status": 500})
         nb = state()["nodes"]["big"]
@@ -542,8 +542,8 @@ def main():
         check("Breaker HALF_OPEN: Probe auf big gelingt -> CLOSED, Route wieder big/qwen warm", st == 200 and d["node"] == "big" and nb.get("breaker") == "closed", f"{d} {nb.get('breaker')}")
         ev = [x["state"] for x in state()["decisions"] if x["event"] == "breaker"]
         check("Breaker-Ereignisse protokolliert (open, half_open, closed)", ev[-3:] == ["open", "half_open", "closed"], str(ev))
-        # Admission: big max_inflight 1 (Policy). Eine lange Anfrage laeuft (1.5 s); batch und interactive warten;
-        # interactive wird zuerst zugelassen. deadline_ms 300 -> 503 statt warten. Danach Policy zurueck.
+        # Admission: big max_inflight 1 (Policy). One long request runs (1.5 s); batch and interactive wait;
+        # interactive is admitted first. deadline_ms 300 -> 503 instead of waiting. Then Policy back.
         http(C + f"/admin/nodes/{big['fp']}/policy", {"max_inflight": 1})
         order = []
 
@@ -583,7 +583,7 @@ def main():
         st, raw = http(R + "/api/chat", {"model": "standard:latest", "messages": msg, "stream": False, "routing": {"priority": "dringend"}})
         check("unbekannte Prioritaet -> 400", st == 400 and "priority" in raw.decode(), f"{st} {raw[:100]!r}")
 
-        # --- Stufe 4: Observability - /metrics (Prometheus-Text) und Usage ---
+        # --- Tier 4: Observability - /metrics (Prometheus text) and Usage ---
         st, raw = http(C + "/metrics")
         txt = raw.decode()
         check("/metrics: 200, Prometheus-Text mit Anfragen, Knoten, Histogramm, Tokens, Ereignissen", st == 200
@@ -605,7 +605,7 @@ def main():
         check("HA-Snapshot: requests_today/tokens_today", ha_["requests_today"] == today["requests"] and ha_["tokens_today"] == today["prompt_tokens"] + today["completion_tokens"],
               str({k: ha_.get(k) for k in ("requests_today", "tokens_today", "errors_today")}))
 
-        # --- Stufe 6: Betrieb - Config-Schema, Idempotency, Canary, Shadow, Supply Chain ---
+        # --- Tier 6: Operations - Config schema, Idempotency, Canary, Shadow, Supply Chain ---
         router_py = os.path.join(HERE, "..", "router", "router.py")
         rc = subprocess.run([PY, router_py, "--check", os.path.join(HERE, "test-config.yaml"), "--pure"], capture_output=True, text=True, cwd=HERE)
         check("router.py --check: Testkonfiguration gueltig (rc 0)", rc.returncode == 0 and "configuration ok" in rc.stdout, (rc.stdout + rc.stderr)[-200:])
@@ -614,7 +614,7 @@ def main():
         rc = subprocess.run([PY, router_py, "--check", bad, "--pure"], capture_output=True, text=True, cwd=HERE)
         os.remove(bad)
         check("--check: Tippfehler router.limitz -> rc 2, benannt, mit Vorschlag 'limits'", rc.returncode == 2 and "router.limitz" in rc.stdout and "'limits'" in rc.stdout, (rc.stdout + rc.stderr)[-220:])
-        # Idempotency: Wiederholung mit demselben Schluessel = dieselbe Antwort, keine zweite Inferenz
+        # Idempotency: repetition with same key = same response, no second inference
         body = {"model": "standard:latest", "messages": msg, "stream": False}
         REQ_T = time.time()
         st1, raw1 = http(R + "/api/chat", body, headers={"Idempotency-Key": "idem-1"}); hh1 = dict(LAST_HEADERS)
@@ -625,7 +625,7 @@ def main():
               f"{st1}/{st2} routen={len(routes_)} replay={hh2.get('X-Skirnir-Idempotent-Replay')}")
         st3, raw3 = http(R + "/api/chat", {**body, "stream": True}, headers={"Idempotency-Key": "idem-2"})
         check("Idempotency: Streams werden nicht gecacht", st3 == 200 and "X-Skirnir-Idempotent-Replay" not in LAST_HEADERS, str(st3))
-        # Canary 100 %: Rolle kanarie (granite) laeuft auf der Canary-Stufe qwen; Shadow 100 %: danach granite@4096 im Schatten
+        # Canary 100 %: role canary (granite) runs on canary tier qwen; Shadow 100 %: then granite@4096 in shadow
         REQ_T = time.time()
         st, raw = http(R + "/api/chat", {"model": "kanarie:latest", "messages": msg, "stream": False, "routing": {}})
         ri = (json.loads(raw) if st == 200 else {}).get("routing") or {}
@@ -649,7 +649,7 @@ def main():
               and bool((sc.get("models", {}).get("qwen3.6:35b-a3b") or {}).get("digest")) and "present" in (s_.get("build") or {}),
               f"version={sc.get('ollama_version')} build={s_.get('build')}")
 
-        # --- Stufe 5: Cloud als Stufe in Rollen (lokal zuerst; Datenklasse, Credential-Scan, Opt-out, Budget) ---
+        # --- Tier 5: Cloud as tier in roles (local first; data class, credential scan, opt-out, budget) ---
         def rinfo(raw_, st_):
             return (json.loads(raw_) if st_ == 200 else {}).get("routing") or {}
         cl = state()["cloud"]
@@ -738,7 +738,7 @@ def main():
         st, raw = http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"data_class": "geheimnis"}})
         check("unbekannte Datenklasse -> 400", st == 400 and "data_class" in raw.decode(), f"{st}")
 
-        # --- Stufe 7: Einstellungen per UI (settings-Block in roles.yaml, Allowlist settings.py), Cloud-Modelle im Katalog, Logo ---
+        # --- Tier 7: Settings via UI (settings block in roles.yaml, allowlist settings.py), cloud models in catalog, logo ---
         cfg7 = json.loads(http(C + "/admin/config")[1])
         items7 = {i["path"]: i for i in cfg7.get("settings", {}).get("items", [])}
         bud7 = items7.get("router.cloud.providers.testcloud.budget_month_chf") or {}
@@ -803,7 +803,7 @@ def main():
         check("Logo /skirnir.png (PNG), Tab-Icon /favicon.png und /favicon.ico", st == 200 and raw[:8] == b"\x89PNG\r\n\x1a\n"
               and http(C + "/favicon.png")[1][:4] == b"\x89PNG" and http(C + "/favicon.ico")[0] == 200)
 
-        # --- Clients-Tab: Client anlegen, Secret erzeugen/rotieren, Quell-IP, loeschen (alles in roles.yaml, config.yaml bleibt) ---
+        # --- Clients tab: create client, generate/rotate secret, source IP, delete (all in roles.yaml, config.yaml stays) ---
         import hashlib as _hl
         st, raw = http(C + "/admin/config", {"clients": {"pi-voice": {"roles": ["*"], "note": "Testclient"}}}, method="PUT")
         st2, raw2 = http(C + "/admin/clients/pi-voice/token", {}, method="POST")
@@ -825,7 +825,7 @@ def main():
         check("Rotation: altes Secret gilt nicht mehr (observe: anonym bedient), neues gilt", st == 200 and tok7b and tok7b != tok7 and ri_old.get("client") is None and ri_new.get("client") == "pi-voice",
               f"alt={ri_old.get('client')} neu={ri_new.get('client')}")
         st, raw = http(C + "/admin/config", {"settings": {"router.client_auth.clients.pi-voice.ip": "127.0.0.1", "router.client_auth.clients.pi-voice.data_class": "internal",
-                                                 "router.cloud.providers.testcloud.budget_month_chf": 50}}, method="PUT")   # Budget: der Cloud-Block oben hat 1.9 CHF verbraucht
+                                                 "router.cloud.providers.testcloud.budget_month_chf": 50}}, method="PUT")   # Budget: the Cloud block above consumed 1.9 CHF
         ri = rinfo(*http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"execution": "cloud"}})[::-1])
         check("Quell-IP + Datenklasse per UI: Anfrage ohne Header ist pi-voice und darf in die Cloud", st == 200 and ri.get("client") == "pi-voice" and ri.get("node") == "cloud:testcloud",
               f"{st} {raw.decode()[:80]} client={ri.get('client')} node={ri.get('node')} {ri.get('skipped')}")
@@ -859,7 +859,7 @@ def main():
               and "big" in lt["normal"]["nodes"], f"{st} {raw.decode()[:200]}")
         check("Lasttest im Entscheidungsprotokoll", any(d.get("event") == "loadtest" for d in state()["decisions"]))
 
-        # --- Decision Engine (2026-09-16): Auto-Rolle ueber Kette Fake-Jevlike -> Regeln ---
+        # --- Decision Engine (2026-09-16): Auto-role via chain Fake-Jevlike -> Rules ---
         dh = lambda tok: {"Authorization": "Bearer " + tok}   # noqa: E731 - hdr() gibt es erst im Client-Auth-Block
         tags_ = json.loads(http(R + "/api/tags", headers=dh("tester-token"))[1])["models"]
         check("Decision: auto:latest steht in /api/tags", any(m["name"] == "auto:latest" for m in tags_))
@@ -914,14 +914,14 @@ def main():
               and dec.get("engine") == "rules" and any("margin" in f for f in dec.get("fallback", [])), f"{st} {st2} {dec}")
         http(C + "/admin/config", {"settings": {"decision_engine.policy.min_margin": None}}, method="PUT")
 
-        # Unload-Nachlauf: /api/ps meldet sofort nichts mehr, nvidia-smi zeigt den Speicher noch. Ohne
-        # vram_settle_s erschiene der freiwerdende Speicher als fremdes VRAM (26600 MiB belegt - 0 Ollama
-        # - 7 GiB Baseline = 19 GiB "fremd") -> Knoten faelschlich busy und prewarm blockiert.
+        # Unload tail: /api/ps reports nothing immediately, nvidia-smi still shows memory. Without
+        # vram_settle_s, the freed memory appears as foreign VRAM (26600 MiB busy - 0 Ollama
+        # - 7 GiB baseline = 19 GiB "foreign") -> node falsely busy and prewarm blocked.
         vor = state()["nodes"]["big"]
         http("https://127.0.0.1:21001/api/generate", {"model": "qwen3.6:35b-a3b", "keep_alive": 0},
              headers={"X-Router-Token": "testtoken"}, auth=False)
         n = vor
-        for _ in range(8):   # bis der Poll das leere /api/ps gesehen hat; Heartbeat meldet weiter viel belegtes VRAM
+        for _ in range(8):   # until the poll sees the empty /api/ps; Heartbeat keeps reporting high busy VRAM
             hb("big", 2, 26600, 6000); time.sleep(0.5)
             n = state()["nodes"]["big"]
             if not n["loaded"]:
@@ -930,34 +930,34 @@ def main():
               and n["foreign_vram_gib"] == 0 and n["state"] == "free",
               f"geladen {list(vor['loaded'])} -> {list(n['loaded'])}, fremd {n['foreign_vram_gib']} GiB, {n['state']}")
 
-        # Lade-Nachlauf (Gegenrichtung): waehrend Ollama laedt, sieht nvidia-smi das Modell schon, /api/ps noch
-        # nicht. Ohne announce_load gilt das ladende Modell als fremdes VRAM - und ein Kaltstart, der laenger
-        # dauert als foreign_sustain_s, macht den Knoten mitten im Laden busy; das Sicherheitsnetz entlaedt dann
-        # genau das eben geladene Modell. `slow_load` haelt das Fake-Ollama 3 s in genau diesem Zustand.
-        # Erst den Nachlauf des Unloads auslaufen lassen (vram_settle_s = 8 s), sonst deckt DER schon das Fenster
-        # ab und der Test wuerde auch ohne announce_load bestehen (genau so passiert, bevor diese Schleife da war).
+        # Load tail (reverse direction): while Ollama loads, nvidia-smi sees the model, /api/ps does
+        # not. Without announce_load, the loading model counts as foreign VRAM - and a cold start taking
+        # longer than foreign_sustain_s makes the node busy mid-load; the safety net then unloads
+        # exactly that model just loaded. `slow_load` keeps the Fake-Ollama in this state for 3 s.
+        # Let the unload tail settle first (vram_settle_s = 8 s), otherwise THAT covers the window
+        # and the test would pass even without announce_load (exactly what happened before this loop existed).
         for _ in range(7):
-            hb("big", 3, 8000, 24600); time.sleep(1.5)   # wenig belegt: kein fremdes VRAM, Knoten bleibt free
+            hb("big", 3, 8000, 24600); time.sleep(1.5)   # low usage: no foreign VRAM, node stays free
 
-        # Baseline-Lernregel (nichts geladen, also lernt der Router gerade): der Median der Stundenmittel, NICHT
-        # das Minimum. Ein einzelner sehr ruhiger Moment - Monitor aus - darf den Grundverbrauch nicht dauerhaft
-        # nach unten ziehen; genau daran ging gpu-desktop grundlos busy.
+        # Baseline learning rule (nothing loaded, so router is learning): median of hourly averages, NOT
+        # the minimum. A single very quiet moment - monitor off - must not permanently
+        # lower the baseline consumption; that is exactly why gpu-desktop was falsely busy.
         def gelernt():
             r = next(n for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "big")
             return (r.get("learned") or {}).get("baseline_gib")
-        hb("big", 3, 2000, 30000)      # Ausreisser nach unten: 1.95 GiB belegt
+        hb("big", 3, 2000, 30000)      # Downward outlier: 1.95 GiB busy
         for _ in range(6):
             hb("big", 3, 9000, 23000); time.sleep(0.3)   # Normalbetrieb: 8.79 GiB
         b1 = gelernt()
         check("Baseline lernt den Normalbetrieb, nicht den ruhigsten Moment", b1 is not None and b1 > 4.0,
               f"gelernt {b1} GiB (Ausreisser 1.95, Normalfall 8.79 - das alte Minimum haette 1.95 geliefert)")
-        # Spielstunden gehoeren nicht hinein: bei hoher Auslastung wird gar nicht erst gesammelt
+        # Game hours do not belong here: under high load, no sampling occurs
         for _ in range(3):
-            hb("big", 80, 30000, 2000); time.sleep(0.2)   # "Spiel": 29.3 GiB belegt, GPU heiss
+            hb("big", 80, 30000, 2000); time.sleep(0.2)   # "Game": 29.3 GiB busy, GPU hot
         b2 = gelernt()
         check("bei heisser GPU wird nicht gelernt (ein Spiel faelscht die Baseline nicht)", b2 == b1,
               f"{b1} -> {b2} GiB")
-        hb("big", 3, 8000, 24600)   # wieder Ruhe fuer den naechsten Test
+        hb("big", 3, 8000, 24600)   # quiet again for the next test
         res = {}
 
         def lade():
@@ -967,20 +967,20 @@ def main():
         th = threading.Thread(target=lade, daemon=True)
         th.start()
         time.sleep(1.0)             # mitten im Ladevorgang
-        hb("big", 2, 26600, 6000)   # nvidia-smi sieht das Modell bereits: 26000 MiB belegt
+        hb("big", 2, 26600, 6000)   # nvidia-smi sees the model already: 26000 MiB busy
         n = state()["nodes"]["big"]
-        # seit 2026-09-11 zaehlt waehrend des Ladens mindestens das fremde VRAM von VOR dem Laden weiter (hier 0,8 GiB aus
-        # 7,8 belegt - 7 Baseline); nur das ladende Modell selbst darf nicht als fremd erscheinen
+        # since 2026-09-11, during loading, at least the foreign VRAM from BEFORE loading continues to count (here 0.8 GiB from
+        # 7.8 busy - 7 baseline); only the loading model itself must not appear as foreign
         check("Lade-Nachlauf: ladendes Modell gilt nicht als fremdes VRAM", not n["loaded"]
               and n["foreign_vram_gib"] <= 0.9 and n["state"] == "free",
               f"geladen {list(n['loaded'])}, fremd {n['foreign_vram_gib']} GiB, {n['state']}")
         th.join(timeout=25)
         check("... und die Anfrage laeuft normal durch", res.get("st") == 200, str(res.get("st")))
 
-        # Busy-Schwellen je Knoten (Policy): big mit busy_foreign_gib 0.5 -> 1 GiB fremd macht busy, obwohl global 3.0 gilt
+        # Busy thresholds per node (Policy): big with busy_foreign_gib 0.5 -> 1 GiB foreign makes busy, although global is 3.0
         fpb = next(n["fp"] for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "big")
         st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"busy_foreign_gib": 0.5, "busy_gpu_util_pct": 90})
-        for _ in range(12):   # Policy-Aenderung schickt dem Agenten ein Konfigurationspaket, der Tunnel kommt kurz neu
+        for _ in range(12):   # Policy change sends a config package to the agent, tunnel comes up briefly
             if state()["nodes"].get("big", {}).get("state") not in (None, "offline"):
                 break
             time.sleep(0.5)
@@ -1006,8 +1006,8 @@ def main():
             hb("big", 5, int(base_b * 1024), int(32607 - base_b * 1024)); time.sleep(0.7)
         check("Policy zurueck auf global: big wieder free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["state"])
 
-        # Router 0.7.0 / Agent 0.17.0: Spiel und Hauptspeicher als Fakt. Anlass 2026-10-04: Diablo IV neben qwen3.8@196k -> RAM 94 %,
-        # Knoten blieb free (kaum fremdes VRAM, keine Last). Ein gemeldetes Spiel macht busy, unabhaengig von VRAM und Last.
+        # Router 0.7.0 / Agent 0.17.0: Game and memory as fact. Trigger 2026-10-04: Diablo IV next to qwen3.8@196k -> RAM 94 %,
+        # Node stayed free (little foreign VRAM, no load). A reported game makes busy, independent of VRAM and load.
         viel = {"ram_available_gib": 30.0, "commit_free_gib": 40.0, "ram_total_gib": 63.4, "commit_limit_gib": 132.0}
         spiel = {"supported": True, "running": True, "name": "Diablo IV.exe", "via": "pfad"}
         ruhig = (int(base_b * 1024), int(32607 - base_b * 1024))
@@ -1035,8 +1035,8 @@ def main():
                 break
         check("... danach free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["state"])
 
-        # Router 0.8.7 / Agent 0.19.0: der Agent meldet den GPU-Bedarf des Spiels. Ein leichtes Spiel (gemessen 735 MiB eigen,
-        # 32 MiB geteilt, 2 %) sperrt die Karte nicht mehr; eines, das die GPU braucht, schon - auch wenn es nur in den geteilten
+        # Router 0.8.7 / Agent 0.19.0: agent reports the GPU demand of the game. A light game (measured 735 MiB own,
+        # 32 MiB shared, 2 %) no longer locks the card; one that needs the GPU does - even if only in the shared
         # Speicher ausweicht (Diablo IV neben qwen3.8: kaum VRAM, kaum Last).
         leicht = dict(spiel, name="Small Game.exe", procs=1, gpu_dedicated_mib=735, gpu_shared_mib=32, gpu_pct=1.8)
         for _ in range(4):   # game_sustain_s 1 im Test
@@ -1091,7 +1091,7 @@ def main():
             if state()["nodes"]["big"]["state"] == "free" and not state()["nodes"]["big"]["memory_pressure"]:
                 break
         check("... Spiel weg, Speicher frei -> free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["state"])
-        # Speicherdruck: nichts kalt laden, nicht vorwaermen - das Geladene antwortet weiter, nichts wird entladen
+        # Memory pressure: no cold load, no prewarm - the loaded one keeps responding, nothing is evicted
         knapp = dict(viel, ram_available_gib=2.5, commit_free_gib=1.8)
         nb = state()["nodes"]["big"]; sm = state()["nodes"].get("small", {})
         kalt = next((m for m in nb["models"] if m not in nb["loaded"] and m not in (sm.get("models") or [])), None)
@@ -1114,7 +1114,7 @@ def main():
         check("... Speicher wieder frei -> memory_pressure vorbei", state()["nodes"]["big"]["memory_pressure"] is False,
               str(state()["nodes"]["big"].get("memory")))
 
-        # Tunnel weg (Agent stirbt) -> big sofort offline; Agent zurueck -> big wieder free
+        # Tunnel gone (agent dies) -> big immediately offline; agent back -> big free again
         agent.terminate(); agent.wait()
         for _ in range(10):
             if state()["nodes"]["big"]["state"] == "offline": break
@@ -1131,9 +1131,9 @@ def main():
         check("Tunnel-Ereignisse protokolliert", [d["state"] for d in state()["decisions"] if d["event"] == "tunnel"][-2:] == ["down", "up"])
         st, txt = chat("standard:latest", ctx=16384)
         check("Anfrage durch den neuen Tunnel", st == 200, f"{st} {txt[:60]}")
-        # Knoten big stirbt (Ollama weg, Tunnel bleibt) -> offline -> WOL-Versuch -> 503 nach wait_up_s
+        # Node big dies (Ollama gone, tunnel stays) -> offline -> WOL attempt -> 503 after wait_up_s
         procs[0].terminate(); procs[0].wait()
-        for _ in range(20):   # 2 Misses x (1 s Poll + Connect-Fehler), Windows braucht ~2 s pro Refused-Connect
+        for _ in range(20):   # 2 misses x (1 s poll + connect error), Windows needs ~2 s per refused connect
             if state()["nodes"]["big"]["state"] == "offline": break
             time.sleep(0.5)
         check("big offline erkannt", state()["nodes"]["big"]["state"] == "offline")
@@ -1149,17 +1149,17 @@ def main():
         d = route()
         check("standard 4096 -> small (granite tier2, 4.95+0.65+0.8=6.4 <= 7)", st == 200 and d["node"] == "small", str(d))
 
-        # Cooldown: zweiter gross-Call darf NICHT wieder 4 s warten
+        # Cooldown: second big call must NOT wait 4 s again
         t0 = time.time(); st, txt = chat("gross:latest"); dt = time.time() - t0
         check("WOL-Cooldown: sofort 503", st == 503 and dt < 1.5, f"{dt:.1f}s")
 
-        # konkrete Modelle: vorhanden -> geroutet, unbekannt -> 404 wie Ollama
+        # specific models: present -> routed, unknown -> 404 like Ollama
         st, txt = chat("granite4.2:8b", ctx=4096)
         d = route()
         check("konkretes Modell wird 1:1 geroutet", st == 200 and d["model"] == "granite4.2:8b" and json.loads(txt.splitlines()[0])["model"] == "granite4.2:8b", str(d))
         st, txt = chat("gibtsnicht:7b")
         check("unbekanntes konkretes Modell -> 404", st == 404 and "not found" in txt, f"{st} {txt[:60]}")
-        # Basic Auth auf dem Control-Port
+        # Basic Auth on the control port
         st, raw = http(C + "/", auth=False)
         check("UI ohne Login -> 401 (über TLS)", st == 401)
         try:
@@ -1195,7 +1195,7 @@ def main():
         st, raw = http(C + "/admin/config", {"roles": {"kaputt": {"tiers": [{"model": "gibtsnicht:1b", "num_ctx": 8}]}}}, method="PUT")
         check("PUT mit unbekanntem Modell -> 400", st == 400, raw.decode()[:100])
 
-        # OpenAI-kompatibel (/v1): Node-RED-MCP spricht chat/completions ohne Streaming, mit tools/response_format
+        # OpenAI-compatible (/v1): Node-RED-MCP speaks chat/completions without streaming, with tools/response_format
         st, raw = http(R + "/v1/models", headers={"Authorization": "Bearer egal"})
         oam = json.loads(raw)
         ids = [m["id"] for m in oam.get("data", [])]
@@ -1208,7 +1208,7 @@ def main():
         oa_body = {"model": "klein", "messages": [{"role": "system", "content": "Du bist knapp."},
                                                   {"role": "user", "content": [{"type": "text", "text": "hi"}]}],
                    "temperature": 0.3, "max_tokens": 64, "response_format": {"type": "json_object"}}
-        t_oa = time.time()   # kein chat() -> Zeitpunkt fuer route() selbst merken
+        t_oa = time.time()   # no chat() -> time for route() to note itself
         st, raw = http(R + "/v1/chat/completions", oa_body, headers={"Authorization": "Bearer egal"})
         oa = json.loads(raw)
         check("/v1/chat/completions non-stream: chat.completion mit Rollenname + usage", st == 200 and oa["object"] == "chat.completion"
@@ -1230,7 +1230,7 @@ def main():
               and tc[0].get("id", "").startswith("call-"), raw.decode()[:220])
         logs["small"].seek(0); sent = last_route(logs["small"].read())[-1]
         check("... tools durchgereicht, think true (explizit)", sent["tools"] is True and sent["think"] is True, str(sent))
-        # Tool-Ergebnis zurueck: assistant.tool_calls (arguments String) + role tool -> nativ (arguments Objekt)
+        # Tool result back: assistant.tool_calls (arguments string) + role tool -> native (arguments object)
         follow = {"model": "klein", "messages": [{"role": "user", "content": "wie spaet?"},
                                                  {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "get_time", "arguments": "{\"tz\": \"CET\"}"}}]},
                                                  {"role": "tool", "tool_call_id": "call_1", "content": "12:00"}]}
@@ -1265,7 +1265,7 @@ def main():
         check("Knoten 501 (Modell kann keine Embeddings) -> Fehlertext an den Client, kein 503", st == 501 and "does not support embeddings" in json.loads(raw)["error"]["message"], f"{st} {raw.decode()[:120]}")
         st, raw = http(R + "/api/embed", {"model": "klein", "input": "kein-embedding"})
         check("... auch im Ollama-Format", st == 501 and "does not support embeddings" in json.loads(raw)["error"], f"{st} {raw.decode()[:120]}")
-        # Anthropic-Messages-API (/v1/messages, Claude Code): Uebersetzung auf /api/chat ueber Rolle und Scheduler
+        # Anthropic Messages API (/v1/messages, Claude Code): Translation to /api/chat via role and scheduler
         def sse_events(raw):
             out = []
             for frame in raw.decode().split("\n\n"):
@@ -1311,8 +1311,8 @@ def main():
               and names[-2:] == ["message_delta", "message_stop"] and txt == "Hallo von small"
               and evs[-2][1]["usage"] == {"input_tokens": 20, "output_tokens": 30} and evs[-2][1]["delta"]["stop_reason"] == "end_turn",
               f"{st} {names}")
-        # Form wie Claude Code 2.1.284 (Mitschrift 2026-10-01): ?beta=true, role system im Verlauf, thinking adaptive/omitted,
-        # context_management/output_config - die erste Abnahme scheiterte an der system-Rolle mit 400
+        # Format like Claude Code 2.1.284 (Log 2026-10-01): ?beta=true, system role in history, thinking adaptive/omitted,
+        # context_management/output_config - first acceptance failed on system role with 400
         cc_body = {**an_body, "stream": True, "thinking": {"type": "adaptive", "display": "omitted"}, "context_management": {},
                    "output_config": {}, "metadata": {"user_id": "x"}, "messages": [
                        {"role": "user", "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "hi"}]},
@@ -1348,9 +1348,9 @@ def main():
         starts = [d["content_block"] for e, d in evs if e == "content_block_start"]
         check("/v1/messages stream: Tool-Call-Rettung greift (Text-Dialekt -> tool_use, kein Textblock)", st == 200
               and [b["type"] for b in starts] == ["tool_use"] and starts[0]["name"] == "get_time", f"{st} {[e for e, _ in evs]}")
-        # 0.6.5: Katalog max_parallel - eine zweite Anfrage an dasselbe Modell wartet im Router, nicht in Ollamas Schlange
-        # (Ollama lud bei qwen3.8 sonst den Runner neu, sobald die erste fertig war; 2026-10-02 03:02 zweimal)
-        # Katalog-PUT fuehrt zusammen (Weglassen loescht nicht): zum Zuruecksetzen denselben Eintrag ohne max_parallel schicken
+        # 0.6.5: Catalog max_parallel - a second request to the same model waits in the router, not in Ollama's queue
+        # (Ollama otherwise reloaded the runner for qwen3.8 as soon as the first finished; 2026-10-02 03:02 twice)
+        # Catalog PUT merges (omitting does not delete): to reset, send the same entry without max_parallel
         granite = {"weights_gib": 4.95, "kv_gib_per_1k": 0.158}
         st_mp, raw_mp = http(C + "/admin/config", {"models": {"granite4.2:8b": {**granite, "max_parallel": 1}}}, method="PUT")
         t_mp = time.time()
@@ -1397,7 +1397,7 @@ def main():
         q_mp = [d for d in state()["decisions"] if d.get("event") == "queued" and d.get("t", 0) >= t_mp]
         check("... ohne max_parallel laufen beide gleichzeitig (kein queued, zweite < 3 s)", not q_mp and mp.get("vier", (0, 9))[1] < 3.0,
               f"{mp} {q_mp}")
-        # Ollama bricht mitten im Stream mit {"error": ...} ab (2026-10-02: kaputtes Werkzeug-XML) - bis 0.6.3 zaehlte das als ok
+        # Ollama aborts mid-stream with {"error": ...} (2026-10-02: broken tool XML) - until 0.6.3 this counted as ok
         t_se = time.time()
         st, raw = http(R + "/api/chat", {"model": "klein", "stream": True, "messages": [{"role": "user", "content": "x [[stream_error]]"}]})
         zeilen = [json.loads(z) for z in raw.decode().splitlines() if z.strip()]
@@ -1443,7 +1443,7 @@ def main():
         j = json.loads(raw)
         check("/admin/try liefert Entscheidung + Antwort", st == 200 and j["status"] == 200 and j["decision"]["model"] == "granite4.2:8b" and "Hallo" in j["answer"], raw.decode()[:160])
         check("roles.yaml geschrieben", os.path.exists(os.path.join(HERE, "roles.yaml")))
-        # Messung: granite auf small (big ist offline) -> weights 4.95, kv 0.158 aus dem Fake
+        # Measurement: granite on small (big is offline) -> weights 4.95, kv 0.158 from the Fake
         st, raw = http(C + "/admin/measure", {"model": "granite4.2:8b"})
         check("/admin/measure startet auf small", st == 200 and json.loads(raw)["node"] == "small", raw.decode()[:100])
         for _ in range(40):
@@ -1454,7 +1454,7 @@ def main():
         check("Messung: weights/kv aus /api/ps abgeleitet, Quelle gemessen", g.get("source") == "measured" and abs(g["kv_gib_per_1k"] - 0.158) < 0.01 and abs(g["weights_gib"] - 4.95) < 0.05, str(g))
         st, raw = http(C + "/admin/measure", {"model": "qwen3.6:35b-a3b"})
         check("Messung ohne freien Knoten mit dem Modell -> 409", st == 409, raw.decode()[:100])
-        # Leistung: passiv aus den bisherigen Anfragen (Fake: 30 Token / 0.5 s = 60 tok/s)
+        # Performance: passive from previous requests (Fake: 30 Token / 0.5 s = 60 tok/s)
         perf = state()["perf"]
         p = perf.get("granite4.2:8b@small")
         check("passive Leistungsdaten aus echten Anfragen (60 tok/s)", p is not None and p["passive"]["gen_tps"] == 60.0 and p["passive"]["n"] >= 2, str(p and p["passive"]))
@@ -1468,13 +1468,13 @@ def main():
         check("perf.json persistiert", os.path.exists(os.path.join(HERE, "perf.json")))
         st, raw = http(C + "/admin/ha")
         ha = json.loads(raw)
-        # roles_total 9 = 8 aus der Konfiguration (inkl. kanarie, wolke, wolke2) + klein aus der UI
+        # roles_total 9 = 8 from config (incl. canary, cloud, cloud2) + small from UI
         check("/admin/ha: Knoten/Modelle/Rollen aggregiert", st == 200 and ha["nodes_total"] == 2 and ha["nodes_online"] == 1
               and "granite4.2:8b" in ha["models"] and ha["roles_total"] == 9, json.dumps({k: ha[k] for k in ("nodes_online", "models_available", "roles_ready", "problem", "problems")}))
         check("/admin/ha: gross ohne Knoten -> problem=true mit Grund", ha["problem"] is True and any("gross" in p for p in ha["problems"]) and ha["roles"]["gross"]["ready"] is False, str(ha["problems"]))
         check("/admin/ha: klein bereit auf small", ha["roles"]["klein"]["ready"] is True and ha["roles"]["klein"]["node"] == "small", str(ha["roles"]["klein"]))
         check("/admin/ha: Anfragen der letzten 5 min gezaehlt", ha["requests_5min"] >= 5 and ha["last_route"].startswith("klein ->"), f"{ha['requests_5min']} {ha['last_route']}")
-        # Agent-Ausfall: small meldet einmal, dann Stille -> nach agent_missing_problem_s (8 s) ein HA-Problem
+        # Agent failure: small reports once, then silence -> after agent_missing_problem_s (8 s) an HA Problem
         hb("small", 1, 1200, 6900, total=8192)
         ha = json.loads(http(C + "/admin/ha")[1])
         check("/admin/ha: frischer Heartbeat -> kein Agent-Problem", not any("Agent-Heartbeat" in p for p in ha["problems"]), str(ha["problems"]))
@@ -1485,7 +1485,7 @@ def main():
         check("Heartbeat mit falschem Token -> 401", st == 401)
         st, raw = http(R + "/api/pull", {"model": "x"})
         check("/api/pull -> 403", st == 403)
-        # ---- Stufe 2: Client-Authentifizierung auf dem API-Port ------------------------------------------------
+        # ---- Tier 2: Client authentication on the API port ------------------------------------------------
         def ca():
             return json.loads(http(C + "/admin/state")[1])["client_auth"]
 
@@ -1494,7 +1494,7 @@ def main():
 
         def chat_body(m):
             return {"model": m, "messages": [{"role": "user", "content": "hi"}], "stream": False}
-        st, raw = http(R + "/api/tags")   # ohne Identitaet, nicht exempt
+        st, raw = http(R + "/api/tags")   # without identity, not exempt
         v = ca()
         check("client_auth observe: Unbekannte werden bedient und gezaehlt (IP, Pfad)", st == 200 and v["mode"] == "observe"
               and any(u["total"] >= 1 and u["last_path"] for u in v["unauthenticated"].values()), json.dumps(v["unauthenticated"])[:160])
@@ -1512,17 +1512,17 @@ def main():
         check("Rolle fuer diesen Client nicht erlaubt -> 403", st == 403 and "not allowed" in raw.decode(), f"{st} {raw[:90]}")
         st, raw = http(R + "/api/chat", chat_body("klein:latest"), headers=hdr("restricted-token"))
         check("erlaubte Rolle -> 200", st == 200, f"{st} {raw[:60]}")
-        # konkrete Modelle sind seit dem UI-Test oben (expose_concrete_models: False) verborgen -> fuer diese Pruefung
-        # einschalten, sonst kaeme 404 statt 403 (genau so passiert), danach wieder aus
+        # concrete models are hidden since the UI test above (expose_concrete_models: False) -> for this check
+        # enable, otherwise 404 instead of 403 (exactly what happened), then disable again
         http(C + "/admin/config", {"expose_concrete_models": True}, method="PUT")
         st, raw = http(R + "/api/chat", chat_body("granite4.2:8b"), headers=hdr("restricted-token"))
-        nd = {k: (v["state"], sorted(v["models"])) for k, v in state()["nodes"].items()}   # Kontext fuer den Fehlerfall
+        nd = {k: (v["state"], sorted(v["models"])) for k, v in state()["nodes"].items()}   # Context for the error case
         check("konkretes Modell fuer diesen Client gesperrt -> 403", st == 403 and "concrete model names" in raw.decode(),
               f"{st} {raw[:90]} | Knoten: {nd}")
         http(C + "/admin/config", {"expose_concrete_models": False}, method="PUT")
         codes = [http(R + "/api/tags", headers=hdr("limited-token"))[0] for _ in range(4)]
         check("Rate Limit 3/min: die vierte Anfrage bekommt 429", codes == [200, 200, 200, 429], str(codes))
-        # client_auth.locked (Audit 2026-09-16): gesperrter Modus ist per Settings nicht aenderbar, Konfiguration traegt das Flag
+        # client_auth.locked (Audit 2026-09-16): locked mode is not changeable via Settings, config carries the flag
         sys.path.insert(0, os.path.join(HERE, "..", "router"))
         from skirnir_router import settings as _smod   # noqa: E402
         from skirnir_router.config import Config as _Cfg   # noqa: E402
@@ -1550,8 +1550,8 @@ def main():
         check("Audit-Log: auth_missing, forbidden, rate_limited, auth_denied, client_auth_mode protokolliert",
               all(e in alog for e in ("auth_missing", "forbidden", "rate_limited", "auth_denied", "client_auth_mode")), alog[-240:])
 
-        # --- Agent-Update ueber den Router (agentupdate.py): Manifest signiert vom Betreiber-Schluessel, Auftrag per UI-Knopf,
-        # Fake-Agent prueft Signatur/Hash, laedt mit Einmal-Token, meldet Stand im Heartbeat und meldet sich mit der neuen Version an.
+        # --- Agent update via router (agentupdate.py): Manifest signed by operator key, trigger via UI button,
+        # Fake agent checks signature/hash, loads with one-time token, reports status in heartbeat and registers with new version.
         from cryptography.hazmat.primitives import serialization as _ser
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as _Ed
         _upk = _Ed.generate()
@@ -1581,7 +1581,7 @@ def main():
         check("Agent-Update: Ereignisse requested -> downloading -> applied -> done", evs[-4:] == ["requested", "downloading", "applied", "done"], str(evs))
         st, raw = http(C + f"/admin/nodes/{fp_big}/update", {})
         check("Agent-Update: gleiche Version -> 409", st == 409 and "already" in raw.decode(), raw.decode()[:80])
-        # Fehlerfall: Manifest mit fremdem Schluessel signiert -> Agent lehnt ab, HA-Problem
+        # Error case: Manifest signed with foreign key -> Agent rejects, HA Problem
         _manifest("test3", _Ed.generate())
         st, raw = http(C + f"/admin/nodes/{fp_big}/update", {})
         for _ in range(40):
@@ -1589,7 +1589,7 @@ def main():
             if u.get("state") in ("done", "failed") and u.get("version") == "test3": break
             time.sleep(0.25)
         ha_u = json.loads(http(C + "/admin/ha")[1])
-        from skirnir_router import agentupdate as _au   # reine Funktion: Wartezeit aus dem gespeicherten Stand
+        from skirnir_router import agentupdate as _au   # pure function: wait time from stored state
         check("Agent-Update: falsche Signatur -> failed mit kind leer (0.8.12: Feld aus dem Heartbeat), naechster Versuch erst nach 6 h",
               u.get("kind") == "" and _au.retry_after(u) == 6 * 3600, str(u))
         check("Agent-Update: falsche Signatur -> failed, HA-Problem, Version unveraendert, kein Drain", st == 200 and u.get("state") == "failed" and "Signatur" in (u.get("message") or "")
@@ -1597,8 +1597,8 @@ def main():
         st, raw = http(C + "/v1/agent/binary/skirnir-agent-test3-windows-amd64.exe", headers={"Authorization": "Bearer falsch"})
         check("Agent-Update: Download ohne gueltiges Token -> 403", st == 403, str(st))
 
-        # --- Ollama-Update ueber den Router (ollamaupdate.py, 0.3.0): Versionspruefung gegen eine Fake-Quelle (GitHub-API-Form),
-        # Auftrag per UI-Knopf, Fake-Agent laedt, prueft den Hash, meldet Stand und Ollama-Version im Heartbeat.
+        # --- Ollama update via router (ollamaupdate.py, 0.3.0): Version check against a Fake source (GitHub-API format),
+        # Trigger via UI button, Fake agent loads, checks hash, reports status and Ollama version in heartbeat.
         import http.server as _hs
         _rel = {"version": "0.99.0", "blob": b"fake ollama 0.99.0" * 50}
         _rel["sum"] = hashlib.sha256(_rel["blob"]).hexdigest()
@@ -1646,7 +1646,7 @@ def main():
         check("Ollama-Update: gleiche Version -> 409", st == 409 and "already" in raw.decode(), raw.decode()[:80])
         ha_o = json.loads(http(C + "/admin/ha")[1])
         check("Ollama-Update: HA-Snapshot kennt die neueste Version, nichts mehr ausstehend", ha_o.get("ollama_latest") == "0.99.0" and ha_o.get("ollama_updates_pending") == 0 and ha_o["nodes"]["big"].get("ollama_version") == "0.99.0", str({k: ha_o.get(k) for k in ("ollama_latest", "ollama_updates_pending")}))
-        # Fehlerfall: die Quelle liefert 0.99.1, aber das Archiv passt nicht zur sha256sum.txt -> Agent lehnt ab, HA-Problem, Version bleibt
+        # Error case: source delivers 0.99.1, but archive does not match sha256sum.txt -> Agent rejects, HA Problem, version remains
         _rel["version"], _rel["blob"] = "0.99.1", b"manipuliert" * 50
         http(C + "/admin/ollama-update/check", {})
         st, raw = http(C + f"/admin/nodes/{fp_big}/ollama-update", {})
@@ -1657,9 +1657,9 @@ def main():
         ha_o = json.loads(http(C + "/admin/ha")[1])
         check("Ollama-Update: Hash-Widerspruch -> failed, HA-Problem, Version unveraendert, kein Drain", st == 200 and rb.get("state") == "failed" and "SHA-256" in (rb.get("message") or "")
               and any("Ollama-Update auf big fehlgeschlagen" in p for p in ha_o["problems"]) and rb["current"] == "0.99.0" and not state()["nodes"]["big"]["draining"], str(rb) + str(ha_o["problems"]))
-        # Tray-App-Knoten (0.3.3): der Agent meldet bei der Anmeldung selbst, ob Ollama sein Kind ist (Fakt ollama_managed). Zweiter
-        # Fake-Agent 'tray' mit ollama_managed=false: kein Knopf, kein Auftrag (auch mit force nicht), nicht in HA gezaehlt, kein HA-Problem.
-        from skirnir_router import ollamaupdate as _ou   # reine Funktionen: ohne Fakt (Agent < 0.12.1) keine Auftraege
+        # Tray app node (0.3.3): agent reports at registration whether Ollama is its child (fact ollama_managed). Second
+        # Fake agent 'tray' with ollama_managed=false: no button, no trigger (even with force), not counted in HA, no HA Problem.
+        from skirnir_router import ollamaupdate as _ou   # pure functions: without fact (Agent < 0.12.1) no triggers
         check("Ollama-Update: managed() nur mit Fakt ollama_managed=true; ohne Fakt Grund 'agent', mit false Grund 'tray'",
               _ou.managed({"facts": {"ollama_managed": True}}) and not _ou.managed({"facts": {}}) and _ou.unmanaged_reason({"facts": {}}) == "agent"
               and _ou.unmanaged_reason({"facts": {"ollama_managed": False}}) == "tray")
@@ -1696,8 +1696,8 @@ def main():
         http(C + "/admin/config", {"settings": {"modes.ollama_update.release_url": None, "modes.ollama_update.window_start": None, "modes.ollama_update.window_end": None}}, method="PUT")
         _rs.shutdown()
 
-        # Metriken persistent (0.1.9): metrics.json neben der Config, gesichert 60 s nach der ersten Aenderung (tick_loop); ein frischer
-        # Prozess laedt Zaehler und Histogramme und liefert dieselben Werte in /metrics
+        # Metrics persistent (0.1.9): metrics.json next to config, saved 60 s after first change (tick_loop); a fresh
+        # process loads counters and histograms and serves same values in /metrics
         mp = os.path.join(HERE, "metrics.json")
         check("metrics.json: liegt neben der Config (Lauf > 60 s, tick_loop hat gesichert)", os.path.exists(mp), mp)
         mtxt = http(C + "/metrics")[1].decode()
@@ -1711,15 +1711,15 @@ def main():
               and 0 < int(parts[1]) <= live_total and parts[2] == "2026", (rc_m.stdout + rc_m.stderr)[-200:] + f" live={live_total}")
         check("/admin/state: metrics_since gesetzt", str(state().get("metrics_since") or "").startswith("2026"), str(state().get("metrics_since")))
 
-        # Sperren: Knoten verschwindet aus dem Routing, Agent bekommt 'revoked'; danach loeschen
+        # Locks: node disappears from routing, agent gets 'revoked'; then delete
         fp = next(n["fp"] for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "big")
         st, raw = http(C + f"/admin/nodes/{fp}/revoke", {})
         time.sleep(1.5)
         logs["agent-big"].seek(0); alog = logs["agent-big"].read()
         check("Sperren: big aus dem Routing, Register 'revoked', Agent informiert", st == 200 and "big" not in state()["nodes"]
               and next(n["state"] for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["fp"] == fp) == "revoked" and '"status": "revoked"' in alog, alog[-160:])
-        # Agent zuerst beenden: er verbindet sich alle 0.5 s neu und wuerde den geloeschten Schluessel sofort
-        # wieder als "wartet auf Freigabe" eintragen - daran ist die Pruefung sporadisch gescheitert.
+        # Stop agent first: it reconnects every 0.5 s and would immediately re-register the deleted key
+        # as "waiting for approval" - the check failed sporadically because of this.
         agent.terminate(); agent.wait()
         time.sleep(1)
         st, raw = http(C + f"/admin/nodes/{fp}", method="DELETE")

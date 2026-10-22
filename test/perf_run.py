@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Performance-Messstand fuer den Router (2026-09-16): Fake-Knoten mit kurzer Antwortzeit, Router ohne TLS/Auth
-(abgeleitete perf-config.yaml wie dev_env), Lasttest ueber /admin/loadtest plus UI-artiges Polling (/metrics,
-/admin/state, /admin/config alle 3 s). Misst CPU-Zeit des Router-Prozesses je Anfrage und nimmt mit py-spy ein
-Sampling-Profil (raw, gestapelte Stacks) auf. Ergebnis: perf-result.json + perf-profile.txt im Testordner.
+"""Performance test bench for the router (2026-09-16): Fake nodes with short response times, router without TLS/Auth
+(derived perf-config.yaml like dev_env), load test via /admin/loadtest plus UI-like polling (/metrics,
+/admin/state, /admin/config every 3 s). Measures CPU time of the router process per request and captures a
+sampling profile (raw, stacked stacks) with py-spy. Output: perf-result.json + perf-profile.txt in the test folder.
 
-    python perf_run.py [--n 600] [--c 8] [--delay 0.02] [--label vorher]
+    python perf_run.py [--n 600] [--c 8] [--delay 0.02] [--label before]
 """
 import json
 import os
@@ -25,7 +25,7 @@ def arg(name, default):
 
 
 N, CONC, DELAY, LABEL, ROUNDS = arg("--n", 300), arg("--c", 8), arg("--delay", 0.02), arg("--label", "lauf"), arg("--rounds", 12)
-SPY_S = 30   # py-spy schreibt sein Profil nur bei regulaerem Ende -> feste Dauer, Last laeuft mindestens so lange
+SPY_S = 30   # py-spy writes its profile only on regular exit -> fixed duration, load runs at least that long
 
 
 def http(path, body=None, timeout=300):
@@ -72,7 +72,7 @@ def main():
         router = start("router", [PY, os.path.join(HERE, "..", "router", "router.py"), "perf-config.yaml"])
         time.sleep(2.5)
         start("agent", [PY, "fake_agent.py", "ws://127.0.0.1:21435", "big", "https://127.0.0.1:21001", "fake-agent-big.key", "testtoken"])
-        for _ in range(40):   # Agent freigeben, sobald er im Register steht
+        for _ in range(40):   # Release agent as soon as it is registered
             time.sleep(0.5)
             try:
                 nodes = json.loads(http("/admin/nodes")[1])["nodes"]
@@ -84,7 +84,7 @@ def main():
             if big and big.get("state") == "approved":
                 http(f"/admin/nodes/{big['fp']}/policy", {"max_inflight": 16})
                 break
-        for _ in range(40):   # warten bis der Knoten online/free ist
+        for _ in range(40):   # Wait until the node is online/free
             st = json.loads(http("/admin/state")[1])
             if st["nodes"].get("big", {}).get("state") == "free":
                 break
@@ -113,7 +113,7 @@ def main():
         th = threading.Thread(target=poller, daemon=True)
         th.start()
         rounds, done = [], 0
-        while done < ROUNDS or time.time() - t0 < SPY_S + 2:   # so viele Runden wie verlangt, mindestens aber die Profil-Dauer
+        while done < ROUNDS or time.time() - t0 < SPY_S + 2:   # As many rounds as requested, but at least the profile duration
             st, raw = http("/admin/loadtest", {"model": "standard:latest", "n": N, "concurrency": CONC, "probe_interactive": True, "prompt": "Antworte nur mit OK."})
             rounds.append(json.loads(raw)); done += 1
         stop["v"] = True

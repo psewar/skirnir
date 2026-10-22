@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Selbsttest Katalog: config.yaml + roles.yaml je Modell Feld fuer Feld (config.merge_models). Ohne Router, ohne Netz.
+"""Self-test catalog: config.yaml + roles.yaml per model field by field (config.merge_models). No router, no network.
 
-Anlass 2026-10-02: ein roles.yaml-Eintrag (Messung aus der UI) ersetzte den config.yaml-Eintrag ganz; max_parallel 1 fuer
-qwen3.8 stand in config.yaml und galt nicht. Groessenangaben gehoeren aber zusammen: neue Gewichte duerfen nicht mit einer alten
-Messung (real, vram_real_gib) gemischt werden.
+Trigger 2026-10-02: a roles.yaml entry (measurement from the UI) completely replaced the config.yaml entry; max_parallel 1 for
+qwen3.8 was in config.yaml and did not apply. Size specifications belong together: new weights must not be mixed with an old
+measurement (real, vram_real_gib).
 """
 import copy
 import os

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Cross-Encoder fuer den Reranker-Dienst vorbereiten - einmalig, mit Netz. Zwei Schritte, weil der Dienst kein torch braucht:
+"""Prepare Cross-Encoder for the Reranker service - one-time, requires network. Two steps, as the service does not need torch:
 
-    <venv mit torch+transformers>/python export_model.py onnx --model cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 --out models/mmarco-mMiniLMv2-L12
-    <venv des Dienstes>/python export_model.py ir --out models/mmarco-mMiniLMv2-L12
+    <venv with torch+transformers>/python export_model.py onnx --model cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 --out models/mmarco-mMiniLMv2-L12
+    <service venv>/python export_model.py ir --out models/mmarco-mMiniLMv2-L12
 
-`onnx`: model.onnx, tokenizer.json und reference.json (Token-IDs und Torch-fp32-Logits fuer Pruefpaare).
-`ir`:   OpenVINO-IR in fp16 (model.xml/.bin). Prueft vorher, dass die tokenizers-Bibliothek dieselben IDs wie transformers liefert
-        und das IR dieselbe Reihenfolge wie Torch ergibt; erst dann schreibt es manifest.json mit den SHA-256 der Laufzeitdateien.
-        Ohne manifest.json startet der Dienst nicht.
+`onnx`: model.onnx, tokenizer.json and reference.json (Token-IDs and Torch-fp32-Logits for test pairs).
+`ir`:   OpenVINO-IR in fp16 (model.xml/.bin). Verifies beforehand that the tokenizers library yields the same IDs as transformers
+        and that the IR produces the same order as Torch; only then writes manifest.json with the SHA-256 of the runtime files.
+        Without manifest.json, the service will not start.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from rerank_service import SELFTEST_QUERY, SELFTEST_TEXTS, sha256_file  # noqa: E402
 
-# Pruefpaare: das Selbsttest-Paar und ein paar deutsche/englische Saetze mit klarer Rangfolge
+# Test pairs: the self-test pair and a few German/English sentences with clear ranking
 CHECK_QUERY = "Wann darf ich eine Auslieferung als fertig melden?"
 CHECK_TEXTS = [
     "Eine Auslieferung gilt erst als fertig, wenn die neue Version im Cluster laeuft.",
@@ -57,8 +57,8 @@ def step_onnx(model_id: str, out: str) -> int:
         print(f"kein Cross-Encoder mit einem Score (num_labels={model.config.num_labels})", file=sys.stderr)
         return 2
     tok.backend_tokenizer.save(os.path.join(out, "tokenizer.json"))
-    # input_names werden positionell vergeben: deshalb in der Reihenfolge der forward-Signatur (sonst vertauscht torch.onnx
-    # bei BERT attention_mask und token_type_ids - 2026-10-20 gemessen: Spearman 0,15 auf allen Geraeten)
+    # input_names are assigned positionally: therefore in the order of the forward signature (otherwise torch.onnx swaps them
+    # for BERT attention_mask and token_type_ids - measured 2026-10-20: Spearman 0.15 on all devices)
     signature = list(inspect.signature(model.forward).parameters)
     inputs = sorted((k for k in tok.model_input_names if k in signature), key=signature.index)
     pairs = [(SELFTEST_QUERY, t) for t in SELFTEST_TEXTS] + [(CHECK_QUERY, t) for t in CHECK_TEXTS]

@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Selbsttest der Kontext-Vorabpruefung (context_check.py). Laeuft ohne Router und ohne Netz.
+"""Self-test for the context pre-check (context_check.py). Runs without a router and without network.
 
-Wichtiger als die Treffer sind die Nicht-Treffer: kleine Anfragen duerfen gar nicht erst geschaetzt werden, und eine
-Anfrage, bei der nur die Schaetzung uebertrieben hat (angekommen ~ geschaetzt), darf keinen Alarm ausloesen.
-Mit Messdatei (SKIRNIR_TOKENMESSUNG = JSONL mit je `echt`, `bytes`, `ziffern`, `hermes` = Bytes/4-Schaetzung; echte
-Tokenzahl vom Modell) wird die Regel zusaetzlich an echten Zaehlwerten nachgerechnet - inklusive Gegenprobe, dass
-Bytes/4 dort durchfaellt. Ohne die Variable entfaellt dieser Teil.
+Misses matter more than hits: small requests must not be estimated at all, and a request where only the estimate was excessive (actual ~ estimated) must not trigger an alarm.
+With a measurement file (SKIRNIR_TOKENMESSUNG = JSONL with `echt`, `bytes`, `ziffern`, `hermes` = Bytes/4 estimate; actual token count from the model), the rule is additionally recalculated against real counts - including a counter-test that Bytes/4 fails there. Without the variable, this part is omitted.
 """
 import json
 import os
@@ -77,7 +74,7 @@ for _ in range(30):
     kp.after_request(160_000, 1000, 131072, info)
 check("Ereignispuffer begrenzt", len(state.MQTT_EVENTS) <= 20, str(len(state.MQTT_EVENTS)))
 
-# --- Nachrechnung an der echten Messung (nur Zaehlwerte) ---
+# --- Recalculation against the actual measurement (counts only) ---
 if os.path.exists(MESSUNG):
     with open(MESSUNG, encoding="utf-8") as f:
         rows = [json.loads(x) for x in f]

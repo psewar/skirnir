@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Selbsttest (Router 0.8.8): Vorwaermen nach einem leichten Spiel nachholen; busy_reason beim Online-Gehen zuruecksetzen.
+"""Self-test (Router 0.8.8): Retry prewarming after a light game; reset busy_reason on coming online.
 
-Anlass 2026-10-21: nach einem Agent-Update kam ein Knoten mit laufendem (leichtem) Spiel online. Das Vorwaermen fiel ins
-game_sustain-Fenster (Spiel noch nicht beurteilt) und wurde uebersprungen; spaeter plante es niemand neu, die Karte blieb neben
-dem leichten Spiel leer. Ausserdem zeigte /admin/state "free" mit dem busy-Grund "game" von vor dem Ausfall.
-Laeuft ohne Router, Netz und Ollama (echte Config aus router/config.example.yaml); state.spawn wird mitgeschrieben."""
+Trigger 2026-10-21: After an agent update, a node came online with a running (light) game. Prewarming fell into the
+game_sustain window (game not yet evaluated) and was skipped; no one re-planned it later, leaving the card idle next
+to the light game. Additionally, /admin/state showed "free" with the stale busy reason "game" from before the outage.
+Runs without Router, network, or Ollama (real config from router/config.example.yaml); state.spawn is written to."""
 import asyncio
 import os
 import sys
@@ -28,7 +28,7 @@ GEPLANT = []
 
 
 def mitschreiben(coro):
-    """state.spawn-Ersatz: merkt sich, welches Vorwaermen mit welchem Grund geplant wuerde, und schliesst die Coroutine."""
+    """state.spawn stub: records which prewarming would be planned with which reason, and closes the coroutine."""
     f = getattr(coro, "cr_frame", None)
     GEPLANT.append((getattr(coro, "__name__", "?"), (f.f_locals.get("reason") if f else None)))
     coro.close()
@@ -54,7 +54,7 @@ def vorwaermen_geplant():
     return [r for name, r in GEPLANT if name == "prewarm"]
 
 
-# 1) Online-Gehen setzt den alten busy-Grund zurueck
+# 1) Coming online resets the stale busy reason
 n = knoten()
 n.state, n.busy_reason, n.calm_since = "offline", "game", time.time() - 5
 GEPLANT.clear()
@@ -63,7 +63,7 @@ check("offline -> online: free und busy_reason leer (nicht mehr 'game' von vor d
       f"{n.state} {n.busy_reason!r}")
 check("... und das Online-Vorwaermen ist geplant", vorwaermen_geplant() == ["online"], str(GEPLANT))
 
-# 2) Vorwaermen faellt ins game_sustain-Fenster: uebersprungen, aber vorgemerkt
+# 2) Prewarming falls into the game_sustain window: skipped, but noted
 n = knoten(LEICHT, seit=1)
 asyncio.run(poll.prewarm(n, 0, "online", since=n.free_at))
 check("Spiel noch nicht beurteilt (1 s alt): Vorwaermen uebersprungen und vorgemerkt", n.prewarm_after_game is True,
@@ -72,7 +72,7 @@ GEPLANT.clear()
 poll.evaluate(n, time.time())
 check("... im Fenster wird noch nicht nachgeholt", vorwaermen_geplant() == [] and n.prewarm_after_game is True, str(GEPLANT))
 
-# 3) Fenster vorbei, Spiel leicht -> nachholen (einmal)
+# 3) Window passed, game is light -> retry (once)
 n.game_since = time.time() - SUSTAIN - 1
 GEPLANT.clear()
 poll.evaluate(n, time.time())
@@ -82,7 +82,7 @@ GEPLANT.clear()
 poll.evaluate(n, time.time())
 check("... nur einmal", vorwaermen_geplant() == [], str(GEPLANT))
 
-# 4) Spiel braucht die GPU -> kein Nachholen; der Knoten wird busy (busy -> free waermt spaeter selbst vor)
+# 4) Game requires GPU -> no retry; node becomes busy (busy -> free prewarms later on its own)
 n = knoten(SCHWER, seit=SUSTAIN + 1)
 n.prewarm_after_game = True
 GEPLANT.clear()
@@ -90,15 +90,15 @@ poll.evaluate(n, time.time())
 check("schweres Spiel: busy, kein Nachholen, Vormerkung geloescht", n.state == "busy" and vorwaermen_geplant() == []
       and n.prewarm_after_game is False, f"{n.state} {GEPLANT} {n.prewarm_after_game}")
 
-# 5) Spiel vorbei, bevor es beurteilt war -> nachholen (Grund spiel-vorbei)
+# 5) Game ended before evaluation -> retry (reason: game-ended)
 n = knoten()
 n.prewarm_after_game = True
 GEPLANT.clear()
 poll.evaluate(n, time.time())
 check("Spiel beendet, Knoten frei -> Vorwaermen nachgeholt (spiel-vorbei)", vorwaermen_geplant() == ["game_ended"], str(GEPLANT))
 
-# 6) Speicherdruck haelt das Nachholen zurueck (das Vorwaermen wuerde dort ohnehin aussetzen). Ohne laufendes Spiel: ein
-#    leichtes Spiel bei Speicherdruck gilt seit 0.8.7 als schwer und macht busy - das prueft der E2E-Lauf.
+# 6) Memory pressure holds back the retry (prewarming would pause there anyway). Without a running game: a
+#    light game under memory pressure is treated as heavy since 0.8.7 and makes the node busy - the E2E run checks this.
 n = knoten()
 n.prewarm_after_game, n.mem_pressure = True, True
 GEPLANT.clear()

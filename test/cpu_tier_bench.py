@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Messung: Modell rein auf der CPU (num_gpu 0) waehrend ein Spiel die GPU haelt.
-Fragen: Ladezeit, gen tok/s, prompt tok/s (kurz und ~1.5k Token), CPU-Last dabei, bleibt das VRAM unangetastet?
-Direkt gegen das lokale Ollama, nicht ueber den Router. Aufruf:
-  python cpu_tier_bench.py <modell> [num_thread ...]     z. B. cpu_tier_bench.py gpt-oss:20b 0 8 16
+"""Measurement: Model on CPU only (num_gpu 0) while a game holds the GPU.
+Questions: Load time, gen tok/s, prompt tok/s (short and ~1.5k tokens), CPU load, does VRAM stay untouched?
+Directly against local Ollama, not via the router. Usage:
+  python cpu_tier_bench.py <model> [num_thread ...]     e.g. cpu_tier_bench.py gpt-oss:20b 0 8 16
 """
 import json
 import subprocess
@@ -34,7 +34,7 @@ def gpu():
 
 
 class CPUSampler(threading.Thread):
-    """Mittelt die Gesamt-CPU-Last (typeperf) waehrend eines Abschnitts."""
+    """Averages total CPU load (typeperf) during a segment."""
     def __init__(self):
         super().__init__(daemon=True)
         self.samples, self.stop = [], threading.Event()

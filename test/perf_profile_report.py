@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""py-spy-Rohprofil (perf-profile.txt, gestapelte Stacks) in Selbstzeit und Inklusivzeit je Funktion umrechnen.
+"""Convert a raw py-spy profile (perf-profile.txt, stacked stacks) into self-time and inclusive-time per function.
 
     python perf_profile_report.py [perf-profile.txt] [--top 25]
 """
