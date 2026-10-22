@@ -1,9 +1,9 @@
-"""Die Ollama-API nach aussen: Anfragen annehmen, zuweisen, durchreichen.
+"""Ollama API facing out: accept, assign, and relay requests.
 
-Aufbau (Refactoring 2026-09-16): `route_request` -> `_route` bereitet die Anfrage vor (`_prepare`), waehlt und
-reserviert einen Knoten (`_Acquire`) und laesst `dispatch` eine Stufe ausfuehren. `dispatch` ist ein duenner Einstieg
-in `_Relay`, das je Anfrage den Zustand haelt (Zeiten, Tokens, Ergebnis) und die Wege Knoten-unary, Knoten-Stream und
-Cloud in kleinen Methoden abbildet. Fehler vor dem ersten Byte liefern None -> `_route` nimmt den naechsten Kandidaten.
+Structure (Refactoring 2026-09-16): `route_request` -> `_route` prepares the request (`_prepare`), selects and
+reserves a node (`_Acquire`), and lets `dispatch` execute a tier. `dispatch` is a thin entry point into `_Relay`,
+which holds per-request state (times, tokens, result) and maps node-unary, node-stream, and cloud paths into small
+methods. Errors before the first byte return None -> `_route` takes the next candidate.
 """
 
 import asyncio
@@ -18,29 +18,29 @@ from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
 from .outcome import Problem, bad_gateway, failed
 
-STREAM_PATHS = ("/api/chat", "/api/generate")   # nur hier streamt Ollama zeilenweise NDJSON
-CONNECT_TIMEOUT_S = 5                            # Verbindungsaufbau zum Knoten; die Antwort darf request_timeout_s dauern
+STREAM_PATHS = ("/api/chat", "/api/generate")   # only here does Ollama stream line-by-line NDJSON
+CONNECT_TIMEOUT_S = 5                            # Connection setup to the node; the response may take request_timeout_s
 NDJSON = "application/x-ndjson"
 UPSTREAM_ERRORS = (ClientError, asyncio.TimeoutError, OSError)
-CLIENT_FAULT_STATUSES = (400, 404, 413, 422)     # Cloud-Fehler, die ein anderer Knoten nicht besser kann -> an den Client
+CLIENT_FAULT_STATUSES = (400, 404, 413, 422)     # Cloud errors that another node cannot handle better -> to the client
 
 
 @dataclass(frozen=True, slots=True)
 class Refusal(Problem):
-    """Anfrage wird mit HTTP-Status und Klartext abgewiesen (im Format des Clients, siehe `err` in _route). Ein Rueckgabewert
-    wie jedes Problem (0.8.9; bis dahin die Ausnahme _Reject, die quer durch den Ablauf geworfen wurde)."""
-    why: object = None   # scheduler.unavailable(): Grund-Code, Retry-After, Hindernisse je Knoten - fuer den Client
+    """Request is rejected with HTTP status and plain text (in the client's format, see `err` in _route). A return value
+    like any Problem (0.8.9; previously the exception _Reject, which was thrown across the flow)."""
+    why: object = None   # scheduler.unavailable(): base code, Retry-After, obstacles per node - for the client
 
 
 def cloud_client_fault(error):
-    """Ist ein Anbieterfehler Sache des Clients (an ihn zurueck) - oder kann ein anderer Kandidat helfen (None, weiter)?
-    Ein unbekanntes oder nicht freigegebenes Modell meldet der Anbieter in seinem strukturierten Fehlercode
-    (CloudError.model_unavailable) - dann weiter; bis 0.8.8 las der Router dafuer den Meldungstext ("the model ...")."""
+    """Is a provider error the client's responsibility (return to them) - or can another candidate help (None, continue)?
+    An unknown or non-released model is reported by the provider in its structured error code
+    (CloudError.model_unavailable) - then continue; until 0.8.8 the router read the message text ("the model ...")."""
     return error.status in CLIENT_FAULT_STATUSES and not error.model_unavailable
 
 
 def _is_role(role):
-    """Rolle (standard:latest ...) oder konkretes Modell? Konkrete Modelle bekommen Kontext/Shadow/Canary nicht."""
+    """Role (standard:latest ...) or specific model? Specific models do not get Context/Shadow/Canary."""
     return role["exposed"] in state.CFG.roles
 
 
@@ -54,9 +54,9 @@ async def handle_infer(request):
 
 
 async def route_request(request, path, body, shape=None, err=ollama_error):
-    """Modell aufloesen (Rolle oder konkret), Knoten waehlen, Anfrage durchreichen. `shape` formt die Antwort
-    (None = Ollama-Format 1:1, sonst z. B. OpenAI), `err` baut Fehlerantworten im Format des Clients.
-    Stufe 6: mit Idempotency-Key (nur ohne Stream) liefert eine Wiederholung die gecachte Antwort."""
+    """Resolve model (role or specific), select node, relay request. `shape` formats the response
+    (None = Ollama format 1:1, otherwise e.g. OpenAI), `err` builds error responses in the client's format.
+    Stage 6: with Idempotency-Key (only without Stream) a repeat returns the cached response."""
     # Memory requests must recheck live credentials/project policy on every call.
     # Do not put scoped recall results into the legacy unscoped response cache.
     rb = body.get("routing")
@@ -75,7 +75,7 @@ async def route_request(request, path, body, shape=None, err=ollama_error):
         finished = True
         return resp
     finally:
-        if not finished:   # abgebrochen oder Fehler: der Schluessel darf beim naechsten Versuch neu rechnen
+        if not finished:   # aborted or error: the key may recompute on the next attempt
             ops.idem_abort(key)
 
 
@@ -105,19 +105,19 @@ async def _route_inner(request, path, body, shape, err):
             return err(result.status, result.message)
         if result is not None:
             if _is_role(role) and not req.context_sensitive:
-                ops.maybe_shadow(role, body, node, req)   # Stufe 6: Schattenlauf nach der Antwort, Client merkt nichts
+                ops.maybe_shadow(role, body, node, req)   # Stage 6: shadow run after the response, client notices nothing
             return result
-        # None = Fehler vor dem ersten Byte -> naechster Kandidat
+        # None = error before the first byte -> next candidate
 
 
-# --- Vorbereitung: Name, routing-Block, Rolle, Stufen ----------------------------------------------------------------
+# --- Preparation: Name, routing-block, Role, Tiers ----------------------------------------------------------------
 
 async def _prepare(request, path, body):
-    """Alles, was ohne Knoten entscheidbar ist. Liefert (name, role, tiers, req) oder eine Refusal."""
+    """Everything decidable without a node. Returns (name, role, tiers, req) or a Refusal."""
     name = _requested_name(body)
     if failed(name):
         return name
-    req = request_mod.parse(body, path, request.headers)   # Stufe 1: routing-Block, abgeleitete Anforderungen
+    req = request_mod.parse(body, path, request.headers)   # Stage 1: routing-block, derived requirements
     if failed(req):
         return Refusal(400, req.message)
     policy = (auth.client_auth_cfg().get("clients", {}).get(request.get("client")) or {}).get("memory") or {}
@@ -157,7 +157,7 @@ async def _prepare(request, path, body):
 
 
 async def _decide_role(request, path, body, name, req):
-    """Auto-Rolle: die Decision Engine waehlt eine der konfigurierten Rollen; alle anderen Namen gehen unveraendert durch."""
+    """Auto-role: the Decision Engine selects one of the configured roles; all other names pass through unchanged."""
     decider = decision.active()
     if not decider or name != decider.exposed:
         return name
@@ -170,7 +170,7 @@ async def _decide_role(request, path, body, name, req):
 
 
 def _requested_name(body):
-    """Angefragter Modell-/Rollenname (ohne Tag -> :latest, wenn es die Rolle so gibt) oder eine Refusal."""
+    """Requested model/role name (without tag -> :latest, if the role has it) or a Refusal."""
     name = body.get("model") or body.get("name")
     if not name:
         return Refusal(400, "model is required")
@@ -180,7 +180,7 @@ def _requested_name(body):
 
 
 def _with_canary(role, tiers, req):
-    """Stufe 6: ausgelost -> Canary-Stufe an die Spitze, Rest bleibt als Ausweich."""
+    """Stage 6: drawn -> Canary tier to the front, rest remains as fallback."""
     ct = ops.canary_tier(role) if _is_role(role) else None
     if not ct:
         return tiers
@@ -189,7 +189,7 @@ def _with_canary(role, tiers, req):
 
 
 def _cloud_ordered(request, body, tiers, req):
-    """Stufe 5: Schranken fuer die Cloud-Stufen dieser Anfrage; execution=cloud zieht sie nach vorn."""
+    """Stage 5: limits for the cloud tiers of this request; execution=cloud pulls them forward."""
     if not any(t.get("cloud") for t in tiers):
         return tiers
     req.cloud_block = cloud.request_block_reason(req, body, request.get("client"))
@@ -199,8 +199,8 @@ def _cloud_ordered(request, body, tiers, req):
 
 
 def _unsatisfiable(name, role, tiers, req):
-    """Keine Stufe kann, was der Request verlangt -> Refusal 400 (Fehler des Requests, kein Kapazitaetsproblem wie 503);
-    sonst None."""
+    """No tier can do what the Request demands -> Refusal 400 (Request error, not a capacity issue like 503);
+    otherwise None."""
     blocked = [req.tier_blocked(t) for t in tiers]
     if not all(blocked):
         return None
@@ -217,7 +217,7 @@ def _client_num_ctx(body):
 
 
 def _priority_for(req, role, request):
-    """Stufe 3: Prioritaetsklasse = routing.priority, sonst die der Rolle; die Client-Identitaet kappt nach oben."""
+    """Stage 3: Priority class = routing.priority, otherwise that of the role; the Client identity caps it upwards."""
     prio = req.priority or role.get("priority") or "normal"
     client = (auth.client_auth_cfg().get("clients") or {}).get(request.get("client") or "") or {}
     cap = client.get("max_priority")
@@ -226,30 +226,30 @@ def _priority_for(req, role, request):
     return prio
 
 
-# --- Knoten waehlen und Platz bekommen (Scheduler + Admission + WOL) -------------------------------------------------
+# --- Select node and get space (Scheduler + Admission + WOL) -------------------------------------------------
 
 class _Acquire:
-    """Kandidatenwahl je Versuch: Scheduler fragen, bei vollem Knoten in der Prioritaetsschlange warten, bei
-    erschoepften Kandidaten einmal wecken. Merkt sich versuchte Knoten und die Wartezeit fuer routing.queued_ms."""
+    """Candidate selection per attempt: ask Scheduler, wait in the priority queue if the node is full, wake
+    exhausted candidates once. Remembers attempted nodes and wait time for routing.queued_ms."""
 
     def __init__(self, name, role, tiers, req, client_ctx, body=None, path=None, client=None):
         self.name, self.role, self.tiers, self.req, self.client_ctx = name, role, tiers, req, client_ctx
-        self.body, self.path, self.client = body, path, client   # fuer den Beobachtungsmodus (fallback_observation)
+        self.body, self.path, self.client = body, path, client   # for observation mode (fallback_observation)
         self.tried = set()
         self.woke = False
-        self.waited_loads = set()   # (Knoten, Modell), auf deren Laden schon gewartet wurde
+        self.waited_loads = set()   # (node, model) for which loading has already been waited on
         self.t_enq = None
-        # Wartebudget: deadline_ms des Clients, sonst je Prioritaetsklasse (interactive kurz, batch lang)
+        # Wait budget: client's deadline_ms, otherwise per priority class (interactive short, batch long)
         self.deadline_at = time.time() + (req.deadline_ms / 1000.0 if req.deadline_ms else admission.max_wait_s(req.priority))
 
     async def next_candidate(self):
-        """(tier_idx, tier, ctx, node) des naechsten Kandidaten, oder eine Refusal (503 mit Grund), wenn keiner bleibt."""
+        """(tier_idx, tier, ctx, node) of the next candidate, or a Refusal (503 with reason), if none remain."""
         while True:
             now = time.time()
             pick = scheduler.choose(self.role, self.tiers, self.client_ctx, now, self.tried, self.req)
             if pick is None:
                 if await self._wait_for_load(now):
-                    continue   # Ladevorgang beendet (oder Frist um): neu waehlen
+                    continue   # Loading finished (or deadline reached): re-select
                 refused = await self._wake_or_refuse()
                 if refused:
                     return refused
@@ -259,24 +259,24 @@ class _Acquire:
                 refused = await self._wait_for_slot(node, now, model)
                 if refused:
                     return refused
-                continue   # neu waehlen: Platz frei, Knoten weg oder ein anderer inzwischen besser
+                continue   # re-select: space free, node gone or another one meanwhile better
             if self.t_enq is not None:
                 self.req.queued_ms = (time.time() - self.t_enq) * 1000
             self.tried.add(node.name)
             return pick
 
     async def _wait_for_load(self, now):
-        """Kein Kandidat, aber ein passender Knoten laedt gerade ein Modell (VRAM-Anspruch aus announce_load): auf das Ende
-        des Ladens warten statt sofort 503. Gemessen 2026-09-25: beim Wechsel qwen3.6 -> gemma4:26b bekamen ~30 s lang
-        alle weiteren Anfragen 'no node available' (778 von 1142), weil das alte Modell bis zum naechsten /api/ps-Poll als
-        geladen zaehlte und der Anspruch des neuen das Budget sprengte. Wartet je (Knoten, Modell) einmal, bis /api/ps das
-        Modell zeigt oder der Anspruch weg ist (dann noch zwei Poll-Intervalle), hoechstens bis zur Admission-Frist."""
+        """No candidate, but a matching node is currently loading a model (VRAM claim from announce_load): wait for the end
+        of loading instead of immediate 503. Measured 2026-09-25: when switching qwen3.6 -> gemma4:26b, ~30 s long
+        all further requests got 'no node available' (778 of 1142), because the old model counted as loaded until the
+        next /api/ps poll and the new one's claim broke the budget. Waits per (node, model) once, until /api/ps shows
+        the model or the claim is gone (then two more poll intervals), at most until the Admission deadline."""
         found = scheduler.loading_for(self.tiers, now, self.tried)
         if found is None or now >= self.deadline_at:
             return False
         node, model = found
         if (node.name, model) in self.waited_loads:
-            return False   # schon abgewartet, immer noch kein Platz: normal weiter (wecken / 503)
+            return False   # already waited, still no space: continue normally (wake / 503)
         self.waited_loads.add((node.name, model))
         if self.t_enq is None:
             self.t_enq = now
@@ -296,7 +296,7 @@ class _Acquire:
         return True
 
     async def _wake_or_refuse(self):
-        """Kandidaten erschoepft -> einmal Weckversuch (None: geweckt, neu waehlen), danach eine Refusal 503."""
+        """Candidates exhausted -> one wake attempt (None: woken, re-select), then a Refusal 503."""
         node = None if self.woke else scheduler.wakeable_for(self.tiers)
         if node is None:
             why = scheduler.unavailable(self.tiers, self.client_ctx, time.time(), self.tried)
@@ -309,9 +309,9 @@ class _Acquire:
         return None
 
     async def _wait_for_slot(self, node, now, model=None):
-        """Stufe 3: Knoten (oder Modell, max_parallel) voll -> hier warten (mit Prioritaet und Alterung), nicht in Ollamas
-        Schlange ohne Prioritaet - die laedt bei Modellen ohne Parallelbetrieb den Runner neu. None: weiter waehlen,
-        sonst eine Refusal 503 (Frist um, Warteschlange voll)."""
+        """Stage 3: Node (or model, max_parallel) full -> wait here (with priority and aging), not in Ollama's
+        queue without priority - that reloads the Runner for models without parallel operation. None: continue selecting,
+        otherwise a Refusal 503 (deadline reached, queue full)."""
         limit = state.CFG.max_parallel(model) if model else None
         model_full = bool(limit) and node.inflight < node.effective_max_inflight()
         if self.t_enq is None:
@@ -319,7 +319,7 @@ class _Acquire:
             state.remember({"event": "queued", "role": self.role["name"], "node": node.name, "priority": self.req.priority,
                             "request_id": self.req.request_id, "inflight": node.inflight, "model": model,
                             "reason": "max_parallel" if model_full else "max_inflight"})
-            if _is_role(self.role) and self.body is not None and not self.req.context_sensitive:   # 0.6.7: haette eine tiefere freie Stufe gereicht? (nur Protokoll)
+            if _is_role(self.role) and self.body is not None and not self.req.context_sensitive:   # 0.6.7: would a deeper free tier have sufficed? (protocol only)
                 fallback_observation.start(self.body, self.path, self.role, self.tiers, self.req, node, model,
                                            "max_parallel" if model_full else "max_inflight", self.client)
         if now >= self.deadline_at:
@@ -336,10 +336,10 @@ class _Acquire:
         return None
 
 
-# --- Eine Stufe ausfuehren ---------------------------------------------------------------------------------------------
+# --- Execute a tier ---------------------------------------------------------------------------------------------
 
 async def dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape=None, req=None):
-    """Eine Stufe auf einem Knoten oder Cloud-Anbieter ausfuehren. None = Fehler vor dem ersten Byte -> naechster Kandidat."""
+    """Execute a tier on a node or cloud provider. None = error before the first byte -> next candidate."""
     turn = request.get(managed.KEY)
     if turn is not None:
         targeted = await turn.target(body, tier, ctx)
@@ -351,41 +351,41 @@ async def dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape=N
 
 
 def _backend_body(body, role, tier, ctx, node):
-    """Body fuer den Knoten: konkretes Modell, Kontext, keep_alive nach Knotenzustand. Liefert (out, ctx)."""
+    """Body for the node: specific model, context, keep_alive based on node state. Returns (out, ctx)."""
     out = dict(body)
     out["model"] = tier["model"]
     opts = dict(out.get("options") or {})
     if _is_role(role) or "num_ctx" in opts:
-        # Schon mit groesserem Kontext geladen (hoechstens so viel wie die Stufe erlaubt): den nehmen. Ein kleinerer
-        # num_ctx zwingt Modelle ohne Runner-Sharing zum Neuladen (qwen3.8:27b, 2026-09-30: 10 s je Wechsel zwischen einem
-        # Client mit 65k und einem mit 131k), und das VRAM fuer den groesseren Kontext ist ohnehin schon belegt.
+        # Already loaded with a larger context (up to what the tier allows): use that. A smaller
+        # num_ctx forces models without runner sharing to reload (qwen3.8:27b, 2026-09-30: 10 s per switch between a
+        # client with 65k and one with 131k), and the VRAM for the larger context is already occupied anyway.
         lc = node.loaded_context(tier["model"]) if hasattr(node, "loaded_context") else None
         if _is_role(role) and lc and ctx < lc <= tier["num_ctx"]:
             ctx = lc
         opts["num_ctx"] = ctx
     else:
-        # konkretes Modell ohne Kontextangabe: den Kontext nehmen, mit dem es schon geladen ist,
-        # sonst laedt Ollama mit seinem Default (OLLAMA_CONTEXT_LENGTH) neu -> 15-20 s und HA-Modell weg
+        # specific model without context specification: use the context it is already loaded with,
+        # otherwise Ollama reloads with its default (OLLAMA_CONTEXT_LENGTH) -> 15-20 s and the HA model is gone
         ctx = node.loaded_context(tier["model"]) or None
         if ctx:
             opts["num_ctx"] = ctx
     out["options"] = opts
-    out["keep_alive"] = state.CFG.keep_alive.get(node.state, "5m")   # Zahl (Sekunden, -1) oder Dauer wie 5m - Ollama nimmt beides
+    out["keep_alive"] = state.CFG.keep_alive.get(node.state, "5m")   # Number (seconds, -1) or duration like 5m - Ollama accepts both
     return out, ctx
 
 
 async def _awaited(awaitable):
-    """nreq liefert ein awaitbares Objekt (aiohttp oder TunnelRequest), keine Koroutine; als Task braucht es eine."""
+    """nreq returns an awaitable object (aiohttp or TunnelRequest), not a coroutine; it needs one as a Task."""
     return await awaitable
 
 
 def _failed_before_first_byte(status):
-    """5xx (ausser 501) und 404 sind Knotenprobleme: naechster Kandidat. 4xx und 501 gehen an den Client."""
+    """5xx (except 501) and 404 are node problems: next candidate. 4xx and 501 go to the client."""
     return (status >= 500 and status != 501) or status == 404
 
 
 class _Relay:
-    """Zustand und Ablauf einer Zuweisung: Buchfuehrung am Knoten, Durchreichen, Tool-Call-Rettung, Metriken."""
+    """State and flow of an assignment: bookkeeping at the node, forwarding, tool call rescue, metrics."""
 
     def __init__(self, request, path, body, role, tier, ctx, node, tier_idx, shape, req):
         self.request, self.path, self.role, self.tier, self.node = request, path, role, tier, node
@@ -396,25 +396,25 @@ class _Relay:
             self.ctx = ctx
             self.out["options"]["num_ctx"] = ctx
         self.stream = bool(self.out.get("stream", True)) and path in STREAM_PATHS
-        # Ollama beschraenkt den tools-Pfad nicht und verwirft einen missglueckten Aufruf still;
-        # gemessen verliert qwen3-coder:30b so 80 % seiner Calls oberhalb ~12k Token. Siehe toolcall_rescue.
+        # Ollama does not restrict the tools path and silently discards a failed call;
+        # measured, qwen3-coder:30b loses 80% of its calls above ~12k tokens. See toolcall_rescue.
         self.rescue = state.CFG.toolcall_rescue and toolcall_rescue.active_for(self.out)
         self.is_cloud = node.is_cloud
-        # Passt die Anfrage in num_ctx? Ollama kuerzt sonst still; bestaetigt wird nach der Antwort (context_check)
+        # Does the request fit in num_ctx? Ollama truncates silently otherwise; confirmed after the response (context_check)
         self.estimated_tokens = context_check.before_request(self.out, self.ctx, self.is_cloud)
         self.warm = node.is_loaded(self.model)
         self.t0 = time.time()
-        self.outcome = None          # Stufe 3: ok | error | timeout | structured_error (perf_outcome + Breaker)
-        self.ptoks = self.ctoks = 0  # Stufe 4: Tokens fuer Metriken/Usage
+        self.outcome = None          # Stage 3: ok | error | timeout | structured_error (perf_outcome + Breaker)
+        self.ptoks = self.ctoks = 0  # Stage 4: Tokens for metrics/usage
         self.ttft_s = None
         self.info = self.headers = None
-        self.resp = None             # Antwort an den Client, sobald der Stream offen ist (_open_stream)
+        self.resp = None             # Response to the client as soon as the stream is open (_open_stream)
         self.memory_capture = memory.Capture(request, req, body) if req.memory and req.memory["retain"] else None
         self.context_sensitive = req.context_sensitive
         self.managed_turn = request.get(managed.KEY)
         self.managed_capture = managed.AssistantCapture(self.managed_turn.cfg.max_response_bytes) if self.managed_turn else None
         self.managed_problem = None  # set by _render_chunks when a managed chunk cannot be persisted
-        self.obs_task = None         # 0.6.7: Einordnung im Hintergrund fuer anfragen.jsonl (fallback_observation, observe_all)
+        self.obs_task = None         # 0.6.7: Context for anfragen.jsonl in the background (fallback_observation, observe_all)
 
     async def run(self):
         self._begin()
@@ -425,11 +425,11 @@ class _Relay:
                 if not allowed:
                     self.outcome = "error"
                     return self.shape.error(403, "memory policy changed") if self.shape else ollama_error(403, "memory policy changed")
-            if self.is_cloud:   # Stufe 5: Anbieter statt Knoten
+            if self.is_cloud:   # Stage 5: Provider instead of node
                 return await self._via_cloud()
             return await self._via_node()
         except (*UPSTREAM_ERRORS, ConnectionResetError) as e:  # exception-ok: network to the node/client mid-answer
-            # Fehler nach dem ersten Byte: nichts mehr zu retten, Verbindung endet
+            # Error after the first byte: nothing left to save, connection ends
             log.warning("stream from %s aborted: %s", self.node.name, e)
             if self.resp is not None and hasattr(self.shape, "stream_error"):
                 return await self._end_with_error(502, f"upstream {self.node.name} aborted")
@@ -448,13 +448,13 @@ class _Relay:
         node, model = self.node, self.model
         node.inflight += 1
         node.inflight_models[model] += 1
-        node.last_used[model] = self.t0   # fuer die Residenz-Regel: wird der Verdraenger noch gebraucht?
+        node.last_used[model] = self.t0   # for the residency rule: is the evictee still needed?
         if not self.warm:
             node.announce_load(model, self.ctx or self.tier["num_ctx"])
         via = self.shape.name if self.shape else "ollama"
         self.info = self.req.info(self.role, self.tier_idx, self.tier, self.ctx, node, self.warm, via, self.request.get("client"))
         self.headers = request_mod.headers_for(self.info)
-        if hasattr(self.shape, "bind"):   # Anthropic: Message-ID = Request-ID, model = Name, den der Client kennt
+        if hasattr(self.shape, "bind"):   # Anthropic: Message-ID = Request-ID, model = Name known to the client
             self.shape.bind(self.req.request_id, self.exposed)
         self.obs_task = None if self.context_sensitive else fallback_observation.begin(self.path, self.out)
         request_mod.remember_session(self.req.session_id, node.name, model)
@@ -488,7 +488,7 @@ class _Relay:
         if self.estimated_tokens and self.outcome == "ok":
             context_check.after_request(self.estimated_tokens, self.ptoks, self.ctx,
                                     {**(self.info or {}), "path": self.path, "request_id": self.req.request_id})
-        admission.release(node)   # Stufe 3: Platz frei -> bestplatzierten Wartenden wecken
+        admission.release(node)   # Stage 3: Space free -> wake up the highest-ranked waiter
         log.info("done %s node=%s %.1fs%s", self.role["name"], node.name, elapsed, f" {cost:.4f} CHF" if cost else "")
         fallback_observation.finish(self.obs_task, {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": self.req.request_id, "client": self.request.get("client"),
@@ -499,17 +499,17 @@ class _Relay:
             "ttft_s": round(self.ttft_s, 2) if self.ttft_s else None, "prompt_tokens": self.ptoks, "output_tokens": self.ctoks,
             "outcome": self.outcome or "aborted"})
         if not self.warm and not self.is_cloud:
-            # frisch geladenes Modell sofort registrieren, nicht erst beim naechsten 5-s-Poll:
-            # sonst gilt die naechste Anfrage bis zu 5 s lang faelschlich als Kaltstart
+            # register a freshly loaded model immediately, not at the next 5-s poll:
+            # otherwise the next request is incorrectly treated as a cold start for up to 5 s
             state.spawn(poll.poll_node(node))
 
     def _fail(self, outcome, breaker_reason):
-        """Fehler vor dem ersten Byte: Breaker zaehlt, Aufrufer nimmt den naechsten Kandidaten."""
+        """Error before the first byte: Breaker counts, caller takes the next candidate."""
         self.outcome = outcome
         self.node.breaker_fail(time.time(), breaker_reason)
         return None
 
-    # -- Knoten --
+    # -- Node --
 
     async def _via_node(self):
         timeout = ClientTimeout(total=state.CFG.request_timeout_s, sock_connect=CONNECT_TIMEOUT_S, sock_read=state.CFG.request_timeout_s)
@@ -518,7 +518,7 @@ class _Relay:
         except UPSTREAM_ERRORS as e:  # exception-ok: network; a node can fail between choosing and connecting
             log.warning("node %s connect failed: %s", self.node.name, e)
             self._fail("timeout" if isinstance(e, asyncio.TimeoutError) else "error", f"connect: {type(e).__name__}")
-            if self.resp is not None:   # Stream schon offen (Keep-alive): kein Ausweich-Kandidat mehr
+            if self.resp is not None:   # Stream already open (Keep-alive): no fallback candidate anymore
                 return await self._end_with_error(502, f"upstream {self.node.name} failed: {type(e).__name__}")
             return None
         async with upstream:
@@ -533,10 +533,10 @@ class _Relay:
             return await self._complete_stream(upstream)
 
     async def _connect(self, timeout):
-        """Anfrage absetzen und auf die Kopfzeilen des Knotens warten. Ollama schickt sie erst mit dem ersten Token, nach dem
-        Prefill (196k Kontext: bis ~2 min). Clients mit Keep-alive (Anthropic-SSE: Claude Code, Proxys) bekommen darum nach
-        `keepalive_s` ohne Antwort schon den Stream-Anfang und danach Pings; ab dann gibt es keinen Ausweich-Kandidaten mehr.
-        Schnelle Fehler (Verbindung, 5xx) kommen fast immer vorher und behalten den Ausweich."""
+        """Submit request and wait for the node's headers. Ollama sends them only with the first token, after
+        Prefill (196k context: up to ~2 min). Clients with Keep-alive (Anthropic-SSE: Claude Code, Proxys) therefore get the
+        stream start after `keepalive_s` without a response and then pings; from then on there is no fallback candidate.
+        Fast errors (connection, 5xx) almost always come before and retain the fallback."""
         call = nodes.nreq(self.node, "post", self.path, json=self.out, timeout=timeout)
         every = getattr(self.shape, "keepalive_s", 0) if self.stream else 0
         if not every:
@@ -546,19 +546,19 @@ class _Relay:
             while True:
                 done, _pending = await asyncio.wait({task}, timeout=every)
                 if done:
-                    return task.result()   # Upstream-Fehler gehen wie ohne Keep-alive an _via_node
+                    return task.result()   # Upstream errors go to _via_node as without Keep-alive
                 await self._open_stream()
                 await self.resp.write(self.shape.ping())
         finally:
-            if not task.done():   # Client weg (Abbruch dieses Handlers): Anfrage an den Knoten nicht weiterlaufen lassen
+            if not task.done():   # Client gone (abort of this handler): do not let the request to the node continue
                 task.cancel()
 
     async def _late_upstream_error(self, upstream):
-        """Knoten lehnt ab, nachdem der Stream schon offen ist: Fehler als Ereignis im Stream statt als HTTP-Status."""
+        """Node rejects after the stream is already open: error as event in the stream instead of HTTP status."""
         txt = (await upstream.text())[:500]
         log.warning("node %s returned %s after keep-alive: %s", self.node.name, upstream.status, "context response redacted" if self.context_sensitive else txt[:200])
         if upstream.status == 404:
-            self.node.models.discard(self.model)   # wie _node_failed: Knoten hat das Modell nicht (mehr)
+            self.node.models.discard(self.model)   # like _node_failed: node does not have the model (anymore)
         elif _failed_before_first_byte(upstream.status):
             self._fail("error", f"HTTP {upstream.status}")
         try:
@@ -569,7 +569,7 @@ class _Relay:
         return await self._end_with_error(upstream.status, f"upstream {self.node.name}: {msg}")
 
     async def _end_with_error(self, status, msg):
-        """Offenen Stream mit `event: error` schliessen. Ist der Client schon weg, gibt es niemanden mehr zu benachrichtigen."""
+        """Close open stream with `event: error`. If the client is already gone, there is no one left to notify."""
         self.outcome = self.outcome or "error"
         transport = self.request.transport
         if transport is not None and not transport.is_closing():
@@ -582,12 +582,12 @@ class _Relay:
         txt = await upstream.text()
         log.warning("node %s returned %s before first byte: %s", self.node.name, upstream.status, "context response redacted" if self.context_sensitive else txt[:200])
         if upstream.status == 404:
-            self.node.models.discard(self.model)   # Knoten hat das Modell nicht (mehr); kein Breaker-Fall
+            self.node.models.discard(self.model)   # Node does not have the model (anymore); not a Breaker case
             return None
         return self._fail("structured_error" if self.out.get("format") else "error", f"HTTP {upstream.status}")
 
     async def _pass_through_error(self, upstream):
-        """4xx und 501 ("does not support embeddings": Modell kann das nicht, ein anderer Knoten auch nicht) -> an den Client."""
+        """4xx and 501 ("does not support embeddings": model cannot do that, another node cannot either) -> to the client."""
         txt = await upstream.read()
         if not self.shape:
             return web.Response(status=upstream.status, body=txt, content_type="application/json", headers=self.headers)
@@ -663,7 +663,7 @@ class _Relay:
                 if self.managed_capture.done:
                     terminal = chunk
                     continue  # Hold success until EOF and the database commit.
-            if chunk is None:            # kein JSON: im Ollama-Format roh weiterreichen, im Fremdformat weglassen
+            if chunk is None:            # no JSON: forward raw in Ollama format, omit in foreign format
                 chunk = b"" if self.shape else line
             if chunk:
                 await resp.write(chunk)
@@ -677,12 +677,12 @@ class _Relay:
         if self.shape:
             await resp.write(self.shape.tail())
         await resp.write_eof()
-        self.outcome = self.outcome or "ok"   # ein Fehler mitten im Stream (_stream_error) bleibt ein Fehler
+        self.outcome = self.outcome or "ok"   # an error in the middle of the stream (_stream_error) remains an error
         return resp
 
     def _render_chunks(self, line, rescuer, first_at):
-        """Einen NDJSON-Chunk in das Client-Format bringen. None = kein JSON. Der Retter kann einen Chunk zurueckhalten
-        (leere Liste) oder in zwei aufspalten (gehaltener Text + Rest) - darum die Schleife; ohne Rettung ein Durchlauf."""
+        """Bring an NDJSON chunk into the client format. None = no JSON. The rescuer can hold back a chunk
+        (empty list) or split it into two (held text + rest) - hence the loop; without rescue it is a single pass."""
         try:
             j = json.loads(line)
         except ValueError:  # exception-ok: upstream data; json.loads is the only full validity check
@@ -711,28 +711,28 @@ class _Relay:
         return out
 
     def _stream_error(self, line, msg):
-        """Ollama bricht eine Antwort mitten im Stream mit {"error": ...} ab - gemessen 2026-10-02: "XML syntax error on line 3:
-        unexpected EOF", das Modell hatte einen Werkzeugaufruf mit kaputtem XML geschrieben, Ollama verwarf die ganze Antwort.
-        Bis 0.6.3 reichte der Router die Zeile durch und zaehlte die Anfrage als ok; jetzt zaehlt sie als Fehler, steht im Log und
-        im Entscheidungsprotokoll, und Fremdformate bekommen ein Fehlerereignis in ihrer Form. Kein Breaker-Fall: der Knoten
-        arbeitet, die Ausgabe des Modells war kaputt."""
+        """Ollama aborts a response mid-stream with {"error": ...} - measured 2026-10-02: "XML syntax error on line 3:
+        unexpected EOF", the model had written a tool call with broken XML, Ollama discarded the whole response.
+        Until 0.6.3 the router passed the line through and counted the request as ok; now it counts as an error, appears in the log
+        and the decision protocol, and foreign formats get an error event in their form. Not a Breaker case: the node
+        is working, the model's output was broken."""
         self.outcome = "error"
         safe_message = "context response redacted" if self.context_sensitive else msg[:200]
         log.warning("stream from %s: Ollama error in the middle of the answer (%s, req=%s): %s", self.node.name, self.model,
                     self.req.request_id, safe_message)
         state.remember({"event": "stream_error", "node": self.node.name, "model": self.model, "role": self.role["name"],
                         "client": self.request.get("client"), "request_id": self.req.request_id, "error": safe_message})
-        if not self.shape:   # Ollama-Clients bekommen die Zeile im Wortlaut, wie von Ollama selbst
+        if not self.shape:   # Ollama clients get the line verbatim, as from Ollama itself
             return line if line.endswith(b"\n") else line + b"\n"
         if hasattr(self.shape, "stream_error"):
             return self.shape.stream_error(502, f"upstream {self.node.name}: {msg}")
         return b""
 
-    # -- Cloud (Stufe 5) --
+    # -- Cloud (stage 5) --
 
     async def _via_cloud(self):
-        """Anfrage an einen Cloud-Anbieter (cloud.run), Antwort im Ollama-Format an den Client. None = naechster Kandidat
-        (Anbieterfehler vor dem ersten Byte, Breaker zaehlt mit)."""
+        """Request to a cloud provider (cloud.run), response in Ollama format to the client. None = next candidate
+        (provider error before first byte, Breaker counts it)."""
         try:
             cinfo, result = await cloud.run(self.node, self.path, self.out, self.model, self.stream)
         except cloud.CloudError as e:  # exception-ok: provider HTTP error (raised in the stream generator too, see CloudError)
@@ -753,7 +753,7 @@ class _Relay:
         return await self._cloud_stream(result, cinfo)
 
     async def _cloud_stream(self, chunks, cinfo):
-        """cinfo fuellt cloud.run erst waehrend des Streams (usage kommt am Ende) - Tokens darum erst nach write_eof lesen."""
+        """cinfo fills cloud.run only during the stream (usage comes at the end) - read tokens only after write_eof."""
         resp = None
         try:
             async for j in chunks:
@@ -768,7 +768,7 @@ class _Relay:
                 if line:
                     await resp.write(line)
         except cloud.CloudError as e:  # exception-ok: provider HTTP error raised by the stream generator (its only channel)
-            if resp is None:   # noch nichts gesendet -> naechster Kandidat
+            if resp is None:   # nothing sent yet -> next candidate
                 log.warning("%s: %s -> HTTP %s: %s", self.node.name, self.model, e.status, e)
                 return self._fail("error", f"HTTP {e.status}")
             if hasattr(self.shape, "stream_error"):
@@ -792,8 +792,8 @@ class _Relay:
     # -- Gemeinsames --
 
     async def _open_stream(self):
-        """Stream zum Client oeffnen (einmal; der Keep-alive in _connect kann es frueher tun). Formate mit Kopf-Ereignis
-        (Anthropic: message_start) schicken es sofort."""
+        """Open stream to client (once; Keep-alive in _connect may do it earlier). Formats with header events
+        (Anthropic: message_start) send it immediately."""
         if self.resp is not None:
             return self.resp
         resp = web.StreamResponse(status=200, headers={"Content-Type": self.shape.stream_content_type if self.shape else NDJSON, **self.headers})
@@ -804,7 +804,7 @@ class _Relay:
         return resp
 
     def _finalize_json(self, j, force_model=False):
-        """model-Feld auf den Namen, den der Client kennt; routing-Block nur bei explizitem routing-Block im Request."""
+        """model field set to the name the client knows; routing block only if explicit routing block in request."""
         if force_model or "model" in j:
             j["model"] = self.exposed
         if self.req.explicit:
@@ -812,7 +812,7 @@ class _Relay:
         return self.shape.complete(j) if self.shape else json.dumps(j).encode()
 
     def _record_stats(self, j, ttft):
-        """Ollamas Zaehler (eval_count ...) fuer Tempo-Statistik und Token-Metriken uebernehmen."""
+        """Adopt Ollama counters (eval_count ...) for speed stats and token metrics."""
         if not j.get("eval_count"):
             return
         perf.perf_record(self.model, self.node.name, j, ttft)
@@ -844,7 +844,7 @@ class _Relay:
                         "stream": stream, "request_id": self.req.request_id})
 
     def _note_lost(self, stream, content=None):
-        """Unbekannter Dialekt: fuer den Client verloren, aber nicht mehr stumm."""
+        """Unknown dialect: lost for the client, but no longer silent."""
         sample = f": {(content or '').replace(chr(10), ' ')[:120]}" if content and not self.context_sensitive else ""
         log.warning("tool call LOST (unknown dialect%s): %s req=%s%s", ", stream" if stream else "", self.model,
                     self.req.request_id, sample)
@@ -859,7 +859,7 @@ async def handle_tags(request):
 
 
 def tags_list():
-    """Modellliste wie /api/tags: Rollen (mit den Details ihres Rang-1-Modells) + ggf. konkrete Modelle aller Knoten."""
+    """Model list like /api/tags: roles (with details of their tier-1 model) + optional specific models of all nodes."""
     out = []
     seen = set()
     for exposed, role in state.CFG.roles.items():
@@ -877,7 +877,7 @@ def tags_list():
                     seen.add(m)
                     out.append(d)
     decider = decision.active()
-    if decider:   # die Auto-Rolle ist fuer Clients ein Modell wie jede Rolle
+    if decider:   # the auto role is a model to clients like any role
         out.append({"name": decider.exposed, "model": decider.exposed, "modified_at": "2026-01-01T00:00:00Z", "size": 0,
                     "digest": "router-decision", "details": {"family": "router-decision", "options": decider.options}})
     return out
@@ -891,19 +891,19 @@ async def handle_show(request):
     if ":" not in name and f"{name}:latest" in state.CFG.roles:
         name = f"{name}:latest"
     decider = decision.active()
-    if decider and name in (decider.exposed, decider.role):   # /show der Auto-Rolle: Auskunft ueber die Default-Rolle
+    if decider and name in (decider.exposed, decider.role):   # /show of the auto role: info about the default role
         name = decision.exposed_for(decider.default) or name
     role, tiers = scheduler.resolve_tiers(name, body)
     if role is None:
         return ollama_error(404, f"model '{name}' not found")
     model = tiers[0]["model"]
-    if tiers[0].get("cloud"):   # Stufe 5: Cloud-Modell hat kein Ollama - synthetische Auskunft
+    if tiers[0].get("cloud"):   # Stage 5: Cloud model has no Ollama - synthetic info
         return web.json_response({"capabilities": request_mod.effective_caps(model) or ["completion"],
                                   "details": {"family": "cloud", "provider": tiers[0]["cloud"]},
                                   "model_info": {}, "modelfile": "", "parameters": ""})
     n = scheduler.any_online_node_with(model)
     if n is None:
-        # letzter Ausweg: Knoten, der das Modell zuletzt hatte, wecken lohnt fuer /show nicht
+        # last resort: node that last had the model, waking it is not worth it for /show
         return ollama_error(503, f"no online node holds '{model}'")
     try:
         async with nodes.nreq(n, "post", "/api/show", json={"model": model, "verbose": bool(body.get("verbose", False))},
@@ -932,9 +932,9 @@ async def handle_version(request):
 
 
 async def handle_availability(request):
-    """GET /v1/skirnir/availability/{model}: bekaeme eine Anfrage jetzt einen Knoten? Reine Sicht, laedt nichts, weckt
-    nichts. Fuer Clients, die nach einem gpu_busy warten und wissen wollen, wann es weitergeht (z. B. ein Agent-Plugin,
-    gpu-warten), statt dafuer Probe-Anfragen zu schicken. Kontext wie ohne num_ctx: die volle Stufe."""
+    """GET /v1/skirnir/availability/{model}: would a request now get a node? Pure view, loads nothing, wakes
+    nothing. For clients waiting for gpu_busy who want to know when it continues (e.g. an agent plugin,
+    gpu-wait), instead of sending probe requests. Context like without num_ctx: the full tier."""
     name = request.match_info["model"]
     if ":" not in name and name not in state.CFG.roles and f"{name}:latest" in state.CFG.roles:
         name = f"{name}:latest"

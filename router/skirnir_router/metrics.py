@@ -1,14 +1,14 @@
-"""Stufe 4 (design/roadmap.md): Observability - /metrics im Prometheus-Textformat und Usage-Erfassung.
+"""Stage 4 (design/roadmap.md): Observability - /metrics in Prometheus text format and usage tracking.
 
-Kein prometheus_client (keine neue Abhaengigkeit auf dem CT): Zaehler und Histogramme liegen in state.METRICS, Gauges
-werden beim Abruf aus dem Laufzeitzustand gelesen. Alle Namen tragen das Praefix `skirnir_`.
+No prometheus_client (no new dependency on the CT): counters and histograms live in state.METRICS, gauges
+are read from runtime state on access. All names carry the `skirnir_` prefix.
 
-Usage: je Tag und Client (dazu je Rolle und je Modell) Anfragen, Prompt-/Antwort-Tokens, Fehler - persistiert in
-usage.json neben perf.json (90 Tage), sichtbar unter /admin/usage und als HA-Sensoren (requests_today, tokens_today).
+Usage: per day and client (plus per role and model) requests, prompt/response tokens, errors - persisted in
+usage.json next to perf.json (90 days), visible under /admin/usage and as HA sensors (requests_today, tokens_today).
 
-Zaehler und Histogramme sind seit 0.1.9 ebenfalls persistent (metrics.json neben der Config, alle METRICS_SAVE_S und beim
-Stopp): ein Deploy setzt sie nicht mehr auf null, die UI zeigt "gesamt" seit `since`. Fuer Verlaeufe ueber Tage bleibt ein
-Prometheus, der /metrics abfragt, der richtige Ort - der Router ist keine Zeitreihendatenbank.
+Counters and histograms have been persistent since 0.1.9 (metrics.json next to config, all METRICS_SAVE_S and on
+stop): a deploy no longer resets them to zero, the UI shows "total" since `since`. For trends over days, a
+Prometheus scraping /metrics remains the right place - the router is not a time-series database.
 """
 
 import os
@@ -55,7 +55,7 @@ def _hist(name, labels, buckets, value):
 
 
 def count_event(entry):
-    """Von state.remember aufgerufen: Ereignisse (busy, free, wol, breaker, queued, admission_timeout, no_node, ...) zaehlen."""
+    """Called from state.remember: counts events (busy, free, wol, breaker, queued, admission_timeout, no_node, ...)."""
     ev = entry.get("event")
     if not ev or ev == "route":
         return
@@ -68,14 +68,14 @@ def count_event(entry):
 
 
 def observe_rerank(outcome, duration_s):
-    """Am Ende jeder Anfrage an POST /rerank (rerank.py). outcome: ok, ein Grund aus rerank.REASONS oder die Klasse der
-    Ablehnung (disabled, forbidden, invalid, too_large)."""
+    """At the end of every request to POST /rerank (rerank.py). outcome: ok, a reason from rerank.REASONS or the class of
+    the rejection (disabled, forbidden, invalid, too_large)."""
     _counter("skirnir_rerank_requests_total", {"outcome": outcome})
     _hist("skirnir_rerank_duration_seconds", {"outcome": outcome}, RERANK_BUCKETS, duration_s)
 
 
 def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion_tokens, queued_s, cost_chf=0.0):
-    """Am Ende jeder Anfrage aus proxy.dispatch."""
+    """At the end of every request from proxy.dispatch."""
     client = info.get("client") or "-"
     base = {"role": info["role"], "node": info["node"], "model": info["model"], "client": client, "via": info["via"], "outcome": outcome}
     _counter("skirnir_requests_total", base)
@@ -113,7 +113,7 @@ def _key_in(rows):
 
 
 def metrics_load():
-    """Beim Start: Zaehler und Histogramme aus metrics.json uebernehmen. Liefert die Zahl der Reihen (0 = Datei fehlt)."""
+    """On start: load counters and histograms from metrics.json. Returns the number of rows (0 = file missing)."""
     state.METRICS.setdefault("since", time.strftime("%Y-%m-%dT%H:%M:%S"))
     d = load_json_file(metrics_path(), "metrics.json")
     if not isinstance(d, dict):
@@ -127,7 +127,7 @@ def metrics_load():
     for name, h in (d.get("hist") or {}).items():
         buckets = tuple(h.get("buckets") or ())
         hh = state.METRICS["hist"].setdefault(name, {"buckets": buckets, "series": {}})
-        if tuple(hh["buckets"]) != buckets:   # Buckets im Code geaendert: alte Reihen passen nicht mehr, weglassen
+        if tuple(hh["buckets"]) != buckets:   # Buckets changed in code: old rows no longer match, discard
             continue
         for labels, s in h.get("series") or []:
             if len(s.get("counts") or []) != len(buckets):
@@ -140,7 +140,7 @@ def metrics_load():
 
 
 def metrics_save():
-    """Atomar nach metrics.json (tick_loop alle METRICS_SAVE_S bei Aenderung, app beim Stopp)."""
+    """Atomically to metrics.json (tick_loop every METRICS_SAVE_S on change, app on stop)."""
     d = {"since": state.METRICS.get("since"), "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
          "counters": {name: [[_key_out(k), v] for k, v in c.items()] for name, c in state.METRICS["counters"].items()},
          "hist": {name: {"buckets": list(h["buckets"]), "series": [[_key_out(k), s] for k, s in h["series"].items()]}
@@ -234,7 +234,7 @@ def render():
     gauge("skirnir_node_vram_foreign_gib", "foreign VRAM (desktop, game) above the baseline", [({"node": n.name}, round(n.foreign_vram_gib(), 3)) for n in nodes])
     gauge("skirnir_node_ollama_vram_gib", "VRAM used by Ollama (measured real footprint where the catalog has it, else /api/ps)", [({"node": n.name}, round(n.ollama_vram_gib(), 3)) for n in nodes])
     gauge("skirnir_node_breaker", "1 for the breaker state", [({"node": n.name, "state": s}, 1 if n.breaker == s else 0) for n in nodes for s in ("closed", "open", "half_open")])
-    # Sensoren (Agent >= 0.6.0) und GPU-Schutz (>= 0.7.0)
+    # Sensors (Agent >= 0.6.0) and GPU guard (>= 0.7.0)
     sens = lambda n, k: (n.sensors or {}).get(k) if n.gpu_known(now) else None  # noqa: E731
     gauge("skirnir_node_gpu_power_w", "board power draw of the card", [({"node": n.name}, sens(n, "power_w")) for n in nodes])
     gauge("skirnir_node_gpu_power_limit_w", "effective power limit", [({"node": n.name}, sens(n, "power_limit_w")) for n in nodes])
@@ -258,7 +258,7 @@ def render():
     gauge("skirnir_sessions", "active session affinities", [({}, len(state.SESSIONS))])
     rows = []
     for _exposed, role in state.CFG.roles.items():
-        pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # Sicht: /metrics wechselt keinen Breaker
+        pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # View: /metrics does not toggle any breaker
         rows.append(({"role": role["name"]}, 1 if pick else 0))
     gauge("skirnir_role_ready", "1 = role could be served right now", rows)
     gauge("skirnir_perf_gen_tps", "EWMA generation speed tok/s per model@node",

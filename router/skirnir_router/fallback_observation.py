@@ -1,17 +1,10 @@
-"""Beobachtungsmodus (0.6.7, decision_engine.observe_blocked): wartet eine Anfrage auf ein belegtes Modell, ordnet die
-Decision Engine sie im Hintergrund ein und das Entscheidungsprotokoll haelt fest, ob eine tiefere freie Stufe derselben Rolle
-gereicht haette (Ereignis `decision_observe`). Am Routing aendert sich nichts.
+"""Observation mode (0.6.7, decision_engine.observe_blocked): when a request waits for a busy model, the Decision Engine classifies it in the background and the decision log records whether a deeper free tier of the same role would have sufficed (event `decision_observe`). Routing remains unchanged.
 
-Hintergrund (kay, 2026-10-02): mit max_parallel 1 (qwen3.8) warten Anfragen im Router hinter minutenlangen Agenten-Anfragen.
-Eine kurze Alltagsfrage koennte oft ein freies kleineres Modell beantworten, eine Programmieraufgabe nicht (Pruefstand: qwen3.8
-19/20, die anderen deutlich darunter). Bevor der Router danach handelt, soll eine Woche zeigen, wie oft der Fall eintritt, welche
-Klassen betroffen sind, wie viel Wartezeit es sparte und ob die Einordnungen stimmen.
+Background (kay, 2026-10-02): with max_parallel 1 (qwen3.8), requests queue behind minute-long agent requests. A short everyday query could often be answered by a free smaller model, but a programming task could not (benchmark: qwen3.8 19/20, others significantly lower). Before the router acts on this, a week of data should show how often this occurs, which classes are affected, how much wait time it saves, and whether the classifications are accurate.
 
-Nur die CPU-Kette der Engine (embed/tfidf/rules, 10-19 ms auf dem Router-Host): das kleine LLM liefe auf genau der GPU, auf die
-gewartet wird. Laeuft als eigene Aufgabe, die Anfrage wartet nicht darauf.
+Only the engine's CPU chain (embed/tfidf/rules, 10-19 ms on the router host): the small LLM would run on the exact GPU being waited for. Runs as a separate task; the request does not wait for it.
 
-Dazu (decision_engine.observe_all): jede Anfrage wird eingeordnet und bekommt am Ende eine Zeile in requests.jsonl - siehe
-Abschnitt "Mitschreiben fuer alle Anfragen" unten.
+Additionally (decision_engine.observe_all): every request is classified and gets a line in requests.jsonl - see section "Logging for all requests" below.
 """
 
 import asyncio
@@ -22,10 +15,10 @@ import time
 from . import admission, decision, scheduler, state
 from .common import log
 
-LIGHT_DEFAULT = ("standard", "assist")   # Klassen, fuer die eine tiefere Stufe in Frage kaeme (Programmieren, Analysen nicht)
+LIGHT_DEFAULT = ("standard", "assist")   # Classes for which a deeper tier might be an option (not Programming, not Analysis)
 CLASSIFY_PATHS = ("/api/chat", "/api/generate")
-FILE_MAX_BYTES = 20 * 2 ** 20            # requests.jsonl: so gross, dann nach .1 rotieren (~400 B je Zeile, ~50 000 Anfragen)
-LATE_WAIT_S = 5.0                        # Einordnung noch nicht fertig, wenn die Anfrage endet: so lange darauf warten
+FILE_MAX_BYTES = 20 * 2 ** 20            # requests.jsonl: this large, then rotate to .1 (~400 B per line, ~50,000 requests)
+LATE_WAIT_S = 5.0                        # Classification not finished when the request ends: wait for it
 _warned = [0.0]
 
 
@@ -34,15 +27,15 @@ def enabled():
 
 
 def start(body, path, role, tiers, req, node, model, reason, client):
-    """Aus _Acquire beim ersten Warten einer Anfrage auf eine Rolle: Beobachtung im Hintergrund anstossen."""
+    """From _Acquire on the first wait of a request for a role: trigger background observation."""
     if not enabled():
         return
     state.spawn(_observe(body, path, role, tiers, req, node, model, reason, client))
 
 
 def alternative(tiers, blocked_model, req, client_ctx=None, now=None):
-    """Erste freie lokale Stufe der Rolle mit einem anderen Modell (warm vor kalt, andere Knoten vor dem blockierten) -
-    was ein Ausweichen nach Klasse nehmen wuerde. None = keine. Reine Sicht (mutate=False)."""
+    """First free local tier of the role with a different model (warm before cold, other nodes before the blocked one) -
+    what a class-based fallback would take. None = none. Read-only view (mutate=False)."""
     now = now or time.time()
     found = []
     for i, t in enumerate(tiers):
@@ -58,12 +51,12 @@ def alternative(tiers, blocked_model, req, client_ctx=None, now=None):
     return {"tier": i, "model": model, "node": node, "warm": not cold}
 
 
-# --- Mitschreiben fuer alle Anfragen (decision_engine.observe_all) ---------------------------------------------------
-# Jede Anfrage auf /api/chat oder /api/generate wird beim Start im Hintergrund eingeordnet (CPU-Kette, die Anfrage wartet nicht),
-# am Ende steht eine Zeile in requests.jsonl: Klasse, Dauer, Token, Denken, Werkzeuge, Client, Rolle, Ergebnis - keine
-# Prompt-Inhalte. Eigene Datei statt Entscheidungsprotokoll: ~1700 Anfragen am Tag halbierten sonst dessen 2000er-Fenster.
-# Wofuer: pruefen, ob die Klasse die Laufzeit vorhersagt (Retry-After, Wartezeit-Schaetzung), und ob Clients passende Rollen
-# waehlen - erst messen, dann danach handeln.
+# --- Logging for all requests (decision_engine.observe_all) ---------------------------------------------------
+# Every request to /api/chat or /api/generate is classified in the background at start (CPU chain, request does not wait),
+# at the end a line is written to requests.jsonl: class, duration, tokens, thinking, tools, client, role, result - no
+# prompt content. Separate file instead of decision log: ~1700 requests per day would otherwise halve its 2000-entry window.
+# Purpose: check if the class predicts runtime (Retry-After, wait time estimate), and if clients choose suitable roles
+# - measure first, then act.
 
 def all_enabled():
     return bool((state.CFG.decision or {}).get("observe_all")) and decision.active() is not None
@@ -80,8 +73,8 @@ def file_path():
 
 
 def adopt_file_before_0_9():
-    """Beim Start: das bisherige anfragen.jsonl (und seine Rotation .1) als requests.jsonl uebernehmen, wenn es noch keins
-    gibt (Router 0.9.0, design/english-names.md). Ein eigener observe_path bleibt, wie er ist."""
+    """At startup: adopt the existing anfragen.jsonl (and its rotation .1) as requests.jsonl if none exists
+    yet (Router 0.9.0, design/english-names.md). A custom observe_path remains as is."""
     p = file_path()
     if not p or (state.CFG.decision or {}).get("observe_path"):
         return
@@ -97,15 +90,15 @@ def adopt_file_before_0_9():
 
 
 def begin(path, body):
-    """Beim Start einer Anfrage: Einordnung als eigene Aufgabe anstossen. None = nicht mitschreiben."""
+    """At request start: trigger classification as a separate task. None = do not log."""
     if path not in CLASSIFY_PATHS or not all_enabled():
         return None
     return state.spawn(decision.active().classify_body(body, path))
 
 
 def finish(task, rec):
-    """Am Ende einer Anfrage: Zeile schreiben - sofort, wenn die Einordnung fertig ist, sonst sobald sie es ist (hoechstens
-    LATE_WAIT_S), damit die Antwort an den Client nie auf die Engine wartet."""
+    """At request end: write line - immediately if classification is done, otherwise as soon as it is (max
+    LATE_WAIT_S), so the response to the client never waits for the engine."""
     if task is None:
         return
     if task.done():
@@ -128,7 +121,7 @@ def _write(rec, task):
                     "class_margin": res.uncertainty.get("margin"),
                     "class_sure": not res.uncertainty.get("reasons") and not res.uncertainty.get("forced")})
     else:
-        rec["class"] = None   # Engine haengt oder Fehler: Zeile trotzdem, ohne Klasse
+        rec["class"] = None   # Engine hangs or error: write line anyway, without class
     p = file_path()
     if not p:
         return
@@ -137,7 +130,7 @@ def _write(rec, task):
             os.replace(p, p + ".1")
         with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    # Platte voll, Rechte: nicht vorab sicher pruefbar; gedrosselt melden, die Anfrage ist laengst beantwortet
+    # Disk full, permissions: not safely checkable in advance; report throttled, the request is long answered
     except OSError as e:  # exception-ok: file system boundary
         if time.time() - _warned[0] > 600:
             _warned[0] = time.time()

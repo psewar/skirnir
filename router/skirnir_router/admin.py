@@ -17,7 +17,7 @@ from . import request as request_mod
 from .common import VERSION, GIB, log, read_json, split_listen
 
 
-UI_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui.html")   # ui.html liegt neben router.py, eine Ebene ueber dem Paket
+UI_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui.html")   # ui.html sits next to router.py, one level above the package
 
 
 async def handle_ui(request):
@@ -26,11 +26,11 @@ async def handle_ui(request):
     return web.FileResponse(UI_PATH, headers={"Cache-Control": "no-store"})
 
 
-ASSETS = {"skirnir.png": "skirnir.png", "favicon.png": "favicon.png", "favicon.ico": "favicon.png"}   # Logo des Betreibers (Kachel seit 2026-09-16; vorher Rabe) freigestellt + Icon mit Kachel
+ASSETS = {"skirnir.png": "skirnir.png", "favicon.png": "favicon.png", "favicon.ico": "favicon.png"}   # Operator logo (tile since 2026-09-16; previously Raven) cut out + icon with tile
 
 
 async def handle_asset(request):
-    """Logo (Skirnir-Kachel, 256 px, Ecken transparent) und Tab-Icon (128 px); /favicon.ico liefert dasselbe PNG."""
+    """Logo (Skirnir tile, 256 px, transparent corners) and tab icon (128 px); /favicon.ico serves the same PNG."""
     name = ASSETS.get(request.match_info["name"])
     path = os.path.join(os.path.dirname(UI_PATH), name) if name else None
     if not path or not os.path.exists(path):
@@ -44,8 +44,8 @@ async def handle_config_get(request):
     return web.json_response({"roles": config.roles_as_config(), "models": state.CFG.models, "nodes": state.CFG.nodes,
                               "expose_concrete_models": state.CFG.expose_concrete, "modes": state.CFG.raw.get("modes", {}),
                               "warm_first": state.CFG.warm_first,
-                              "settings": config.settings_view(lang=request.query.get("lang", "de")),                     # Stufe 7: per UI aenderbare Einstellungen
-                              "ui_models": sorted(m for m in state.CFG.models if m not in base_models),   # Katalogeintraege aus roles.yaml (loeschbar)
+                              "settings": config.settings_view(lang=request.query.get("lang", "de")),                     # Stage 7: UI-editable settings
+                              "ui_models": sorted(m for m in state.CFG.models if m not in base_models),   # Catalog entries from roles.yaml (deletable)
                               "cloud_providers": sorted(state.CFG.cloud.get("providers") or {}),
                               "clients": clients_view(),                                 # Clients-Tab: Identitaet, Herkunft, Felder
                               "overrides_file": state.CFG.overrides_path, "overrides_active": os.path.exists(state.CFG.overrides_path),
@@ -61,7 +61,7 @@ def base_clients():
 
 
 def clients_view():
-    """Alle wirksamen Clients mit Herkunft (config.yaml / UI) und Identitaetsmerkmalen - nie der Hash selbst in voller Laenge."""
+    """All effective clients with origin (config.yaml / UI) and identity markers - never the full hash."""
     base = base_clients()
     ov = (config.read_overrides().get("clients") or {})
     out = {}
@@ -79,7 +79,7 @@ def clients_view():
 
 
 def _client_spec(name, v):
-    """Felder eines Clients aus der UI pruefen: die Felder oder ein Problem 400 mit Klartext."""
+    """Validate client fields from the UI: return the fields or a Problem 400 with plain text."""
     if not isinstance(v, dict):
         return invalid(f"client {name}: object expected")
     bad = set(v) - set(CLIENT_FIELDS)
@@ -110,8 +110,8 @@ def _client_spec(name, v):
 
 
 async def handle_client_token(request):
-    """Neues Secret fuer einen Client: Zufall (256 Bit), nur der sha256 landet in roles.yaml; der Klartext geht EINMAL an die UI
-    und wird nirgends gespeichert oder geloggt. Das bisherige Secret ist sofort ungueltig (Rotation)."""
+    """New secret for a client: Random (256 Bit), only the sha256 lands in roles.yaml; the plaintext goes ONCE to the UI
+    and is never stored or logged. The previous secret is immediately invalid (rotation)."""
     name = request.match_info["name"]
     if name not in (state.CFG.client_auth.get("clients") or {}):
         return web.json_response({"error": f"unknown client {name}"}, status=404)
@@ -136,8 +136,8 @@ def _bad(msg):
 
 
 async def handle_decide(request):
-    """Decision Engine direkt fragen (UI, decision-eval): POST {"context": "...", "options": [..]?, "engine": "rules"?}
-    oder {"body": <Ollama-Body>, "path": "/api/chat"} - dann baut der Router den Kontext wie im Betrieb."""
+    """Query the Decision Engine directly (UI, decision-eval): POST {"context": "...", "options": [..]?, "engine": "rules"?}
+    or {"body": <Ollama-Body>, "path": "/api/chat"} - then the Router builds the context as in production."""
     d = decision.active()
     if not d:
         return _bad("decision engine is not active")
@@ -168,8 +168,8 @@ async def handle_decision_status(request):
 
 
 async def handle_config_put(request):
-    """Rollen, Modellkatalog, Einstellungen, Clients von der UI: validieren, roles.yaml schreiben, live schalten.
-    Der Body traegt nur die geaenderten Abschnitte; sie werden mit den bestehenden Overrides zusammengefuehrt."""
+    """Roles, model catalog, settings, clients from the UI: validate, write roles.yaml, switch live.
+    The body carries only the changed sections; they are merged with existing overrides."""
     b = await read_json(request)
     if b is None:
         return _bad("invalid json")
@@ -178,7 +178,7 @@ async def handle_config_put(request):
     new = estimated if failed(estimated) else _merge_overrides(config.read_overrides(), ov)
     if failed(new):
         return _bad(new.message)
-    written = config.write_overrides(new)   # Schema- und Pruefungsfehler landen als 400 beim Bediener
+    written = config.write_overrides(new)   # Schema and validation errors land as 400 for the operator
     if failed(written):
         return _bad(f"invalid configuration: {written.message}") if written.status == 400 else \
             web.json_response({"error": written.message}, status=written.status)
@@ -187,10 +187,10 @@ async def handle_config_put(request):
 
 
 def _overrides_from_request(b):
-    """Body der UI -> Override-Abschnitte (validiert, noch nicht mit dem Bestand zusammengefuehrt), oder ein Problem 400."""
+    """UI body -> override sections (validated, not yet merged with existing state), or a Problem 400."""
     if not isinstance(b, dict):
         return invalid("object expected")
-    for key in ("roles", "models", "settings", "clients"):   # Stufe 7 settings: {pfad: wert}; null = Override entfernen
+    for key in ("roles", "models", "settings", "clients"):   # Stage 7 settings: {path: value}; null = remove override
         if not isinstance(b.get(key) or {}, dict):
             return invalid(f"{key} must be a mapping")
     for key in ("delete_models", "delete_clients"):
@@ -205,7 +205,7 @@ def _overrides_from_request(b):
         ov["settings"] = dict(b["settings"] or {})
     if "delete_models" in b:
         ov["delete_models"] = [str(m) for m in (b["delete_models"] or [])]
-    if "clients" in b:   # Clients-Tab: neue Clients oder Felder bestehender; das Secret kommt separat ueber /admin/clients/<n>/token
+    if "clients" in b:   # Clients tab: new clients or fields of existing ones; the secret comes separately via /admin/clients/<n>/token
         ov["clients"] = _clients_from(b["clients"] or {})
     if "delete_clients" in b:
         ov["delete_clients"] = [str(n) for n in (b["delete_clients"] or [])]
@@ -236,7 +236,7 @@ def _roles_from(raw):
             return problem
         if r.get("latency_first") is not None:
             roles[name]["latency_first"] = bool(r["latency_first"])
-        for k in ("priority", "canary", "shadow"):   # Stufe 3/6: die UI darf sie setzen; fehlen sie, bleibt config.yaml
+        for k in ("priority", "canary", "shadow"):   # Stage 3/6: the UI may set them; if missing, config.yaml remains
             if r.get(k) is not None:
                 roles[name][k] = r[k]
     return roles
@@ -253,7 +253,7 @@ def _models_from(raw):
         entry = _cloud_model_entry(m, v) if v.get("cloud") else _local_model_entry(m, v)
         if failed(entry):
             return entry
-        if v.get("max_parallel"):   # 0.6.5: Grenze gleichzeitiger Anfragen je Knoten fuer dieses Modell
+        if v.get("max_parallel"):   # 0.6.5: Limit of concurrent requests per node for this model
             entry["max_parallel"] = values.number(v["max_parallel"], f"model {m}: max_parallel", integer=True)
             if failed(entry["max_parallel"]):
                 return entry["max_parallel"]
@@ -270,7 +270,7 @@ def _local_model_entry(m, v):
 
 
 def _cloud_model_entry(m, v):
-    """Stufe 7: Cloud-Modell im Katalog anlegen/aendern (Anbieter, Preise, Kontext, Faehigkeiten)."""
+    """Stage 7: Create/edit cloud model in catalog (provider, prices, context, capabilities)."""
     if v["cloud"] not in (state.CFG.cloud.get("providers") or {}):
         return invalid(f"model {m}: cloud provider {v['cloud']} is not configured")
     pr = v.get("price_chf_per_m") or {}
@@ -309,7 +309,7 @@ def _clients_from(raw):
 
 
 def _estimate_unknown_tier_models(ov):
-    """Tier-Modelle ohne Katalogeintrag: aus Knotenwissen ableiten (Dateigroesse), sonst ein Problem 400."""
+    """Tier models without catalog entry: derive from node knowledge (file size), otherwise a Problem 400."""
     known = set(state.CFG.models) | set(ov.get("models", {}))
     for name, r in ov.get("roles", {}).items():
         for t in r["tiers"]:
@@ -324,18 +324,18 @@ def _estimate_unknown_tier_models(ov):
 
 
 def _merge_overrides(current, ov):
-    """Neue Abschnitte in die bestehenden Overrides einarbeiten: Katalog und Clients ergaenzen, Settings mit null loeschen,
-    Loeschlisten anwenden. Problem 400: Modell noch in Rollen, Client aus config.yaml."""
+    """Merge new sections into existing overrides: supplement catalog and clients, delete settings with null,
+    apply deletion lists. Problem 400: model still in roles, client from config.yaml."""
     if "models" in ov:
         cur_models = current.get("models", {})
         merged = dict(cur_models)
         for m, e in ov["models"].items():
             old_entry = cur_models.get(m) or {}
-            # Die UI schickt nur Gewichte + KV. Sind sie unveraendert, bleibt der gemessene Eintrag samt real /
-            # vram_real_gib (0.3.5) stehen - sonst verloere jedes Speichern im Katalog-Tab die echte Messung.
+            # The UI sends only weights + KV. If unchanged, the measured entry with real /
+            # vram_real_gib (0.3.5) remains - otherwise every save in the catalog tab would lose the actual measurement.
             if (old_entry.get("real") and not e.get("cloud") and old_entry.get("weights_gib") == e.get("weights_gib")
                     and old_entry.get("kv_gib_per_1k") == e.get("kv_gib_per_1k")):
-                if "max_parallel" in e:   # 0.6.5: die Messung bleibt, die Grenze aus der UI kommt trotzdem an
+                if "max_parallel" in e:   # 0.6.5: the measurement remains, the limit from the UI still applies
                     merged[m] = {**old_entry, "max_parallel": e["max_parallel"]}
                 continue
             merged[m] = e
@@ -395,7 +395,7 @@ def _apply_delete_clients(current, ov):
 
 def _after_config_change(b, new):
     if "settings" in b and any(k == "router.client_auth.mode" for k in b.get("settings") or {}):
-        state.CLIENT_AUTH_MODE = None   # der dauerhafte Wert gilt; ein aelterer Laufzeit-Schalter (POST /admin/client_auth) verfaellt
+        state.CLIENT_AUTH_MODE = None   # the persistent value applies; an older runtime switch (POST /admin/client_auth) expires
         auth.audit("client_auth_mode", mode=state.CFG.client_auth["mode"], by="admin-ui-settings")
     log.info("config changed via UI: %d roles, expose_concrete=%s, settings=%d", len(state.CFG.roles), state.CFG.expose_concrete, len(new.get("settings") or {}))
     state.remember({"event": "config", "roles": sorted(r["name"] for r in state.CFG.roles.values()),
@@ -403,7 +403,7 @@ def _after_config_change(b, new):
 
 
 async def handle_try(request):
-    """Testprompt durch den eigenen Proxy schicken und die Routing-Entscheidung dazu liefern."""
+    """Send a test prompt through the own proxy and provide the routing decision."""
     b = await read_json(request)
     if b is None:
         return _bad("invalid json")
@@ -414,12 +414,12 @@ async def handle_try(request):
             return _bad(ctx.message)
         body["options"] = {"num_ctx": ctx}
     if "think" in b:
-        body["think"] = bool(b["think"])   # thinking-Modelle (glm, qwen3.6, gpt-oss, granite) denken sonst unsichtbar vor der Antwort
+        body["think"] = bool(b["think"])   # thinking models (glm, qwen3.6, gpt-oss, granite) otherwise think invisibly before the answer
     rt = {k: v for k, v in (b.get("routing") or {}).items() if v not in (None, "", [])}   # UI: execution, data_class, priority, require
     rid = f"ui-{int(time.time() * 1000)}"
-    body["routing"] = {**rt, "request_id": rid}   # immer ein Block -> Routing-Info in der Antwort
+    body["routing"] = {**rt, "request_id": rid}   # always a block -> routing info in the response
     h, p = split_listen(state.CFG.listen)
-    url = f"{'https' if state.CFG.api_tls else 'http'}://127.0.0.1:{p}/api/chat"   # Selbstaufruf; Zertifikat lautet auf den Hostnamen -> ssl=False
+    url = f"{'https' if state.CFG.api_tls else 'http'}://127.0.0.1:{p}/api/chat"   # Self-call; certificate is for the hostname -> ssl=False
     t0 = time.time()
     hdrs = {"Authorization": "Bearer " + state.INTERNAL_TOKEN} if state.INTERNAL_TOKEN else {}   # eigene Identitaet skirnir-ui (enforce)
     try:
@@ -428,14 +428,14 @@ async def handle_try(request):
             status = r.status
     except Exception as e:  # noqa: BLE001  # exception-ok: network boundary of the self-call; the operator sees the reason
         return web.json_response({"status": 502, "answer": str(e), "seconds": round(time.time() - t0, 1)})
-    # ueber die request_id, nicht per Index: der Ring ist nach dem Laden von events.jsonl voll, ein Slice ab len() waere leer
+    # via request_id, not by index: the ring is full after loading events.jsonl, a slice from len() would be empty
     decision = next((d for d in reversed(state.DECISIONS) if d.get("event") == "route" and d.get("request_id") == rid), None)
     answer = data.get("error") if "error" in data else (data.get("message") or {}).get("content", "")
     thinking = (data.get("message") or {}).get("thinking") or "" if isinstance(data, dict) else ""
     return web.json_response({"status": status, "answer": answer, "seconds": round(time.time() - t0, 1),
                               "load_ms": round((data.get("load_duration") or 0) / 1e6), "decision": decision,
                               "backend_ms": round((data.get("total_duration") or 0) / 1e6),   # Ollamas eigene Zeit (Laden + Prompt + Generieren)
-                              "queued_ms": (data.get("routing") or {}).get("queued_ms") if isinstance(data, dict) else None,   # Wartezeit in der Admission
+                              "queued_ms": (data.get("routing") or {}).get("queued_ms") if isinstance(data, dict) else None,   # Wait time in admission
                               "routing": data.get("routing") if isinstance(data, dict) else None,
                               "perf": perf.perf_stats(data, None) if isinstance(data, dict) else None,
                               "thinking_chars": len(thinking)})
@@ -450,9 +450,9 @@ LOADTEST = {"running": False}
 
 
 async def handle_loadtest(request):
-    """Lasttest aus der UI (Betreiber, 2026-09-11): n Anfragen mit Parallelitaet c durch den eigenen Proxy, dazu optional alle 2 s
-    eine Sonde mit routing.priority interactive - der Nachweis, dass Sprachbefehle (assist) den Stau ueberholen.
-    Ergebnis: Durchsatz, Latenz (Median/p95/max), Wartezeit normal vs. interactive, Modellzeit, Knotenverteilung, Fehler."""
+    """Load test from the UI (operator, 2026-09-11): n requests with parallelism c through the own proxy, plus optionally every 2 s
+    a probe with routing.priority interactive - proof that voice commands (assist) overtake the queue.
+    Result: throughput, latency (median/p95/max), wait time normal vs. interactive, model time, node distribution, errors."""
     b = await read_json(request)
     if b is None:
         return _bad("invalid json")
@@ -535,12 +535,12 @@ async def handle_loadtest(request):
     return web.json_response(out)
 
 
-# Katalogquellen, die vor Router 0.9.0 deutsch in roles.yaml geschrieben wurden (design/english-names.md)
+# Catalog sources written in German in roles.yaml before Router 0.9.0 (design/english-names.md)
 CATALOG_SOURCE_BEFORE_0_9 = {"gemessen": "measured", "gemessen (nvidia-smi)": "measured (nvidia-smi)", "geschaetzt": "estimated"}
 
 
 def catalog_effective():
-    """Für jedes bekannte Modell die wirksamen Katalogwerte: direkt, über Digest-Zwilling (Alias) oder keine."""
+    """Effective catalog values for each known model: direct, via digest twin (alias), or none."""
     out = {}
     names = set(state.CFG.models)
     for n in state.NODES.values():
@@ -569,7 +569,7 @@ async def handle_state(request):
         "version": VERSION,
         "public_url": state.CFG.public_url,
         "measuring": state.MEASURING,
-        "metrics_since": state.METRICS.get("since"),   # Beginn der Aufzeichnung von metrics.json (UI: "gesamt seit")
+        "metrics_since": state.METRICS.get("since"),   # Start of metrics.json recording (UI: "total since")
         "benching": state.BENCHING,
         "perf": state.PERF,
         "fit_overhead_gib": state.CFG.overhead_gib,
@@ -603,9 +603,9 @@ async def handle_metrics(request):
 
 
 async def handle_client_auth(request):
-    """GET: Sicht der Beobachtungsphase. POST {"mode": "observe"|"enforce"}: Modus zur Laufzeit umschalten -
-    gilt bis zum Neustart; dauerhaft ist config.yaml. Gedacht fuer den Wechsel nach der Beobachtung und als
-    Notbremse zurueck auf observe ohne Deploy."""
+    """GET: View of the observation phase. POST {"mode": "observe"|"enforce"}: Switch mode at runtime -
+    applies until restart; persistent is config.yaml. Intended for switching after observation and as
+    a brake back to observe without deploy."""
     if request.method == "POST":
         b = await read_json(request)
         if b is None:

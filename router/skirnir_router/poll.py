@@ -1,4 +1,4 @@
-"""Polling der Knoten, Zustandsautomat free/busy, prewarm und Sicherheitsnetz."""
+"""Node polling, free/busy state machine, prewarming, and safety net."""
 
 import asyncio
 import time
@@ -26,20 +26,20 @@ async def poll_node(node):
     node.misses = 0
     node.polled_ok = time.time()
     apply_ollama_state(node, tags.get("models", []), ps.get("models", []), time.time())
-    if time.time() - node.version_ts > 300:   # beim Push kommt die Version mit dem Heartbeat
+    if time.time() - node.version_ts > 300:   # on push, the version arrives with the heartbeat
         node.version_ts = time.time()
         state.spawn(fetch_version(node))
 
 
 def apply_ollama_state(node, tag_models, ps_models, now):
-    """Ollama-Zustand eines Knotens uebernehmen: installierte (/api/tags) und geladene Modelle (/api/ps), Wechsel offline ->
-    free, Faehigkeiten nachladen, Zustandsautomat. Gemeinsam fuer den Poll des Routers und die Meldung des Agenten
-    (Rahmen OLLAMA, apply_ollama_push)."""
+    """Adopt Ollama state of a node: installed (/api/tags) and loaded models (/api/ps), transition offline ->
+    free, reload capabilities, state machine. Shared for router polling and agent reporting
+    (OLLAMA frame, apply_ollama_push)."""
     node.models = {m["name"] for m in tag_models}
     node.model_details = {m["name"]: m for m in tag_models}
     if node.models:
         node.last_known_models = set(node.models)
-        # ins Register, sonst weiss der Router nach einem Neustart bei schlafendem Knoten nicht, was der kann - und
+        # into the registry, otherwise the router doesn't know what a sleeping node can do after a restart - and
         # wakeable_for() findet nichts zu wecken (2026-09-09 beim WOL-Nachweis gefunden: 404 statt Magic Packet)
         if node.reg is not None and node.reg.get("models") != sorted(node.models):
             node.reg["models"] = sorted(node.models)
@@ -56,15 +56,15 @@ def apply_ollama_state(node, tag_models, ps_models, now):
                 node.loaded_ctx[d] = int(m["context_length"])
     if node.state == "offline":
         log.info("node %s -> free (online)", node.name)
-        # 0.8.8: den Grund eines busy vor dem Ausfall nicht mitschleppen - /admin/state zeigte sonst "free, Grund game"
+        # 0.8.8: don't carry over the reason for busy before a failure - /admin/state otherwise showed "free, reason game"
         node.state, node.free_at, node.busy_reason, node.calm_since = "free", now, "", None
-        node.breaker_reset()   # Stufe 3: alte Fehler eines abgestuerzten Knotens zaehlen nach dem Neustart nicht mehr
+        node.breaker_reset()   # Stage 3: old errors of a crashed node no longer count after restart
         state.MQTT_DIRTY.append(True)
         if state.CFG.prewarm_on_online:
             state.spawn(prewarm(node, state.CFG.prewarm_online_delay, "online", since=node.free_at))
     for m in node.models:
         if m not in state.CAPS:
-            state.CAPS[m] = None   # in Arbeit, kein Doppel-Fetch
+            state.CAPS[m] = None   # in progress, no double fetch
             state.spawn(fetch_caps(node, m))
     node.note_loaded_changed(now)
     evaluate(node, now)
@@ -72,9 +72,9 @@ def apply_ollama_state(node, tag_models, ps_models, now):
 
 
 def busy_unload_check(node, now):
-    """Sicherheitsnetz: ein grosses Modell, das trotz busy geladen ist (Race mit einem laufenden Load oder keep_alive -1 einer
-    Anfrage, die vor dem busy startete), wird nachtraeglich entladen. Zeitgesteuert (unload_on_busy_interval_s), darum auch aus
-    tick_loop jede Sekunde - lief bis 0.3.8 nach jedem Poll; mit dem Ollama-Push kaemen Daten nur noch bei einer Aenderung."""
+    """Safety net: a large model that is loaded despite busy (race with a running Load or keep_alive -1 of a
+    request that started before busy) is unloaded retroactively. Time-based (unload_on_busy_interval_s), hence also from
+    tick_loop every second - ran after every poll until 0.3.8; with Ollama push, data would only arrive on change."""
     if node.state == "busy" and state.CFG.unload_on_busy and now - node.last_busy_unload >= state.CFG.unload_on_busy_interval_s:
         big = [m for m, gib in node.loaded.items() if gib >= 0.5 and not any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models)]
         if big:
@@ -109,17 +109,17 @@ async def fetch_caps(node, model):
 
 
 def evaluate(node, now):
-    """Zustandsautomat free <-> busy. Wird bei jedem Poll und jedem Heartbeat aufgerufen."""
+    """free <-> busy state machine. Called on every poll and every heartbeat."""
     if node.state == "offline":
         return
-    # Waehrend einer Messung (perf.measure_model) ruht er: dort wird absichtlich entladen und geladen, und bis der
+    # During a measurement (perf.measure_model) it rests: there, unloading and loading happen intentionally, and until the
     # Katalog echte Zahlen hat, erschiene Ollamas ungemeldeter Rest als fremdes VRAM - busy + unload_on_busy
-    # wuerden das Messobjekt mitten in der Messung entladen.
+    # would unload the measurement object mid-measurement.
     if any(m.get("node") == node.name for m in state.MEASURING.values()):
         return
     gpu_known = node.gpu_known(now)
-    # Auslastung allein reicht nicht: ein weiterer Ollama-Client (lokaler Worker, Agenten-Framework) belegt kein fremdes
-    # VRAM und darf den Knoten nicht "busy" machen. Spiele/Encoder belegen immer Speicher.
+    # Utilization alone is not enough: another Ollama client (local worker, agent framework) does not occupy foreign
+    # VRAM and must not make the node "busy". Games/encoders always occupy memory.
     util_hot = (gpu_known and node.gpu_util is not None and node.gpu_util >= node.busy_util_threshold() and node.inflight == 0
                 and node.foreign_vram_gib() >= state.CFG.util_requires_foreign_gib)
     if util_hot:
@@ -127,22 +127,22 @@ def evaluate(node, now):
     else:
         node.hot_since = None
     hot_long = node.hot_since is not None and (now - node.hot_since) >= state.CFG.busy_sustain
-    # Fremdes VRAM braucht ebenfalls ein Haltefenster: beim Modellwechsel meldet /api/ps kurz nichts,
-    # während das VRAM noch belegt ist -> sonst Fehlalarm "busy" für die Dauer der Exit-Hysterese.
+    # Foreign VRAM also needs a hold window: on model switch, /api/ps briefly reports nothing,
+    # while VRAM is still occupied -> otherwise false alarm "busy" for the duration of the exit hysteresis.
     foreign_now = gpu_known and node.foreign_vram_gib() >= node.busy_foreign_threshold()
     node.foreign_since = (node.foreign_since or now) if foreign_now else None
     foreign = node.foreign_since is not None and (now - node.foreign_since) >= state.CFG.foreign_sustain
-    # Hysterese (0.6.8): busy BLEIBEN ist leichter als busy WERDEN. Bis 0.6.7 musste ein busy-Knoten die Eintrittsbedingung
-    # (Auslastung ueber der Schwelle, ohne Unterbrechung ueber sustain_s) dauernd erfuellen - ein Spiel mit 31-44 % Last bei
-    # 40 % Schwelle flatterte so alle 20-60 s zwischen busy und free (gpu-laptop, 2026-10-04). Solange das Spiel fremdes VRAM
-    # haelt und die Last ueber der Austrittsschwelle liegt, bleibt der Knoten busy; Ladebildschirme darunter deckt below_for_s ab.
+    # Hysteresis (0.6.8): staying busy is easier than becoming busy. Until 0.6.7, a busy node had to continuously meet the entry condition
+    # (utilization above threshold, without interruption for sustain_s) - a game with 31-44 % load at
+    # 40 % threshold flapped between busy and free every 20-60 s (gpu-laptop, 2026-10-04). As long as the game holds foreign VRAM
+    # and load is above the exit threshold, the node stays busy; loading screens below that are covered by below_for_s.
     keep = (node.state == "busy" and gpu_known and node.gpu_util is not None and node.gpu_util >= node.busy_exit_util_threshold()
             and node.foreign_vram_gib() >= state.CFG.util_requires_foreign_gib)
-    # Spiel als Fakt vom Agenten (0.7.0 / Agent 0.17.0): Diablo IV bekam neben qwen3.8@196k kaum VRAM und lastete die GPU
-    # kaum aus, trotzdem lief es (RAM 94 %) - fremdes VRAM und Last allein erkennen das nicht. Bis 0.8.6 machte darum JEDES
-    # Spiel busy; ein kleines (735 MiB, 2 %) sperrte so die ganze Karte. Seit 0.8.7 nur ein Spiel, das die GPU braucht
-    # (game_heavy, gemessen vom Agenten >= 0.19.0, siehe game_needs_gpu). Kurz nach dem Start erst nach game_sustain_s
-    # (Launcher-Blitzer), danach haelt es den Knoten busy, bis das Spiel weg ist.
+    # Game as fact from agent (0.7.0 / Agent 0.17.0): Diablo IV got hardly any VRAM next to qwen3.8@196k and barely loaded the GPU
+    # yet it ran (RAM 94 %) - foreign VRAM and load alone don't detect that. Until 0.8.6, therefore, EVERY
+    # game made it busy; a small one (735 MiB, 2 %) locked the whole card. Since 0.8.7, only a game that needs the GPU
+    # (game_heavy, measured by agent >= 0.19.0, see game_needs_gpu). Shortly after start, only after game_sustain_s
+    # (launcher blip), then it keeps the node busy until the game is gone.
     if node.game_since is not None and not node.game_heavy:
         heavy, why = game_needs_gpu(node)
         if heavy:
@@ -157,11 +157,11 @@ def evaluate(node, now):
     if trigger:
         node.calm_since = None
         if game and node.state == "busy" and node.busy_reason != "game":
-            node.busy_reason = "game"   # Grund nachziehen: ein Spiel ist die genaueste Erklaerung
+            node.busy_reason = "game"   # Pull reason: a game is the most precise explanation
             state.MQTT_DIRTY.append(True)
         if node.state == "free":
             node.state = "busy"
-            node.prewarm_after_game = False   # busy -> free waermt ohnehin vor
+            node.prewarm_after_game = False   # busy -> free prewarms anyway
             node.busy_reason = "game" if game else ("gpu_util" if hot_long else "foreign_vram")
             log.info("node %s -> busy (%s util=%s foreign=%.1fGiB)", node.name, node.busy_reason,
                      node.gpu_util, node.foreign_vram_gib())
@@ -170,7 +170,7 @@ def evaluate(node, now):
                 state.spawn(unload_big_models(node))
     elif node.state == "busy":
         node.calm_since = node.calm_since or now
-        # Nach einem Spiel laenger warten (Neustart des Spiels, Wechsel Launcher -> Spiel), sonst laedt prewarm dazwischen
+        # Wait longer after a game (game restart, switch Launcher -> Game), otherwise prewarm interferes
         quiet = max(state.CFG.busy_exit_s, state.CFG.game_exit_s) if node.busy_reason == "game" else state.CFG.busy_exit_s
         if (now - node.calm_since) >= quiet:
             node.state, node.calm_since, node.busy_reason = "free", None, ""
@@ -179,9 +179,9 @@ def evaluate(node, now):
             node.free_at = now
             if state.CFG.prewarm_on_free:
                 state.spawn(prewarm(node, state.CFG.prewarm_free_delay, "free", since=node.free_at))
-    # 0.8.8: ein Vorwaermen, das ein noch unbeurteiltes Spiel (game_sustain-Fenster) verhindert hat, nachholen, sobald das
-    # Spiel als leicht gilt oder beendet ist und der Knoten frei bleibt. Gefunden 2026-10-21: nach dem Agent-Update kam
-    # psewar mit laufendem Spiel online, das Vorwaermen fiel ins Fenster, und die Karte blieb neben dem leichten Spiel leer.
+    # 0.8.8: retry a prewarm that was blocked by an unassessed game (game_sustain window), as soon as the
+    # game is deemed light or finished and the node remains free. Found 2026-10-21: after agent update, came
+    # psewar online with running game, prewarm fell into the window, and the card stayed idle next to the light game.
     if (node.state == "free" and node.prewarm_after_game and not node.mem_pressure and not game_blocks_prewarm(node, now)):
         node.prewarm_after_game = False
         why = "game_light" if node.game_since is not None else "game_ended"
@@ -190,15 +190,15 @@ def evaluate(node, now):
 
 
 def game_blocks_prewarm(node, now):
-    """Sperrt das laufende Spiel das Vorwaermen? Ja, wenn es die GPU braucht oder noch im game_sustain-Fenster steckt (noch
-    nicht beurteilt); ein leichtes Spiel (0.8.7) nicht - sonst bliebe die Karte daneben leer."""
+    """Does the running game block prewarming? Yes, if it needs the GPU or is still in the game_sustain window (not
+    yet assessed); a light game (0.8.7) does not - otherwise the card would stay idle next to it."""
     return node.game_since is not None and (node.game_heavy or now - node.game_since < state.CFG.game_sustain)
 
 
 def game_needs_gpu(node):
-    """(braucht die GPU?, Grund) fuer das laufende Spiel. Grafikspeicher = eigen + geteilt: ein Spiel, das neben einem grossen
-    Modell kein VRAM mehr bekommt, weicht in den geteilten Speicher aus und zaehlt so trotzdem als schwer. Ohne gemeldeten
-    Bedarf (Agent < 0.19.0, Messung gescheitert) gilt jedes Spiel als schwer - das Verhalten bis 0.8.6."""
+    """(needs GPU?, reason) for the running game. Graphics memory = own + shared: a game that gets no VRAM next to a large
+    model falls back to shared memory and still counts as heavy. Without reported
+    need (Agent < 0.19.0, measurement failed), every game is considered heavy - behavior until 0.8.6."""
     g = node.game or {}
     ded, shared, pct = g.get("gpu_dedicated_mib"), g.get("gpu_shared_mib"), g.get("gpu_pct")
     if not isinstance(ded, (int, float)) or not isinstance(shared, (int, float)):
@@ -218,7 +218,7 @@ async def unload_big_models(node):
         if any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models):
             continue
         if gib < 0.5:
-            continue   # liegt im RAM (num_gpu 0), belegt kein VRAM -> darf beim Spielen bleiben
+            continue   # is in RAM (num_gpu 0), occupies no VRAM -> may stay during gaming
         if any(cnt > 0 and node.same_blob(m, im) for im, cnt in node.inflight_models.items()):
             continue
         try:
@@ -231,23 +231,23 @@ async def unload_big_models(node):
 
 
 async def prewarm(node, delay, reason, since=None):
-    """Rang-1-Modelle der Rollen (in Konfig-Reihenfolge) auf dem Knoten vorladen, soweit sie zusammen ins Budget passen.
-    Ohne das wuerde 'warm zuerst' nach einer Spielphase dauerhaft beim kleinen busy_ok-Modell bleiben.
-    `since` = der Wechsel auf free, fuer den dieses Vorwaermen geplant wurde. Kam seither ein neuer Wechsel (dazwischen busy
-    oder offline), plant der sein eigenes; dieses entfaellt. Vorher feuerte ein altes Vorwaermen kurz nach dem naechsten free."""
+    """Preload rank-1 models of roles (in config order) on the node, as long as they fit in the budget together.
+    Without this, 'warm first' would permanently stay on the small busy_ok model after a game phase.
+    `since` = the transition to free for which this prewarm was planned. If a new transition occurred since (busy
+    or offline in between), that one plans its own; this one is dropped. Previously, an old prewarm fired shortly after the next free."""
     if delay:
         await asyncio.sleep(delay)
     if since is not None and (node.free_at != since or node.state != "free"):
         log.info("prewarm on %s dropped (%s): state changed since it was planned", node.name, reason)
         return
     if time.time() < node.draining_until or ollamaupdate.update_running(node):
-        # 2026-10-01: waehrend eines Ollama-Updates lud das Vorwaermen qwen3.8 (131k), das der Tausch 30 s spaeter wieder beendete
+        # 2026-10-01: during an Ollama update, prewarm loaded qwen3.8 (131k), which the release ended 30 s later
         log.info("prewarm on %s dropped (%s): update running", node.name, reason)
         return
-    # Erst den Heartbeat urteilen lassen. Ein frisch (neu) gestarteter Router haelt jeden erreichbaren Knoten zunaechst
-    # fuer free; am 2026-09-06 lud er so qwen3.6 in ein von einem Spiel belegtes VRAM (Ueberlauf in den Shared Memory,
-    # Spiel ruckelte). Warten, bis GPU-Daten da sind und kein fremdes VRAM anliegt; ohne Agent nach dem Haltefenster weiter.
-    deadline = time.time() + 4   # Agent meldet alle 3 s; ohne Agent nach 4 s weiter wie bisher
+    # Let the heartbeat judge first. A freshly (re)started router initially holds every reachable node
+    # as free; on 2026-09-06, it thus loaded qwen3.6 into VRAM occupied by a game (overflow into Shared Memory,
+    # game stuttered). Wait until GPU data is available and no foreign VRAM is present; without agent, continue after the hold window.
+    deadline = time.time() + 4   # Agent reports every 3 s; without agent, continue after 4 s as before
     while time.time() < deadline:
         if node.state != "free":
             return
@@ -258,21 +258,21 @@ async def prewarm(node, delay, reason, since=None):
     if node.state != "free" or node.foreign_since is not None:
         log.info("prewarm on %s skipped (%s): foreign VRAM %.1f GiB", node.name, reason, node.foreign_vram_gib())
         return
-    # Ein Spiel, das die GPU braucht oder noch nicht beurteilt ist (game_sustain-Fenster), sperrt das Vorwaermen; ein leichtes
-    # (0.8.7) nicht - sonst bliebe die Karte neben einem kleinen Spiel leer. Braucht es spaeter doch die GPU, wird es schwer,
-    # der Knoten busy und das Grosse entladen. Gesperrt durch ein Spiel: evaluate() holt es nach (prewarm_after_game, 0.8.8).
+    # A game requiring the GPU or still under evaluation (game_sustain window) blocks prewarming; a light one
+    # (0.8.7) does not - otherwise the card would sit idle next to a small game. If it needs the GPU later, it becomes heavy,
+    # the node turns busy, and the large model is evicted. Blocked by a game: evaluate() retrieves it later (prewarm_after_game, 0.8.8).
     game_blocks = game_blocks_prewarm(node, time.time())
     if game_blocks:
         node.prewarm_after_game = True
     if node.mem_pressure or game_blocks:
-        # Agent >= 0.17.0: Hauptspeicher knapp oder Spiel gemeldet (z. B. noch im game_sustain-Fenster) - kein Laden, das
-        # den Speicher weiter fuellt; nach Spielende erst, wenn auch der Speicherdruck vorbei ist (kein Laden-Entladen-Pingpong)
+        # Agent >= 0.17.0: RAM is tight or a game is reported (e.g., still in game_sustain window) - no loading, as that
+        # would further fill memory; only after the game ends and memory pressure subsides (no load-evict ping-pong)
         log.info("prewarm on %s skipped (%s): %s", node.name, reason, "memory pressure" if node.mem_pressure else "game running")
         return
     now = time.time()
-    # Budget = Karte minus Reserve minus dem, was WIRKLICH fremd ist (Desktop-Grundverbrauch + fremdes VRAM); Ollamas eigene
-    # Modelle sind verdraengbar und zaehlen nicht. Vorher stand hier die volle Karte - auf gpu-laptop (16 GiB) wurde gemma4 neben
-    # ein laufendes Spiel geladen.
+    # Budget = card minus reserve minus what is truly foreign (desktop baseline + foreign VRAM); Ollama's own
+    # models are evictable and don't count. Previously this was the full card - on gpu-laptop (16 GiB) gemma4 was loaded next to
+    # a running game.
     budget = node.vram_total_gib - state.CFG.reserve.get("free", 1.0) - node.baseline_gib() - node.foreign_vram_gib()
     planned, used = [], 0.0
     for role in state.CFG.roles.values():
@@ -305,25 +305,24 @@ async def prewarm(node, delay, reason, since=None):
             node.finish_load(m)
     await poll_node(node)
     if node.state == "busy" and state.CFG.unload_on_busy:
-        # waehrend des Ladens busy geworden (Race mit unload_on_busy): gleich wieder raus
+        # became busy during loading (race with unload_on_busy): evict immediately
         log.info("prewarm on %s: node went busy while loading, unloading again", node.name)
         await unload_big_models(node)
 
 
 def _named(models):
-    """Eintraege aus einer Agenten-Meldung, die wie Ollamas eigene aussehen (dict mit Namen); alles andere faellt weg."""
+    """Entries from an agent report that look like Ollama's own (dict with name); everything else is dropped."""
     return [m for m in models if isinstance(m, dict) and isinstance(m.get("name"), str)]
 
 
 def apply_ollama_push(node, msg, now):
-    """Ollama-Zustand vom Agenten (Agent >= 0.14.0, Rahmen OLLAMA): bei jeder Aenderung sofort und spaetestens alle 30 s.
-    Solange die Meldung frisch ist, pollt der Router diesen Knoten nicht. `up: false` ist die ausdrueckliche Meldung des
-    Agenten, dass sein Ollama nicht antwortet - der Router muss das nicht mehr aus fehlgeschlagenen Abfragen erschliessen."""
+    """Ollama state from the agent (Agent >= 0.14.0, frame OLLAMA): immediately on change and at most every 30 s.
+    While the report is fresh, the router does not poll this node. `up: false` is the agent's explicit report that its Ollama is not responding - the router no longer needs to infer this from failed requests."""
     if not isinstance(msg, dict) or not isinstance(msg.get("up"), bool):
-        node.ollama_push_ts = 0.0   # unbrauchbare Meldung: bis zur naechsten gueltigen wieder Poll, nicht die letzte behalten
+        node.ollama_push_ts = 0.0   # Useless report: poll again until the next valid one, do not keep the last one
         log.warning("node %s: Ollama state from the agent without 'up' - dropped, the router polls", node.name)
         return
-    # Agent 0.14.0 schickte eine nie gesetzte leere Liste als null (Go: nil-Slice) - gleichbedeutend mit []. Ab 0.14.1 immer [].
+    # Agent 0.14.0 sent a never-set empty list as null (Go: nil-Slice) - equivalent to []. From 0.14.1 always [].
     tags = [] if msg.get("tags") is None else msg.get("tags")
     ps = [] if msg.get("ps") is None else msg.get("ps")
     if msg["up"] and not (isinstance(tags, list) and isinstance(ps, list)):
@@ -343,21 +342,21 @@ def apply_ollama_push(node, msg, now):
 async def poll_loop():
     while True:
         now = time.time()
-        # Knoten, deren Agent den Ollama-Zustand frisch meldet, nicht abfragen; aeltere Agenten und statische Knoten weiter
+        # Do not query nodes whose agent reports Ollama state fresh; continue polling older agents and static nodes
         await asyncio.gather(*(poll_node(n) for n in state.NODES.values() if not n.ollama_push_active(now)), return_exceptions=True)
         await asyncio.sleep(state.CFG.poll_s)
 
 
 def residency_check(node, now):
-    """Rang-1 wieder vorwaermen, wenn ein Fremdmodell es verdraengt hat und seit `residency_idle_s` ungenutzt ist.
+    """Prewarm rank-1 again if a foreign model evicted it and it has been unused for `residency_idle_s`.
 
-    Warum: "warm zuerst" nimmt die erste Stufe mit einem WARMEN Knoten. Verdraengt eine konkrete Anfrage (z. B. glm)
-    das Rang-1-Modell auf dem Hauptknoten, ist die Ausweichstufe auf dem anderen Knoten warm und gewinnt dauerhaft -
-    es gibt keinen Zustandswechsel, der prewarm ausloesen wuerde. Am 2026-09-10 lief so jede Sprach- und
-    Standardanfrage auf gpu-laptop/gemma4:12b (69 statt 214 tok/s), bis jemand qwen von Hand zurueckholte.
-    Fremdmodell = geladen, aber kein Rang-1-Modell irgendeiner Rolle. Rang-1-Modelle untereinander (coder verdraengt
-    qwen) sind kein Fall fuer die Regel: die wuerde nur hin- und herladen. Kein Ping-Pong mit dem Verdraenger: solange
-    er ueber den Router genutzt wird, bleibt er. Nichts geladen = Sache von prewarm on_free/on_online."""
+    Why: "warm first" picks the first tier with a WARM node. If a specific request (e.g., glm)
+    evicts the rank-1 model on the main node, the fallback tier on the other node is warm and wins permanently -
+    there is no state change to trigger prewarm. On 2026-09-10, every language and
+    standard request ran on gpu-laptop/gemma4:12b (69 vs 214 tok/s) until someone manually restored qwen.
+    Foreign model = loaded, but not a rank-1 model of any role. Rank-1 models among themselves (coder evicts
+    qwen) are not a case for this rule: it would just load back and forth. No ping-pong with the evictor: as long as
+    it is used via the router, it stays. Nothing loaded = matter for prewarm on_free/on_online."""
     cfg = state.CFG
     if node.state != "free":
         node.free_since = 0.0
@@ -365,7 +364,7 @@ def residency_check(node, now):
     node.free_since = node.free_since or now
     if not cfg.residency_idle_s or node.inflight or node.loading or not node.gpu_known(now) or not node.loaded:
         return
-    # Dieselbe Wartezeit wie prewarm on_free: ein kurz pausiertes Spiel soll das VRAM nicht sofort verlieren
+    # Same wait time as prewarm on_free: a briefly paused game should not lose VRAM immediately
     if now - node.free_since < cfg.prewarm_free_delay or now - node.last_residency < cfg.residency_check_s:
         return
     node.last_residency = now
@@ -382,8 +381,8 @@ def residency_check(node, now):
         return
     if any(now - t < cfg.residency_idle_s for used, t in node.last_used.items() if any(node.same_blob(used, d) for d in displacers)):
         return
-    # Nur, wenn ein fehlendes Rang-1-Modell neben den geladenen Rang-1-Modellen ueberhaupt Platz haette; sonst
-    # wuerde prewarm ohnehin nichts laden und wir meldeten jede Minute dasselbe.
+    # Only if a missing rank-1 model would actually fit next to the loaded rank-1 models; otherwise
+    # prewarm would load nothing anyway and we would report the same thing every minute.
     room = node.vram_total_gib - cfg.reserve.get("free", 1.0) - sum(node.loaded_size(m) for m, _ in rank1 if node.is_loaded(m))
     if not any(cfg.need_gib(m, ctx, node) <= room for m, ctx in missing):
         return
@@ -393,7 +392,7 @@ def residency_check(node, now):
 
 
 async def tick_loop():
-    """Re-evaluiert zwischen Polls, damit Sustain/Exit-Fenster auch ohne neue Daten ablaufen; sichert perf.json verzoegert."""
+    """Re-evaluates between polls so Sustain/Exit windows expire even without new data; saves perf.json delayed."""
     while True:
         now = time.time()
         for n in state.NODES.values():
@@ -402,12 +401,12 @@ async def tick_loop():
             busy_unload_check(n, now)
         if state.PERF_DIRTY[0] and now - state.PERF_DIRTY[0] >= 10:
             state.PERF_DIRTY[0] = 0.0
-            await asyncio.to_thread(perf.perf_save)   # Dateischreiben nicht im Event-Loop
+            await asyncio.to_thread(perf.perf_save)   # File writes not in the event loop
         if state.USAGE_DIRTY[0] and now - state.USAGE_DIRTY[0] >= 10:
             state.USAGE_DIRTY[0] = 0.0
             from . import metrics
             await asyncio.to_thread(metrics.usage_save)
-        if state.METRICS_DIRTY[0] and now - state.METRICS_DIRTY[0] >= 60:   # metrics.METRICS_SAVE_S; Zaehler ueberleben Deploys
+        if state.METRICS_DIRTY[0] and now - state.METRICS_DIRTY[0] >= 60:   # metrics.METRICS_SAVE_S; counters survive deploys
             state.METRICS_DIRTY[0] = 0.0
             from . import metrics
             await asyncio.to_thread(metrics.metrics_save)
@@ -417,9 +416,9 @@ async def tick_loop():
 
 
 async def handle_heartbeat(request):
-    """Heartbeat-Einspeisung mit Token: GPU-Fakten fuer einen bekannten Knoten setzen, wie es der Agent durch den Tunnel tut.
-    Kein Agentenweg mehr (der HTTP-Heartbeat des Agenten ist seit 0.9.1 weg), sondern Hebel fuer Tests und Diagnose;
-    ohne router.heartbeat_token abgeschaltet."""
+    """Heartbeat injection with token: sets GPU facts for a known node, as the agent does via the tunnel.
+    No agent path anymore (agent HTTP heartbeat removed since 0.9.1), but a lever for tests and diagnostics;
+    disabled without router.heartbeat_token."""
     if not state.CFG.heartbeat_token:
         return web.json_response({"error": "heartbeat injection is off (router.heartbeat_token not set)"}, status=410)
     if request.headers.get("X-Router-Token") != state.CFG.heartbeat_token:
@@ -436,10 +435,10 @@ async def handle_heartbeat(request):
 
 
 def note_game_memory(node, b, now):
-    """Agent >= 0.17.0 meldet ein laufendes Spiel und den Hauptspeicher als Fakt (kays Regel: Zustand melden statt aus
-    Nebenwirkungen erraten). Anlass 2026-10-04: Diablo IV + qwen3.8@196k -> RAM 94 %, freier Commit 1,8 GB, ~900 Hard
-    Faults/s; der Knoten blieb free, weil Diablo kaum VRAM bekam (kein fremdes VRAM) und der Router RAM nicht kannte.
-    Fehlt ein Block, meldet der Agent es nicht (aelter, Linux ohne Spielerkennung): dann bleibt es beim alten Verhalten."""
+    """Agent >= 0.17.0 reports a running game and RAM as a fact (kay's rule: report state instead of guessing from
+    side effects). Trigger 2026-10-04: Diablo IV + qwen3.8@196k -> RAM 94 %, free commit 1.8 GB, ~900 Hard
+    Faults/s; the node stayed free because Diablo got little VRAM (no foreign VRAM) and the router didn't know RAM.
+    If a block is missing, the agent doesn't report it (older, Linux without game detection): then old behavior remains."""
     g = b.get("game")
     if isinstance(g, dict) and g.get("supported", True):
         was = bool((node.game or {}).get("running"))
@@ -480,8 +479,8 @@ ROUTE_REASONS = ("", "unreachable", "unhealthy", "starting", "selftest_failed")
 
 
 def route_health(raw):
-    """Heartbeat-Feld `routes` -> {name: {"up": bool, "reason": str}}. Nur echte Booleans zaehlen als up; ein unbekannter
-    Grund wird zu "unhealthy" (der Agent ist neuer als der Router), ein Eintrag ohne Mapping faellt weg."""
+    """Heartbeat field `routes` -> {name: {"up": bool, "reason": str}}. Only real booleans count as up; an unknown
+    reason becomes "unhealthy" (agent is newer than router), an entry without mapping is dropped."""
     if not isinstance(raw, dict):
         return {}
     out = {}
@@ -495,13 +494,13 @@ def route_health(raw):
 
 
 def hb_ack(node):
-    """Antwort auf einen Heartbeat (HTTP und Tunnel): Urteil des Routers plus ob er den GPU-Schutz dieses Knotens beachtet."""
+    """Response to a heartbeat (HTTP and tunnel): router's verdict plus whether it respects this node's GPU guard."""
     return {"state": node.state, "busy_reason": node.busy_reason,
             "gpu_guard_ack": bool(state.CFG.gpu_guard["enabled"] and node.guard_policy)}
 
 
 def apply_heartbeat(node, b, now):
-    """GPU-Fakten eines Heartbeats uebernehmen, Zustandsautomat laufen lassen, Baseline lernen."""
+    """Adopt GPU facts from a heartbeat, run state machine, learn baseline."""
     node.hb_ts = now
     fp = b.get("ollama_tls_sha256")
     if fp and node.tls and node.tls_mode == "auto" and str(fp).lower() != node.tls_fp:
@@ -516,21 +515,21 @@ def apply_heartbeat(node, b, now):
     node.vram_free_gib = free / 1024 if free is not None else None
     op = b.get("ollama_proc_mib")
     node.ollama_proc_gib = op / 1024 if op is not None else None
-    kv = b.get("children_vram_mib")   # Agent >= 0.13.0: {kind: MiB} ohne Ollama; fehlt das Feld, gibt es keine solchen Kinder
+    kv = b.get("children_vram_mib")   # Agent >= 0.13.0: {kind: MiB} without Ollama; if field is missing, no such children
     node.children_vram_gib = sum(v for v in kv.values() if isinstance(v, (int, float))) / 1024 if isinstance(kv, dict) else 0.0
-    note_game_memory(node, b, now)   # Agent >= 0.17.0: Spiel und Hauptspeicher als Fakt
-    node.routes = route_health(b.get("routes"))   # Tunnel-Routen neben Ollama (Reranker); ein aelterer Agent meldet keine
-    sens = b.get("sensors")   # Agent >= 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z-Werte (unveraendert durchgereicht)
+    note_game_memory(node, b, now)   # Agent >= 0.17.0: game and RAM as fact
+    node.routes = route_health(b.get("routes"))   # Tunnel routes next to Ollama (Reranker); older agents report none
+    sens = b.get("sensors")   # Agent >= 0.6.0: temperature, power, throttling, GPU-Z values (passed through unchanged)
     node.sensors = sens if isinstance(sens, dict) else None
     if isinstance(b.get("update"), dict):   # Agent >= 0.8.0: Zwischenstand eines Update-Auftrags
         agentupdate.note_report(node, b["update"], now)
-    if b.get("ollama_version"):   # Agent >= 0.12.0: Ollama-Version frisch vom Knoten (nach einem Ollama-Update sofort sichtbar)
+    if b.get("ollama_version"):   # Agent >= 0.12.0: Ollama version fresh from node (immediately visible after an Ollama update)
         ollamaupdate.note_version(node, str(b["ollama_version"]), now, source="agent")
     if isinstance(b.get("ollama_update"), dict):   # Agent >= 0.12.0: Zwischenstand eines Ollama-Update-Auftrags
         ollamaupdate.note_report(node, b["ollama_update"], now)
-    g = b.get("gpu_guard")     # Agent >= 0.7.0: GPU-Schutz (Power-Limit, Hochlast-Stufe, Warnungen) - nur Flag neben dem Zustand
+    g = b.get("gpu_guard")     # Agent >= 0.7.0: GPU guard (power limit, high-load tier, warnings) - only flag next to state
     if isinstance(g, dict):
-        g = nodes.guard_english(g)   # Agenten vor 0.20.0 melden deutsch
+        g = nodes.guard_english(g)   # Agents before 0.20.0 report in German
         prev = node.guard or {}
         node.guard, node.guard_ts = g, now
         if g.get("state") != prev.get("state") or bool(g.get("problem")) != bool(prev.get("problem")):
@@ -542,15 +541,15 @@ def apply_heartbeat(node, b, now):
             state.MQTT_DIRTY.append(True)
     if node.vram_total_reported_gib and not node.vram_total_gib:
         node.vram_total_gib = node.vram_total_reported_gib
-    # Baseline nur lernen, wenn Ollama nichts im VRAM haelt und keine Anfrage laeuft: dann ist "belegt" der reine
-    # Desktop-Grundverbrauch (plus ggf. ein Spiel, das das 24-h-Minimum aber nicht senkt). Mit geladenem Modell waere
-    # belegt-minus-size_vram unzuverlaessig (Ueberlauf in den Shared Memory verfaelscht size_vram).
-    # Nur bei ruhiger GPU lernen: sonst wandert ein laufendes Spiel als "Desktop" in die Baseline (gpu-desktop hatte
-    # 19 von 23 Stundeneimern bei 18,2 GiB). Der Filter haengt bewusst an gpu_util und NICHT am busy-Zustand -
-    # der wird aus der Baseline berechnet, das waere ein Kreis: ein Knoten mit hohem Desktop-Verbrauch bliebe
-    # fuer immer busy und koennte nie lernen, dass das sein Normalzustand ist.
+    # Learn baseline only if Ollama holds nothing in VRAM and no request is running: then "busy" is the pure
+    # Desktop baseline (plus any game, which does not lower the 24h minimum). With a loaded model,
+    # busy-minus-size_vram is unreliable (overflow into Shared Memory corrupts size_vram).
+    # Learn only on an idle GPU: otherwise a running game drifts into the baseline as "Desktop" (gpu-desktop had
+    # 19 of 23 hourly buckets at 18.2 GiB). The filter intentionally keys off gpu_util and NOT the busy state -
+    # which is derived from the baseline; that would be circular: a node with high desktop usage would stay
+    # busy forever and never learn that it is its normal state.
     if (node.vram_used_gib is not None and node.ollama_vram_claimed_gib() < 0.5 and node.inflight == 0
             and node.gpu_util is not None and node.gpu_util < node.busy_util_threshold()
-            and node.ps_fresh(now)):   # nur mit frischem /api/ps-Wissen (sonst zaehlt ein geladenes Modell als Desktop)
-        node.learn_baseline(now, node.vram_used_gib - node.children_vram_gib)   # die Kinder zieht foreign_vram_gib schon ab
+            and node.ps_fresh(now)):   # only with fresh /api/ps data (otherwise a loaded model counts as desktop)
+        node.learn_baseline(now, node.vram_used_gib - node.children_vram_gib)   # children are already subtracted by foreign_vram_gib
     evaluate(node, now)

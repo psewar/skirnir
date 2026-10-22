@@ -1,20 +1,20 @@
-"""Stufe 6 (design/roadmap.md): Betrieb - Idempotency, Canary, Shadow, Supply-Chain-Metadaten.
+"""Stage 6 (design/roadmap.md): Operations - Idempotency, Canary, Shadow, Supply-Chain metadata.
 
-Idempotency: `Idempotency-Key`-Header (oder routing.idempotency_key) bei NICHT-streamenden Anfragen. Die erste Anfrage
-laeuft, ihre Antwort (Status 200) wird `router.idempotency_ttl_s` lang behalten; eine Wiederholung mit demselben Schluessel
-bekommt dieselbe Antwort zurueck (Header X-Skirnir-Idempotent-Replay: 1), eine gleichzeitige Wiederholung wartet auf die
-laufende. Streams werden nicht gecacht (der Client bekommt sie ohnehin nur einmal in Echtzeit).
+Idempotency: `Idempotency-Key` header (or routing.idempotency_key) for non-streaming requests. The first request
+executes, and its response (Status 200) is retained for `router.idempotency_ttl_s`; a repeat with the same key
+receives the same response (Header X-Skirnir-Idempotent-Replay: 1), while a concurrent repeat waits for the
+running one. Streams are not cached (the client receives them only once in real-time anyway).
 
-Canary: `roles.<r>.canary: {model, num_ctx, percent}` - fuer den Anteil der Anfragen rueckt die Canary-Stufe an die erste
-Stelle der Stufenliste; das Ergebnis geht normal an den Client, Routing-Info und Entscheidungsprotokoll tragen `canary`.
-Damit laesst sich ein Kandidatenmodell mit echtem Verkehr messen (perf, outcomes, Usage je Modell).
+Canary: `roles.<r>.canary: {model, num_ctx, percent}` - for the specified percentage of requests, the canary tier is moved to the
+first position in the tier list; the result goes normally to the client, and routing info and decision logs carry `canary`.
+This allows measuring a candidate model with real traffic (perf, outcomes, Usage per model).
 
-Shadow: `roles.<r>.shadow: {model, num_ctx, percent}` - NACH der Antwort an den Client laeuft dieselbe Anfrage noch einmal
-ohne Stream gegen das Schattenmodell (nur auf einem freien, nicht vollen Knoten, nie zwei Schatten gleichzeitig). Der Client
-sieht nichts davon; perf/outcomes/Usage (Client "shadow") und das Ereignis `shadow` halten fest, wie das Modell sich schlaegt.
+Shadow: `roles.<r>.shadow: {model, num_ctx, percent}` - AFTER the response to the client, the same request runs again
+without streaming against the shadow model (only on a free, not full node, never two shadows at once). The client
+sees nothing of this; perf/outcomes/Usage (Client "shadow") and the `shadow` event record how the model performs.
 
-Supply Chain: Ollama-Version je Knoten (Poll), Modell-Digests aus /api/tags, Deploy-Manifest (manifest.json: Zeitpunkt,
-SHA-256 der ausgerollten Dateien, von deploy.py geschrieben) -> /admin/state `build` und `supply_chain`.
+Supply Chain: Ollama version per node (Poll), model digests from /api/tags, Deploy manifest (manifest.json: timestamp,
+SHA-256 of deployed files, written by deploy.py) -> /admin/state `build` and `supply_chain`.
 """
 
 import asyncio
@@ -59,13 +59,13 @@ def _prune(now):
 
 
 async def idem_wait(key):
-    """Gecachte Antwort (dict) oder None, wenn diese Anfrage die erste ist (dann ist der Schluessel jetzt reserviert)."""
+    """Cached response (dict) or None if this request is the first (then the key is now reserved)."""
     now = time.time()
     _prune(now)
     e = IDEM.get(key)
     if e is not None and e.get("fut") is not None:
-        # asyncio.wait bricht die laufende Erstanfrage nicht ab und meldet die Frist als Wert; wird DIESE Anfrage abgebrochen,
-        # geht das wie ueberall weiter nach oben (bis 0.8.10 schluckte ein except auch das und lief dann als Erstanfrage weiter)
+        # asyncio.wait does not abort the running initial request and reports the deadline as a value; if THIS request is aborted,
+        # it propagates upwards as everywhere else (until 0.8.10 an except swallowed it and continued as an initial request)
         done, _ = await asyncio.wait({e["fut"]}, timeout=state.CFG.request_timeout_s)
         if not done:
             return None
@@ -140,7 +140,7 @@ async def run_shadow(role, s, body, primary_node, request_id):
                             "request_id": request_id})
             return
         node = scheduler.rank(cands, s["model"])[0]
-        if node.is_cloud:   # Schattenlaeufe kosten in der Cloud Geld - bewusst nicht
+        if node.is_cloud:   # Shadow runs cost money in the cloud - intentionally not
             state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": node.name, "status": "cloud_skipped", "request_id": request_id})
             return
         out = dict(body)

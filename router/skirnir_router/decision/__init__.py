@@ -1,14 +1,14 @@
-"""Decision Engine (2026-09-16): semantische Vorentscheidung fuer die Auto-Rolle, getrennt vom generativen Weg.
+"""Decision Engine (2026-09-16): semantic pre-decision for the auto role, separate from the generative path.
 
-Ein Client, der `auto:latest` (Name konfigurierbar) anfragt, bekommt die Rolle von einer Kette von Engines gewaehlt:
-    decision_engine.chain: [jevlike, rules]      # erste sichere Antwort gewinnt, sonst die naechste Engine
-Jede Engine liefert eine Verteilung ueber die Optionen (= Rollennamen). Ob sie "sicher" ist, entscheidet nicht die
-absolute Wahrscheinlichkeit allein, sondern Abstand Platz 1/2 und normierte Entropie (`policy`). Ist auch die letzte
-Engine unsicher oder ausgefallen, gilt `default`. Danach laeuft alles wie bei jeder Rolle: Stufen, Faehigkeiten,
-Verfuegbarkeit, Score. Die Engine waehlt nie einen Knoten.
+A client requesting `auto:latest` (name configurable) gets the role selected by a chain of engines:
+    decision_engine.chain: [jevlike, rules]      # first confident answer wins, otherwise next engine
+Each engine provides a distribution over the options (= role names). Confidence is determined not solely by absolute
+probability, but by the gap between rank 1/2 and normalized entropy (`policy`). If the last engine is also
+uncertain or fails, `default` applies. Then everything proceeds as with any role: tiers, capabilities,
+availability, score. The engine never selects a node.
 
-Messbarkeit: Prometheus (`skirnir_decision_total`, `_latency_seconds`, `_fallback_total`), Entscheidungsprotokoll
-(`event: decision`), `routing.decision` in der Antwort (bei explizitem routing-Block), optional Trainingsdaten (capture).
+Observability: Prometheus (`skirnir_decision_total`, `_latency_seconds`, `_fallback_total`), decision log
+(`event: decision`), `routing.decision` in the response (for explicit routing blocks), optional training data (capture).
 """
 
 from __future__ import annotations
@@ -28,11 +28,11 @@ from .tfidf import TfidfEngine
 
 DEFAULT_POLICY = {"min_top_probability": 0.5, "min_margin": 0.2, "max_entropy_ratio": 0.75}
 LATENCY_BUCKETS = (0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5)
-DECIDER = None   # Instanz nach init(); None = Auto-Rolle aus
+DECIDER = None   # Instance after init(); None = auto role off
 
 
 def init():
-    """Aus state.CFG.decision bauen (beim Start). Engines entstehen einmal; Policy/Default liest decide() live."""
+    """Build from state.CFG.decision (at startup). Engines are created once; Policy/Default is read live by decide()."""
     global DECIDER
     cfg = state.CFG.decision
     DECIDER = Decider(cfg) if cfg.get("enabled") else None
@@ -43,8 +43,8 @@ def init():
 
 
 def ensure():
-    """Nach einem Konfig-Reload (UI-Schalter, SIGHUP): Engines bauen, wenn die Auto-Rolle jetzt an ist und noch keine
-    Instanz besteht. Eine bestehende Instanz bleibt (Kette/Endpunkte aendern sich nur mit Neustart), active() liest das Flag live."""
+    """After a config reload (UI toggle, SIGHUP): build engines if the auto role is now on and no
+    instance exists yet. An existing instance remains (chain/endpoints change only on restart), active() reads the flag live."""
     if DECIDER is None and state.CFG.decision.get("enabled"):
         init()
     return DECIDER
@@ -55,14 +55,14 @@ def active():
 
 
 def exposed_for(option):
-    """Option (Rollen-Kurzname) -> Name, unter dem die Rolle angefragt wird (z. B. code -> code:latest)."""
+    """Option (role shortname) -> Name under which the role is requested (e.g. code -> code:latest)."""
     return next((exposed for exposed, r in state.CFG.roles.items() if r["name"] == option), None)
 
 
 def context_from(body: dict, path: str, limit: int) -> tuple[str, dict]:
-    """Der Text, ueber den entschieden wird: letzte Benutzernachricht (chat) oder prompt (generate), gekuerzt; dazu
-    Hinweise als Metadaten (Werkzeuge, Bilder, System-Prompt), die auch als Text angehaengt werden - ein Byte-Encoder
-    sieht nur den Anfang, darum steht der Benutzertext vorn."""
+    """The text on which the decision is based: last user message (chat) or prompt (generate), truncated; plus
+    hints as metadata (tools, images, system prompt), also appended as text - a byte encoder
+    only sees the beginning, so the user text comes first."""
     msgs = body.get("messages") or []
     user = [m for m in msgs if isinstance(m, dict) and m.get("role") == "user"]
     text = _content_text(user[-1].get("content")) if user else str(body.get("prompt") or "")
@@ -111,13 +111,13 @@ class Decider:
         ll = cfg.get("local_llm") or {}
         if ll.get("model"):
             engines["local_llm"] = LocalLLMEngine(ll["model"], float(ll.get("timeout_s") or 20.0), ll.get("descriptions") or {})
-        em = cfg.get("embed") or {}   # Stufe 2: Embedding-Dienst (decision-embed), gleiches Protokoll wie jevlike
+        em = cfg.get("embed") or {}   # Stage 2: Embedding service (decision-embed), same protocol as jevlike
         if em.get("endpoint"):
             engines["embed"] = JevlikeEngine(em["endpoint"], em.get("model"), float(em.get("timeout_s") or 2.0), name="embed")
         tf = cfg.get("tfidf") or {}
         if tf.get("model_path"):
             engine = TfidfEngine.load(tf["model_path"])
-            if failed(engine):   # Modell fehlt/kaputt: Engine faellt aus der Kette, Router startet trotzdem
+            if failed(engine):   # Model missing/broken: Engine drops out of the chain, router still starts
                 log.warning("decision tfidf: model not loadable: %s", engine.message)
             else:
                 engines["tfidf"] = engine
@@ -134,18 +134,18 @@ class Decider:
         return result
 
     def cpu_chain(self):
-        """Kette ohne GPU-Stufe (local_llm laeuft ueber den Router auf einem Knoten): fuer Lagen, in denen ein Modell gerade
-        blockiert ist - die Klassifikation stellte sich sonst selbst hinten an."""
+        """Chain without GPU tier (local_llm runs via the router on a node): for situations where a model is currently
+        blocked - otherwise the classification would queue behind itself."""
         return [e for e in self.chain if e.name != "local_llm"]
 
     async def classify_body(self, body: dict, path: str) -> DecisionResult:
-        """Nur einordnen (Beobachtungsmodus): CPU-Kette, kein Capture, keine Metrik der Auto-Rolle."""
+        """Classify only (observation mode): CPU chain, no capture, no auto-role metrics."""
         context, meta = context_from(body, path, self.context_chars)
         return await self.decide(DecisionRequest(context=context, options=list(self.options), metadata=meta),
                                  engines=self.cpu_chain())
 
     async def decide(self, req: DecisionRequest, engines=None) -> DecisionResult:
-        """Kette abarbeiten. `engines` = explizite Liste (Auswertung), sonst die konfigurierte Kette."""
+        """Process chain. `engines` = explicit list (evaluation), otherwise the configured chain."""
         policy = self.policy
         tried, last = [], None
         for engine in (engines if engines is not None else self.chain):
@@ -167,7 +167,7 @@ class Decider:
             tried.append(f"{engine.name}: {reasons[0]}")
             metrics._counter("skirnir_decision_fallback_total", {"from": engine.name, "reason": reasons[0].split(" ")[0]})
             last = result
-        if last is not None:   # alle unsicher: die letzte Engine entscheidet trotzdem (transparent markiert)
+        if last is not None:   # all uncertain: the last engine decides anyway (marked transparently)
             last.fallback = tried
             last.uncertainty["forced"] = True
             return last
@@ -191,10 +191,10 @@ class Decider:
                         "selected": result.selected, "top": result.uncertainty.get("top"), "margin": result.uncertainty.get("margin"),
                         "fallback": result.fallback, "latency_ms": round(result.latency_ms, 1)})
 
-    # -- Labels aus echten Client-Entscheidungen --
+    # -- Labels from actual client decisions --
 
     def record_client_choice(self, body: dict, path: str, role_name: str, client: str | None, request_id: str):
-        """Client hat eine konkrete Rolle aus den Optionen verlangt -> echtes Label fuer den Trainingssatz (Opt-in)."""
+        """Client requested a specific role from the options -> real label for the training set (Opt-in)."""
         if role_name not in self.options or not self.capture.allowed(client):
             return
         context, _ = context_from(body, path, self.context_chars)

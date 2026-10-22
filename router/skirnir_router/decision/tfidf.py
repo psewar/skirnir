@@ -1,12 +1,12 @@
-"""Engine "tfidf": Zeichen-n-Gramme + logistische Regression, reine Standardbibliothek, laeuft im Router-Prozess.
+"""Engine "tfidf": character n-grams + logistic regression, pure standard library, runs in the router process.
 
-Stufe 1 der Empfehlung vom 2026-09-17: eine echte Textklassifikation statt Stichwortlisten, ohne torch, ohne Dienst, unter
-einer Millisekunde je Anfrage. Merkmale: Zeichen-n-Gramme (3-5) innerhalb von Woertern mit Randmarkierung, dazu Wort-Uni- und
--Bigramme; Gewichtung TF-IDF mit L2-Norm; Klassifikator: Softmax-Regression (Gewichte je Klasse). Training liegt in
-decision-eval/train_tfidf.py (numpy), das Modell ist eine JSON-Datei (Vokabular, IDF, Gewichte, Bias, Klassen).
+Stage 1 of the recommendation from 2026-09-17: real text classification instead of keyword lists, no torch, no service, under
+one millisecond per request. Features: character n-grams (3-5) within words with boundary marking, plus word uni- and
+bigrams; TF-IDF weighting with L2 normalization; classifier: Softmax regression (weights per class). Training is in
+decision-eval/train_tfidf.py (numpy), the model is a JSON file (vocabulary, IDF, weights, bias, classes).
 
-Die Wahrscheinlichkeiten sind Softmax-Ausgaben eines linearen Modells - brauchbar fuer die Reihenfolge und die
-Unsicherheitsmasse, aber keine kalibrierte Konfidenz (calibration.json, wie bei den anderen Engines).
+The probabilities are Softmax outputs of a linear model - usable for ranking and
+uncertainty mass, but not calibrated confidence (calibration.json, like the other engines).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ NGRAM_RANGE = (3, 5)
 
 
 def features(text: str) -> Counter:
-    """Merkmalszaehler eines Textes (gleiche Funktion beim Training und im Router)."""
+    """Feature counter for a text (same function during training and in the router)."""
     text = text.lower()
     tokens = WORD.findall(text)
     feats = Counter()
@@ -64,7 +64,7 @@ MODEL_KEYS = ("classes", "vocab", "idf", "weights", "bias")
 
 
 def load_model(path: str) -> TfidfModel | Problem:
-    """Modelldatei lesen: das Modell oder ein Problem (fehlt, unlesbar, unvollstaendig) - dann faellt die Engine aus der Kette."""
+    """Read model file: the model or a Problem (missing, unreadable, incomplete) - then the engine drops out of the chain."""
     if not os.path.exists(path):
         return engine_failed(f"{path} missing")
     try:
@@ -114,7 +114,7 @@ class TfidfEngine(DecisionEngine):
     async def decide(self, req: DecisionRequest) -> DecisionResult:
         t0 = time.perf_counter()
         raw = self.model.predict(req.context)
-        # Optionen, die das Modell nicht kennt, bekommen 0; bekannte werden auf die angefragten Optionen renormiert
+        # Options the model does not know get 0; known ones are renormalized to the requested options
         probs = normalize({o: raw.get(o, 0.0) for o in req.options}, req.options)
         selected = max(probs, key=probs.get) if probs else None
         return DecisionResult(selected=selected, probabilities=probs, engine=self.name, model=self.model.name,

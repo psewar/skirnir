@@ -1,11 +1,11 @@
-"""Anthropic-Messages-API (POST /v1/messages) als Uebersetzung auf die native Ollama-API.
+"""Anthropic Messages API (POST /v1/messages) translated to the native Ollama API.
 
-Claude Code und andere Anthropic-Clients sprechen /v1/messages. Der Router uebersetzt nach /api/chat und zurueck, damit
-Rollen, num_ctx je Stufe (geladener Kontext nach der 0.3.7-Regel), warm zuerst, gpu_busy-Warten und die Tool-Call-Rettung
-genauso gelten wie fuer Ollama- und OpenAI-Clients. Ollamas eigenes /v1/messages kennt kein num_ctx: das Modell luede mit
-OLLAMA_CONTEXT_LENGTH neu und verdraengte den Runner, den alle anderen Clients teilen.
+Claude Code and other Anthropic clients speak /v1/messages. The router translates to /api/chat and back, so that
+roles, num_ctx per tier (loaded context after the 0.3.7 rule), warm first, gpu_busy waiting, and tool call rescue
+apply exactly as they do for Ollama and OpenAI clients. Ollama's own /v1/messages does not know num_ctx: it would reload the model with
+OLLAMA_CONTEXT_LENGTH and evict the runner shared by all other clients.
 
-Die Uebersetzungsfunktionen sind rein (ohne Router-Zustand) und werden von test/selftest_anthropic_messages.py geprueft.
+The translation functions are pure (no router state) and are tested by test/selftest_anthropic_messages.py.
 """
 
 import json
@@ -17,7 +17,7 @@ from aiohttp import web
 from . import context_check, proxy, state
 from .common import anthropic_error, anthropic_error_body, log, parse_tool_args, read_json
 
-KEEPALIVE_S = 15            # Default von router.anthropic.keepalive_s (Prefill bei 196k Kontext bis ~2 min)
+KEEPALIVE_S = 15            # Default for router.anthropic.keepalive_s (Prefill for 196k context up to ~2 min)
 TOOL_ERROR_PREFIX = "Error: "
 THINK_TYPES = ("enabled", "adaptive")
 _seen_headers = set()       # anthropic-version/-beta je Wert einmal ins Log
@@ -27,10 +27,10 @@ def tool_id():
     return "toolu_" + secrets.token_hex(12)
 
 
-# --- Anfrage: Anthropic -> Ollama /api/chat --------------------------------------------------------------------------
+# --- Request: Anthropic -> Ollama /api/chat --------------------------------------------------------------------------
 
 def text_of(content, sep="\n\n"):
-    """String oder Liste von Bloecken -> Text der text-Bloecke (cache_control u. a. Felder fallen weg)."""
+    """String or list of blocks -> text of text blocks (cache_control and other fields are dropped)."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -41,7 +41,7 @@ def text_of(content, sep="\n\n"):
 
 
 def image_data(block):
-    """Bild-Block -> (Base64, None) oder (None, Klartext). Ollama nimmt nur Base64; eine URL holt der Router nicht."""
+    """Image block -> (Base64, None) or (None, plaintext). Ollama only accepts Base64; the router does not fetch URLs."""
     src = block.get("source") if isinstance(block.get("source"), dict) else {}
     if src.get("type") == "base64" and src.get("data"):
         return src["data"], None
@@ -49,7 +49,7 @@ def image_data(block):
 
 
 def _tool_result(block, names, preserve_tool_ids=False):
-    """tool_result -> eine Ollama-Nachricht role=tool. Der Werkzeugname kommt aus dem passenden tool_use im Verlauf."""
+    """tool_result -> one Ollama message with role=tool. The tool name comes from the matching tool_use in the history."""
     content = block.get("content")
     text = text_of(content)
     images = []
@@ -73,13 +73,13 @@ def _tool_result(block, names, preserve_tool_ids=False):
 
 
 def messages_to_native(messages, preserve_tool_ids=False):
-    """Verlauf Anthropic -> Ollama. Liefert (Nachrichten, None) oder (None, Klartext fuer 400).
+    """History Anthropic -> Ollama. Returns (messages, None) or (None, plaintext for 400).
 
-    Ein User-Zug mit tool_result-Bloecken wird zu je einer role=tool-Nachricht (in Reihenfolge), sein Text und seine Bilder
-    danach zu einer user-Nachricht. thinking/redacted_thinking im Verlauf gehen nicht an das Modell zurueck.
+    A user turn with tool_result blocks becomes one role=tool message each (in order), followed by its text and images
+    as a user message. thinking/redacted_thinking in the history are not sent back to the model.
 
-    role=system mitten im Verlauf kennt die oeffentliche API nicht, Claude Code (2.1.x) schickt sie aber (Hinweise an das
-    Modell nach dem ersten User-Zug, Textbloecke mit cache_control). Sie geht an derselben Stelle als system-Nachricht weiter."""
+    role=system mid-history is not known to the public API, but Claude Code (2.1.x) sends it (hints to the
+    model after the first user turn, text blocks with cache_control). It passes through as a system message at the same position."""
     out, names = [], {}
     for i, m in enumerate(messages):
         if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system"):
@@ -132,8 +132,8 @@ def messages_to_native(messages, preserve_tool_ids=False):
 
 
 def tools_to_native(tools):
-    """Werkzeuge mit input_schema -> Ollama-Funktionen. Anthropic-eigene Server-Werkzeuge (web_search_..., bash_... ohne
-    Schema) kann kein lokales Modell ausfuehren; sie fallen weg und stehen einmal im Log."""
+    """Tools with input_schema -> Ollama functions. Anthropic-specific server tools (web_search_..., bash_... without
+    schema) cannot be executed by local models; they are dropped and logged once."""
     out = []
     for t in tools or []:
         if not isinstance(t, dict) or not t.get("name"):
@@ -148,7 +148,7 @@ def tools_to_native(tools):
 
 
 def tool_choice_hint(choice, tools):
-    """any/tool erzwingt Ollama nicht; best effort per Systemhinweis. auto/fehlt -> nichts."""
+    """any/tool does not force Ollama; best effort via system hint. auto/missing -> nothing."""
     if not isinstance(choice, dict) or not tools:
         return ""
     if choice.get("type") == "any":
@@ -173,21 +173,21 @@ def options_of(b):
 
 
 def think_of(b):
-    """thinking {type: enabled|adaptive} -> denken; fehlt/disabled -> nicht (qwen3.8 dachte sonst immer).
-    adaptive (Claude Code 2.1.x) heisst bei Anthropic "das Modell entscheidet"; qwen3.8 denkt ohnehin, also true."""
+    """thinking {type: enabled|adaptive} -> think; missing/disabled -> no (qwen3.8 thought always otherwise).
+    adaptive (Claude Code 2.1.x) means "the model decides" at Anthropic; qwen3.8 thinks anyway, so true."""
     t = b.get("thinking")
     return isinstance(t, dict) and t.get("type") in THINK_TYPES
 
 
 def thinking_shown(b):
-    """thinking.display "omitted": der Client will den Denktext nicht (Claude Code zeigt ihn nicht an). Die API liefert dann
-    thinking-Bloecke mit leerem Text; der Router ebenso."""
+    """thinking.display "omitted": the client does not want the thinking text (Claude Code does not display it). The API then
+    returns thinking blocks with empty text; the router does the same."""
     t = b.get("thinking")
     return not (isinstance(t, dict) and t.get("display") == "omitted")
 
 
 def think_for(b, mode):
-    """router.anthropic.think: auto = was der Client verlangt (think_of), on/off = fest."""
+    """router.anthropic.think: auto = what the client requests (think_of), on/off = fixed."""
     if mode == "on":
         return True
     if mode == "off":
@@ -196,7 +196,7 @@ def think_for(b, mode):
 
 
 def to_native(b, think_mode="auto"):
-    """Anthropic-Body -> (Ollama-/api/chat-Body, None) oder (None, Klartext fuer 400)."""
+    """Anthropic body -> (Ollama /api/chat body, None) or (None, plaintext for 400)."""
     if not b.get("model"):
         return None, "model is required"
     if not isinstance(b.get("messages"), list) or not b["messages"]:
@@ -221,14 +221,14 @@ def to_native(b, think_mode="auto"):
     if tools:
         native["tools"] = tools
     if "routing" in b:
-        native["routing"] = b["routing"]   # routing-Block (nicht-standard) wie bei OpenAI; der Router nimmt ihn heraus
+        native["routing"] = b["routing"]   # routing block (non-standard) like for OpenAI; the router removes it
     return native, None
 
 
-# --- Antwort: Ollama -> Anthropic ------------------------------------------------------------------------------------
+# --- Response: Ollama -> Anthropic ------------------------------------------------------------------------------------
 
 def stop_reason(j, has_tools):
-    """Ollama unterscheidet Stop-Sequenz und natuerliches Ende nicht (beides done_reason=stop) -> end_turn."""
+    """Ollama does not distinguish stop sequence and natural end (both done_reason=stop) -> end_turn."""
     if has_tools:
         return "tool_use"
     return "max_tokens" if j.get("done_reason") == "length" else "end_turn"
@@ -252,8 +252,8 @@ def sse(event, obj):
 
 
 class AnthropicShape:
-    """Formt Antworten von /api/chat als Anthropic-Message bzw. SSE-Ereignisfolge (message_start, Bloecke, message_delta,
-    message_stop). Ein Block wird geschlossen, bevor der naechste beginnt; Indizes laufen fortlaufend."""
+    """Formats /api/chat responses as Anthropic Message or SSE event sequence (message_start, blocks, message_delta,
+    message_stop). A block is closed before the next begins; indices run continuously."""
     name = "anthropic"
     stream_content_type = "text/event-stream"
     error = staticmethod(anthropic_error)
@@ -261,20 +261,20 @@ class AnthropicShape:
     def __init__(self, model, keepalive_s=KEEPALIVE_S, show_thinking=True):
         self.id = "msg_" + secrets.token_hex(12)
         self.model = model
-        self.keepalive_s = keepalive_s   # proxy._connect: Ping-Abstand, solange der Knoten noch nichts geschickt hat
-        self.show_thinking = show_thinking   # False bei thinking.display "omitted": Denkbloecke ohne Text
-        self.last_sent = time.monotonic()    # verschwiegenes Denken: ping, damit der Stream nicht minutenlang stumm ist
+        self.keepalive_s = keepalive_s   # proxy._connect: Ping interval while the node has not sent anything yet
+        self.show_thinking = show_thinking   # False for thinking.display "omitted": thinking blocks without text
+        self.last_sent = time.monotonic()    # redacted thinking: ping so the stream is not silent for minutes
         self.index = -1
-        self.open = None        # Typ des offenen Blocks: thinking | text | None
+        self.open = None        # Type of the open block: thinking | text | None
         self.saw_tools = False
         self.finished = False
 
     def bind(self, request_id, model):
-        """Vom Relay vor dem ersten Byte: Request-ID (gleich wie X-Skirnir-Request-Id) und Name, den der Client kennt."""
+        """From the relay before the first byte: Request-ID (same as X-Skirnir-Request-Id) and the name known to the client."""
         self.id = f"msg_{request_id}"
         self.model = model
 
-    # -- nicht-streamend --
+    # -- non-streaming --
 
     def message(self, j):
         msg = j.get("message") or {}
@@ -328,8 +328,8 @@ class AnthropicShape:
             out += self._start({"type": kind, kind: ""})
             self.open = kind
         if kind == "thinking" and not self.show_thinking:
-            # Denktext verschwiegen: Block bleibt (wie bei der API), Deltas nicht. Ohne sie kaeme bei langem Denken
-            # minutenlang nichts beim Client an - darum hoechstens alle keepalive_s ein ping.
+            # Thinking text redacted: block remains (as with the API), deltas do not. Without them, long thinking would result in
+            # nothing reaching the client for minutes - hence a ping at most every keepalive_s.
             if not out and time.monotonic() - self.last_sent >= self.keepalive_s:
                 out = self.ping()
             return out
@@ -338,7 +338,7 @@ class AnthropicShape:
                                                  "delta": {"type": dtype, field: text}})
 
     def _tool(self, block):
-        """Ollama liefert Tool-Calls am Stueck: Block mit leerem input, ein input_json_delta mit dem ganzen JSON, Stop."""
+        """Ollama delivers tool calls in one go: block with empty input, one input_json_delta with the full JSON, Stop."""
         args = block.pop("input")
         out = self._start({**block, "input": {}})
         out += sse("content_block_delta", {"type": "content_block_delta", "index": self.index,
@@ -347,7 +347,7 @@ class AnthropicShape:
         return out
 
     def _end(self, j):
-        """Zaehler haengen am Abschluss-Chunk (wie bei toolcall_rescue) - message_delta darum erst hier."""
+        """Counters hang on the final chunk (like in toolcall_rescue) - message_delta therefore only here."""
         self.finished = True
         out = self._close()
         out += sse("message_delta", {"type": "message_delta",
@@ -372,7 +372,7 @@ class AnthropicShape:
         return out
 
     def tail(self):
-        """Stream ohne Abschluss-Chunk (Knoten brach ab): trotzdem sauber beenden, damit der Client nicht haengt."""
+        """Stream without final chunk (node crashed): still end cleanly so the client does not hang."""
         return b"" if self.finished else self._end({})
 
     def stream_error(self, status, msg, why=None):
@@ -391,7 +391,7 @@ def _log_once(key, fmt, *args):
 
 
 def note_headers(request):
-    """anthropic-version und anthropic-beta annehmen, nicht auswerten; jeden Wert einmal ins Log (Diagnose neuer Clients)."""
+    """Accept anthropic-version and anthropic-beta, do not evaluate; log each value once (diagnose new clients)."""
     for h in ("anthropic-version", "anthropic-beta"):
         v = request.headers.get(h)
         if v:
@@ -420,7 +420,7 @@ async def handle_messages(request):
 
 
 async def handle_count_tokens(request):
-    """Schaetzung wie die Kontextpruefung (Zeichen je Token), nie 404: Claude Code ruft den Pfad je nach Version."""
+    """Estimate like the context check (chars per token), never 404: Claude Code calls the path depending on version."""
     note_headers(request)
     b, e = await _body(request)
     if e:
@@ -432,7 +432,7 @@ async def handle_count_tokens(request):
 
 
 def wants_anthropic(request):
-    """GET /v1/models teilen sich OpenAI- und Anthropic-Clients; Anthropic-SDKs schicken immer anthropic-version."""
+    """GET /v1/models is shared by OpenAI and Anthropic clients; Anthropic SDKs always send anthropic-version."""
     return "anthropic-version" in request.headers
 
 

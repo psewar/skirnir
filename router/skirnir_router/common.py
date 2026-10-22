@@ -1,4 +1,4 @@
-"""Konstanten, Logger und reine Helfer ohne Zustand. Werden per Name importiert."""
+"""Constants, logger, and pure stateless helpers. Imported by name."""
 
 import base64
 import json
@@ -14,13 +14,13 @@ GIB = 2 ** 30
 log = logging.getLogger("router")
 
 PROXY_METHODS = ("POST",)
-PRIORITIES = ("interactive", "normal", "batch")              # Stufe 3: Prioritaetsklassen; die Reihenfolge ist die Rangfolge (admission)
-DATA_CLASSES_DEFAULT = ["public", "internal", "personal", "secret"]   # Stufe 5: Datenklassen, wenn router.cloud.data_classes fehlt
+PRIORITIES = ("interactive", "normal", "batch")              # Stage 3: Priority classes; order defines rank (admission)
+DATA_CLASSES_DEFAULT = ["public", "internal", "personal", "secret"]   # Stage 5: Data classes, if router.cloud.data_classes is missing
 
 
 def read_env_value(path, key, strip_quotes=False):
-    """KEY=VALUE roh aus einer Datei (kein systemd-EnvironmentFile-Parsing: Sonderzeichen wie \\ oder " bleiben erhalten).
-    None, wenn Datei oder Schluessel fehlen. strip_quotes entfernt umschliessende Anfuehrungszeichen (Cloud-Schluessel)."""
+    """KEY=VALUE raw from a file (no systemd-EnvironmentFile parsing: special chars like \\ or " are preserved).
+    None if file or key is missing. strip_quotes removes surrounding quotes (Cloud keys)."""
     if not os.path.exists(path):
         return None
     try:
@@ -34,7 +34,7 @@ def read_env_value(path, key, strip_quotes=False):
 
 
 def load_json_file(path, what):
-    """Geparste JSON-Datei; None, wenn sie fehlt oder unlesbar ist (dann mit Warnung). Der Aufrufer prueft die Form."""
+    """Parsed JSON file; None if missing or unreadable (with warning). Caller validates shape."""
     if not os.path.exists(path):
         return None
     try:
@@ -46,7 +46,7 @@ def load_json_file(path, what):
 
 
 def save_json_file(path, data, what, **dump_kw):
-    """Atomar schreiben (tmp + replace). False mit Warnung, wenn es nicht geht; der Stand bleibt beim Aufrufer im Speicher."""
+    """Atomic write (tmp + replace). False with warning on failure; state remains with caller in memory."""
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -62,7 +62,7 @@ _TLS_FP = re.compile(r"[0-9a-f]{64}")
 
 
 def tls_fingerprint(hexfp):
-    """'sha256:AB:CD:...' oder 64 Hexziffern -> 64 Hexziffern klein; None, wenn es kein SHA-256-Fingerprint ist."""
+    """'sha256:AB:CD:...' or 64 hex digits -> 64 lowercase hex digits; None if not a SHA-256 fingerprint."""
     fp = str(hexfp or "").lower().removeprefix("sha256:").replace(":", "").strip()
     return fp if _TLS_FP.fullmatch(fp) else None
 
@@ -71,8 +71,8 @@ BASE64 = re.compile(r"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3
 
 
 def basic_credentials(value):
-    """(user, passwort) aus dem Wert eines Basic-Authorization-Headers (ohne 'Basic '), None wenn er kein Base64 ist.
-    Ungueltiges UTF-8 wird ersetzt - so ein Passwort passt zu keinem gespeicherten, wie vorher die Ablehnung."""
+    """(user, password) from Basic-Authorization header value (without 'Basic '), None if not Base64.
+    Invalid UTF-8 is replaced - such a password matches no stored one, as rejection did before."""
     value = value.strip()
     if not BASE64.fullmatch(value):
         return None
@@ -95,7 +95,7 @@ _MAC_RE = re.compile(r"[0-9A-Fa-f]{2}([:-]?)(?:[0-9A-Fa-f]{2}\1){4}[0-9A-Fa-f]{2
 
 
 def normalize_mac(mac):
-    """'AA-BB-CC-DD-EE-01' / 'aabbccddee01' -> 'aa:bb:cc:dd:ee:01'; None, wenn es keine MAC ist."""
+    """'AA-BB-CC-DD-EE-01' / 'aabbccddee01' -> 'aa:bb:cc:dd:ee:01'; None if not a MAC."""
     s = str(mac or "").strip()
     if not _MAC_RE.fullmatch(s):
         return None
@@ -106,14 +106,14 @@ FORBIDDEN_PATHS = {"/api/pull", "/api/push", "/api/create", "/api/copy", "/api/d
 
 
 def _why_headers(why):
-    """Retry-After nur, wenn Warten hilft (scheduler.RETRY_AFTER_S) - OpenAI-Clients (z. B. Hermes Agent) richten ihr Backoff danach."""
+    """Retry-After only if waiting helps (scheduler.RETRY_AFTER_S) - OpenAI clients (e.g. Hermes Agent) set backoff based on it."""
     if why and why.get("retry_after_s"):
         return {"Retry-After": str(int(why["retry_after_s"]))}
     return None
 
 
 def ollama_error(status, msg, why=None):
-    """`why` (scheduler.unavailable) legt Grund-Code und Hindernisse maschinenlesbar neben den Klartext."""
+    """`why` (scheduler.unavailable) places base code and blockers machine-readable next to plain text."""
     body = {"error": msg}
     if why:
         body.update(code=why["code"], retry_after=why.get("retry_after_s"), blockers=why["blockers"])
@@ -121,10 +121,10 @@ def ollama_error(status, msg, why=None):
 
 
 async def read_json(request):
-    """Body als JSON lesen; None bei ungueltigem JSON. Die Fehlerantwort baut der Aufrufer im Format seines Clients."""
+    """Read body as JSON; None for invalid JSON. Caller builds error response in client format."""
     try:
         return await request.json()
-    # aiohttp wirft je nach Fall JSONDecodeError, UnicodeDecodeError oder ClientError
+    # aiohttp raises JSONDecodeError, UnicodeDecodeError, or ClientError depending on case
     except Exception:  # noqa: BLE001  # exception-ok: untrusted request body and the connection it arrives on
         return None
 
@@ -134,12 +134,12 @@ def safe_node_name(name):
     return (out or "knoten")[:40]
 
 
-# Node-RED-MCP (llm-call, ai-agent) und andere OpenAI-Clients. Der Router uebersetzt selbst nach /api/chat und zurueck,
-# damit Rollen, num_ctx pro Tier, keep_alive, Tempo-Statistik und "warm zuerst" genauso gelten wie fuer Ollama-Clients.
-# Ollamas eigenes /v1 wuerde das Modell ohne num_ctx mit OLLAMA_CONTEXT_LENGTH neu laden (HA-Modell weg, 15-20 s).
+# Node-RED-MCP (llm-call, ai-agent) and other OpenAI clients. Router translates to /api/chat and back,
+# so roles, num_ctx per tier, keep_alive, rate stats, and "warm first" apply as with Ollama clients.
+# Ollama's own /v1 would reload model without num_ctx using OLLAMA_CONTEXT_LENGTH (HA model lost, 15-20 s).
 def openai_error(status, msg, why=None):
-    """OpenAI-Form: der Grund-Code steht in error.code (wertet z. B. die Fehlerklassifikation von Hermes Agent aus), die Wartezeit in
-    error.retry_after und im Header Retry-After, die Hindernisse je Knoten in error.skirnir.blockers."""
+    """OpenAI format: base code in error.code (evaluates e.g. Hermes Agent error classification), wait time in
+    error.retry_after and Retry-After header, blockers per node in error.skirnir.blockers."""
     e = {"message": msg, "type": "invalid_request_error" if status < 500 else "api_error", "param": None,
          "code": why["code"] if why else None}
     if why:
@@ -148,17 +148,17 @@ def openai_error(status, msg, why=None):
 
 
 # Anthropic-Messages-API (Claude Code u. a.), siehe anthropic_api.py. Kein Platz (503 im Router) heisst dort 529
-# overloaded_error: Claude Code wiederholt 529 von selbst, 503 je nach Version nicht.
+# overloaded_error: Claude Code retries 529 automatically, 503 not depending on version.
 ANTHROPIC_OVERLOADED = 529
-THINK_MODES = ("auto", "on", "off")   # router.anthropic.think: dem Client folgen / immer / nie
+THINK_MODES = ("auto", "on", "off")   # router.anthropic.think: follow client / always / never
 ANTHROPIC_ERROR_TYPES = {400: "invalid_request_error", 401: "authentication_error", 403: "permission_error",
                          404: "not_found_error", 413: "request_too_large", 422: "invalid_request_error",
                          429: "rate_limit_error", 529: "overloaded_error"}
 
 
 def anthropic_error_body(status, msg, why=None):
-    """(HTTP-Status, Fehlerobjekt, Kopfzeilen) in Anthropic-Form; gemeinsam fuer die Antwort und `event: error` im Stream.
-    Grund-Code, Wartezeit und Hindernisse je Knoten stehen in error.skirnir wie bei OpenAI in error.code/skirnir."""
+    """(HTTP status, error object, headers) in Anthropic format; shared for response and `event: error` in stream.
+    Base code, wait time, and blockers per node in error.skirnir like OpenAI error.code/skirnir."""
     if status == 503:
         status = ANTHROPIC_OVERLOADED
     typ = ANTHROPIC_ERROR_TYPES.get(status) or ("api_error" if status >= 500 else "invalid_request_error")

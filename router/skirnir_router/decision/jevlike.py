@@ -1,11 +1,11 @@
-"""Adapter fuer Entscheidungsdienste im eigenen Prozess bzw. Container, lokal per HTTP: Jevlike (decision-jevlike/server.py)
-und der Embedding-Dienst der Stufe 2 (decision-embed/server.py) sprechen dasselbe Protokoll.
+"""Adapter for in-process or in-container decision services, local via HTTP: Jevlike (decision-jevlike/server.py)
+and the stage 2 embedding service (decision-embed/server.py) speak the same protocol.
 
-Der Router kennt nur dieses Protokoll:
+The router only knows this protocol:
     POST {endpoint}/decide   {"context": "...", "options": ["a", "b"]}
     ->   {"probabilities": {"a": 0.8, "b": 0.2}, "model": "skirnir-router-v1", "encoder": "tiny", "latency_ms": 3.1}
     GET  {endpoint}/health   -> {"ok": true, "model": ..., "encoder": ..., "offline": true}
-Nichts von Jevlikes Datenstrukturen (Checkpoints, Collator, Tensoren) taucht hier auf.
+None of Jevlike's data structures (checkpoints, collator, tensors) appear here.
 """
 
 from __future__ import annotations

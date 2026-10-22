@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Skirnir-Router - Einstiegspunkt. Der Code liegt im Paket skirnir_router/ daneben (seit 2026-09-09).
+"""Skirnir Router - entry point. The code lives in the adjacent skirnir_router/ package (since 2026-09-09).
 
     python3 router.py /etc/skirnir-router/config.yaml
     python3 router.py --hash '<passwort>'

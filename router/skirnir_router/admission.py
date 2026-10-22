@@ -1,11 +1,11 @@
-"""Stufe 3 (design/roadmap.md): Admission Control - Prioritaetsklassen mit Aging, Warteschlange je Knoten, Deadline.
+"""Stage 3 (design/roadmap.md): Admission Control - Priority classes with aging, per-node queue, deadline.
 
-Ein Knoten nimmt hoechstens `max_inflight` Anfragen gleichzeitig (Policy im Register, sonst
-`modes.admission.max_inflight_default`). Ist der gewaehlte Knoten voll, wartet die Anfrage hier statt in Ollamas
-eigener Schlange - dort gibt es keine Prioritaet. Beim Freiwerden eines Platzes wird der Wartende mit dem besten
-Rang geweckt: Klasse (interactive < normal < batch) minus Alter/aging_s, damit ein Batch-Auftrag nicht endlos hinter
-Sprachbefehlen verhungert. Wer bis zur Deadline (routing.deadline_ms, sonst max_wait_s) keinen Platz bekommt, erhaelt
-503 mit Klartext. Der Wartende prueft alle 2 s neu (Knoten kann inzwischen offline/busy sein oder ein anderer besser).
+A node accepts at most `max_inflight` requests concurrently (policy in register, else
+`modes.admission.max_inflight_default`). If the chosen node is full, the request waits here instead of in Ollama's
+own queue - there is no priority there. When a slot frees up, the waiting request with the best
+rank is woken: class (interactive < normal < batch) minus age/aging_s, so a batch job doesn't starve behind
+voice commands. If no slot is available by the deadline (routing.deadline_ms, else max_wait_s), it receives
+503 with plain text. The waiter rechecks every 2 s (node may be offline/busy or another may be better).
 """
 
 import asyncio
@@ -15,16 +15,16 @@ from . import state
 from .common import PRIORITIES as _PRIORITY_ORDER, log
 from .outcome import unavailable
 
-PRIORITIES = {p: i for i, p in enumerate(_PRIORITY_ORDER)}   # Klasse -> Rang (common.PRIORITIES ist die Reihenfolge)
+PRIORITIES = {p: i for i, p in enumerate(_PRIORITY_ORDER)}   # Class -> Rank (common.PRIORITIES is the order)
 WAITING = []   # [{node, prio, t_enq, fut, request_id, role}]
 RECHECK_S = 2.0
 
 
 def saturated(node, model=None):
-    """Knoten voll (max_inflight) - oder das Modell darauf: Katalog `max_parallel`. Anlass 2026-10-02: qwen3.8 (Architektur
-    qwen35) kann in Ollama keine zwei Anfragen zugleich; schickte der Router eine zweite, stellte Ollama sie in seine eigene
-    Schlange und LUD DEN RUNNER NEU, sobald die erste fertig war (zweimal 03:02, je 5-7 s, Checkpoints und Prompt-Cache weg).
-    Mit der Grenze wartet die zweite Anfrage hier, mit Prioritaet, und der Runner bleibt."""
+    """Node full (max_inflight) - or the model on it: catalog `max_parallel`. Cause 2026-10-02: qwen3.8 (architecture
+    qwen35) cannot handle two concurrent requests in Ollama; if the router sent a second, Ollama queued it in its own
+    queue and RELOADED THE RUNNER once the first finished (twice at 03:02, 5-7 s each, checkpoints and prompt cache lost).
+    With this limit, the second request waits here, with priority, and the runner stays."""
     if node.inflight >= node.effective_max_inflight():
         return True
     limit = state.CFG.max_parallel(model) if model else None
@@ -32,8 +32,8 @@ def saturated(node, model=None):
 
 
 def max_wait_s(prio):
-    """Wartebudget je Prioritaetsklasse, wenn der Client keine deadline_ms setzt: ein Sprachbefehl, der eine Minute wartet,
-    ist verloren, ein Batch-Auftrag darf eine halbe Stunde warten."""
+    """Wait budget per priority class if the client doesn't set deadline_ms: a voice command waiting a minute
+    is lost, a batch job may wait half an hour."""
     ad = state.CFG.admission
     return {"interactive": ad["max_wait_interactive_s"], "batch": ad["max_wait_batch_s"]}.get(prio, ad["max_wait_s"])
 
@@ -43,27 +43,27 @@ def rank_key(w, now):
 
 
 async def wait_for_slot(node, prio, t_enq, deadline_at, request_id, role, model=None):
-    """Bis zu RECHECK_S (oder Deadline) auf einen Platz auf `node` (fuer `model`) warten. True = geweckt (Platz frei
-    geworden), False = Zeit abgelaufen (Aufrufer prueft Deadline und waehlt ggf. neu), ein Problem 503 = Warteschlange voll."""
+    """Wait up to RECHECK_S (or deadline) for a slot on `node` (for `model`). True = woken (slot
+    freed), False = timeout (caller checks deadline and may reselect), Problem 503 = queue full."""
     if len(WAITING) >= state.CFG.admission["max_queue"]:
         return unavailable(f"queue full ({len(WAITING)} waiting)", "queue_full")
     fut = asyncio.get_running_loop().create_future()
     w = {"node": node, "prio": prio, "t_enq": t_enq, "fut": fut, "request_id": request_id, "role": role, "model": model}
     WAITING.append(w)
     try:
-        # asyncio.wait meldet das Ergebnis (fertig oder nicht) - kein TimeoutError als Signal fuer "Zeit um"
+        # asyncio.wait reports the result (done or not) - no TimeoutError as signal for "time up"
         done, _ = await asyncio.wait({fut}, timeout=max(0.05, min(RECHECK_S, deadline_at - time.time())))
         return bool(done)
     finally:
         if w in WAITING:
             WAITING.remove(w)
         if not fut.done():
-            fut.cancel()   # niemand wartet mehr darauf; release() ueberspringt erledigte
+            fut.cancel()   # no one is waiting for it anymore; release() skips completed ones
 
 
 def release(node):
-    """Ein Platz auf `node` ist frei geworden: den bestplatzierten Wartenden dieses Knotens wecken, der jetzt auch
-    loslegen kann (wartet er auf ein Modell, das noch an seiner max_parallel-Grenze ist, bleibt er liegen)."""
+    """A slot on `node` has freed up: wake the highest-ranked waiter for this node, who can now
+    proceed (if waiting for a model still at its max_parallel limit, it stays)."""
     now = time.time()
     cands = [w for w in WAITING if w["node"] is node and not w["fut"].done() and not saturated(node, w.get("model"))]
     if not cands:

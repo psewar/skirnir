@@ -1,4 +1,4 @@
-"""Zusammenbau der beiden aiohttp-Apps, Hauptschleife, Kommandozeile."""
+"""Assembly of the two aiohttp apps, main loop, and CLI."""
 
 import asyncio
 import importlib.util
@@ -17,16 +17,16 @@ from . import decision, fallback_observation, memory, rerank, session_api, conte
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 from .outcome import failed
 
-# TCP-Keepalive auf dem API-Port: erste Probe nach 60 s Stille, dann alle 15 s, nach 4 unbeantworteten gilt die Verbindung als tot
+# TCP keepalive on the API port: first probe after 60 s idle, then every 15 s; connection considered dead after 4 unanswered probes
 KEEPALIVE = (("TCP_KEEPIDLE", 60), ("TCP_KEEPINTVL", 15), ("TCP_KEEPCNT", 4))
 
 
 def keepalive_socket(listen):
-    """Lauschender Socket mit TCP-Keepalive. Anlass 2026-10-01: eine Anfrage ohne Stream rechnete 6,6 min, so lange floss kein
-    Byte; der Verbindungszustand auf dem Weg zum Client (WSL mirrored) verfiel still, die fertige Antwort kam nie an, und der
-    Router zaehlte sie als ok. Die Proben halten den Zustand auf dem Weg frisch und lassen tote Verbindungen als Fehler auffallen.
-    Linux uebertraegt die Optionen auf jede angenommene Verbindung (selftest_keepalive.py prueft das); wo es TCP_KEEP* nicht gibt
-    (Windows-Testbetrieb), bleibt es bei SO_KEEPALIVE mit den Vorgaben des Systems."""
+    """Listening socket with TCP keepalive. Trigger 2026-10-01: a non-streaming request took 6.6 min, no bytes flowed during that time;
+    the connection state on the path to the client (WSL mirrored) silently expired, the finished response never arrived, and the
+    router counted it as ok. Probes keep the path state fresh and let dead connections surface as errors.
+    Linux propagates the options to every accepted connection (selftest_keepalive.py verifies this); where TCP_KEEP* is unavailable
+    (Windows test env), it falls back to SO_KEEPALIVE with system defaults."""
     h, p = split_listen(listen)
     sock = socket.create_server((h, p))
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
@@ -46,17 +46,17 @@ def build_apps():
     api.router.add_post("/api/show", proxy.handle_show)
     api.router.add_get("/api/ps", proxy.handle_ps)
     api.router.add_get("/api/version", proxy.handle_version)
-    api.router.add_get("/v1/skirnir/availability/{model}", proxy.handle_availability)   # vor dem /v1-Fangnetz registrieren
-    api.router.add_post("/rerank", rerank.handle_rerank)   # TEI-Reranking (router.rerank, default aus -> 404); immer registriert, Reload schaltet
-    api.router.add_get("/info", rerank.handle_info)        # TEI-Kennung; Hindsights TEI-Client fragt sie vor dem ersten /rerank ab
-    if state.CFG.anthropic_enabled:   # Anthropic-Messages-API (Claude Code): eigene Uebersetzung auf /api/chat
+    api.router.add_get("/v1/skirnir/availability/{model}", proxy.handle_availability)   # Register before the /v1 catch-all
+    api.router.add_post("/rerank", rerank.handle_rerank)   # TEI reranking (router.rerank, default off -> 404); always registered, Reload toggles it
+    api.router.add_get("/info", rerank.handle_info)        # TEI ID; Hindsight TEI client fetches it before the first /rerank
+    if state.CFG.anthropic_enabled:   # Anthropic Messages API (Claude Code): custom translation to /api/chat
         api.router.add_post("/v1/messages", anthropic_api.handle_messages)
         api.router.add_post("/v1/messages/count_tokens", anthropic_api.handle_count_tokens)
     for p in INFER_PATHS:
         api.router.add_post(p, proxy.handle_infer)
     for p in FORBIDDEN_PATHS:
         api.router.add_route("*", p, proxy.handle_forbidden)
-    if state.CFG.openai_enabled:   # OpenAI-kompatibel (Node-RED-MCP u. a.); Bearer-Token wird wie bei Ollama ignoriert
+    if state.CFG.openai_enabled:   # OpenAI-compatible (Node-RED-MCP etc.); Bearer token is ignored like in Ollama
         api.router.add_get("/v1/models", openai_api.handle_oa_models)
         api.router.add_get("/v1/models/{model}", openai_api.handle_oa_model)
         api.router.add_post("/v1/chat/completions", openai_api.handle_oa_chat)
@@ -68,12 +68,12 @@ def build_apps():
     ctl.router.add_get("/admin/context", context_ops.handle)
     ctl.router.add_get("/", admin.handle_ui)
     ctl.router.add_get(r"/{name:(skirnir\.png|favicon\.png|favicon\.ico)}", admin.handle_asset)
-    ctl.router.add_post("/v1/heartbeat/{node}", poll.handle_heartbeat)   # Heartbeat-Einspeisung mit heartbeat_token (Tests, Diagnose)
+    ctl.router.add_post("/v1/heartbeat/{node}", poll.handle_heartbeat)   # Heartbeat injection with heartbeat_token (tests, diagnostics)
     ctl.router.add_get("/v1/tunnel", registry.handle_tunnel_v2)
-    ctl.router.add_get("/v1/agent/binary/{name}", agentupdate.handle_binary)   # Download mit Einmal-Token aus dem Update-Auftrag
+    ctl.router.add_get("/v1/agent/binary/{name}", agentupdate.handle_binary)   # Download with one-time token from the update task
     ctl.router.add_get("/admin/agent-update", agentupdate.handle_manifest)
-    ctl.router.add_get("/admin/ollama-update", ollamaupdate.handle_status)        # neueste Ollama-Version, Fenster, ausstehende Knoten
-    ctl.router.add_post("/admin/ollama-update/check", ollamaupdate.handle_check)  # Versionspruefung jetzt
+    ctl.router.add_get("/admin/ollama-update", ollamaupdate.handle_status)        # Latest Ollama version, window, pending nodes
+    ctl.router.add_post("/admin/ollama-update/check", ollamaupdate.handle_check)  # Version check now
     ctl.router.add_get("/admin/nodes", registry.handle_nodes)
     ctl.router.add_post("/admin/nodes/{fp}/{action}", registry.handle_node_action)
     ctl.router.add_delete("/admin/nodes/{fp}", registry.handle_node_delete)
@@ -81,22 +81,22 @@ def build_apps():
     ctl.router.add_route("*", "/admin/client_auth", admin.handle_client_auth)
     ctl.router.add_get("/admin/config", admin.handle_config_get)
     ctl.router.add_put("/admin/config", admin.handle_config_put)
-    ctl.router.add_post("/admin/clients/{name}/token", admin.handle_client_token)   # Clients-Tab: neues Secret (Klartext einmalig)
+    ctl.router.add_post("/admin/clients/{name}/token", admin.handle_client_token)   # Clients tab: new secret (plaintext shown once)
     ctl.router.add_post("/admin/try", admin.handle_try)
     ctl.router.add_post("/admin/loadtest", admin.handle_loadtest)
     ctl.router.add_post("/admin/decide", admin.handle_decide)            # Decision Engine direkt fragen (UI, Auswertung)
-    ctl.router.add_get("/admin/decision", admin.handle_decision_status)   # Lasttest mit Prioritaets-Sonden (UI, Ausprobieren)
+    ctl.router.add_get("/admin/decision", admin.handle_decision_status)   # Load test with priority probes (UI, Try it)
     ctl.router.add_get("/admin/ha", ha.handle_ha)
-    ctl.router.add_get("/admin/usage", admin.handle_usage)   # Stufe 4
-    ctl.router.add_get("/metrics", admin.handle_metrics)     # Stufe 4: Prometheus (Basic Auth wie /admin)
+    ctl.router.add_get("/admin/usage", admin.handle_usage)   # Stage 4
+    ctl.router.add_get("/metrics", admin.handle_metrics)     # Stage 4: Prometheus (Basic Auth like /admin)
     ctl.router.add_post("/admin/measure", perf.handle_measure)
     ctl.router.add_post("/admin/bench", perf.handle_bench)
     return api, ctl
 
 
 def install_uvloop():
-    """uvloop statt der Standard-Schleife, wenn installiert (Router-CT: python3-uvloop 0.17). Weniger CPU je Verbindung/Frame;
-    unter Windows (Tests, Dev-Env) gibt es kein uvloop -> Standard bleibt."""
+    """uvloop instead of the standard loop, if installed (Router-CT: python3-uvloop 0.17). Less CPU per connection/frame;
+    on Windows (tests, dev env) uvloop is unavailable -> standard loop remains."""
     if importlib.util.find_spec("uvloop") is None:
         return False
     import uvloop
@@ -110,8 +110,8 @@ async def main(cfg_path):
         log.error("configuration invalid, router does not start: %s", cfg.message)
         sys.exit(2)
     state.CFG = cfg
-    state.INTERNAL_TOKEN = secrets.token_urlsafe(32)   # Selbstaufruf der UI (Ausprobieren) im enforce-Modus, nur localhost
-    decision.init()   # Auto-Rolle (decision_engine), wenn konfiguriert
+    state.INTERNAL_TOKEN = secrets.token_urlsafe(32)   # Self-call of the UI (Try it) in enforce mode, localhost only
+    decision.init()   # Auto role (decision_engine), if configured
     state.NODES = {name: nodes.Node(name, spec) for name, spec in state.CFG.nodes.items()}
     state.REG = registry.NodeRegistry(os.path.join(os.path.dirname(os.path.abspath(cfg_path)), "nodes.json")).load()
     for fp, e in list(state.REG.nodes.items()):
@@ -146,9 +146,9 @@ async def main(cfg_path):
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         h, p = split_listen(listen)
-        if keepalive:   # API-Port: lange Anfragen ohne Stream (Minuten ohne Byte) - siehe keepalive_socket
+        if keepalive:   # API port: long requests without stream (minutes without bytes) - see keepalive_socket
             await web.SockSite(runner, keepalive_socket(listen), ssl_context=sslctx).start()
-        else:           # Control-Port: Tunnel hat eigene Heartbeats, UI/Admin-Anfragen sind kurz
+        else:           # Control port: tunnel has its own heartbeats, UI/admin requests are short
             await web.TCPSite(runner, h, p, ssl_context=sslctx).start()
         runners.append(runner)
         log.info("listening on %s://%s:%d%s", "https" if sslctx else "http", h, p, " (TCP-Keepalive)" if keepalive else "")
@@ -165,7 +165,7 @@ async def main(cfg_path):
     stop = asyncio.Event()
 
     def on_hup():
-        problem = state.CFG.reload()   # prueft erst an einer Probe: ungueltig = nichts geaendert
+        problem = state.CFG.reload()   # Checks against a probe first: invalid = nothing changed
         if failed(problem):
             log.error("config reload failed, keeping old: %s", problem.message)
             return
@@ -173,7 +173,7 @@ async def main(cfg_path):
         decision.ensure()
         log.info("config reloaded")
 
-    if sys.platform != "win32":   # Windows (nur Testbetrieb): die Ereignisschleife kennt keine Signal-Handler
+    if sys.platform != "win32":   # Windows (test env only): the event loop does not support signal handlers
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stop.set)
         loop.add_signal_handler(signal.SIGHUP, on_hup)
@@ -182,26 +182,26 @@ async def main(cfg_path):
         ha_pub.stop()
     for t in tasks:
         t.cancel()
-    # offene Tunnel schliessen, sonst wartet runner.cleanup() auf die WebSocket-Handler (29 s beim Deploy 2026-09-07)
+    # Close open tunnels, otherwise runner.cleanup() waits for WebSocket handlers (29 s in deploy 2026-09-07)
     for tun in [n.tunnel for n in state.NODES.values() if n.tunnel is not None] + list(state.PENDING.values()):
         await asyncio.wait({asyncio.ensure_future(registry.close_ws(tun.ws))}, timeout=3)
     if state.REG is not None and state.REG.dirty:
         state.REG.save()
-    metrics.usage_save()     # letzter Stand statt bis zu 10 s Verlust
-    metrics.metrics_save()   # Zaehler/Histogramme ueberleben den Neustart
+    metrics.usage_save()     # Last state instead of up to 10 s loss
+    metrics.metrics_save()   # Counters/histograms survive restart
     for r in runners:
         await r.cleanup()
     await state.SESSION.close()
 
 
 def cli():
-    """Kommandozeile: `router.py <config.yaml>` oder `router.py --hash <passwort>`."""
+    """CLI: `router.py <config.yaml>` or `router.py --hash <password>`."""
     if len(sys.argv) > 2 and sys.argv[1] == "--hash":
         print(auth.hash_password(sys.argv[2]))      # Hilfsfunktion: python3 router.py --hash '<passwort>'
         sys.exit(0)
     if len(sys.argv) > 2 and sys.argv[1] == "--check":
-        # Stufe 6: Konfiguration gegen Schema und Parser pruefen (deploy.py: lokal ohne, auf dem CT mit roles.yaml).
-        # rc 0 = ok, 2 = ungueltig. --pure ignoriert eine daneben liegende roles.yaml.
+        # Stage 6: Validate configuration against schema and parser (deploy.py: local without, on CT with roles.yaml).
+        # rc 0 = ok, 2 = invalid. --pure ignores an adjacent roles.yaml.
         cfg = config.Config.load(sys.argv[2], use_overrides="--pure" not in sys.argv)
         if failed(cfg):
             print(f"ERROR: {cfg.message}")

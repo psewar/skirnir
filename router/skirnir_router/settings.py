@@ -1,14 +1,14 @@
-"""Einstellungen, die die Web-UI aendern darf (Wunsch des Betreibers 2026-09-10: "die meisten Konfigurationen auch ueber das UI").
+"""Settings that the Web-UI is allowed to modify (Operator request 2026-09-10: "most configurations also via the UI").
 
-Die UI schreibt keine config.yaml, sondern einen flachen Block `settings: {"<pfad>": wert}` in roles.yaml (die Override-Datei).
-`config.Config.merged()` legt ihn beim Laden ueber config.yaml. Erlaubt ist nur, was hier in EDITABLE steht - alles, was der
-Router zur LAUFZEIT liest. Bewusst nicht dabei: Ports/TLS/Basic-Auth/MQTT/Audit-Log (Startwerte), Identitaeten
-(token_sha256 - Secrets entstehen nur ueber POST /admin/clients/<name>/token, Klartext einmalig), Anbieter-Endpunkte und
-Schluesselquellen (kind, base_url, api_key_env, secrets_file), Egress-Allowlist. Quell-IPs je Client sind seit dem Clients-Tab
-editierbar (Wunsch des Betreibers: Clients samt Identitaet in der UI pflegen).
-Die bleiben in config.yaml und kommen per Deploy - eine UI-Sitzung soll nicht die Vertrauensbasis verschieben koennen.
+The UI does not write config.yaml, but a flat block `settings: {"<path>": value}` in roles.yaml (the override file).
+`config.Config.merged()` applies it over config.yaml when loading. Only what is listed in EDITABLE is allowed - everything the
+Router reads at RUNTIME. Deliberately excluded: Ports/TLS/Basic-Auth/MQTT/Audit-Log (startup values), Identities
+(token_sha256 - Secrets are only created via POST /admin/clients/<name>/token, plaintext shown once), Provider endpoints and
+Key sources (kind, base_url, api_key_env, secrets_file), Egress-Allowlist. Source IPs per Client have been editable since the Clients-Tab
+(Operator request: manage Clients including Identity in the UI).
+They remain in config.yaml and come via Deploy - a UI session should not be able to shift the trust basis.
 
-Pfade mit `*` gelten je Eintrag (Cloud-Anbieter, Client) - nur fuer Namen, die config.yaml schon kennt.
+Paths with `*` apply per entry (Cloud-Provider, Client) - only for names already known in config.yaml.
 """
 
 import re
@@ -19,12 +19,12 @@ from .outcome import failed, invalid  # noqa: E402
 SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open")
 
 # typ: int | float | bool | str | choice | list | iplist | keep_alive | tristate
-# choices "data_classes" / "roles" werden zur Laufzeit aufgeloest. nullable: null = "nicht gesetzt" (Router-Default / Vererbung).
+# choices "data_classes" / "roles" are resolved at runtime. nullable: null = "not set" (Router-Default / Inheritance).
 EDITABLE = {}
 
 
 def _e(path, typ, label, help_="", group="", default=None, label_en=None, help_en=None, **kw):
-    """label/help deutsch, label_en/help_en englisch (view(lang="en") liefert sie unter denselben Schluesseln)."""
+    """label/help in German, label_en/help_en in English (view(lang="en") returns them under the same keys)."""
     EDITABLE[path] = {"type": typ, "label": label, "help": help_, "group": group, "default": default,
                       "label_en": label_en if label_en is not None else label, "help_en": help_en if help_en is not None else help_, **kw}
 
@@ -241,11 +241,11 @@ _e(C + "cloud", "bool", "Cloud erlaubt", "aus = Opt-out: Cloud-Stufen werden fue
 _e(C + "data_class", "choice", "Datenklasse", "Deklaration fuer Anfragen ohne routing.data_class (leer = globaler Default)", "Clients", None, choices="data_classes", nullable=True,
    label_en="Data class", help_en="declaration for requests without routing.data_class (empty = global default)")
 
-# Reihenfolge im Einstellungen-Tab. Review 2026-09-25: Decision Engine, GPU-Schutz und Agent-Update fehlten hier, ihre Eintraege
-# waren in der UI nie sichtbar (Speichern per API ging).
+# Order in the Settings-Tab. Review 2026-09-25: Decision Engine, GPU guard and Agent-Update were missing here, their entries
+# were never visible in the UI (saving via API worked).
 GROUPS = ["Cloud", "Cloud-Anbieter", "Clients", "Scheduler", "Decision Engine", "Admission", "Circuit Breaker", "Busy-Erkennung", "Vorwaermen", "Anfragen & Limits",
           "Knoten-Ueberwachung", "GPU-Schutz", "Agent-Update", "Ollama-Update", "Wake-on-LAN", "Client-Auth"]
-# Englische Gruppennamen (view(lang="en")); deckt GROUPS und alle group-Strings der _e-Aufrufe ab.
+# English group names (view(lang="en")); covers GROUPS and all group-strings of the _e calls.
 GROUPS_EN = {"Cloud": "Cloud", "Cloud-Anbieter": "Cloud providers", "Clients": "Clients", "Decision Engine": "Decision engine", "Scheduler": "Scheduler",
              "Admission": "Admission", "Circuit Breaker": "Circuit breaker", "GPU-Schutz": "GPU guard", "Agent-Update": "Agent update", "Ollama-Update": "Ollama update",
              "Busy-Erkennung": "Busy detection", "Vorwaermen": "Prewarming", "Anfragen & Limits": "Requests & limits", "Knoten-Ueberwachung": "Node monitoring",
@@ -255,7 +255,7 @@ _KEEP_ALIVE = re.compile(r"^-?\d+(\.\d+)?[smh]?$")
 
 
 def spec_for(path):
-    """EDITABLE-Eintrag fuer einen konkreten Pfad (mit Namen statt *) oder None."""
+    """EDITABLE entry for a specific path (with name instead of *) or None."""
     if path in EDITABLE:
         return EDITABLE[path]
     parts = path.split(".")
@@ -281,8 +281,8 @@ def _classes(c):
 
 
 def coerce(path, value, c):
-    """Wert fuer einen Pfad pruefen und in den Typ bringen. Ein Problem 400 mit Klartext, wenn er nicht passt; None
-    nur, wenn nullable (darum failed() pruefen, nicht auf None)."""
+    """Check a value for a path and cast it to the type. A Problem 400 with plaintext if it doesn't fit; None
+    only if nullable (hence check failed(), not for None)."""
     spec = spec_for(path)
     if spec is None:
         return invalid(f"settings.{path}: cannot be changed in the UI (config.yaml only)")
@@ -290,7 +290,7 @@ def coerce(path, value, c):
         return invalid("settings.router.client_auth.mode: locked (client_auth.locked in config.yaml) - change it by deploy")
     parts = path.split(".")
     if "*" in spec_key(path):
-        # der benannte Eintrag (Anbieter/Client) muss in config.yaml existieren - die UI legt keine neuen an
+        # the named entry (Provider/Client) must exist in config.yaml - the UI does not create new ones
         parent, ok = _get(c, parts[:-1])
         if not ok or not isinstance(parent, dict):
             return invalid(f"settings.{path}: {'.'.join(parts[:-1])} does not exist in config.yaml")
@@ -363,7 +363,7 @@ def coerce(path, value, c):
 
 
 def spec_key(path):
-    """Der EDITABLE-Schluessel (mit *), der zu einem konkreten Pfad gehoert."""
+    """The EDITABLE key (with *) that belongs to a specific path."""
     if path in EDITABLE:
         return path
     parts = path.split(".")
@@ -375,8 +375,8 @@ def spec_key(path):
 
 
 def apply(c, settings):
-    """settings {pfad: wert} geprueft in die (noch ungeparste) Konfiguration c legen. Liefert die geprueften Werte
-    oder das Problem des ersten ungueltigen (dann ist c teilweise belegt - Aufrufer arbeiten auf einer Kopie)."""
+    """settings {path: value} checked into the (not yet parsed) configuration c. Returns the checked values
+    or the Problem of the first invalid one (then c is partially populated - callers work on a copy)."""
     if not isinstance(settings, dict):
         return invalid("settings must be a mapping path -> value")
     out = {}
@@ -399,9 +399,9 @@ def apply(c, settings):
 
 
 def view(cfg, base, overrides, lang="de"):
-    """Fuer die UI: alle editierbaren Einstellungen mit Wert (wirksam), Basiswert (config.yaml), Override-Flag und Metadaten.
-    cfg = geparste Config (raw = gemergter Baum), base = config.yaml pur, overrides = settings-Block aus roles.yaml.
-    lang = "de" | "en": bei "en" tragen label/help/group/note und die Gruppenliste die englischen Texte (gleiche Schluessel)."""
+    """For the UI: all editable settings with value (effective), base value (config.yaml), override flag and metadata.
+    cfg = parsed Config (raw = merged tree), base = config.yaml pure, overrides = settings block from roles.yaml.
+    lang = "de" | "en": for "en", label/help/group/note and the group list carry the English texts (same keys)."""
     en = lang == "en"
     classes = cfg.cloud.get("data_classes") or DATA_CLASSES_DEFAULT
     roles = sorted(r["name"] for r in cfg.roles.values())

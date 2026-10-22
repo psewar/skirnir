@@ -1,4 +1,4 @@
-"""Ein GPU-Knoten: Zustand, VRAM-Rechnung, Baseline, und `nreq` als einziger Weg zu seinem Ollama."""
+"""A GPU node: state, VRAM accounting, baseline, and `nreq` as the sole path to its Ollama."""
 
 import asyncio
 import time
@@ -9,10 +9,10 @@ from aiohttp import ClientError, Fingerprint
 from . import config, state
 from .common import log, tls_fingerprint
 
-PUSH_STALE_S = 45   # Agent >= 0.14.0 meldet den Ollama-Zustand bei jeder Aenderung und spaetestens alle 30 s
+PUSH_STALE_S = 45   # Agent >= 0.14.0 reports Ollama status on every change and at least every 30 s
 
-# GPU-Schutz: Agenten vor 0.20.0 melden Zustaende, Gruende und Feldnamen deutsch (design/english-names.md). guard_english
-# uebersetzt beim Empfang, damit der Router nur die englischen Namen kennt; entfernen, sobald alle Knoten >= 0.20.0 laufen.
+# GPU guard: Agents before 0.20.0 report states, reasons, and field names in German (design/english-names.md). guard_english
+# translates on receipt so the router only sees English names; remove once all nodes are >= 0.20.0.
 GUARD_STATES = ("off", "unavailable", "normal", "high_load", "throttled", "recovery")
 GUARD_STATE_BEFORE_0_20 = {"aus": "off", "unverfuegbar": "unavailable", "hochlast": "high_load", "gedrosselt": "throttled",
                            "erholung": "recovery"}
@@ -21,7 +21,7 @@ GUARD_REASON_BEFORE_0_20 = {"abgewaehlt": "deselected"}
 
 
 def guard_english(g):
-    """GPU-Schutz-Status eines Agenten mit englischen Feldnamen und Werten (Agenten vor 0.20.0 senden deutsche)."""
+    """GPU guard status of an agent with English field names and values (agents before 0.20.0 send German)."""
     out = {GUARD_FIELD_BEFORE_0_20.get(k, k): v for k, v in g.items()}
     out["state"] = GUARD_STATE_BEFORE_0_20.get(out.get("state"), out.get("state"))
     out["reason"] = GUARD_REASON_BEFORE_0_20.get(out.get("reason"), out.get("reason"))
@@ -29,12 +29,12 @@ def guard_english(g):
 
 
 class NodeNotReady(ClientError):
-    """TLS-Knoten, dessen Fingerprint noch nicht bekannt ist (kein Heartbeat bisher)."""
+    """TLS node whose fingerprint is not yet known (no heartbeat so far)."""
 
 
 def nreq(node, method, path, **kw):
-    """HTTP-Anfrage an einen Knoten: durch den Tunnel des Agenten, wenn er steht; sonst direkt an die ollama-URL
-    (TLS-Knoten: gepinntes Zertifikat + Router-Token). Knoten ohne URL und ohne Tunnel gelten als nicht erreichbar."""
+    """HTTP request to a node: via the agent's tunnel if active; otherwise directly to the ollama-URL
+    (TLS nodes: pinned certificate + router token). Nodes without URL and tunnel are considered unreachable."""
     if node.tunnel is not None:
         return node.tunnel.request(method, path, **kw)
     if not node.url:
@@ -46,18 +46,18 @@ def nreq(node, method, path, **kw):
             raise NodeNotReady(f"{node.name}: TLS-Fingerprint unbekannt, warte auf Heartbeat")
         kw["ssl"] = node.ssl
         h = dict(kw.get("headers") or {})
-        if state.CFG.heartbeat_token:   # Router-Token der TLS-Vorschaltstelle des Agenten (ollama_proxy, router.token)
+        if state.CFG.heartbeat_token:   # Router token for the agent's TLS front-end (ollama_proxy, router.token)
             h["X-Router-Token"] = state.CFG.heartbeat_token
         kw["headers"] = h
     return state.SESSION.request(method, node.url + path, **kw)
 
 
 class Breaker:
-    """Circuit Breaker je Ziel (Stufe 3): closed -> open nach `failures` Fehlern im Fenster -> nach open_s half_open mit genau
-    einer Probe. Gemeinsam fuer Node und CloudTarget (beide tragen name, inflight, breaker, breaker_fails, breaker_until)."""
+    """Circuit breaker per target (stage 3): closed -> open after `failures` errors in window -> after open_s half_open with exactly
+    one probe. Shared for Node and CloudTarget (both carry name, inflight, breaker, breaker_fails, breaker_until)."""
 
     def breaker_would_allow(self, now):
-        """Reine Sicht ohne Zustandswechsel (HA-Bild, /metrics): darf jetzt eine Anfrage hin?"""
+        """Pure view without state change (HA view, /metrics): is a request allowed now?"""
         if self.breaker == "closed":
             return True
         if self.breaker == "open" and now < self.breaker_until:
@@ -91,10 +91,10 @@ class Breaker:
 
 
 class Node(Breaker):
-    is_cloud = False   # CloudTarget (cloud.py) sagt True; Proxy/Ops unterscheiden daran, kein getattr mehr noetig
+    is_cloud = False   # CloudTarget (cloud.py) returns True; Proxy/Ops distinguish by this, no getattr needed
 
     def set_fingerprint(self, hexfp):
-        """TLS-Fingerprint uebernehmen. False, wenn es kein SHA-256-Fingerprint ist (der Aufrufer meldet es)."""
+        """Adopt TLS fingerprint. False if not a SHA-256 fingerprint (caller reports it)."""
         fp = tls_fingerprint(hexfp)
         if fp is None:
             return False
@@ -104,10 +104,10 @@ class Node(Breaker):
 
     def __init__(self, name, spec):
         self.name = name
-        self.url = (spec.get("ollama") or "").rstrip("/")   # leer = Knoten kommt nur per Tunnel (Agent verbindet sich)
+        self.url = (spec.get("ollama") or "").rstrip("/")   # empty = node reachable only via tunnel (agent connects)
         self.tunnel = None
-        # TLS-Knoten (Agent-Vorschaltstelle vor Ollama): Zertifikat wird per SHA-256-Fingerprint gepinnt, keine CA.
-        # "auto": der Agent meldet den Fingerprint seines Zertifikats im Heartbeat (der ist per Token + LE-TLS gesichert).
+        # TLS node (agent front-end before Ollama): certificate pinned via SHA-256 fingerprint, no CA.
+        # "auto": agent reports its certificate fingerprint in heartbeat (secured by token + LE-TLS).
         self.tls = self.url.startswith("https://")
         self.ssl = None
         self.tls_fp = ""
@@ -117,58 +117,58 @@ class Node(Breaker):
             fp = config.cert_fingerprint(spec["ollama_tls_cert"])
         if fp:
             self.tls_mode = "fixed"
-            if not self.set_fingerprint(fp):   # config.yaml prueft das Format schon beim Laden
+            if not self.set_fingerprint(fp):   # config.yaml validates format on load
                 log.error("node %s: invalid TLS fingerprint: %r - node stays unreachable", name, fp)
         self.vram_total_gib = float(spec.get("vram_total_gib", 0))
         self.mac = spec.get("mac")
         self.wol = bool(spec.get("wol", False))
         self.weight = int(spec.get("weight", 1))
         self.foreign_baseline_gib = float(spec.get("foreign_vram_baseline_gib", 0))
-        self.fp = None      # Fingerprint des Agenten-Schluessels (registrierte Knoten)
-        self.polled_ok = 0.0   # letzter erfolgreicher Poll (/api/ps bekannt) - Voraussetzung fuers Baseline-Lernen
-        self.ollama_push_ts = 0.0     # letzte Meldung des Ollama-Zustands durch den Agenten (Rahmen OLLAMA); frisch = kein Poll
-        self.ollama_push_error = None  # Grund, den der Agent fuer "Ollama antwortet nicht" meldet
+        self.fp = None      # Fingerprint of the agent key (registered nodes)
+        self.polled_ok = 0.0   # last successful poll (/api/ps known) - prerequisite for baseline learning
+        self.ollama_push_ts = 0.0     # last Ollama status report by agent (frame OLLAMA); fresh = no poll
+        self.ollama_push_error = None  # Reason agent reports for "Ollama not responding"
         self.reg = None     # Eintrag im Knotenregister (nodes.json)
         self.gpu = spec.get("gpu", "")
         # Ollama-Sicht
         self.models = set()
         self.last_known_models = set()
-        self.model_details = {}          # name -> dict aus /api/tags
-        self.digest_of = {}              # name -> digest (Alias und Original teilen den Digest)
-        self.loaded = {}                 # geladener Name -> size_vram GiB (so wie Ollama ihn meldet)
+        self.model_details = {}          # name -> dict from /api/tags
+        self.digest_of = {}              # name -> digest (alias and original share digest)
+        self.loaded = {}                 # loaded name -> size_vram GiB (as reported by Ollama)
         self.loaded_digest = {}          # digest -> size_vram GiB
-        self.loaded_ctx = {}             # digest -> context_length, mit dem das Modell geladen ist
+        self.loaded_ctx = {}             # digest -> context_length, with which the model is loaded
         self.misses = 0
         self.state = "offline"
         # Agent-Sicht
         self.hb_ts = 0.0
         self.gpu_util = None
-        self.sensors = None   # Zusatzsensoren aus dem Heartbeat (Agent >= 0.6.0), dict oder None
+        self.sensors = None   # Extra sensors from heartbeat (Agent >= 0.6.0), dict or None
         self.guard = None     # GPU-Schutz laut Agent (>= 0.7.0): state, limit_w, target_w, problem, reason, warnings (guard_english)
-        self.draining_until = 0.0   # Agent-Update laeuft: bis dahin keine neuen Anfragen an diesen Knoten
+        self.draining_until = 0.0   # Agent update running: no new requests to this node until done
         self.guard_ts = 0.0
         self.vram_free_gib = None
         self.vram_used_gib = None
         self.vram_total_reported_gib = None
         self.ollama_proc_gib = None
         self.children_vram_gib = 0.0   # Agent >= 0.13.0: Grafikspeicher seiner Kinder ausser Ollama (STT per CUDA), gemeldet
-        # Agent >= 0.17.0: Spiel und Hauptspeicher als Fakt (poll.apply_heartbeat). game None = Agent meldet es nicht
-        # (zu alt / Linux ohne Erkennung) - dann gilt wie bisher nur fremdes VRAM und GPU-Last.
-        self.game = None              # {"running", "name", "via", ...} vom Agenten
-        self.game_since = None        # seit wann der Router das Spiel ununterbrochen sieht (busy erst nach game_sustain_s)
-        # 0.8.7: braucht das laufende Spiel die GPU? Einmal ja, bleibt es ja bis Spielende (kein Flattern im Menue/Ladebildschirm).
-        # Ohne GPU-Bedarf in der Meldung (Agent < 0.19.0, Messung gescheitert) gilt jedes Spiel als schwer - wie bis 0.8.6.
+        # Agent >= 0.17.0: Game and RAM as fact (poll.apply_heartbeat). game None = agent does not report it
+        # (too old / Linux without detection) - then only foreign VRAM and GPU load apply as before.
+        self.game = None              # {"running", "name", "via", ...} from agent
+        self.game_since = None        # since when router has seen the game continuously (busy only after game_sustain_s)
+        # 0.8.7: does the running game need GPU? Once yes, stays yes until game ends (no flicker in menu/loading screen).
+        # Without GPU requirement in report (Agent < 0.19.0, measurement failed), every game is heavy - as until 0.8.6.
         self.game_heavy = False
-        self.game_heavy_why = ""      # Grund als Fakt fuer /admin/state und das Journal
-        self.prewarm_after_game = False   # 0.8.8: Vorwaermen wegen eines Spiels uebersprungen -> nachholen, sobald es leicht/vorbei ist
-        self.memory = None            # {"ram_available_gib", "commit_free_gib", ...} vom Agenten
-        self.routes = {}              # Tunnel-Routen des Agenten neben Ollama: {"rerank": {"up": bool, "reason": str}}; leer = meldet keine
-        self.mem_low_count = 0        # so viele Heartbeats in Folge unter der Grenze
-        self.mem_pressure = False     # Speicherdruck: nichts kalt laden, nicht vorwaermen (das Geladene antwortet weiter)
-        self.vram_last_gib = 0.0      # Ollama-Belegung beim letzten Poll, um ein Schrumpfen zu erkennen
+        self.game_heavy_why = ""      # Reason as fact for /admin/state and journal
+        self.prewarm_after_game = False   # 0.8.8: Prewarm skipped due to game -> catch up when light/done
+        self.memory = None            # {"ram_available_gib", "commit_free_gib", ...} from agent
+        self.routes = {}              # Agent tunnel routes besides Ollama: {"rerank": {"up": bool, "reason": str}}; empty = not reported
+        self.mem_low_count = 0        # so many consecutive heartbeats below threshold
+        self.mem_pressure = False     # Memory pressure: no cold loads, no prewarm (loaded ones keep responding)
+        self.vram_last_gib = 0.0      # Ollama usage at last poll, to detect shrinkage
         self.vram_hold_gib = 0.0      # solange nvidia-smi nachzieht, gilt dieser Wert als Ollama-Belegung
         self.vram_hold_until = 0.0
-        self.loading = {}             # Modell -> (erwartete Belegung GiB, Frist): Ladevorgang, den der Router ausgeloest hat
+        self.loading = {}             # Model -> (expected usage GiB, deadline): load triggered by router
         # Zustandsautomat
         self.hot_since = None
         self.foreign_since = None
@@ -178,25 +178,25 @@ class Node(Breaker):
         # Laufende Arbeit
         self.inflight = 0
         self.inflight_models = Counter()
-        self.last_used = {}           # Modell -> Zeitpunkt der letzten Anfrage ueber den Router (Residenz-Regel)
+        self.last_used = {}           # Model -> timestamp of last request via router (residency rule)
         self.last_residency = 0.0
-        self.free_since = 0.0         # seit wann ununterbrochen free (gefuehrt von poll.residency_check)
-        self.free_at = 0.0            # Zeitpunkt des letzten Wechsels auf free; ein verzoegertes Vorwaermen gilt nur fuer "seinen" Wechsel
-        self.swap_pending = None      # Ollama-Version, deren Tausch der Router gerade freigibt (ollamaupdate.release_swap)
-        # Stufe 3: Circuit Breaker (closed -> open nach `failures` Backend-Fehlern im Fenster -> half_open nach open_s:
-        # eine Probe, Erfolg = closed, Fehler = wieder open) und Admission (max_inflight aus der Policy, sonst Default)
+        self.free_since = 0.0         # how long continuously free (driven by poll.residency_check)
+        self.free_at = 0.0            # Timestamp of last switch to free; delayed prewarm applies only to "its" switch
+        self.swap_pending = None      # Ollama version whose swap the router is currently releasing (ollamaupdate.release_swap)
+        # Stage 3: Circuit Breaker (closed -> open after `failures` backend errors in window -> half_open after open_s:
+        # one probe, success = closed, error = open again) and admission (max_inflight from policy, else default)
         self.breaker = "closed"
         self.breaker_fails = []
         self.breaker_until = 0.0
         self.max_inflight = int(spec["max_inflight"]) if spec.get("max_inflight") else None
-        # Busy-Schwellen je Knoten (Policy im Register, 2026-09-11): eine 16-GiB-Karte, auf der Ollama 8 GiB haelt, laesst
-        # einem Spiel nie 6 GiB "fremdes" VRAM - gpu-laptop blieb beim Spielen free (util 35-40 %, fremd 3,9 GiB) und gemma4 blieb
-        # geladen. None = globale Werte aus modes.busy_enter.
+        # Busy thresholds per node (policy in register, 2026-09-11): a 16-GiB card where Ollama holds 8 GiB leaves
+        # a game never 6 GiB of "foreign" VRAM - gpu-laptop stayed free while gaming (util 35-40 %, foreign 3.9 GiB) and gemma4 stayed
+        # loaded. None = global values from modes.busy_enter.
         self.busy_util_pct = float(spec["busy_gpu_util_pct"]) if spec.get("busy_gpu_util_pct") is not None else None
         self.busy_foreign_pol = float(spec["busy_foreign_gib"]) if spec.get("busy_foreign_gib") is not None else None
-        self.guard_policy = bool(spec.get("gpu_guard", True))   # Policy je Knoten: Router beachtet den GPU-Schutz-Status (Deckel, Score, HA)
+        self.guard_policy = bool(spec.get("gpu_guard", True))   # Policy per node: Router respects the GPU guard status (cap, score, HA)
         self.foreign_frozen = 0.0     # fremdes VRAM beim Start eines Ladevorgangs (siehe announce_load / foreign_vram_gib)
-        self.ollama_version = None    # Stufe 6: Supply Chain (aus /api/version, alle 5 min)
+        self.ollama_version = None    # Stage 6: Supply Chain (from /api/version, every 5 min)
         self.version_ts = 0.0
         # WOL
         self.last_wake = 0.0
@@ -206,10 +206,10 @@ class Node(Breaker):
         return self.hb_ts and (now - self.hb_ts) <= state.CFG.hb_stale_s
 
     def ollama_vram_gib(self):
-        """Was Ollama gerade belegt: je geladenes Modell die gemessene echte Belegung bei seinem geladenen Kontext
-        (Katalog `real`, seit 0.3.5), sonst `/api/ps`. Fuer das VRAM-Budget: dort zaehlt, was beim Verdraengen
-        wirklich frei wird - mit der zu kleinen /api/ps-Zahl lehnte der Router einen Kontextwechsel desselben Modells
-        ab, der real passte."""
+        """What Ollama currently occupies: for each loaded model the measured actual occupancy at its loaded context
+        (catalog `real`, since 0.3.5), else `/api/ps`. For the VRAM budget: count what actually frees up on eviction
+        - with the too-small /api/ps number the router rejected a context switch of the same model
+        that actually fit."""
         return self._loaded_real_gib()
 
     def _loaded_real_gib(self):
@@ -221,11 +221,11 @@ class Node(Breaker):
         return total
 
     def ollama_vram_claimed_gib(self):
-        """Was Ollama beansprucht, inklusive Nachlauf. `/api/ps` (Poll) und die belegte Gesamtmenge aus nvidia-smi
-        (Heartbeat) hinken einander nach, in beide Richtungen: beim Entladen faellt /api/ps sofort auf null, waehrend
-        nvidia-smi den Speicher noch zeigt; beim Laden sieht nvidia-smi das Modell, bevor es in /api/ps auftaucht.
-        Beides erschiene als fremdes VRAM. Solange der Nachlauf laeuft, gilt darum der hoehere Wert; hat nvidia-smi
-        nachgezogen, klemmt `foreign_vram_gib()` das ohnehin auf 0."""
+        """What Ollama claims, including tail. `/api/ps` (poll) and total occupied from nvidia-smi
+        (heartbeat) lag each other, in both directions: on unload /api/ps drops to zero immediately, while
+        nvidia-smi still shows memory; on load nvidia-smi sees the model before it appears in /api/ps.
+        Both would appear as foreign VRAM. While the tail runs, the higher value applies; once nvidia-smi
+        has caught up, `foreign_vram_gib()` clamps it to 0 anyway."""
         now = time.time()
         claim = self.load_claim_gib(now)
         if now < self.vram_hold_until:
@@ -233,33 +233,33 @@ class Node(Breaker):
         return max(self._loaded_real_gib(), claim)
 
     def hold_vram(self, now, gib):
-        """Nachlauf setzen: bis `vram_settle_s` gilt mindestens `gib` als Ollama-Belegung."""
+        """Set tail: for `vram_settle_s` at least `gib` counts as Ollama occupancy."""
         if gib > 0:
             self.vram_hold_gib = max(gib, self.vram_hold_gib if now < self.vram_hold_until else 0.0)
             self.vram_hold_until = now + state.CFG.vram_settle_s
 
     def announce_load(self, model, ctx):
-        """Der Router loest gerade einen Ladevorgang aus: die erwartete Belegung gilt ab sofort als beansprucht.
-        Ohne das zaehlt das ladende Modell als fremdes VRAM - und ein Kaltstart, der laenger dauert als
-        `foreign_sustain_s`, wuerde den Knoten mitten im Laden busy machen; das Sicherheitsnetz entlaedt dann genau
-        das eben geladene Modell. Der Anspruch gilt, BIS das Modell in /api/ps steht (nicht nur `vram_settle_s`,
-        denn genau der langsame Kaltstart ist der gefaehrliche Fall); `finish_load` beendet ihn mit kurzem Nachlauf,
-        die Frist faengt einen verlorenen Abschluss ab.
+        """Router is triggering a load: expected occupancy counts as claimed immediately.
+        Without this, the loading model counts as foreign VRAM - and a cold start taking longer than
+        `foreign_sustain_s` would make the node busy mid-load; the safety net then unloads exactly
+        the model just loaded. The claim holds UNTIL the model is in /api/ps (not just `vram_settle_s`,
+        since that slow cold start is the dangerous case); `finish_load` ends it with a short tail,
+        the deadline catches a lost completion.
 
-        Erwartet wird die Belegung nach dem Laden, also `need_gib` OHNE den Fit-Zuschlag (seit 0.3.5 bei gemessenen
-        Modellen die echte nvidia-smi-Belegung, sonst was `/api/ps` meldet) - und
-        NICHT die aktuelle Belegung plus die neue: Ollama verdraengt beim Laden, die Summe waere fast doppelt so
-        hoch wie die Wirklichkeit und wuerde die busy-Erkennung fuer die Dauer des Anspruchs aushebeln. Haelt Ollama
-        daneben noch ein anderes Modell, deckt `max(...)` mit der `/api/ps`-Summe das ab."""
+        Expected occupancy after load, i.e. `need_gib` WITHOUT the fit margin (since 0.3.5 for measured
+        models the actual nvidia-smi occupancy, else what `/api/ps` reports) - and
+        NOT current occupancy plus new: Ollama evicts on load, the sum would be nearly double
+        reality and would disable busy detection for the duration of the claim. If Ollama
+        holds another model, `max(...)` with the `/api/ps` sum covers it."""
         if not self.loading:
-            self.foreign_frozen = self.foreign_vram_gib()   # Stand VOR dem Anspruch einfrieren
-        real = state.CFG.real_gib(model, ctx)   # gemessen: ohne Zuschlag, sonst need_gib minus Fit-Zuschlag
+            self.foreign_frozen = self.foreign_vram_gib()   # Freeze state BEFORE the claim
+        real = state.CFG.real_gib(model, ctx)   # measured: without margin, else need_gib minus fit margin
         claim = real if real is not None else max(0.0, state.CFG.need_gib(model, ctx, self) - state.CFG.overhead_gib)
         self.loading[model] = (claim, time.time() + 300)
 
     def finish_load(self, model):
-        """Ladevorgang beendet (auch bei Fehler): Anspruch in einen kurzen Nachlauf umwandeln, damit die Luecke
-        bis zum naechsten /api/ps-Poll gedeckt bleibt."""
+        """Load finished (also on error): convert claim to a short tail, covering the gap
+        until the next /api/ps poll."""
         claim = self.loading.pop(model, None)
         if claim:
             self.hold_vram(time.time(), claim[0])
@@ -268,17 +268,17 @@ class Node(Breaker):
         return max((gib for gib, deadline in self.loading.values() if now < deadline), default=0.0)
 
     def note_loaded_changed(self, now):
-        """Nach jedem Poll aufrufen: schrumpft die Ollama-Belegung, beginnt der Nachlauf (mit der echten Belegung,
-        sonst endete der Nachlauf bei der /api/ps-Zahl und der Rest erschiene kurz als fremdes VRAM)."""
+        """Call after each poll: if Ollama occupancy shrinks, start the tail (with actual occupancy,
+        else the tail would end at the /api/ps number and the rest would briefly appear as foreign VRAM)."""
         cur = self._loaded_real_gib()
         if cur < self.vram_last_gib - 0.05:
             self.hold_vram(now, self.vram_last_gib)
         self.vram_last_gib = cur
         for m in [m for m in self.loading if self.is_loaded(m)]:
-            self.finish_load(m)   # /api/ps bestaetigt es: Anspruch in einen kurzen Nachlauf umwandeln
+            self.finish_load(m)   # /api/ps confirms it: convert claim to a short tail
 
     def is_loaded(self, model):
-        """Geladen = gleicher Digest, egal unter welchem Namen (ein Alias und sein Basismodell)."""
+        """Loaded = same digest, regardless of name (an alias and its base model)."""
         d = self.digest_of.get(model)
         return (d is not None and d in self.loaded_digest) or model in self.loaded
 
@@ -297,26 +297,26 @@ class Node(Breaker):
         return a == b or (da is not None and da == db)
 
     def foreign_vram_gib(self):
-        """VRAM, das weder Ollama noch die eigenen Kinder des Agenten noch der bekannte Desktop-Grundverbrauch belegt."""
+        """VRAM not occupied by Ollama, the agent's own children, or known desktop baseline."""
         if self.vram_used_gib is None:
             return 0.0
         if self.ollama_proc_gib is not None:
             ollama = self.ollama_proc_gib
         else:
             ollama = self.ollama_vram_claimed_gib()
-        # Die Kinder des Agenten (2026-09-30: Whisper per CUDA, 2,6 GiB) meldet er als Fakt; ohne das galten sie als Spiel und
-        # hoben den Knoten ueber die foreign-Schwelle - mit Desktop + einem Spiel 3,6 GiB fremd, mit Whisper 6.2 GiB.
+        # The agent's children (2026-09-30: Whisper via CUDA, 2.6 GiB) report as fact; without this they would count as game and
+        # push the node over the foreign threshold - with desktop + one game 3.6 GiB foreign, with Whisper 6.2 GiB.
         raw = max(0.0, self.vram_used_gib - ollama - self.children_vram_gib - self.baseline_gib())
-        # Waehrend eines vom Router ausgeloesten Ladevorgangs deckt der Anspruch (announce_load) das ganze Modell ab, auch
-        # solange es noch gar nicht im VRAM liegt - ein Spiel verschwand so 300 s lang aus der Rechnung (gpu-laptop 2026-09-11:
-        # fremd 0,0 trotz 2,4 GiB Spiel, Knoten blieb free). Darum gilt mindestens der Wert von vor dem Laden.
+        # During a router-triggered load, the claim (announce_load) covers the whole model, even
+        # while it is not yet in VRAM - a game thus disappeared from the calculation for 300 s (gpu-laptop 2026-09-11:
+        # foreign 0.0 despite 2.4 GiB game, node stayed free). Hence at least the pre-load value applies.
         if self.load_claim_gib(time.time()) > 0:
             return max(raw, self.foreign_frozen)
         return raw
 
     def baseline_gib(self):
-        """Desktop-Grundverbrauch ohne Ollama: Policy-Wert (Config/UI) und gelernter Wert (rollendes 24-h-Minimum von
-        belegt minus Ollama); ist beides da, gilt das Minimum - ein Spiel beim ersten Start kann das Lernen so nicht verderben."""
+        """Desktop baseline without Ollama: policy value (Config/UI) and learned value (rolling 24-h minimum of
+        occupied minus Ollama); if both exist, the minimum applies - a game on first start cannot spoil the learning."""
         b = self.foreign_baseline_gib
         if self.reg is not None:
             pol = self.reg.get("policy") or {}
@@ -328,26 +328,26 @@ class Node(Breaker):
         return b
 
     def learn_baseline(self, now, sample):
-        """Desktop-Grundverbrauch lernen: pro Stunde Anzahl/Summe/Minimum von (VRAM belegt - Ollama) in
-        `nodes.json`, daraus der **Median der Stundenmittel** ueber 24 h.
+        """Learn desktop baseline: per hour count/sum/min of (VRAM used - Ollama) in
+        `nodes.json`, then the **median of hourly means** over 24 h.
 
-        Bis 2026-09-08 war es das Minimum ueber alles. Das rutscht auf den ruhigsten Moment des Tages - auf
-        gpu-desktop 2,89 GiB bei schlafendem Monitor, waehrend der wache Desktop 6,1 GiB braucht. Die Differenz galt
-        als fremdes VRAM und machte den Knoten grundlos busy (zweimal in vier Minuten, GPU-Auslastung 0). Ein
-        Minimum beschreibt eben nicht den Normalbetrieb, sondern dessen Extrem.
+        Until 2026-09-08 it was the global minimum. That drifts to the quietest moment of the day - on
+        gpu-desktop 2.89 GiB with a sleeping monitor, while the active desktop needs 6.1 GiB. The difference was
+        treated as foreign VRAM and made the node busy for no reason (twice in four minutes, GPU utilization 0). A
+        minimum does not describe normal operation, but its extreme.
 
-        Zwei Schichten gegen Verunreinigung: gesammelt wird nur bei ruhiger GPU (Filter beim Aufrufer), und der
-        Median ueber die Stunden faengt einzelne trotzdem verdorbene Stunden ab. Ausreisser nach oben (ein Spiel)
-        koennen den Median nur verschieben, wenn sie die Mehrheit der Stunden stellen - und dann deckelt ihn noch
-        der Policy-Wert in `baseline_gib()`."""
+        Two layers against contamination: data is only collected when the GPU is idle (filter at the caller), and the
+        median over hours catches individual corrupted hours. Outliers on the high side (a game)
+        can only shift the median if they constitute the majority of hours - and then the policy value in `baseline_gib()`
+        caps it anyway."""
         if self.reg is None or sample is None:
             return
         learned = self.reg.setdefault("learned", {})
         buckets = learned.setdefault("buckets", {})
         hour = int(now // 3600)
-        # Eimer im alten Format (nur eine Zahl = Stundenminimum) verwerfen statt umrechnen: sie entstanden OHNE
-        # den Ruhe-Filter, es stecken also Spielstunden darin. Auf gpu-desktop waeren das 19 von 23 Stunden bei
-        # 18,2 GiB gewesen - der Median daraus waere schlechter als alles, was wir ersetzen wollen.
+        # Discard buckets in the old format (single number = hourly minimum) instead of converting: they were created WITHOUT
+        # the idle filter, so they contain gaming hours. On gpu-desktop that would be 19 of 23 hours at
+        # 18.2 GiB - the median from that would be worse than everything we are replacing.
         for k, _v in [(k, v) for k, v in buckets.items() if not isinstance(v, dict)]:
             del buckets[k]
         b = buckets.get(str(hour)) or {"n": 0, "sum": 0.0, "min": 1e9}
@@ -361,7 +361,7 @@ class Node(Breaker):
         state.REG.dirty = True
 
     def apply_spec(self, spec):
-        """Fakten/Policy eines registrierten Knotens uebernehmen (Registrierung oder Policy-Aenderung in der UI)."""
+        """Adopt facts/policy of a registered node (registration or policy change in the UI)."""
         if spec.get("vram_total_gib"):
             self.vram_total_gib = float(spec["vram_total_gib"])
         if spec.get("mac"):
@@ -375,19 +375,19 @@ class Node(Breaker):
         self.max_inflight = int(spec["max_inflight"]) if spec.get("max_inflight") else None
         self.busy_util_pct = float(spec["busy_gpu_util_pct"]) if spec.get("busy_gpu_util_pct") is not None else None
         self.busy_foreign_pol = float(spec["busy_foreign_gib"]) if spec.get("busy_foreign_gib") is not None else None
-        self.guard_policy = bool(spec.get("gpu_guard", True))   # Policy je Knoten: Router beachtet den GPU-Schutz-Status (Deckel, Score, HA)
+        self.guard_policy = bool(spec.get("gpu_guard", True))   # Policy per node: Router respects the GPU guard status (cap, score, HA)
 
     def busy_util_threshold(self):
         return self.busy_util_pct if self.busy_util_pct is not None else state.CFG.busy_util
 
     def busy_exit_util_threshold(self):
-        """Hysterese: unter dieser Auslastung darf ein busy-Knoten wieder free werden - nie hoeher als seine Eintrittsschwelle."""
+        """Hysteresis: below this utilization a busy node may become free again - never higher than its admission threshold."""
         return min(state.CFG.busy_exit_util, self.busy_util_threshold())
 
     def busy_foreign_threshold(self):
         return self.busy_foreign_pol if self.busy_foreign_pol is not None else state.CFG.busy_foreign_gib
 
-    # --- Stufe 3: Circuit Breaker / Admission ---
+    # --- Stage 3: Circuit Breaker / Admission ---
     def effective_max_inflight(self):
         base = self.max_inflight or state.CFG.admission["max_inflight_default"]
         g = state.CFG.gpu_guard
@@ -399,13 +399,13 @@ class Node(Breaker):
         return base
 
     def guard_state(self, now=None):
-        """Zustand des GPU-Schutzes laut Agent; None = kein oder veralteter Status (aelter als 30 s)."""
+        """GPU guard status according to the agent; None = no or stale status (older than 30 s)."""
         if not self.guard or not self.guard_ts or (now or time.time()) - self.guard_ts > 30:
             return None
         return self.guard.get("state")
 
     def guard_view(self, now=None):
-        """Fuer /admin/state, HA und UI: Status plus Policy und Frische."""
+        """For /admin/state, HA and UI: status plus policy and freshness."""
         g = self.guard or {}
         return {"state": self.guard_state(now), "reported": g.get("state"), "limit_w": g.get("limit_w"), "target_w": g.get("target_w"),
                 "default_limit_w": g.get("default_limit_w"), "problem": bool(g.get("problem")), "reason": g.get("reason"),
@@ -413,28 +413,28 @@ class Node(Breaker):
                 "policy": self.guard_policy, "router_enabled": state.CFG.gpu_guard["enabled"]}
 
     def ollama_push_active(self, now):
-        """Meldet der Agent den Ollama-Zustand selbst und ist die letzte Meldung frisch? Dann pollt der Router nicht."""
+        """Does the agent report the Ollama status itself and is the last report fresh? Then the router does not poll."""
         return bool(self.ollama_push_ts) and now - self.ollama_push_ts < PUSH_STALE_S
 
     def ps_fresh(self, now):
-        """Ist bekannt, welche Modelle geladen sind? Push: Aenderungen kommen sofort, frisch solange der Agent meldet.
-        Poll: nur bis kurz nach dem naechsten Takt."""
+        """Is it known which models are loaded? Push: changes arrive immediately, fresh as long as the agent reports.
+        Poll: only until shortly after the next tick."""
         return self.ollama_push_active(now) or now - self.polled_ok < 2 * state.CFG.poll_s + 1
 
     def go_offline(self, why):
-        """Knoten aus dem Routing nehmen: Zustand, geladene Modelle, Ladeansprueche und VRAM-Nachlauf zuruecksetzen.
-        Eine Stelle fuer Poll-Fehler, Tunnelabriss und Sperre (vorher vier Kopien mit leicht verschiedenem Umfang)."""
+        """Remove node from routing: reset state, loaded models, load requests and VRAM tail.
+        One place for poll errors, tunnel drops and locks (previously four copies with slightly different scope)."""
         if self.state != "offline":
             log.warning("node %s -> offline (%s)", self.name, why)
         self.state, self.hot_since, self.calm_since = "offline", None, None
-        self.prewarm_after_game = False   # online plant sein eigenes Vorwaermen
+        self.prewarm_after_game = False   # online plans its own prewarming
         self.loaded, self.loaded_digest, self.loaded_ctx, self.loading = {}, {}, {}, {}
-        self.vram_last_gib, self.vram_hold_gib, self.vram_hold_until = 0.0, 0.0, 0.0   # offline: Nachlauf ist gegenstandslos
+        self.vram_last_gib, self.vram_hold_gib, self.vram_hold_until = 0.0, 0.0, 0.0   # offline: tail is irrelevant
         state.MQTT_DIRTY.append(True)
 
     def budget_gib(self, now, model):
-        """Was Ollama auf diesem Knoten belegen darf: freies VRAM + alles, was Ollama selbst hält (wird bei Bedarf
-        verdrängt oder per Runner-Sharing wiederverwendet) - Reserve. Fremdes VRAM (Desktop, Spiel) zählt nicht."""
+        """What Ollama may occupy on this node: free VRAM + everything Ollama itself holds (will be
+        evicted or reused via Runner-Sharing as needed) - reserve. Foreign VRAM (desktop, game) does not count."""
         reserve = state.CFG.reserve.get(self.state, 1.0)
         if self.gpu_known(now) and self.vram_free_gib is not None:
             return self.vram_free_gib + self.ollama_vram_gib() - reserve

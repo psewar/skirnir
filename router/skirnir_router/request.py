@@ -1,22 +1,22 @@
-"""Stufe 1 (design/roadmap.md): Request-Semantik - der Client beschreibt, der Router entscheidet.
+"""Stage 1 (design/roadmap.md): Request semantics - the client describes, the router decides.
 
-Ein Request traegt optional einen `routing`-Block, in derselben Form nativ (/api/chat, /api/generate, /api/embed) und
-OpenAI-kompatibel (/v1/*). Er wird NICHT an Ollama weitergereicht.
+A request optionally carries a `routing` block, in the same form natively (/api/chat, /api/generate, /api/embed) and
+OpenAI-compatible (/v1/*). It is NOT forwarded to Ollama.
 
     routing:
-      require: [tools, vision, thinking, structured, embedding, insert]  # Pflicht: Stufen ohne diese Faehigkeit fallen weg
-      prefer:  [thinking]        # Wunsch: kann eine Stufe damit bedient werden, kommen nur solche in Frage
-      min_context: 32768         # Untergrenze fuer den Kontext der Stufe (die Kontextleiter bleibt der Fit-Mechanismus)
-      session_id: "..."          # Affinitaet: gleicher Knoten + gleiches Modell wie zuletzt, solange es dort warm ist
-      request_id: "..."          # gespiegelt in Antwort (routing-Block), Header X-Skirnir-Request-Id und Entscheidungsprotokoll
+      require: [tools, vision, thinking, structured, embedding, insert]  # Mandatory: tiers without these capabilities are excluded
+      prefer:  [thinking]        # Preference: if a tier can serve this, only such tiers are considered
+      min_context: 32768         # Lower bound for the tier's context (the context ladder remains the fit mechanism)
+      session_id: "..."          # Affinity: same node + same model as last time, as long as it is warm there
+      request_id: "..."          # mirrored in response (routing block), header X-Skirnir-Request-Id and decision log
 
-Anforderungen leitet der Router auch aus dem Request selbst ab: tools -> tools, Bilder -> vision, think -> thinking,
-format als Schema/json -> structured, suffix -> insert (embedding nur auf ausdrueckliches require). Faehigkeiten stammen aus Ollamas
-/api/show (state.CAPS), ergaenzt um Katalog-Overrides `models.<name>.capabilities: {structured: false, ...}` - Ollama
-kennt `structured` nicht als Faehigkeit, gpt-oss antwortet auf ein Schema aber mit HTTP 500.
+The router also derives requirements from the request itself: tools -> tools, images -> vision, think -> thinking,
+format as Schema/json -> structured, suffix -> insert (embedding only on explicit require). Capabilities come from Ollama's
+/api/show (state.CAPS), supplemented by catalog overrides `models.<name>.capabilities: {structured: false, ...}` - Ollama
+does not know `structured` as a capability, gpt-oss responds to a schema with HTTP 500.
 
-Antwort: Header X-Skirnir-Request-Id/-Node/-Model/-Tier/-Warm immer; der `routing`-Block im Body nur, wenn der Client
-selbst einen `routing`-Block geschickt hat (Altclients wie die HA-Ollama-Integration sehen einen unveraenderten Body).
+Response: Headers X-Skirnir-Request-Id/-Node/-Model/-Tier/-Warm always; the `routing` block in the body only if the client
+sent a `routing` block (legacy clients like the HA-Ollama integration see an unchanged body).
 """
 
 import secrets
@@ -29,13 +29,13 @@ from .outcome import failed, invalid
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES
 
 KNOWN_CAPS = ("completion", "tools", "vision", "thinking", "structured", "embedding", "insert")
-# Ollama meldet diese nicht als Faehigkeit; sie gelten, solange der Katalog nichts anderes sagt
+# Ollama does not report these as capabilities; they apply unless the catalog says otherwise
 DEFAULT_TRUE = {"structured", "completion"}
 ROUTING_KEYS = {"require", "prefer", "min_context", "session_id", "request_id", "priority", "deadline_ms", "idempotency_key",
                 "execution", "data_class", "memory", "session"}
-EXECUTIONS = ("auto", "local", "cloud")   # Stufe 5: auto = Rollenreihenfolge, local = Opt-out, cloud = Cloud-Stufen zuerst
+EXECUTIONS = ("auto", "local", "cloud")   # Stage 5: auto = role order, local = opt-out, cloud = cloud tiers first
 MAX_ID_LEN = 128
-REQUEST_ID_BYTES = 6   # "skirnir-" + 12 Hex-Zeichen: eindeutig genug fuer Log und Entscheidungsprotokoll, kurz genug zum Abtippen
+REQUEST_ID_BYTES = 6   # "skirnir-" + 12 hex chars: unique enough for logs and decision log, short enough to type
 
 
 def new_request_id():
@@ -48,8 +48,8 @@ def overrides(model):
 
 
 def lacks(model, caps):
-    """Welche der verlangten Faehigkeiten fehlen dem Modell nachweislich? Unbekannt (noch kein /api/show) blockiert nicht -
-    der Router sperrt nur, was er weiss; Ollama meldet den Rest selbst."""
+    """Which of the required capabilities does the model demonstrably lack? Unknown (no /api/show yet) does not block -
+    the router only blocks what it knows; Ollama reports the rest itself."""
     raw = state.CAPS.get(model)
     over = overrides(model)
     missing = []
@@ -68,7 +68,7 @@ def lacks(model, caps):
 
 
 def effective_caps(model):
-    """Fuer /admin/state: gemeldete Faehigkeiten + Katalog-Overrides; None solange nichts bekannt ist."""
+    """For /admin/state: reported capabilities + catalog overrides; None until known."""
     raw = state.CAPS.get(model)
     over = overrides(model)
     if raw is None and not over:
@@ -81,8 +81,8 @@ def effective_caps(model):
 
 def implicit_caps(body, path):
     caps = set()
-    # /api/embed leitet KEINE Anforderung 'embedding' ab: Ollama fuehrt die Faehigkeit nur bei reinen Embedding-Modellen,
-    # Chat-Modelle koennen trotzdem einbetten (und die, die nicht koennen, melden 501 - das reicht der Router 1:1 durch).
+    # /api/embed does NOT derive an 'embedding' requirement: Ollama only lists the capability for pure embedding models,
+    # Chat models can still embed (and those that cannot report 501 - the router passes this through 1:1).
     if body.get("tools"):
         caps.add("tools")
     msgs = body.get("messages") or []
@@ -110,7 +110,7 @@ def count_images(body):
 class Routing:
     @classmethod
     def fresh(cls):
-        """Leere Routing-Angaben mit neuer Request-Id (interne Anfragen ohne Client-Body, z. B. Schattenlauf)."""
+        """Empty routing specs with a new request ID (internal requests without client body, e.g. shadow run)."""
         r = cls()
         r.request_id = new_request_id()
         return r
@@ -121,29 +121,29 @@ class Routing:
         self.min_context = None
         self.session_id = None
         self.request_id = None
-        self.explicit = False      # Client hat einen routing-Block geschickt -> Routing-Info in den Body
-        self.skipped = []          # [{"tier", "model", "ctx", "reason"}] der letzten Auswahl
+        self.explicit = False      # Client sent a routing block -> routing info in the body
+        self.skipped = []          # [{"tier", "model", "ctx", "reason"}] of the last selection
         self.reason = None         # affinity | warm-first | rank
-        self.candidates = []       # Stufe 3: Kandidaten der gewaehlten Stufe mit Score
-        self.priority = None       # Stufe 3: interactive | normal | batch (Rolle als Default, Client kappt)
-        self.deadline_ms = None    # Stufe 3: laengstes Warten auf einen Platz
+        self.candidates = []       # Stage 3: candidates of the chosen tier with score
+        self.priority = None       # Stage 3: interactive | normal | batch (role as default, client truncates)
+        self.deadline_ms = None    # Stage 3: longest wait for a slot
         self.queued_ms = 0
-        self.canary = None         # Stufe 6: Modell der Canary-Stufe, wenn diese Anfrage ausgelost wurde
-        self.execution = "auto"    # Stufe 5
+        self.canary = None         # Stage 6: model of the canary tier, if this request was selected
+        self.execution = "auto"    # Stage 5
         self.data_class = None
         self.data_class_effective = None
-        self.cloud_block = None    # Grund, warum diese Anfrage nicht in die Cloud darf (gilt fuer alle Cloud-Stufen)
+        self.cloud_block = None    # Reason why this request cannot go to the cloud (applies to all cloud tiers)
         self.session = None
         self.memory_context = None
         self.memory_items = []
-        self.memory_state = None   # Zustand des Recalls (memory.Recall.state), als Header X-Skirnir-Memory-State
+        self.memory_state = None   # State of the recall (memory.Recall.state), as header X-Skirnir-Memory-State
         self.context_sensitive = False
         self.memory = None
         self.memory_scope = None
-        self.decision = None       # Decision Engine: Ergebnis (as_dict), wenn die Auto-Rolle angefragt wurde
+        self.decision = None       # Decision Engine: result (as_dict), if the auto role was requested
 
     def tier_blocked(self, tier):
-        """Grund, warum diese Stufe fuer den Request nicht in Frage kommt - oder None."""
+        """Reason why this tier is not suitable for the request - or None."""
         if tier.get("cloud"):
             why = self.cloud_block or cloud.provider_block_reason(tier, self)
             if why:
@@ -181,8 +181,8 @@ class Routing:
 
 
 def parse(body, path, headers=None):
-    """routing-Block aus dem Body nehmen und pruefen, Anforderungen ableiten. Liefert Routing oder ein Problem 400 mit
-    Klartext (bis 0.8.8 ein ValueError, den proxy._prepare auffing)."""
+    """Take the routing block from the body and check it, derive requirements. Returns Routing or a Problem 400 with
+    plain text (until 0.8.8 a ValueError caught by proxy._prepare)."""
     rb = body.pop("routing", None)
     r = Routing()
     if rb is not None:
@@ -246,7 +246,7 @@ def parse(body, path, headers=None):
 
 
 def check_limits(body):
-    """Request-Groessenlimits (router.limits) - 413-Klartext oder None. Grob, aber vor dem Backend."""
+    """Request size limits (router.limits) - 413 plain text or None. Coarse, but before the backend."""
     lim = state.CFG.limits
     n = count_images(body)
     if n > lim["max_images"]:
@@ -263,12 +263,12 @@ def check_limits(body):
 def headers_for(info):
     h = {"X-Skirnir-Request-Id": str(info["request_id"]), "X-Skirnir-Node": info["node"], "X-Skirnir-Model": info["model"],
          "X-Skirnir-Tier": str(info["tier"]), "X-Skirnir-Warm": "1" if info["warm"] else "0"}
-    if info.get("memory_state"):   # nur bei Recall: ein Ausfall (auch unter fail_open) sieht nie wie "kein Wissen" aus
+    if info.get("memory_state"):   # only for recall: a failure (even under fail_open) never looks like "no knowledge"
         h["X-Skirnir-Memory-State"] = info["memory_state"]
     return h
 
 
-# --- Session-Affinitaet (klein, §10): gleicher Knoten + gleiches Modell, solange dort warm; Eintraege verfallen ---
+# --- Session affinity (small, §10): same node + same model, as long as warm; entries expire ---
 
 def affinity(session_id):
     e = state.SESSIONS.get(session_id)
@@ -285,6 +285,6 @@ def remember_session(session_id, node_name, model):
         return
     now = time.time()
     state.SESSIONS[session_id] = {"node": node_name, "model": model, "t": now}
-    if len(state.SESSIONS) > 5000:   # Aufraeumen: abgelaufene raus, im Zweifel die aeltesten
+    if len(state.SESSIONS) > 5000:   # Cleanup: remove expired, oldest first in case of doubt
         for k in sorted(state.SESSIONS, key=lambda k: state.SESSIONS[k]["t"])[:1000]:
             state.SESSIONS.pop(k, None)
