@@ -220,7 +220,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	run("ollama-registrierung", a.ollamaUp.RegistrationLoop) // Windows-Eintrag der Installation mit der laufenden Version abgleichen
 	run("gpu-guard", a.guard.Run)
-	run("spiel", a.game.Run)
+	run("game", a.game.Run)
 	run("health", (&HealthServer{app: a}).Run)
 	if a.proxy != nil {
 		run("ollama-proxy", a.proxy.Run)

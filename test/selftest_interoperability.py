@@ -624,7 +624,7 @@ class SharedGatewayTests(MemoryHarness):
             self.assertEqual(response.status, 200)
         self.assertEqual(len(self.upstream_bodies), 2)
         ops.maybe_shadow.assert_not_called()
-        proxy.ausweich_beobachtung.begin.assert_not_called()
+        proxy.fallback_observation.begin.assert_not_called()
 
     async def test_revoke_while_waiting_for_http_slot_prevents_dispatch(self):
         self.shared()

@@ -363,7 +363,7 @@ The existing extractive projection and immutable raw events remain the foundatio
 `optimize_recall` caps recall to `recall_budget_percent` of the prompt budget and
 removes lower-priority recall entries when protected history needs space. Entire
 untrusted wrappers are bounded; no wrapper is cut in half. The estimate reuses
-`kontextpruefung` and accounts conservatively for serialized bytes/tool overhead,
+`context_check` and accounts conservatively for serialized bytes/tool overhead,
 output allowance and safety reserve. It is not an exact model tokenizer.
 
 `reduce_tool_results` selectively reduces **old completed** tool results pinned by

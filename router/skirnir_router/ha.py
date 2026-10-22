@@ -81,13 +81,13 @@ def ha_snapshot(now=None):
     for n in online:
         if n.hb_ts and now - n.hb_ts > state.CFG.agent_missing_s:
             problems.append(f"Knoten {n.name}: kein Agent-Heartbeat seit {int((now - n.hb_ts) // 60)} min")
-    # GPU-Schutz (Agent >= 0.7.0): unverfuegbar (Limit nicht setzbar), abgewaehlt (Betreiber-Entscheid: zaehlt als Problem),
+    # GPU-Schutz (Agent >= 0.7.0): unavailable (Limit nicht setzbar), deselected (Betreiber-Entscheid: zaehlt als Problem),
     # Spannungs-/Temperatur-/Hardware-Warnung. Nur wenn der Router den Status dieses Knotens beachten soll.
     if state.CFG.gpu_guard["enabled"]:
         for n in online:
             g = n.guard or {}
             if n.guard_policy and g.get("problem") and n.guard_state(now) is not None:
-                reason = g.get("grund") or ", ".join(g.get("warnungen") or []) or "?"
+                reason = g.get("reason") or ", ".join(g.get("warnings") or []) or "?"
                 problems.append(f"Knoten {n.name}: GPU-Schutz {g.get('state')} ({reason})")
     from . import agentupdate, ollamaupdate
     problems += agentupdate.problems(now)   # fehlgeschlagene oder haengende Agent-Updates
@@ -109,7 +109,7 @@ def ha_snapshot(now=None):
         **{k: v for k, v in _usage_today_fields().items()},
         "last_route": (f"{last['role']} -> {last['node']} {last['model']} (tier {last['tier']}, ctx {last['ctx']})" if last else "-"),
         "last_route_ts": last["ts"] if last else None,
-        "kuerzungen": state.KUERZUNGEN["anzahl"], "letzte_kuerzung": state.KUERZUNGEN["letzte"],
+        "truncations": state.TRUNCATIONS["count"], "last_truncation": state.TRUNCATIONS["last"],
         "ollama_latest": ollamaupdate.LATEST.get("version"), "ollama_updates_pending": len(ollama_pending), "ollama_updates": ollama_pending,
         "nodes": nodes, "version": VERSION, "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
@@ -123,9 +123,10 @@ class HAPublisher:
     """Meldet den Router als Geraet 'Skirnir' bei HA an (MQTT-Discovery) und publiziert den Zustand.
     LWT: <base>/status = offline -> alle Entitaeten in HA 'unavailable', sobald der Router stirbt.
     Namen seit 2026-09-25 (Router 0.2.0): base_topic `skirnir-router`, Discovery-Node-Id `skirnir_router`, unique_ids
-    `skirnir_router_<oid>`, object_ids `skirnir_<oid>` (Entity-IDs sensor.skirnir_*). Die retained Themen der alten Namen
-    (`ollama-router`, `ollama_router`) raeumt sweep_orphans beim ersten Connect weg; HA-seitige Entity-ID-Uebernahme macht
-    das Betriebsskript (Register-Update ueber WebSocket)."""
+    `skirnir_router_<oid>`. Seit 0.9.0 setzt `default_entity_id` die Entity-ID englisch (`<domain>.skirnir_<entity>`);
+    vorher bildete HA sie aus den deutschen Anzeigenamen (design/english-names.md). Bestehende Installationen behalten ihre
+    IDs, bis die Registry umbenannt wird. Die retained Themen der alten Namen (`ollama-router`, `ollama_router`) raeumt
+    sweep_orphans beim ersten Connect weg."""
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -208,8 +209,11 @@ class HAPublisher:
                 "model": "skirnir-router", "sw_version": VERSION,
                 "configuration_url": state.CFG.public_url or None}
 
-    def _ent(self, component, oid, name, **extra):
-        payload = {"name": name, "unique_id": f"skirnir_router_{oid}", "object_id": f"skirnir_{oid}",
+    def _ent(self, component, oid, name, entity=None, **extra):
+        """Eine Entitaet anmelden. `oid` bestimmt unique_id und Discovery-Thema und bleibt fuer bestehende Entitaeten fest
+        (eine neue unique_id erzeugte eine zweite Entitaet und liesse Verlauf und Automationen an einer Waise);
+        `entity` ist der englische Name der Entity-ID, wenn er davon abweicht."""
+        payload = {"name": name, "unique_id": f"skirnir_router_{oid}", "default_entity_id": f"{component}.skirnir_{entity or oid}",
                    "state_topic": f"{self.base}/state", "device": self._dev(), **extra}
         if "availability" not in payload:   # HA verbietet availability und availability_topic gemeinsam
             payload["availability_topic"] = f"{self.base}/status"
@@ -248,7 +252,7 @@ class HAPublisher:
              dict(unit_of_measurement="GiB", device_class="data_size", icon="mdi:memory", **numeric("vram_free_gib"))),
             # Agent >= 0.17.0: Spiel und Hauptspeicher als Fakt (Router 0.7.0)
             ("sensor", f"node_{oid}_game", f"{name} Spiel",
-             dict(state_topic=nt, value_template="{{ value_json.game if value_json.game else 'keins' }}", icon="mdi:gamepad-variant")),
+             dict(state_topic=nt, value_template="{{ value_json.game if value_json.game else 'none' }}", icon="mdi:gamepad-variant")),
             ("sensor", f"node_{oid}_ram_free", f"{name} RAM frei",
              dict(unit_of_measurement="GiB", device_class="data_size", icon="mdi:memory", **numeric("ram_available_gib"))),
             ("sensor", f"node_{oid}_commit_free", f"{name} Commit frei",
@@ -329,12 +333,13 @@ class HAPublisher:
             json_attributes_topic=st, json_attributes_template="{{ {'errors_today': value_json.errors_today} | tojson }}")
         ent("sensor", "last_route", "Letzte Zuweisung", value_template="{{ value_json.last_route }}", icon="mdi:routes",
             json_attributes_topic=st, json_attributes_template="{{ {'ts': value_json.last_route_ts} | tojson }}")
-        # Stille Kuerzungen (kontextpruefung.py): Zaehler seit Routerstart + Ereignis je bestaetigter Kuerzung
-        ent("sensor", "kuerzungen", "Gekürzte Anfragen", value_template="{{ value_json.kuerzungen }}", icon="mdi:content-cut",
-            state_class="total_increasing", json_attributes_topic=st,
-            json_attributes_template="{{ {'letzte': value_json.letzte_kuerzung} | tojson }}")
-        ent("event", "kuerzung", "Anfrage gekürzt", state_topic=f"{self.base}/kuerzung", event_types=["kontext_gekuerzt"],
-            icon="mdi:content-cut")
+        # Stille Kuerzungen (context_check.py): Zaehler seit Routerstart + Ereignis je bestaetigter Kuerzung. oid (unique_id,
+        # Discovery-Thema) bleibt der Name von 2026, damit HA Verlauf und Automationen behaelt; die Entity-ID ist englisch.
+        ent("sensor", "kuerzungen", "Gekürzte Anfragen", entity="truncations", value_template="{{ value_json.truncations }}",
+            icon="mdi:content-cut", state_class="total_increasing", json_attributes_topic=st,
+            json_attributes_template="{{ {'last': value_json.last_truncation} | tojson }}")
+        ent("event", "kuerzung", "Anfrage gekürzt", entity="truncation", state_topic=f"{self.base}/truncation",
+            event_types=["context_truncated"], icon="mdi:content-cut")
         # Ollama-Update (0.3.0): Knoten, denen die neueste Ollama-Version fehlt; Attribute: neueste Version, je Knoten laeuft/verfuegbar
         ent("sensor", "ollama_updates", "Ollama-Updates ausstehend", value_template="{{ value_json.ollama_updates_pending }}", icon="mdi:update",
             state_class="measurement", json_attributes_topic=st,
@@ -374,7 +379,7 @@ class HAPublisher:
                 events, state.MQTT_EVENTS[:] = list(state.MQTT_EVENTS), []
                 for e in events:
                     try:
-                        self.client.publish(f"{self.base}/kuerzung", json.dumps(e), qos=1, retain=False)
+                        self.client.publish(f"{self.base}/truncation", json.dumps(e), qos=1, retain=False)
                     except Exception as ex:  # noqa: BLE001  # exception-ok: MQTT broker boundary; one lost event, the loop goes on
                         log.warning("MQTT Ereignis: %s", ex)
             if state.MQTT_DIRTY or time.time() - last >= self.interval:

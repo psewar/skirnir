@@ -170,8 +170,8 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
         cfg.roles = {"example": self.role}
         self.patches = [patch.object(proxy.scheduler, "resolve_tiers", return_value=(self.role, [self.tier])),
                         patch.object(proxy._Acquire, "next_candidate", AsyncMock(return_value=(0, self.tier, 4096, self.node))),
-                        patch.object(ops, "maybe_shadow"), patch.object(proxy.ausweich_beobachtung, "begin", return_value=None),
-                        patch.object(proxy.ausweich_beobachtung, "finish"), patch.object(proxy.poll, "poll_node", AsyncMock())]
+                        patch.object(ops, "maybe_shadow"), patch.object(proxy.fallback_observation, "begin", return_value=None),
+                        patch.object(proxy.fallback_observation, "finish"), patch.object(proxy.poll, "poll_node", AsyncMock())]
         for p in self.patches:
             p.start()
         state.SESSION = ClientSession()

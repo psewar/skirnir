@@ -319,7 +319,7 @@ def _estimate_unknown_tier_models(ov):
             if not size:
                 return invalid(f"Rolle {name}: Modell {t['model']} ist weder im Katalog noch auf einem Knoten")
             ov.setdefault("models", {})[t["model"]] = {"weights_gib": round(size / GIB * 1.05, 2), "kv_gib_per_1k": 0.1,
-                                                        "source": "geschaetzt", "note": "geschaetzt aus Dateigroesse, bitte messen"}
+                                                        "source": "estimated", "note": "estimated from the file size, please measure"}
             known.add(t["model"])
 
 
@@ -535,6 +535,10 @@ async def handle_loadtest(request):
     return web.json_response(out)
 
 
+# Katalogquellen, die vor Router 0.9.0 deutsch in roles.yaml geschrieben wurden (design/english-names.md)
+CATALOG_SOURCE_BEFORE_0_9 = {"gemessen": "measured", "gemessen (nvidia-smi)": "measured (nvidia-smi)", "geschaetzt": "estimated"}
+
+
 def catalog_effective():
     """Für jedes bekannte Modell die wirksamen Katalogwerte: direkt, über Digest-Zwilling (Alias) oder keine."""
     out = {}
@@ -544,7 +548,8 @@ def catalog_effective():
     for m in sorted(names):
         if m in state.CFG.models:
             e = state.CFG.models[m]
-            src = e.get("source") or ("geschaetzt" if e.get("note") else "gemessen")
+            src = e.get("source") or ("estimated" if e.get("note") else "measured")
+            src = CATALOG_SOURCE_BEFORE_0_9.get(src, src)
             out[m] = {**e, "source": src}
             continue
         twin = None

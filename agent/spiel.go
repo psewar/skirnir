@@ -377,7 +377,7 @@ func (g *GameWatch) Fact() GameFact {
 	return g.fact
 }
 
-// probeGame: Befehl "spiel" - Index, Treffer und Speicher einmal ausgeben (wie spiel-waechter.ps1 -Probe).
+// probeGame: Befehl "game" - Index, Treffer und Speicher einmal ausgeben (wie spiel-waechter.ps1 -Probe).
 func probeGame() {
 	if !gameScanSupported {
 		fmt.Println("spielerkennung: auf dieser Plattform nicht unterstuetzt")

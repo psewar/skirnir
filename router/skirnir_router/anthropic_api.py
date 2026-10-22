@@ -14,7 +14,7 @@ import time
 
 from aiohttp import web
 
-from . import kontextpruefung, proxy, state
+from . import context_check, proxy, state
 from .common import anthropic_error, anthropic_error_body, log, parse_tool_args, read_json
 
 KEEPALIVE_S = 15            # Default von router.anthropic.keepalive_s (Prefill bei 196k Kontext bis ~2 min)
@@ -428,7 +428,7 @@ async def handle_count_tokens(request):
     native, err = to_native(b)
     if err:
         return anthropic_error(400, err)
-    return web.json_response({"input_tokens": kontextpruefung.schaetze_body(native)})
+    return web.json_response({"input_tokens": context_check.schaetze_body(native)})
 
 
 def wants_anthropic(request):

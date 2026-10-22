@@ -124,7 +124,7 @@ func main() {
 		}
 		return
 	}
-	if verb == "spiel" { // 0.17.0: dieselbe Erkennung wie das Modul, einmal - ohne Konfiguration
+	if verb == "game" { // 0.17.0: dieselbe Erkennung wie das Modul, einmal - ohne Konfiguration (bis 0.19: "spiel")
 		probeGame()
 		return
 	}

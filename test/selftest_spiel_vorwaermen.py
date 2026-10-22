@@ -77,7 +77,7 @@ n.game_since = time.time() - SUSTAIN - 1
 GEPLANT.clear()
 poll.evaluate(n, time.time())
 check("Spiel als leicht beurteilt -> Vorwaermen nachgeholt (Grund spiel-leicht), Vormerkung geloescht",
-      vorwaermen_geplant() == ["spiel-leicht"] and n.prewarm_after_game is False and n.state == "free", f"{GEPLANT} {n.state}")
+      vorwaermen_geplant() == ["game_light"] and n.prewarm_after_game is False and n.state == "free", f"{GEPLANT} {n.state}")
 GEPLANT.clear()
 poll.evaluate(n, time.time())
 check("... nur einmal", vorwaermen_geplant() == [], str(GEPLANT))
@@ -95,7 +95,7 @@ n = knoten()
 n.prewarm_after_game = True
 GEPLANT.clear()
 poll.evaluate(n, time.time())
-check("Spiel beendet, Knoten frei -> Vorwaermen nachgeholt (spiel-vorbei)", vorwaermen_geplant() == ["spiel-vorbei"], str(GEPLANT))
+check("Spiel beendet, Knoten frei -> Vorwaermen nachgeholt (spiel-vorbei)", vorwaermen_geplant() == ["game_ended"], str(GEPLANT))
 
 # 6) Speicherdruck haelt das Nachholen zurueck (das Vorwaermen wuerde dort ohnehin aussetzen). Ohne laufendes Spiel: ein
 #    leichtes Spiel bei Speicherdruck gilt seit 0.8.7 als schwer und macht busy - das prueft der E2E-Lauf.

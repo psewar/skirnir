@@ -136,12 +136,12 @@ async def run_shadow(role, s, body, primary_node, request_id):
         ctx, need, cands = scheduler.candidates_for(tier, None, t0)
         cands = [n for n in cands if not admission.saturated(n, s["model"])]
         if not cands:
-            state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": None, "status": "kein Knoten",
+            state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": None, "status": "no_node",
                             "request_id": request_id})
             return
         node = scheduler.rank(cands, s["model"])[0]
         if node.is_cloud:   # Schattenlaeufe kosten in der Cloud Geld - bewusst nicht
-            state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": node.name, "status": "cloud uebersprungen", "request_id": request_id})
+            state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": node.name, "status": "cloud_skipped", "request_id": request_id})
             return
         out = dict(body)
         out.pop("routing", None)

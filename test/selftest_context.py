@@ -182,8 +182,8 @@ class ManagedHarness(unittest.IsolatedAsyncioTestCase):
         cfg.roles = {"example": self.role}
         self.patches = [patch.object(proxy.scheduler, "resolve_tiers", return_value=(self.role, [self.tier])),
             patch.object(proxy._Acquire, "next_candidate", AsyncMock(return_value=(0, self.tier, 8192, self.node))),
-            patch.object(ops, "maybe_shadow"), patch.object(proxy.ausweich_beobachtung, "begin", return_value=None),
-            patch.object(proxy.ausweich_beobachtung, "finish"), patch.object(proxy.poll, "poll_node", AsyncMock()),
+            patch.object(ops, "maybe_shadow"), patch.object(proxy.fallback_observation, "begin", return_value=None),
+            patch.object(proxy.fallback_observation, "finish"), patch.object(proxy.poll, "poll_node", AsyncMock()),
             patch.object(session_api.PostgresSessionStore, "open", return_value=self.store),
             patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "synthetic-test-only"})]
         for p in self.patches:
@@ -267,7 +267,7 @@ class ManagedHttpTests(ManagedHarness):
                     self.assertEqual(self.seen[-1]["options"]["num_predict"], 1024)
         self.assertEqual(self.store.finish_turn.await_count, 6)
         ops.maybe_shadow.assert_not_called()
-        proxy.ausweich_beobachtung.begin.assert_not_called()
+        proxy.fallback_observation.begin.assert_not_called()
         self.assertGreater(len(self.seen[-1]["messages"]), 1)
 
     async def test_isolation_optout_revocation_cloud_and_data_class(self):

@@ -11,6 +11,22 @@ from .common import log, tls_fingerprint
 
 PUSH_STALE_S = 45   # Agent >= 0.14.0 meldet den Ollama-Zustand bei jeder Aenderung und spaetestens alle 30 s
 
+# GPU-Schutz: Agenten vor 0.20.0 melden Zustaende, Gruende und Feldnamen deutsch (design/english-names.md). guard_english
+# uebersetzt beim Empfang, damit der Router nur die englischen Namen kennt; entfernen, sobald alle Knoten >= 0.20.0 laufen.
+GUARD_STATES = ("off", "unavailable", "normal", "high_load", "throttled", "recovery")
+GUARD_STATE_BEFORE_0_20 = {"aus": "off", "unverfuegbar": "unavailable", "hochlast": "high_load", "gedrosselt": "throttled",
+                           "erholung": "recovery"}
+GUARD_FIELD_BEFORE_0_20 = {"quelle": "source", "grund": "reason", "warnungen": "warnings", "hochlast_s": "high_load_s", "zeit": "at"}
+GUARD_REASON_BEFORE_0_20 = {"abgewaehlt": "deselected"}
+
+
+def guard_english(g):
+    """GPU-Schutz-Status eines Agenten mit englischen Feldnamen und Werten (Agenten vor 0.20.0 senden deutsche)."""
+    out = {GUARD_FIELD_BEFORE_0_20.get(k, k): v for k, v in g.items()}
+    out["state"] = GUARD_STATE_BEFORE_0_20.get(out.get("state"), out.get("state"))
+    out["reason"] = GUARD_REASON_BEFORE_0_20.get(out.get("reason"), out.get("reason"))
+    return out
+
 
 class NodeNotReady(ClientError):
     """TLS-Knoten, dessen Fingerprint noch nicht bekannt ist (kein Heartbeat bisher)."""
@@ -128,7 +144,7 @@ class Node(Breaker):
         self.hb_ts = 0.0
         self.gpu_util = None
         self.sensors = None   # Zusatzsensoren aus dem Heartbeat (Agent >= 0.6.0), dict oder None
-        self.guard = None     # GPU-Schutz laut Agent (>= 0.7.0): state, limit_w, target_w, problem, grund, warnungen
+        self.guard = None     # GPU-Schutz laut Agent (>= 0.7.0): state, limit_w, target_w, problem, reason, warnings (guard_english)
         self.draining_until = 0.0   # Agent-Update laeuft: bis dahin keine neuen Anfragen an diesen Knoten
         self.guard_ts = 0.0
         self.vram_free_gib = None
@@ -378,7 +394,7 @@ class Node(Breaker):
         if not g["enabled"] or not self.guard_policy:
             return base
         gs = self.guard_state()
-        if gs == "gedrosselt" or (gs is None and g["require_fresh_status"]):
+        if gs == "throttled" or (gs is None and g["require_fresh_status"]):
             return min(base, g["throttled_max_inflight"])
         return base
 
@@ -392,8 +408,8 @@ class Node(Breaker):
         """Fuer /admin/state, HA und UI: Status plus Policy und Frische."""
         g = self.guard or {}
         return {"state": self.guard_state(now), "reported": g.get("state"), "limit_w": g.get("limit_w"), "target_w": g.get("target_w"),
-                "default_limit_w": g.get("default_limit_w"), "problem": bool(g.get("problem")), "grund": g.get("grund"),
-                "warnungen": g.get("warnungen") or [], "quelle": g.get("quelle"), "hochlast_s": g.get("hochlast_s"),
+                "default_limit_w": g.get("default_limit_w"), "problem": bool(g.get("problem")), "reason": g.get("reason"),
+                "warnings": g.get("warnings") or [], "source": g.get("source"), "high_load_s": g.get("high_load_s"),
                 "policy": self.guard_policy, "router_enabled": state.CFG.gpu_guard["enabled"]}
 
     def ollama_push_active(self, now):

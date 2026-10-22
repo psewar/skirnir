@@ -162,7 +162,7 @@ roles:
   ihn nach dem Ende noch `busy_exit.game_quiet_s` (60 s). Liegen verfügbarer RAM oder freier Commit `memory_pressure.polls`
   Heartbeats lang (2) unter `memory_pressure.min_free_gib` (8 GiB), steht der Knoten unter Speicherdruck: nichts wird kalt
   geladen, kein Prewarm; geladene Modelle antworten weiter, entladen wird nichts. Grund-Code `memory_pressure` mit
-  `Retry-After` 60 s. `skirnir-agent spiel` zeigt, was der Agent erkennt.
+  `Retry-After` 60 s. `skirnir-agent game` zeigt, was der Agent erkennt.
 - **Prewarm.** Nach dem Online-Gehen und nach `busy → free` lädt der Router die Rang-1-Modelle der Rollen wieder vor, so viele
   zusammen ins VRAM passen. Eine **Residenz-Regel** holt ein verdrängtes Rang-1-Modell zurück, wenn der Verdränger 5 min nicht
   mehr gefragt wurde – sonst bliebe „warm zuerst“ dauerhaft auf der Ausweichstufe hängen.
@@ -237,7 +237,7 @@ Grössenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_mes
   und `max_wait_batch_s` (1800 s).
 - **Interaktive Anfragen warten nicht hinter einem belegten warmen Modell**, wenn eine andere lokale Stufe sofort bedienen
   kann: zuerst eine freie warme, dann eine freie kalte Stufe, andere Knoten vor dem belegten (nie eine Cloud-Stufe auf
-  diesem Weg); im Entscheidungslog steht `reason: ausweichen`. Ist nichts Warmes belegt, entscheidet warm zuerst wie
+  diesem Weg); im Entscheidungslog steht `reason: fallback`. Ist nichts Warmes belegt, entscheidet warm zuerst wie
   bisher; ist keine Stufe frei, wartet die Anfrage innerhalb ihres interactive-Budgets.
 - **Beobachtungsmodus** (`decision_engine.observe_blocked`): muss eine Anfrage an eine Rolle warten, ordnet die Decision Engine
   sie im Hintergrund ein, nur mit ihrer CPU-Kette (Embedding, TF-IDF, Regeln; nie das LLM, das sich auf genau der GPU
@@ -245,7 +245,7 @@ Grössenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_mes
   erste freie tiefere Stufe derselben Rolle und `would_fallback` für die Klassen in `observe_light`. Am Routing ändert sich
   nichts; es soll erst messen, wie oft ein freies kleineres Modell gereicht hätte, bevor der Router danach handelt.
   `observe_all` geht weiter: Jede Anfrage an `/api/chat` oder `/api/generate` wird beim Start im Hintergrund eingeordnet, und
-  an ihrem Ende hängt der Router eine Zeile an `anfragen.jsonl` neben der Konfiguration (`observe_path`): Klasse, Dauer,
+  an ihrem Ende hängt der Router eine Zeile an `requests.jsonl` neben der Konfiguration (`observe_path`): Klasse, Dauer,
   Wartezeit, Token, Denken, Zahl der Werkzeuge, Client, Rolle, Ergebnis - keine Prompt-Inhalte. Eigene Datei, damit das
   Entscheidungslog sein Fenster behält; sie rotiert bei 20 MB. Die Antwort wartet nie auf die Einordnung.
 
@@ -486,7 +486,7 @@ oder passt die zwei Vorlagen `CT_EXEC`/`CT_PUSH` in `deploy.env` an.
 python test/run_tests.py          # rund 250 End-to-End-Prüfungen, ~3 min: zwei Fake-Ollama-Knoten, Fake-Agent durch den Tunnel,
                                   # Fake-Cloud (OpenAI und Anthropic), Fake-Decision-Dienst, selbstsigniertes TLS, Client-Auth,
                                   # Admission, Breaker, Canary/Shadow, Idempotency, Cloud-Schranken, UI-Config-Runden
-python test/selftest_kontextpruefung.py   # Selbsttests ohne Router: Kontext-Vorabprüfung und
+python test/selftest_context_check.py   # Selbsttests ohne Router: Kontext-Vorabprüfung und
 python test/selftest_toolcall_rescue.py   # Tool-Call-Rettung (je ein paar Sekunden)
 python test/dev_env.py            # dieselbe Umgebung zum Klicken, ohne TLS/Login
 python test/perf_run.py           # Messstand: CPU je Anfrage, py-spy-Profil (test/perf_profile_report.py)
@@ -529,7 +529,7 @@ Seit Router 0.2.0 / Agent 0.11.0 folgen die technischen Namen dem Produkt: Paket
 Agenten einen bestehenden Knoten (Verzeichnisse, Dienst, Relay-Aufgabe). Ein Agent, der sich unter dem alten Dateinamen
 selbst aktualisiert hat, läuft weiter: alter Konfigurationspfad, Dienst- und Aufgabenname werden als Rückfall gefunden, bis
 `setup` gelaufen ist. Auch die MQTT-Seite ist umgezogen: Basisthema `skirnir-router`, Discovery-Node-ID `skirnir_router`,
-unique_ids `skirnir_router_*`, Entitäts-IDs `sensor.skirnir_*`; die retained Themen der alten Namen räumt der Router beim ersten
+unique_ids `skirnir_router_*`, Entitäts-IDs `<domain>.skirnir_*` (seit Router 0.9.0 englisch über `default_entity_id`, siehe design/english-names.md); die retained Themen der alten Namen räumt der Router beim ersten
 Connect weg. Home Assistant führt Registereinträge je unique_id, darum müssen angepasste Entitäts-IDs der alten Entitäten einmal
 übertragen werden (Betriebsskript über die WebSocket-API); die Recorder-Historie wandert nicht mit.
 

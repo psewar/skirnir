@@ -13,7 +13,7 @@ import sys
 from aiohttp import ClientSession, web
 
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
-from . import decision, memory, rerank, session_api, context_ops
+from . import decision, fallback_observation, memory, rerank, session_api, context_ops
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 from .outcome import failed
 
@@ -119,6 +119,7 @@ async def main(cfg_path):
             registry.activate_node(fp)
     log.info("Knotenregister: %d Eintraege (%d freigegeben)", len(state.REG.nodes), sum(1 for e in state.REG.nodes.values() if e["state"] == "approved"))
     perf.perf_load()
+    fallback_observation.adopt_file_before_0_9()   # anfragen.jsonl -> requests.jsonl (0.9.0)
     metrics.usage_load()
     n_met = metrics.metrics_load()
     if n_met:

@@ -60,7 +60,7 @@ check("Gerade: kv 0,0229 GiB/1k", abs(kv - 0.0229) < 0.0005, f"{kv:.4f}")
 check("Gerade: Grundwert 21,93 GiB", abs(w - 21.93) < 0.05, f"{w:.2f}")
 e = perf.catalog_entry(GEMESSEN, "gpu-desktop", real=True)
 check("Katalog-Eintrag markiert real + haelt beide Messreihen", e["real"] is True and e["vram_real_gib"]["196608"] == 26.43
-      and e["vram_ps_gib"]["196608"] == 20.98 and e["source"] == "gemessen (nvidia-smi)", str(e))
+      and e["vram_ps_gib"]["196608"] == 20.98 and e["source"] == "measured (nvidia-smi)", str(e))
 
 # --- Teil-Auslagerung zaehlt nicht fuer die Gerade ---
 lag = perf.catalog_entry({8192: (27.0, 19.0, 19.0), 32768: (27.6, 19.1, 19.1), 131072: (29.71, 19.23, 19.23),
