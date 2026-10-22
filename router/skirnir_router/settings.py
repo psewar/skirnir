@@ -218,6 +218,10 @@ _e("router.heartbeat_stale_s", "float", "Heartbeat veraltet nach s", "", G, 10, 
 _e("router.heartbeat_interval_s", "float", "Heartbeat-Takt s", "gilt fuer Agenten bei ihrer naechsten Verbindung", G, 3, min=1, max=60, note="bei naechster Agent-Verbindung",
    label_en="Heartbeat interval s", help_en="applies to agents on their next connection", note_en="on next agent connection")
 _e("router.agent_missing_problem_s", "float", "HA-Problem nach Agent-Stille s", "", G, 300, min=10, max=86400, label_en="HA problem after agent silence s")
+_e("router.ram_spill_problem_gib", "float", "HA-Problem ab Modell im RAM GiB",
+   "ein geladenes Modell, das Ollama teilweise in den Arbeitsspeicher legen musste, rechnet dort auf der CPU (vielfach langsamer); 0 = aus",
+   G, 0.5, min=0, max=256, label_en="HA problem from model in RAM GiB",
+   help_en="a loaded model that Ollama had to place partly in system RAM runs there on the CPU (many times slower); 0 = off")
 
 G = "Wake-on-LAN"
 _e("router.wol.wait_up_s", "float", "warten bis wach s", "", G, 90, min=5, max=900, label_en="wait until awake s")

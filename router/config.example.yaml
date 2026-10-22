@@ -92,6 +92,7 @@ router:
   # heartbeat_token: ...          # nur fuer Knoten mit TLS-Vorschaltstelle (X-Router-Token) und die Heartbeat-Einspeisung
                                   # POST /v1/heartbeat/<node> (Tests, Diagnose); registrierte Agenten brauchen keinen Token
   agent_missing_problem_s: 300  # Agent hat schon gemeldet und schweigt seit 5 min -> HA-Problem (Alarm-Automation)
+  ram_spill_problem_gib: 0.5    # a loaded model with at least this much in system RAM (runs partly on the CPU) -> HA problem; 0 = off
   expose_concrete_models: true   # konkrete Modellnamen werden 1:1 geroutet (404 wenn kein Knoten sie hat); Rollen = nach Zweck
   request_timeout_s: 600
   limits:                        # Stufe 1: grobe Request-Groessenlimits, 413 vor dem Backend (Body-Limit bleibt 64 MiB)
