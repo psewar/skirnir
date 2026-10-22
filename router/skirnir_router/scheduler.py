@@ -1,4 +1,4 @@
-"""Auswahl: Rolle -> Tiers -> passende Knoten -> Rang."""
+"""Selection: role -> tiers -> matching nodes -> rank."""
 
 import time
 
@@ -8,7 +8,7 @@ from . import state
 
 
 def known_concrete(name):
-    """Konkreter Modellname, den irgendein Knoten hält (jetzt oder zuletzt gesehen). Liefert den Namen mit Tag."""
+    """Specific model name held by any node (current or last seen). Returns the name with tag."""
     for cand in (name, f"{name}:latest"):
         if any(cand in n.models or cand in n.last_known_models for n in state.NODES.values()):
             return cand
@@ -16,7 +16,7 @@ def known_concrete(name):
 
 
 def resolve_tiers(name, body):
-    if name.startswith("workload:"):   # Alias aus der Spezifikation (§1): workload:standard == standard:latest
+    if name.startswith("workload:"):   # Alias from spec (§1): workload:standard == standard:latest
         base = name[len("workload:"):]
         name = next((c for c in (base, f"{base}:latest") if c in state.CFG.roles), name)
     if name in state.CFG.roles:
@@ -31,12 +31,12 @@ def resolve_tiers(name, body):
 
 
 def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
-    """Kandidaten einer Stufe. mutate=False ist die reine Sicht (HA-Bild, /metrics): kein Breaker wechselt nach half_open."""
+    """Candidates for a tier. mutate=False is the pure view (HA image, /metrics): no breaker switches to half_open."""
     ctx = min(client_ctx, tier["num_ctx"]) if client_ctx else tier["num_ctx"]
     need = None
     out = []
     allows = (lambda n: n.breaker_allows(now)) if mutate else (lambda n: n.breaker_would_allow(now))
-    if tier.get("cloud"):   # Stufe 5: der Anbieter ist der einzige "Knoten" dieser Stufe (Schranken prueft request.tier_blocked)
+    if tier.get("cloud"):   # Stage 5: the provider is the only "node" of this tier (guard checks request.tier_blocked)
         t = cloud.target_for(tier)
         if t is not None and t.name not in exclude and allows(t):
             out.append(t)
@@ -44,22 +44,22 @@ def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
     for n in state.NODES.values():
         if n.name in exclude or n.state == "offline" or tier["model"] not in n.models:
             continue
-        if now < n.draining_until:   # Agent-Update laeuft: Knoten leert sich, keine neuen Anfragen
+        if now < n.draining_until:   # Agent update running: node draining, no new requests
             continue
         if n.state == "busy" and not tier["busy_ok"]:
             continue
-        if not allows(n):   # Stufe 3: Knoten mit offenem Breaker bleiben aussen vor (half_open: eine Probe)
+        if not allows(n):   # Stage 3: nodes with open breaker stay out (half_open: one probe)
             continue
         need = state.CFG.need_gib(tier["model"], ctx, n)
         lc = n.loaded_context(tier["model"])
         if n.is_loaded(tier["model"]) and (lc is None or lc >= ctx):
-            # Schon geladen mit ausreichendem Kontext: braucht kein weiteres VRAM, also keine Budgetpruefung.
-            # Der Heartbeat waehrend/kurz nach einer Antwort zeigt wenig freies VRAM (Rechenpuffer, KV); mit der
-            # Budgetpruefung fiel am 2026-09-10 der warme Hauptknoten 0,2 s nach seiner eigenen Antwort durch,
-            # und die Folgeanfrage lief auf der Ausweichstufe des anderen Knotens.
+            # Already loaded with sufficient context: needs no extra VRAM, so no budget check.
+            # The Heartbeat during/shortly after a response shows little free VRAM (compute buffer, KV); with the
+            # Budget check failed on 2026-09-10 for the warm primary node 0.2 s after its own response,
+            # and the follow-up request ran on the fallback tier of the other node.
             out.append(n)
             continue
-        if n.mem_pressure:   # Agent >= 0.17.0: Hauptspeicher knapp - nichts kalt laden (das Geladene oben antwortet weiter)
+        if n.mem_pressure:   # Agent >= 0.17.0: RAM tight - do not load cold (the loaded one above keeps answering)
             continue
         if need > n.budget_gib(now, tier["model"]):
             continue
@@ -68,15 +68,15 @@ def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
 
 
 def score(node, model):
-    """Stufe 3: gewichtbarer Score (modes.score). Die Vorgaben bilden die alte Reihenfolge ab - warm (100) vor wenig
-    laufenden Anfragen (10 je Anfrage; voller Knoten zusaetzlich -50) vor freiem VRAM (Anteil x2) vor Gewicht (x1) -
-    und ergaenzen sie um gemessenes Tempo (EWMA tok/s / 100 x2), juengste Fehlerrate (x20) und Breaker-Probe (-5)."""
+    """Stage 3: weighted score (modes.score). The defaults mirror the old order - warm (100) before few
+    running requests (10 per request; full node additionally -50) before free VRAM (share x2) before weight (x1) -
+    and add measured speed (EWMA tok/s / 100 x2), recent error rate (x20) and breaker probe (-5)."""
     w = state.CFG.score
     s = w["warm"] if node.is_loaded(model) else 0.0
     s -= w["inflight"] * node.inflight
-    if admission.saturated(node, model):   # Knoten voll oder Modell an seiner max_parallel-Grenze
+    if admission.saturated(node, model):   # Node full or model at its max_parallel limit
         s -= w["saturated"]
-    gg = state.CFG.gpu_guard   # GPU-Schutz: Knoten in Hochlast/Stufe 2 weichen einem zweiten Knoten, der die Stufe tragen kann
+    gg = state.CFG.gpu_guard   # GPU guard: node under high load/stage 2 yields to a second node that can carry the tier
     if gg["enabled"] and node.guard_policy and node.guard_state() in ("high_load", "throttled"):   # CloudTarget: guard_policy False
         s -= gg["score_penalty"]
     if node.vram_total_gib and node.vram_free_gib is not None:
@@ -100,8 +100,8 @@ def rank(nodes, model, req=None):
 
 
 def loading_for(tiers, now, exclude=()):
-    """Ein Knoten, der fuer eine der Stufen in Frage kaeme und gerade ein Modell laedt (unverfallener Anspruch aus
-    announce_load): Grund zu warten statt 503. Liefert (Knoten, ladendes Modell) oder None."""
+    """A node that could be a candidate for one of the tiers and is currently loading a model (unexpired claim from
+    announce_load): reason to wait instead of 503. Returns (node, loading model) or None."""
     for t in tiers:
         if t.get("cloud"):
             continue
@@ -117,17 +117,17 @@ def loading_for(tiers, now, exclude=()):
 
 
 def _interactive_pick(per_tier, req):
-    """Interaktive Anfragen (Sprachbefehle) warten nicht hinter einer laufenden Anfrage, wenn eine andere lokale Stufe sofort
-    bedienen kann. Warm zuerst haelt sonst am belegten warmen Knoten fest: mit max_parallel 1 (qwen3.8, seit 0.6.5) wartete ein
-    Sprachbefehl bis zu 60 s hinter einer minutenlangen Agenten-Anfrage, obwohl auf einem zweiten Knoten eine freie Stufe bereitstand.
-    Reihenfolge: freie warme Stufe (Rangfolge der Stufen), dann freie kalte Stufe. Cloud-Stufen nie (Kosten, Datenklasse -
-    die regelt der normale Weg). None = keine freie Stufe: normal weiter, dann wird am warmen Knoten gewartet."""
+    """Interactive requests (voice commands) do not wait behind a running request if another local tier can serve
+    immediately. Warm-first otherwise sticks to the busy warm node: with max_parallel 1 (qwen3.8, since 0.6.5) a
+    voice command waited up to 60 s behind a minute-long agent request, although a free tier was ready on a second node.
+    Order: free warm tier (tier rank), then free cold tier. Never cloud tiers (cost, data class -
+    handled by the normal path). None = no free tier: proceed normally, then wait at the warm node."""
     local = [pt for pt in per_tier if not pt[1].get("cloud")]
     busy = {n.name for _i, t, _c, _n, cands in local for n in cands if n.is_loaded(t["model"]) and admission.saturated(n, t["model"])}
     if not busy:
-        return None   # nichts Warmes belegt: der normale Weg (warm zuerst) entscheidet wie bisher
-    # Andere Knoten zuerst: ein Ausweichmodell auf dem belegten Knoten teilte sich die GPU mit der laufenden Anfrage (beide
-    # langsamer) und belegte VRAM, das dem warmen Modell fehlen kann - erst wenn nur er kann, darf er
+        return None   # nothing warm is busy: the normal path (warm first) decides as before
+    # Other nodes first: a fallback model on the busy node shared the GPU with the running request (both
+    # slower) and occupied VRAM that the warm model might need - only if it is the only one that can, it may
     for other_only in (True, False):
         for warm_only in (True, False):
             for i, t, ctx, _need, cands in local:
@@ -140,8 +140,8 @@ def _interactive_pick(per_tier, req):
 
 
 def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
-    """Liefert (tier_index, tier, ctx, node) oder None. `req` (request.Routing) filtert Stufen nach Anforderungen,
-    bevorzugt Stufen mit gewuenschten Faehigkeiten und haelt eine Session auf ihrem warmen Knoten."""
+    """Returns (tier_index, tier, ctx, node) or None. `req` (request.Routing) filters tiers by requirements,
+    prefers tiers with desired capabilities and keeps a session on its warm node."""
     per_tier = []
     if req is not None:
         req.skipped = []
@@ -154,8 +154,8 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
         ctx, need, cands = candidates_for(t, client_ctx, now, exclude, mutate)
         per_tier.append((i, t, ctx, need, cands))
     if req is not None and req.canary:
-        # Stufe 6: ausgeloste Canary-Stufe bekommt den Verkehr auch kalt - sonst saehe ein Kandidatenmodell neben einem
-        # warmen Hauptmodell nie eine Anfrage. Kann kein Knoten sie bedienen, geht es normal weiter.
+        # Stage 6: triggered canary tier gets traffic even cold - otherwise a candidate model next to a
+        # warm primary model would never see a request. If no node can serve it, proceed normally.
         for i, t, ctx, _need, cands in per_tier:
             if t.get("canary") and cands:
                 req.reason = "canary"
@@ -183,9 +183,9 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
         local_cands_seen = False
         for i, t, ctx, _need, cands in per_tier:
             if t.get("cloud"):
-                # Stufe 5: eine Cloud-Stufe hat keine Ladezeit, ist aber nie "warm". Sie gilt als warm, solange keine
-                # lokale Stufe VOR ihr Kandidaten hat - so gewinnt ein kaltes lokales Modell weiter vor der Cloud (Geld),
-                # eine Cloud-Stufe an der Spitze (Rollenwahl oder routing.execution: cloud) aber vor einem warmen lokalen.
+                # Stage 5: a cloud tier has no load time but is never "warm". It counts as warm as long as no
+                # local tier BEFORE it has candidates - so a cold local model still wins over cloud (cost),
+                # a cloud tier at the top (role selection or routing.execution: cloud) but before a warm local one.
                 if cands and not local_cands_seen:
                     if req is not None:
                         req.reason = "cloud"
@@ -223,8 +223,8 @@ def any_online_node_with(model):
 
 
 def role_possible_when_free(role):
-    """Koennte irgendein online-Knoten die Rolle bedienen, wenn er nicht belegt waere? (Modell vorhanden und
-    Tier passt ins gesamte VRAM abzueglich der free-Reserve.) Unterscheidet 'Spiel laeuft' von 'Rolle kaputt'."""
+    """Could any online node serve the role if it were not busy? (Model present and
+    tier fits into total VRAM minus free reserve.) Distinguishes 'game running' from 'role broken'."""
     for t in role["tiers"]:
         if t.get("cloud"):
             ct = cloud.target_for(t)
@@ -241,29 +241,29 @@ def role_possible_when_free(role):
     return False
 
 
-# --- Warum kein Knoten: Grund-Codes fuer den Client ------------------------------------------------------------------
-# Der Router weiss, warum eine Anfrage keinen Knoten bekommt; der Client soll es nicht aus dem Fehlertext erraten.
-# Anlass 2026-09-29: ein Spiel belegte auf gpu-desktop 5 GiB, qwen3.6@131k passte nicht mehr ins Budget, der Agent-Client bekam nur
-# "no node available" und meldete "model provider failed". Mit Code und Retry-After kann ein Client warten und
-# ehrlich sagen, woran es liegt. Die Codes sind Drahtformat (503-Antwort, /v1/skirnir/availability).
-GPU_BUSY = "gpu_busy"                 # Knoten belegt (Spiel) oder fremdes VRAM nimmt den Platz: voruebergehend
+# --- Why no node: base codes for the client ------------------------------------------------------------------
+# The router knows why a request gets no node; the client should not guess from the error text.
+# Trigger 2026-09-29: a game occupied 5 GiB on gpu-desktop, qwen3.6@131k no longer fit the budget, the agent client got only
+# "no node available" and reported "model provider failed". With code and Retry-After a client can wait and
+# honestly state the cause. The codes are wire format (503 response, /v1/skirnir/availability).
+GPU_BUSY = "gpu_busy"                 # Node busy (game) or foreign VRAM takes the space: temporary
 NODE_OFFLINE = "node_offline"
-NODE_DRAINING = "node_draining"       # Agent-Update laeuft
+NODE_DRAINING = "node_draining"       # Agent update running
 NODE_FAILING = "node_failing"         # Breaker offen
-VRAM_FULL = "vram_full"               # Platz fehlt, ohne dass fremdes VRAM schuld ist (Nachlauf, Reserve)
-MODEL_TOO_LARGE = "model_too_large"   # passt auch auf die leere Karte nicht: Konfigurationsfehler, Warten hilft nicht
-MODEL_MISSING = "model_missing"       # kein Knoten hat das Modell
-ATTEMPT_FAILED = "attempt_failed"     # Knoten war Kandidat, der Versuch scheiterte (tried)
-MEMORY_PRESSURE = "memory_pressure"   # Agent >= 0.17.0: Hauptspeicher knapp, der Router laedt dort nichts kalt
+VRAM_FULL = "vram_full"               # Space missing, without foreign VRAM being the cause (tail, reserve)
+MODEL_TOO_LARGE = "model_too_large"   # does not fit on the empty card either: configuration error, waiting does not help
+MODEL_MISSING = "model_missing"       # no node has the model
+ATTEMPT_FAILED = "attempt_failed"     # Node was candidate, attempt failed (tried)
+MEMORY_PRESSURE = "memory_pressure"   # Agent >= 0.17.0: RAM tight, router does not load cold there
 NO_NODE = "no_node"
 
-# Wann ein Client es wieder versuchen soll (Retry-After). Ohne Eintrag: Warten hilft nicht.
+# When a client should retry (Retry-After). No entry: waiting does not help.
 RETRY_AFTER_S = {GPU_BUSY: 30, NODE_DRAINING: 60, NODE_FAILING: 30, VRAM_FULL: 10, ATTEMPT_FAILED: 10, NODE_OFFLINE: 60,
                  MEMORY_PRESSURE: 60}
 
 
 def _node_block(n, t, ctx, now):
-    """Grund-Code, warum Knoten `n` die Stufe `t` gerade nicht bedient - oder None (koennte bedienen)."""
+    """Base code for why node `n` cannot serve tier `t` right now - or None (could serve)."""
     if n.state == "offline":
         return NODE_OFFLINE, {}
     if now < n.draining_until:
@@ -278,7 +278,7 @@ def _node_block(n, t, ctx, now):
     lc = n.loaded_context(t["model"])
     if n.is_loaded(t["model"]) and (lc is None or lc >= ctx):
         return None, {}
-    if n.mem_pressure:   # wie candidates_for: nichts kalt laden, solange der Hauptspeicher knapp ist
+    if n.mem_pressure:   # Like candidates_for: do not cold-load while main memory is tight
         return MEMORY_PRESSURE, {k: v for k, v in (n.memory or {}).items() if k in ("ram_available_gib", "commit_free_gib")}
     need, budget = state.CFG.need_gib(t["model"], ctx, n), n.budget_gib(now, t["model"])
     if need <= budget:
@@ -293,7 +293,7 @@ def _node_block(n, t, ctx, now):
 
 
 def blockers(tiers, client_ctx, now, exclude=()):
-    """Je lokale Stufe x Knoten mit dem Modell: warum er nicht bedient. Reine Sicht (kein Breaker-Wechsel)."""
+    """Per local tier x node with the model: why it is not serving. Pure view (no breaker changes)."""
     out = []
     for i, t in enumerate(tiers):
         if t.get("cloud"):
@@ -305,15 +305,15 @@ def blockers(tiers, client_ctx, now, exclude=()):
             code, info = _node_block(n, t, ctx, now)
             if code is None:
                 if n.name not in exclude:
-                    continue   # koennte bedienen (z. B. frei geworden): kein Hindernis
+                    continue   # Could serve (e.g. became free): no blocker
                 code = ATTEMPT_FAILED
             out.append(dict({"tier": i, "model": t["model"], "num_ctx": ctx, "node": n.name, "code": code}, **info))
     return out
 
 
 def unavailable(tiers, client_ctx, now, exclude=()):
-    """Gesamturteil fuer eine Anfrage ohne Knoten: {code, retry_after_s, blockers, detail}. gpu_busy geht vor, weil es
-    das einzige ist, das von selbst vergeht und das der Mensch am Rechner selbst aufheben kann."""
+    """Overall verdict for a request without a node: {code, retry_after_s, blockers, detail}. gpu_busy takes precedence because it
+    is the only one that resolves on its own and can be cleared by the human at the machine."""
     bl = blockers(tiers, client_ctx, now, exclude)
     codes = [b["code"] for b in bl]
     if not bl:
@@ -329,7 +329,7 @@ def unavailable(tiers, client_ctx, now, exclude=()):
 
 
 def _detail(code, bl):
-    """Kurzer Klartext zum Code (englisch wie alle API-Texte); die Zahlen stehen maschinenlesbar in `blockers`."""
+    """Short plain text for the code (English like all API texts); numbers are machine-readable in `blockers`."""
     b = next((x for x in bl if x["code"] == code), None)
     if code == GPU_BUSY and b is not None:
         if b.get("busy_reason") == "foreign_vram" and "need_gib" in b:

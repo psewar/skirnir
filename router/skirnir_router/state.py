@@ -1,55 +1,55 @@
-"""Der gemeinsame Laufzeitzustand des Routers. Immer als `state.X` ansprechen - CFG, SESSION, REG und
-HA_PUB werden beim Start neu gebunden, ein `from .state import CFG` saehe den alten Wert."""
+"""Shared runtime state of the router. Always access as `state.X` - CFG, SESSION, REG, and
+HA_PUB are re-bound at startup; `from .state import CFG` would see the old value."""
 
 import asyncio
 import time
 
 
-# Der Agent weist sich mit einem Ed25519-Schluessel aus (Signatur ueber eine Zufallszahl). Unbekannte Schluessel landen
-# als "wartet auf Freigabe" im Register (nodes.json) und werden in der UI freigegeben; dabei werden Policy (WOL,
-# Gewicht, MQTT) gesetzt. Freigegebene Knoten bekommen ihr Konfigurationspaket (MQTT-Zugang, Intervalle) durch den Tunnel.
+# The agent authenticates with an Ed25519 key (signature over a nonce). Unknown keys land
+# as "awaiting approval" in the registry (nodes.json) and are approved in the UI; this sets Policy (WOL,
+# weight, MQTT). Approved nodes receive their config package (MQTT access, intervals) via the tunnel.
 REG = None
-PENDING = {}    # fp -> Tunnel, verbunden aber nicht freigegeben
+PENDING = {}    # fp -> tunnel, connected but not approved
 HA_PUB = None
 
 
 CFG = None
 NODES = {}
-MQTT_DIRTY = []   # nicht-leer = sofort publizieren
-TASKS = set()     # Hintergrund-Tasks (spawn): der Loop haelt nur schwache Referenzen, ein unreferenzierter Task kann vor dem Ende eingesammelt werden
-MQTT_EVENTS = []  # HA-Ereignisse, die ha.py beim naechsten Durchlauf einmal verschickt (nicht retained)
-TRUNCATIONS = {"count": 0, "last": None}   # bestaetigte stille Kuerzungen seit Routerstart (context_check.py)
-MEASURING = {}    # model -> {"node", "step", "started", "error"} waehrend einer laufenden Messung
-PERF = {}         # "model@node" -> Leistungsdaten (passiv aus echten Anfragen + aktiver Benchmark), persistiert in perf.json
+MQTT_DIRTY = []   # non-empty = publish immediately
+TASKS = set()     # Background tasks (spawn): the loop holds only weak references; an unreferenced task may be GC'd before completion
+MQTT_EVENTS = []  # HA events for ha.py to send once on the next pass (not retained)
+TRUNCATIONS = {"count": 0, "last": None}   # confirmed silent truncations since router start (context_check.py)
+MEASURING = {}    # model -> {"node", "step", "started", "error"} during an active measurement
+PERF = {}         # "model@node" -> performance data (passive from real requests + active benchmark), persisted in perf.json
 PERF_DIRTY = [0.0]
 
 
 BENCHING = {}     # model -> {"node","step","started","error"}
 SESSION = None
-DECISIONS = []   # Ringpuffer der letzten Routing-Entscheidungen und Ereignisse (DECISIONS_KEEP Eintraege, ~300 B je Eintrag)
-DECISIONS_KEEP = 2000   # Betreiber 2026-09-25: 50 in der UI waren zu wenig, eine Nacht (Guard-Zustandsfolge) war schon weg
-DECISIONS_FILE = None   # events.jsonl neben config.yaml (decisions_load setzt ihn; None = keine Persistenz)
-_DEC_APPENDED = 0       # Zeilen seit dem letzten Eindampfen
-_DEC_WARNED = 0.0       # letzte Warnung 'schreiben fehlgeschlagen' (hoechstens alle 10 min)
-CAPS = {}        # model -> capabilities (aus /api/show)
-SESSIONS = {}    # routing.session_id -> {node, model, t} (Affinitaet, Stufe 1)
-CLOUD = {}       # Stufe 5: provider -> cloud.CloudTarget
-METRICS = {"counters": {}, "hist": {}}   # Stufe 4: Prometheus-Zaehler/Histogramme (metrics.py); Gauges kommen live; persistiert in metrics.json
-METRICS_DIRTY = [0.0]                    # Zeitpunkt der ersten ungesicherten Aenderung (tick_loop sichert nach METRICS_SAVE_S)
-USAGE = {"days": {}}                     # Stufe 4: Nutzung je Tag/Client/Rolle/Modell, persistiert in usage.json
+DECISIONS = []   # Ring buffer of recent routing decisions and events (DECISIONS_KEEP entries, ~300 B per entry)
+DECISIONS_KEEP = 2000   # Operator 2026-09-25: 50 in the UI was too few; a night's worth (guard state sequence) was already gone
+DECISIONS_FILE = None   # events.jsonl next to config.yaml (decisions_load sets it; None = no persistence)
+_DEC_APPENDED = 0       # Lines since last compaction
+_DEC_WARNED = 0.0       # Last 'write failed' warning (at most every 10 min)
+CAPS = {}        # model -> capabilities (from /api/show)
+SESSIONS = {}    # routing.session_id -> {node, model, t} (affinity, stage 1)
+CLOUD = {}       # Stage 5: provider -> cloud.CloudTarget
+METRICS = {"counters": {}, "hist": {}}   # Stage 4: Prometheus counters/histograms (metrics.py); gauges are live; persisted in metrics.json
+METRICS_DIRTY = [0.0]                    # Timestamp of first unsaved change (tick_loop saves after METRICS_SAVE_S)
+USAGE = {"days": {}}                     # Stage 4: usage per day/client/role/model, persisted in usage.json
 USAGE_DIRTY = [0.0]
-# Client-Authentifizierung (Stufe 2): Laufzeit-Ueberschreibung des Modus (POST /admin/client_auth, gilt bis zum Neustart;
-# dauerhaft ist config.yaml) und Zaehler fuer die Beobachtungsphase - wer kommt mit welcher Identitaet, wer ohne.
+# Client authentication (Stage 2): runtime override of mode (POST /admin/client_auth, valid until restart;
+# persistent config is config.yaml) and counters for the observation phase - who comes with which identity, who without.
 CLIENT_AUTH_MODE = None
 CLIENT_STATS = {"clients": {}, "unauth": {}}
-# Eigene Identitaet des Routers fuer den Selbstaufruf der UI ("Ausprobieren", admin.handle_try): Zufall beim Start, nur im
-# Speicher, gilt nur von localhost. Ohne das lief der Knopf im enforce-Modus auf 401 (Betreiber, 2026-09-10). Name: skirnir-ui.
+# Router's own identity for UI self-calls ("Try it", admin.handle_try): random at start, in-memory only,
+# valid from localhost only. Without this, the button hit 401 in enforce mode (Operator, 2026-09-10). Name: skirnir-ui.
 INTERNAL_TOKEN = None
 INTERNAL_CLIENT = "skirnir-ui"
 
 
 def spawn(coro):
-    """asyncio.create_task mit Halter: Referenz in TASKS bis zum Ende (RUF006, Python-Doku zu create_task)."""
+    """asyncio.create_task with holder: reference in TASKS until completion (RUF006, Python docs on create_task)."""
     t = asyncio.get_running_loop().create_task(coro)
     TASKS.add(t)
     t.add_done_callback(TASKS.discard)
@@ -62,8 +62,8 @@ def decisions_path():
 
 
 def decisions_load():
-    """Beim Start: die letzten DECISIONS_KEEP Eintraege aus events.jsonl in den Ring uebernehmen und die Datei darauf
-    eindampfen. Damit ueberlebt das Protokoll Neustarts und Deploys (Betreiber 2026-09-25: die Nacht war nach dem Deploy weg)."""
+    """At startup: load the last DECISIONS_KEEP entries from events.jsonl into the ring and compact the file.
+    This ensures the log survives restarts and deploys (Operator 2026-09-25: the night was gone after deploy)."""
     global DECISIONS_FILE, _DEC_APPENDED
     import os
     from .common import log
@@ -84,8 +84,8 @@ def decisions_load():
     return len(rows)
 
 
-# Namen in events.jsonl vor Router 0.9.0 (design/english-names.md): beim Laden uebersetzt, damit Filter alte und neue
-# Eintraege gleich finden. Schluessel: Feld -> {alt: neu}; dazu die Felder des Kuerzungs-Ereignisses.
+# Names in events.jsonl prior to Router 0.9.0 (design/english-names.md): translated on load so filters find old and new
+# entries equally. Keys: field -> {old: new}; plus fields of the truncation event.
 JOURNAL_BEFORE_0_9 = {
     "event": {"kontext_gekuerzt": "context_truncated"},
     "reason": {"spiel-leicht": "game_light", "spiel-vorbei": "game_ended", "ausweichen": "fallback", "abgewaehlt": "deselected"},
@@ -96,7 +96,7 @@ TRUNCATION_FIELDS_BEFORE_0_9 = {"geschaetzt": "estimated", "angekommen": "receiv
 
 
 def _journal_english(r):
-    """Ein Eintrag aus events.jsonl mit den Namen ab Router 0.9.0."""
+    """An entry from events.jsonl with names from Router 0.9.0 onwards."""
     for field, names in JOURNAL_BEFORE_0_9.items():
         if r.get(field) in names:
             r[field] = names[r[field]]
@@ -106,7 +106,7 @@ def _journal_english(r):
 
 
 def _journal_row(line):
-    """Eine Zeile aus events.jsonl als Eintrag (Namen ab 0.9.0), None fuer Leerzeilen und angerissene Zeilen (Absturz beim Schreiben)."""
+    """A line from events.jsonl as an entry (names from 0.9.0 onwards), None for empty lines and truncated lines (crash during write)."""
     import json
     if not line.strip():
         return None
@@ -118,7 +118,7 @@ def _journal_row(line):
 
 
 def _decisions_compact():
-    """Datei neu schreiben mit dem, was im Ring steht (atomar ueber .tmp)."""
+    """Rewrite the file with the current ring contents (atomic via .tmp)."""
     global _DEC_APPENDED
     import json
     import os
@@ -137,7 +137,7 @@ def _decisions_compact():
 
 
 def _warn_journal(e):
-    """Schreibfehler des Journals gedrosselt melden (hoechstens alle 10 min); das Protokoll im Speicher lebt weiter."""
+    """Throttle journal write errors (at most every 10 min); the in-memory log continues."""
     global _DEC_WARNED
     if time.time() - _DEC_WARNED > 600:
         _DEC_WARNED = time.time()
@@ -146,8 +146,8 @@ def _warn_journal(e):
 
 
 def decisions_append(entry):
-    """Eine Zeile anhaengen; nach 4 x DECISIONS_KEEP Zeilen eindampfen, damit die Datei nicht unbegrenzt waechst
-    (~300 B je Eintrag: hoechstens ~2,5 MB). Schreibfehler werden gedrosselt gemeldet, das Protokoll im Speicher lebt weiter."""
+    """Append a line; compact after 4 x DECISIONS_KEEP lines to prevent unbounded growth
+    (~300 B per entry: max ~2.5 MB). Write errors are throttled; the in-memory log continues."""
     global _DEC_APPENDED
     if not DECISIONS_FILE:
         return
@@ -171,5 +171,5 @@ def remember(entry):
     DECISIONS.append(entry)
     del DECISIONS[:-DECISIONS_KEEP]
     decisions_append(entry)
-    from . import metrics   # spaet, um Importzyklen zu vermeiden
+    from . import metrics   # late, to avoid import cycles
     metrics.count_event(entry)

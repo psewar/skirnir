@@ -1,4 +1,4 @@
-"""Knotenregister mit Schluessel-Identitaet: Anmeldung, Freigabe, Sperren, Provisionierung."""
+"""Node registry with key identity: registration, release, locking, provisioning."""
 
 import asyncio
 import base64
@@ -47,23 +47,23 @@ class NodeRegistry:
         return self
 
     def drop_stale_learned(self):
-        """Einmalig beim Start: Gelerntes im alten Format wegwerfen (Eimer = eine Zahl statt {n,sum,min}).
+        """One-time on startup: discard learned data in the old format (bucket = a number instead of {n,sum,min}).
 
-        Es entstand ohne den Ruhe-Filter und ist systematisch verdorben: gelernt wird nur, wenn Ollama nichts
-        haelt - auf einem Knoten mit dauerhaft warmem Modell ist das fast nur waehrend eines Spiels, weil erst
-        `unload_on_busy` das Modell aus dem VRAM nimmt. Der Lerner sah die Welt also vorwiegend im Spielzustand.
-        Wegwerfen statt umrechnen; bis wieder genug ruhige Proben da sind, traegt der Policy-Wert."""
+        It was created without the idle filter and is systematically corrupted: learning only happens when Ollama holds nothing
+        - on a node with a persistently warm model, that is almost only during a game, because only
+        `unload_on_busy` removes the model from VRAM. The learner thus saw the world mostly in the game state.
+        Discard instead of converting; until enough idle samples are available, the policy value carries the load."""
         for fp, e in self.nodes.items():
             learned = e.get("learned") or {}
             if any(not isinstance(v, dict) for v in (learned.get("buckets") or {}).values()):
                 e.pop("learned", None)
                 self.dirty = True
                 log.info("node %s: learned baseline in the old format dropped (collected without the calm filter)",
-                         e.get("name") or fp[:16])   # das Register ist nach Fingerprint geschluesselt
+                         e.get("name") or fp[:16])   # the registry is keyed by fingerprint
 
     def save(self):
-        """Register schreiben (atomar). Scheitert das Dateisystem, bleibt der Stand im Speicher gueltig und dirty - maybe_save
-        versucht es wieder; der Aufrufer bekommt das Problem."""
+        """Write registry (atomic). If the filesystem fails, the in-memory state remains valid and dirty - maybe_save
+        will retry; the caller receives the Problem."""
         tmp = self.path + ".tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as f:
@@ -84,13 +84,13 @@ class NodeRegistry:
         return next(((fp, e) for fp, e in self.nodes.items() if e["name"] == name), (None, None))
 
     def upsert_hello(self, fp, name, pub_b64, facts, remote):
-        """Anmeldung verbuchen: neuer Schluessel -> pending; bekannter -> Fakten/Zeit aktualisieren."""
+        """Record registration: new key -> pending; known -> update facts/time."""
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
         e = self.nodes.get(fp)
         if e is None:
             base = safe_node_name(name)
             cand, i = base, 2
-            while any(x["name"] == cand for x in self.nodes.values()):   # Namenskollision mit anderem Schluessel
+            while any(x["name"] == cand for x in self.nodes.values()):   # Name collision with a different key
                 cand, i = f"{base}-{i}", i + 1
             e = {"name": cand, "pubkey": pub_b64, "state": "pending", "facts": {}, "policy": {}, "learned": {},
                  "first_seen": now, "remote": remote}
@@ -98,7 +98,7 @@ class NodeRegistry:
             log.info("node %s: new agent key %s... from %s -> awaiting approval", cand, fp[:16], remote)
             state.remember({"event": "node_pending", "node": cand, "fp": fp[:16]})
         agentupdate.note_hello(e, facts or {})   # Versionswechsel merken, offenen Update-Auftrag abschliessen
-        ollamaupdate.note_hello(e, facts or {})  # Ollama-Version aus der Anmeldung, falls das Register noch keine kennt
+        ollamaupdate.note_hello(e, facts or {})  # Ollama version from the registration, if the registry does not know it yet
         e["facts"] = facts or {}
         e["last_seen"], e["remote"], e["pubkey"] = now, remote, pub_b64
         self.dirty = True
@@ -106,14 +106,14 @@ class NodeRegistry:
 
 
 def read_mqtt_password(m):
-    """MQTT-Passwort wie der HAPublisher: roh aus der Secrets-Datei, sonst Umgebung/Config."""
+    """MQTT password like HAPublisher: raw from the secrets file, otherwise environment/config."""
     key = m.get("password_env", "MQTT_PASSWORD")
     pw = read_env_value(m["password_file"], key) if m.get("password_file") else None
     return pw or os.environ.get(key) or m.get("password") or ""
 
 
 def provision_bundle(e):
-    """Konfigurationspaket fuer einen freigegebenen Knoten: was der Agent ausser der Router-URL braucht."""
+    """Configuration package for a released node: what the agent needs besides the router URL."""
     pol, facts = e.get("policy") or {}, e.get("facts") or {}
     b = {"heartbeat_interval_s": state.CFG.hb_interval_s, "node": e["name"]}
     if pol.get("mqtt", True) and state.CFG.mqtt and state.CFG.mqtt.get("host"):
@@ -128,10 +128,10 @@ def provision_bundle(e):
 
 
 def node_spec_from_entry(e):
-    """Knoten-Spec aus Fakten (Agent) und Policy (UI); ein gleichnamiger statischer Config-Knoten liefert die Basis."""
+    """Node spec from facts (agent) and policy (UI); a static config node with the same name provides the base."""
     facts, pol = e.get("facts") or {}, e.get("policy") or {}
     spec = dict(state.CFG.nodes.get(e["name"], {}))
-    spec.pop("ollama", None)   # registrierte Knoten kommen per Tunnel
+    spec.pop("ollama", None)   # registered nodes come via tunnel
     if facts.get("vram_total_mib"):
         spec["vram_total_gib"] = round(facts["vram_total_mib"] / 1024, 1)
     spec["mac"] = pol.get("mac") or facts.get("mac") or spec.get("mac")
@@ -139,12 +139,12 @@ def node_spec_from_entry(e):
     spec["weight"] = int(pol.get("weight", spec.get("weight", 1)))
     if pol.get("foreign_vram_baseline_gib") is not None:
         spec["foreign_vram_baseline_gib"] = pol["foreign_vram_baseline_gib"]
-    if pol.get("max_inflight") is not None:   # Stufe 3: gleichzeitige Anfragen je Knoten (Admission)
+    if pol.get("max_inflight") is not None:   # Stage 3: concurrent requests per node (admission)
         spec["max_inflight"] = int(pol["max_inflight"])
-    for k in ("busy_gpu_util_pct", "busy_foreign_gib"):   # Busy-Schwellen je Knoten (leer = global)
+    for k in ("busy_gpu_util_pct", "busy_foreign_gib"):   # Busy thresholds per node (empty = global)
         if pol.get(k) is not None:
             spec[k] = float(pol[k])
-    if pol.get("gpu_guard") is not None:   # Policy: GPU-Schutz-Status dieses Knotens beachten (False z. B. fuer Karten ohne 12V-2x6)
+    if pol.get("gpu_guard") is not None:   # Policy: respect GPU guard status of this node (False e.g. for cards without 12V-2x6)
         spec["gpu_guard"] = bool(pol["gpu_guard"])
     if facts.get("gpu"):
         spec["gpu"] = facts["gpu"]
@@ -152,7 +152,7 @@ def node_spec_from_entry(e):
 
 
 def activate_node(fp):
-    """Knotenobjekt fuer einen freigegebenen Registereintrag anlegen oder aktualisieren."""
+    """Create or update node object for a released registry entry."""
     e = state.REG.nodes[fp]
     spec = node_spec_from_entry(e)
     node = state.NODES.get(e["name"])
@@ -163,12 +163,12 @@ def activate_node(fp):
     else:
         node.apply_spec(spec)
     node.fp, node.reg = fp, e
-    node.last_known_models |= set(e.get("models") or [])   # zuletzt gesehene Modelle (Register) -> WOL kennt den Knoten auch vor dem ersten Poll
+    node.last_known_models |= set(e.get("models") or [])   # last seen models (registry) -> WOL knows the node even before the first poll
     return node
 
 
 async def close_ws(ws):
-    """WebSocket eines abgeloesten oder gesperrten Tunnels schliessen; ist die Verbindung schon weg, gibt es nichts zu tun."""
+    """Close WebSocket of a detached or locked tunnel; if the connection is already gone, there is nothing to do."""
     if ws.closed:
         return
     try:
@@ -227,7 +227,7 @@ async def revoke_node(fp):
     if node is not None and node.fp == fp:
         if node.tunnel is not None:
             tun = node.tunnel
-        if e["name"] not in state.CFG.nodes:     # rein dynamischer Knoten: raus aus dem Routing
+        if e["name"] not in state.CFG.nodes:     # purely dynamic node: remove from routing
             node.tunnel = None
             node.go_offline("blocked")
             del state.NODES[e["name"]]
@@ -250,7 +250,7 @@ async def push_config(fp):
 
 
 async def receive_hello(ws, nonce, timeout=15):
-    """Signiertes Hello des Agenten pruefen: (pub, name, hello) oder ein Problem 401 mit dem Grund."""
+    """Verify signed Hello of the agent: (pub, name, hello) or a Problem 401 with the reason."""
     recv = asyncio.ensure_future(ws.receive())
     done, _ = await asyncio.wait({recv}, timeout=timeout)
     if not done:
@@ -279,7 +279,7 @@ async def receive_hello(ws, nonce, timeout=15):
 
 
 async def handle_tunnel_v2(request):
-    """WebSocket-Endpunkt fuer Agenten mit Schluessel-Identitaet: Challenge -> signiertes Hello -> Status."""
+    """WebSocket endpoint for agents with key identity: Challenge -> signed Hello -> Status."""
     if Ed25519PublicKey is None:
         return web.json_response({"error": "python3-cryptography is missing on the router"}, status=503)
     ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024 * 1024)
@@ -312,7 +312,7 @@ async def handle_tunnel_v2(request):
             await close_ws(old.ws)
         state.MQTT_DIRTY.append(True)
         await ws.send_json({"t": "status", "state": "pending", "node": e["name"], "message": "awaiting approval in the router UI"})
-    state.REG.save()   # scheitert es, bleibt das Register dirty und maybe_save versucht es wieder
+    state.REG.save()   # if it fails, the registry remains dirty and maybe_save will retry
     try:
         async for msg in ws:
             if msg.type == web.WSMsgType.BINARY:
@@ -327,7 +327,7 @@ async def handle_tunnel_v2(request):
         node = tun.node
         if node is not None and node.tunnel is tun:
             node.tunnel = None
-            node.ollama_push_ts = 0.0   # ohne Tunnel keine Meldungen; nach dem Neuverbinden bis zur ersten Meldung wieder Poll
+            node.ollama_push_ts = 0.0   # no tunnel, no messages; after reconnecting, poll again until the first message
             log.warning("node %s: tunnel disconnected", node.name)
             state.remember({"event": "tunnel", "node": node.name, "state": "down"})
             if not node.url and node.state != "offline":
@@ -340,7 +340,7 @@ def registry_view():
     for fp, e in state.REG.nodes.items():
         node = state.NODES.get(e["name"])
         out.append({"fp": fp, "name": e["name"], "state": e["state"], "facts": e.get("facts") or {}, "policy": e.get("policy") or {},
-                    "learned": e.get("learned") or {}, "models": e.get("models") or [],   # zuletzt gesehene Modelle (fuer WOL nach Neustart)
+                    "learned": e.get("learned") or {}, "models": e.get("models") or [],   # last seen models (for WOL after restart)
                     "first_seen": e.get("first_seen"), "last_seen": e.get("last_seen"), "remote": e.get("remote"),
                     "approved_at": e.get("approved_at"), "update": agentupdate.update_view(e), "ollama_update": ollamaupdate.update_view(e),
                     "connected": (fp in state.PENDING) or (node is not None and node.fp == fp and node.tunnel is not None),
@@ -357,7 +357,7 @@ POLICY_KEYS = ("wol", "weight", "mqtt", "foreign_vram_baseline_gib", "mac", "max
 
 
 def node_policy(body):
-    """Policy-Felder aus der UI: die gesetzten Felder (None = entfernen) oder ein Problem 400."""
+    """Policy fields from the UI: the set fields (None = remove) or a Problem 400."""
     pol = {k: body.get(k) for k in POLICY_KEYS if k in body}
     for k, lo, hi in (("busy_gpu_util_pct", 1, 100), ("busy_foreign_gib", 0.1, 64)):
         if pol.get(k) is not None:
@@ -394,7 +394,7 @@ async def handle_node_action(request):
     if action == "revoke":
         await revoke_node(fp)
         return web.json_response({"ok": True})
-    if action == "update":   # Agent-Update anstossen (agentupdate.py); force = auch bei laufenden Anfragen / gleicher Version
+    if action == "update":   # Trigger agent update (agentupdate.py); force = also with running requests / same version
         ok, msg = await agentupdate.order_update(fp, "ui", force=bool(body.get("force")))
         return web.json_response({"ok": ok, "message": msg}, status=200 if ok else 409)
     if action == "ollama-update":   # Ollama-Update anstossen (ollamaupdate.py, 0.3.0)

@@ -20,20 +20,20 @@ from .outcome import Problem, failed, invalid
 
 
 def _d(path):
-    """Laufzeit-Default eines Schluessels aus settings.EDITABLE - eine Quelle fuer Parser, UI und Anzeige der Basiswerte."""
+    """Runtime default of a key from settings.EDITABLE - a single source for parsers, UI, and base value display."""
     return settings_mod.EDITABLE[path]["default"]
 
 
-# Performance (2026-09-11): yaml.safe_load ist der reine Python-Parser (config.yaml 15,6 ms auf Router-CT), der libyaml-Loader
-# braucht 1,5 ms. Dazu ein Cache nach Dateizeit: /admin/config las config.yaml und roles.yaml je zweimal pro Aufruf (~86 ms),
-# und die UI fragt das alle paar Sekunden ab. Schreibpfade (write_overrides) invalidieren ueber die geaenderte mtime.
+# Performance (2026-09-11): yaml.safe_load is the pure Python parser (config.yaml 15.6 ms on Router-CT), the libyaml loader
+# takes 1.5 ms. Plus an mtime-based cache: /admin/config read config.yaml and roles.yaml twice per call (~86 ms),
+# and the UI polls every few seconds. Write paths (write_overrides) invalidate via changed mtime.
 _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 _YAML_CACHE = {}   # pfad -> (mtime_ns, size, geparster Baum)
 
 
 def load_yaml(path, default=None):
-    """YAML-Datei geparst zurueckgeben - aus dem Cache, solange sich mtime/Groesse nicht geaendert haben. Liefert eine
-    tiefe Kopie? Nein: Aufrufer duerfen den Baum NICHT veraendern (merged() arbeitet auf einer eigenen Kopie)."""
+    """Return parsed YAML file - from cache as long as mtime/size unchanged. Returns a
+    deep copy? No: callers must NOT modify the tree (merged() works on its own copy)."""
     try:
         st = os.stat(path)
     except FileNotFoundError:  # exception-ok: file system; exists() then stat() would race with a writer replacing the file
@@ -49,11 +49,11 @@ def load_yaml(path, default=None):
     _YAML_CACHE[path] = (key, data)
     return data
 
-# Stufe 6: Konfigurationsschema. dict = erlaubte Unterschluessel, None = Blatt (Wert beliebig, Typpruefung in parse),
-# "*" = beliebige Namen. Unbekannte Schluessel sind ein Fehler (Tippfehler wie `limitz` wurden bisher stumm ignoriert).
+# Stage 6: Config schema. dict = allowed subkeys, None = leaf (any value, type check in parse),
+# "*" = any names. Unknown keys are an error (typos like `limitz` were previously silently ignored).
 _TIER = {"model": None, "num_ctx": None, "busy_ok": None}
 _CANARY = {"model": None, "num_ctx": None, "percent": None, "busy_ok": None}
-# aus den Feldern, die parse_client_memory annimmt - eine Quelle, sonst verweigert das Schema einen gueltigen Schluessel
+# from fields accepted by parse_client_memory - single source, otherwise schema rejects valid keys
 _MEMORY_SCHEMA = {**dict.fromkeys(CLIENT_MEMORY_FIELDS), "projects": {"*": dict.fromkeys(PROJECT_FIELDS)}}
 SCHEMA = {
     "router": {
@@ -98,15 +98,15 @@ SCHEMA = {
     },
     "models": {"*": {"weights_gib": None, "kv_gib_per_1k": None, "capabilities": None, "source": None, "note": None, "measured_at": None,
                      "measured_on": None, "vram_gib_8k": None, "vram_gib_32k": None, "partial_offload": None,
-                     # seit 0.3.5: real = weights/kv aus dem nvidia-smi-Zuwachs (nicht aus /api/ps), je Kontext beide Werte
+                     # since 0.3.5: real = weights/kv from nvidia-smi delta (not /api/ps), both values per context
                      "real": None, "vram_real_gib": None, "vram_ps_gib": None,
                      "cloud": None, "provider_model": None, "price_chf_per_m": None, "context_tokens": None, "reasoning": None,
-                     # seit 0.6.5: hoechstens so viele Anfragen gleichzeitig je Knoten (qwen3.8: 1, Ollama kann qwen35 nicht parallel)
+                     # since 0.6.5: max concurrent requests per node (qwen3.8: 1, Ollama cannot parallelize qwen35)
                      "max_parallel": None}},
     "nodes": {"*": {"ollama": None, "vram_total_gib": None, "wol": None, "weight": None, "mac": None, "foreign_vram_baseline_gib": None,
                     "gpu": None, "ollama_tls_fingerprint": None, "ollama_tls_cert": None, "max_inflight": None}},
     "roles": {"*": {"exposed_as": None, "tiers": [_TIER], "latency_first": None, "priority": None, "canary": _CANARY, "shadow": _CANARY}},
-    # Decision Engine (2026-09-16): Auto-Rolle, deren Rolle eine Kette von Engines waehlt (decision/__init__.py)
+    # Decision Engine (2026-09-16): Auto-role, whose role selects a chain of engines (decision/__init__.py)
     "decision_engine": {"enabled": None, "role": None, "options": None, "default": None, "chain": None, "context_chars": None,
                         "policy": {"min_top_probability": None, "min_margin": None, "max_entropy_ratio": None},
                         "jevlike": {"endpoint": None, "model": None, "timeout_s": None},
@@ -115,18 +115,18 @@ SCHEMA = {
                         "embed": {"endpoint": None, "model": None, "timeout_s": None},
                         "rules": None, "calibration_path": None,
                         "capture": {"enabled": None, "path": None, "clients": None, "anonymize": None, "max_context_chars": None},
-                        # 0.6.7: Beobachtungsmodus - wartet eine Anfrage, klassifizieren und protokollieren, ob eine tiefere freie
-                        # Stufe gereicht haette (fallback_observation.py); observe_light = Klassen, fuer die das in Frage kaeme
+                        # 0.6.7: Observation mode - wait for request, classify and log if a deeper free
+                        # tier would have sufficed (fallback_observation.py); observe_light = classes where this applies
                         "observe_blocked": None, "observe_light": None,
-                        # ... und observe_all: JEDE Anfrage im Hintergrund einordnen, Zeile je Anfrage in observe_path
-                        # (Vorgabe anfragen.jsonl neben config.yaml) - Klasse, Dauer, Token, keine Inhalte
+                        # ... and observe_all: classify EVERY request in background, one line per request in observe_path
+                        # (default anfragen.jsonl next to config.yaml) - class, duration, tokens, no content
                         "observe_all": None, "observe_path": None},
 }
 DECISION_ENGINES = ("rules", "jevlike", "local_llm", "tfidf", "embed")
 
 
 def validate_schema(c, schema=SCHEMA, path=""):
-    """Unbekannte Schluessel benennen (mit Vorschlag), Abschnitte muessen Mappings sein. Liefert Fehlerliste."""
+    """Name unknown keys (with suggestion), sections must be mappings. Returns error list."""
     errs = []
     if not isinstance(c, dict):
         return [f"{path or '<root>'}: must be a mapping"]
@@ -149,17 +149,17 @@ def validate_schema(c, schema=SCHEMA, path=""):
     return errs
 
 
-# Groessenangaben eines Katalogeintrags gehoeren zusammen: eine Messung (UI, perf) liefert sie als Einheit, und neue Gewichte mit
-# einer alten Messung (real, vram_real_gib) zu mischen hiesse, die alte Messung fuer die neuen Werte auszugeben.
+# Sizing fields of a catalog entry belong together: one measurement (UI, perf) provides them as a unit, and mixing new weights with
+# an old measurement (real, vram_real_gib) would imply the old measurement for new values.
 SIZING_FIELDS = ("weights_gib", "kv_gib_per_1k", "real", "vram_real_gib", "vram_ps_gib", "vram_gib_8k", "vram_gib_32k",
                  "measured_at", "measured_on", "partial_offload")
 
 
 def merge_models(base, overlay):
-    """Katalog aus config.yaml + roles.yaml, je Modell Feld fuer Feld (0.6.9). Bis 0.6.8 ersetzte ein roles.yaml-Eintrag den aus
-    config.yaml ganz - max_parallel aus config.yaml galt fuer qwen3.8 nicht, weil roles.yaml eine Messung des Modells hielt
-    (2026-10-02). Bringt der Overlay-Eintrag Groessenangaben mit, ersetzen sie die der Basis als Einheit (SIZING_FIELDS);
-    alle anderen Felder (max_parallel, capabilities, note, ...) bleiben aus der Basis, wenn der Overlay sie nicht setzt."""
+    """Catalog from config.yaml + roles.yaml, field-by-field per model (0.6.9). Until 0.6.8 a roles.yaml entry replaced the config.yaml one
+    entirely - max_parallel from config.yaml did not apply to qwen3.8 because roles.yaml held a model measurement
+    (2026-10-02). If the overlay entry has sizing fields, they replace the base ones as a unit (SIZING_FIELDS);
+    all other fields (max_parallel, capabilities, note, ...) remain from base if overlay does not set them."""
     out = dict(base)
     for m, e in overlay.items():
         b = base.get(m)
@@ -173,11 +173,11 @@ def merge_models(base, overlay):
 
 
 class Config:
-    """config.yaml (kommentiert, per deploy) + roles.yaml (von der UI geschrieben, überschreibt roles/models/expose)."""
+    """config.yaml (commented, via deploy) + roles.yaml (written by UI, overrides roles/models/expose)."""
 
     def __init__(self, path, use_overrides=True):
-        """Fuer Aufrufer ohne Problem-Pfad (Tests, Werkzeuge). Config.load() ist die ausdrueckliche Form und liefert eine
-        ungueltige Konfiguration als Problem."""
+        """For callers without Problem path (tests, tools). Config.load() is the explicit form and returns an
+        invalid configuration as Problem."""
         self._locate(path, use_overrides)
         problem = self.reload()
         if failed(problem):
@@ -185,7 +185,7 @@ class Config:
 
     @classmethod
     def load(cls, path, use_overrides=True):
-        """Config oder ein Problem 400 (ungueltige Konfiguration) - Start, --check und Neuladen entscheiden daran."""
+        """Config or Problem 400 (invalid config) - start, --check and reload decide on this."""
         cfg = cls.__new__(cls)
         cfg._locate(path, use_overrides)
         problem = cfg.reload()
@@ -203,15 +203,15 @@ class Config:
             overrides = copy.deepcopy(load_yaml(self.overrides_path, {}) or {})
         for k, v in (overrides or {}).items():
             if k == "roles":
-                # Die UI schreibt nur Stufen/latency_first. Alles andere an einer Rolle (priority, canary, shadow) bleibt aus
-                # config.yaml erhalten - sonst verlor `assist` seine Prioritaet, sobald roles.yaml existierte (2026-09-10).
+                # UI writes only tiers/latency_first. Everything else on a role (priority, canary, shadow) remains from
+                # config.yaml - otherwise `assist` would lose priority once roles.yaml existed (2026-09-10).
                 base = c.get("roles") or {}
                 c["roles"] = {name: {**(base.get(name) or {}), **(r or {})} for name, r in (v or {}).items()}
             elif k == "models":
                 c["models"] = merge_models(c.get("models") or {}, v or {})
             elif k == "expose_concrete_models":
                 c["router"]["expose_concrete_models"] = bool(v)
-        # Clients aus der UI (neue Clients, rotierte Secrets): je Client ueber den config.yaml-Eintrag gelegt, Felder einzeln
+        # Clients from UI (new clients, rotated secrets): per client via config.yaml entry, fields individually
         if (overrides or {}).get("clients"):
             ca = c.setdefault("router", {}).setdefault("client_auth", None) or {}
             c["router"]["client_auth"] = ca
@@ -219,7 +219,7 @@ class Config:
             ca["clients"] = cl
             for name, spec in (overrides["clients"] or {}).items():
                 cl[str(name)] = {**(cl.get(name) or {}), **(spec or {})}
-        # Stufe 7 (UI-Einstellungen): settings {pfad: wert} zuletzt - Rollen aus roles.yaml sind dann bekannt (Client-Rollen)
+        # Stage 7 (UI settings): settings {path: value} last - roles from roles.yaml are known then (client roles)
         if (overrides or {}).get("settings"):
             applied = settings_mod.apply(c, overrides["settings"])
             if failed(applied):
@@ -227,13 +227,13 @@ class Config:
         return c
 
     def base(self):
-        """config.yaml pur (ohne roles.yaml) - fuer die Anzeige der Basiswerte in der UI. Nur lesen, nicht veraendern (Cache)."""
+        """config.yaml pure (without roles.yaml) - for base value display in UI. Read-only, do not modify (cache)."""
         return load_yaml(self.path)
 
     def reload(self, overrides=None):
-        """Neu laden; None = uebernommen, ein Problem = ungueltig und NICHTS geaendert. Erst eine Probe, dann dieses Objekt:
-        bis 0.8.9 brach parse() mitten im Ueberschreiben ab, und "config reload failed, keeping old" behielt eine halb neue
-        Konfiguration."""
+        """Reload; None = adopted, Problem = invalid and NOTHING changed. First a probe, then this object:
+        until 0.8.9 parse() aborted mid-override, and "config reload failed, keeping old" kept a half-new
+        configuration."""
         import copy
         c = self.merged(overrides)
         if failed(c):
@@ -246,8 +246,8 @@ class Config:
         return self.parse(c)
 
     def parse(self, c):
-        """Baum c pruefen und uebernehmen. None = ok, ein Problem = ungueltig (dann kann das Objekt teilweise belegt sein -
-        darum prueft reload() erst an einer Probe)."""
+        """Check and adopt tree c. None = ok, Problem = invalid (then object may be partially populated -
+        hence reload() checks on a probe first)."""
         errs = validate_schema(c)
         if errs:
             return invalid("configuration: " + "; ".join(errs))
@@ -269,7 +269,7 @@ class Config:
         if failed(problem := self._parse_cloud(r.get("cloud") or {})):
             return problem
         for attr, value in (("hindsight", parse_hindsight(r.get("hindsight"))),
-                            ("rerank", parse_rerank_config(r.get("rerank"))),   # POST /rerank (rerank.py), default aus
+                            ("rerank", parse_rerank_config(r.get("rerank"))),   # POST /rerank (rerank.py), default off
                             ("memory_scopes", parse_scopes(r.get("memory_scopes"), self.cloud["data_classes"]))):
             if failed(value):
                 return value
@@ -315,51 +315,51 @@ class Config:
         self.control_listen = r.get("control_listen", "0.0.0.0:11435")
         self.poll_s = float(r.get("ollama_poll_s", _d("router.ollama_poll_s")))
         self.offline_after = int(r.get("offline_after_misses", _d("router.offline_after_misses")))
-        self.hb_interval_s = float(r.get("heartbeat_interval_s", _d("router.heartbeat_interval_s")))   # Takt der Agenten (wird provisioniert)
+        self.hb_interval_s = float(r.get("heartbeat_interval_s", _d("router.heartbeat_interval_s")))   # Agent tick (provisioned)
         self.hb_stale_s = float(r.get("heartbeat_stale_s", _d("router.heartbeat_stale_s")))
-        if self.hb_stale_s < 2 * self.hb_interval_s:   # sonst gilt ein Knoten zwischen zwei Meldungen als "GPU unbekannt"
+        if self.hb_stale_s < 2 * self.hb_interval_s:   # otherwise a node between two reports is considered "GPU unknown"
             self.hb_stale_s = 2 * self.hb_interval_s + 1
-        self.agent_missing_s = float(r.get("agent_missing_problem_s", _d("router.agent_missing_problem_s")))   # Agent war da und schweigt -> HA-Problem
+        self.agent_missing_s = float(r.get("agent_missing_problem_s", _d("router.agent_missing_problem_s")))   # Agent was there and silent -> HA problem
         self.expose_concrete = bool(r.get("expose_concrete_models", False))
         self.request_timeout_s = float(r.get("request_timeout_s", _d("router.request_timeout_s")))
         self.heartbeat_token = r.get("heartbeat_token") or ""
-        self.api_tls = bool(r.get("api_tls", False))   # 11434 ebenfalls TLS (Zertifikat aus control_tls)
-        # Im Text gestrandete Tool-Calls zurueckholen (siehe toolcall_rescue). Standard an:
-        # die Stufe greift nur, wenn Ollama selbst nichts geparst hat, und laesst sonst alles unberuehrt.
+        self.api_tls = bool(r.get("api_tls", False))   # 11434 also TLS (cert from control_tls)
+        # Rescue tool calls stranded in text (see toolcall_rescue). Default on:
+        # tier applies only if Ollama parsed nothing itself, otherwise leaves everything untouched.
         self.toolcall_rescue = bool(r.get("toolcall_rescue", _d("router.toolcall_rescue")))
-        # OpenAI-kompatible Schnittstelle /v1 (Node-RED-MCP, andere OpenAI-Clients). Der Router uebersetzt selbst nach
-        # /api/chat, weil Ollamas eigenes /v1 kein num_ctx/keep_alive kennt (Modell wuerde mit Default-Kontext neu laden).
+        # OpenAI-compatible interface /v1 (Node-RED-MCP, other OpenAI clients). Router translates to
+        # /api/chat itself, because Ollama's own /v1 does not know num_ctx/keep_alive (model would reload with default context).
         oa = r.get("openai") or {}
         self.openai_enabled = bool(oa.get("enabled", True))
-        # think, wenn der Client nichts sagt: false = Antwort ohne unsichtbares Nachdenken (wie HAs AI-Tasks);
-        # true = Modell-Default; null = Feld nicht setzen (Ollama entscheidet)
+        # think, if client says nothing: false = response without invisible thinking (like HA AI-Tasks);
+        # true = model default; null = do not set field (Ollama decides)
         self.openai_default_think = oa.get("default_think", _d("router.openai.default_think"))
-        # Anthropic-Messages-API /v1/messages (Claude Code). Ping-Abstand, solange der Knoten noch am Prompt rechnet:
-        # Ollama schickt die Kopfzeilen erst mit dem ersten Token, bei 196k Kontext bis ~2 min.
+        # Anthropic Messages API /v1/messages (Claude Code). Ping interval while the node is still computing the prompt:
+        # Ollama sends headers only with the first token; with 196k context, this can take up to ~2 min.
         an = r.get("anthropic") or {}
         self.anthropic_enabled = bool(an.get("enabled", True))
         self.anthropic_keepalive_s = float(an.get("keepalive_s", _d("router.anthropic.keepalive_s")))
-        # Denken: auto = wie der Client es verlangt (thinking-Block), on/off = fest. Claude Code verlangt bei jedem Zug
-        # adaptives Denken; qwen3.8 kennt nur an/aus und denkt dann immer.
+        # Thinking: auto = as requested by the client (thinking block), on/off = fixed. Claude Code requires adaptive thinking for every turn;
+        # qwen3.8 only knows on/off and always thinks when enabled.
         self.anthropic_think = str(an.get("think", _d("router.anthropic.think")))
         if self.anthropic_think not in THINK_MODES:
             return invalid(f"router.anthropic.think must be one of {THINK_MODES}, not {self.anthropic_think!r}")
-        # Basic Auth für UI + /admin/*: {user: "pbkdf2:<iter>:<salt_hex>:<hash_hex>"}; leer = offen (nur Tests)
+        # Basic Auth for UI + /admin/*: {user: "pbkdf2:<iter>:<salt_hex>:<hash_hex>"}; empty = open (tests only)
         self.control_users = dict((r.get("control_auth") or {}).get("users") or {})
-        # TLS für den Control-Port: {cert: <fullchain.pem>, key: <key.pem>}; fehlt der Block -> Klartext (nur Tests)
+        # TLS for the Control port: {cert: <fullchain.pem>, key: <key.pem>}; missing block -> plaintext (tests only)
         tls = r.get("control_tls") or {}
         self.control_tls = (tls.get("cert"), tls.get("key")) if tls.get("cert") and tls.get("key") else None
         self.public_url = r.get("public_url", "")
-        # Stufe 1: Request-Groessenlimits (413 vor dem Backend) und Verfall der Session-Affinitaet
+        # Stage 1: Request size limits (413 before backend) and session affinity expiry
         lim = r.get("limits") or {}
         self.limits = {k: int(lim.get(k, _d(f"router.limits.{k}"))) for k in ("max_images", "max_tools", "max_messages")}
         self.session_ttl_s = float(r.get("session_affinity_ttl_s", _d("router.session_affinity_ttl_s")))
-        self.idempotency_ttl_s = float(r.get("idempotency_ttl_s", _d("router.idempotency_ttl_s")))   # Stufe 6: Wiederholungen mit Idempotency-Key
+        self.idempotency_ttl_s = float(r.get("idempotency_ttl_s", _d("router.idempotency_ttl_s")))   # Stage 6: Retries with Idempotency-Key
 
     def _parse_client_auth(self, ca):
-        # Client-Authentifizierung auf dem API-Port 11434 (Stufe 2, design/roadmap.md). mode: observe = alles bedienen,
-        # Unbekannte zaehlen und ins Audit-Log; enforce = 401 ohne gueltige Identitaet. clients: {name: {token_sha256,
-        # ip: [..], roles: [..]|["*"], models: bool, requests_per_minute}}. Kein clients-Block = Port offen wie bisher.
+        # Client authentication on API port 11434 (Stage 2, design/roadmap.md). mode: observe = serve all,
+        # count unknowns and log to audit; enforce = 401 without valid identity. clients: {name: {token_sha256,
+        # ip: [..], roles: [..]|["*"], models: bool, requests_per_minute}}. No clients block = port open as before.
         mode = ca.get("mode", _d("router.client_auth.mode"))
         if mode not in ("observe", "enforce"):
             return invalid(f"client_auth.mode must be observe or enforce, not {mode!r}")
@@ -378,11 +378,11 @@ class Config:
             spec["ip"] = [str(x) for x in (spec.get("ip") or [])]
             spec["roles"] = [str(x) for x in (spec.get("roles") or ["*"])]
             spec["models"] = bool(spec.get("models", True))
-            # Recht auf POST /rerank (rerank.py), default nein. Erkennung auch per ip: Hindsights TEI-Client schickt keinen Header.
+            # Permission for POST /rerank (rerank.py), default no. Detection also via ip: Hindsight TEI client sends no header.
             if type(spec.get("rerank", False)) is not bool:
                 return invalid(f"client_auth.clients.{name}.rerank must be true or false")
             spec["rerank"] = spec.get("rerank", False)
-            # inference: false = nur POST /rerank und GET /info (auth.inference_refusal); Standard true wie bisher
+            # inference: false = only POST /rerank and GET /info (auth.inference_refusal); default true as before
             if type(spec.get("inference", True)) is not bool:
                 return invalid(f"client_auth.clients.{name}.inference must be true or false")
             spec["inference"] = spec.get("inference", True)
@@ -391,18 +391,18 @@ class Config:
                             "may also call every role", name)
             if spec.get("requests_per_minute") is not None:
                 spec["requests_per_minute"] = int(spec["requests_per_minute"])
-            if spec.get("max_priority") is not None and spec["max_priority"] not in PRIORITIES:   # Stufe 3: Kappung der Klasse
+            if spec.get("max_priority") is not None and spec["max_priority"] not in PRIORITIES:   # Stage 3: Class truncation
                 return invalid(f"client_auth.clients.{name}.max_priority must be one of {PRIORITIES}")
             clients[str(name)] = spec
-        # locked (Audit 2026-09-16): true = der Modus ist NUR ueber config.yaml + Deploy aenderbar; UI-Einstellung und
-        # POST /admin/client_auth werden abgelehnt (403/400 + Audit-Eintrag). Ein kompromittiertes UI-Konto kann die
-        # Client-Auth dann nicht mehr per Klick auf observe stellen.
+        # locked (Audit 2026-09-16): true = mode changeable ONLY via config.yaml + Deploy; UI setting and
+        # POST /admin/client_auth are rejected (403/400 + audit entry). A compromised UI account cannot then
+        # switch Client Auth to observe via a click.
         self.client_auth = {"mode": mode, "clients": clients, "locked": bool(ca.get("locked", False)),
                             "audit_log": ca.get("audit_log", "/var/log/skirnir-router/audit.jsonl")}
 
     def _parse_cloud(self, cl):
-        # Stufe 5: Cloud-Anbieter als Stufen in Rollen (cloud.py). Kein Opt-in pro Client: die Rolle erlaubt, der Client kann
-        # sich per routing.execution: local oder clients.<c>.cloud: false ausnehmen.
+        # Stage 5: Cloud providers as tiers in roles (cloud.py). No per-client opt-in: the role allows it, the client can
+        # opt out via routing.execution: local or clients.<c>.cloud: false.
         from urllib.parse import urlparse
         classes = [str(x) for x in (cl.get("data_classes") or DATA_CLASSES_DEFAULT)]
         for key in ("default_data_class", "max_cloud_data_class"):
@@ -448,16 +448,16 @@ class Config:
         self.foreign_sustain = float(be.get("foreign_sustain_s", _d("modes.busy_enter.foreign_sustain_s")))
         self.util_requires_foreign_gib = float(be.get("util_requires_foreign_gib", _d("modes.busy_enter.util_requires_foreign_gib")))
         self.busy_exit_s = float((m.get("busy_exit") or {}).get("below_for_s", _d("modes.busy_exit.below_for_s")))
-        # Hysterese (0.6.8): einmal busy, bleibt der Knoten busy, solange die Auslastung ueber dieser Schwelle liegt UND fremdes
-        # VRAM belegt ist (util_requires_foreign_gib) - ein Spiel mit 31-44 % Last flatterte sonst um die Eintrittsschwelle
+        # Hysteresis (0.6.8): once busy, the node stays busy as long as utilization is above this threshold AND foreign
+        # VRAM is occupied (util_requires_foreign_gib) - otherwise a game with 31-44% load would flap around the entry threshold
         self.busy_exit_util = float((m.get("busy_exit") or {}).get("gpu_util_pct", _d("modes.busy_exit.gpu_util_pct")))
-        # Agent >= 0.17.0 meldet Spiel und Hauptspeicher (Router 0.7.0): ein Spiel macht busy (nach game_sustain_s), danach
-        # wartet free game_quiet_s; Speicherdruck (RAM- oder Commit-frei unter min_free_gib, polls Heartbeats in Folge) sperrt
-        # kaltes Laden und Vorwaermen, entlaedt aber nichts
+        # Agent >= 0.17.0 reports game and main memory (Router 0.7.0): a game makes it busy (after game_sustain_s), then
+        # waits for free game_quiet_s; memory pressure (RAM or Commit free below min_free_gib, polls Heartbeats in a row) blocks
+        # cold loading and prewarming, but evicts nothing
         self.busy_game = bool(be.get("game", _d("modes.busy_enter.game")))
         self.game_sustain = float(be.get("game_sustain_s", _d("modes.busy_enter.game_sustain_s")))
-        # 0.8.7 / Agent 0.19.0: meldet der Agent den GPU-Bedarf des Spiels, macht es erst busy, wenn das Spiel selbst so viel
-        # Grafikspeicher (eigen + geteilt) oder Engine-Auslastung braucht - oder bei Speicherdruck. Ohne Meldung wie bisher.
+        # 0.8.7 / Agent 0.19.0: if the agent reports the game's GPU demand, it only becomes busy if the game itself requires that much
+        # graphics memory (own + shared) or engine utilization - or under memory pressure. Without reporting, as before.
         self.game_min_gpu_gib = float(be.get("game_min_gpu_gib", _d("modes.busy_enter.game_min_gpu_gib")))
         self.game_min_gpu_pct = float(be.get("game_min_gpu_pct", _d("modes.busy_enter.game_min_gpu_pct")))
         self.game_exit_s = float((m.get("busy_exit") or {}).get("game_quiet_s", _d("modes.busy_exit.game_quiet_s")))
@@ -468,23 +468,23 @@ class Config:
         self.reserve = {k: float(v) for k, v in reserve.items()}
         self.keep_alive = m.get("keep_alive") or {"free": _d("modes.keep_alive.free"), "busy": _d("modes.keep_alive.busy")}
         self.unload_on_busy = bool(m.get("unload_on_busy", _d("modes.unload_on_busy")))
-        self.unload_on_busy_interval_s = float(m.get("unload_on_busy_interval_s", _d("modes.unload_on_busy_interval_s")))   # Mindestabstand des Sicherheitsnetzes
-        self.vram_settle_s = float(m.get("vram_settle_s", _d("modes.vram_settle_s")))   # Nachlauf, bis nvidia-smi einen Unload nachvollzogen hat
+        self.unload_on_busy_interval_s = float(m.get("unload_on_busy_interval_s", _d("modes.unload_on_busy_interval_s")))   # Minimum interval of the safety net
+        self.vram_settle_s = float(m.get("vram_settle_s", _d("modes.vram_settle_s")))   # Lag until nvidia-smi has tracked an unload
         self.overhead_gib = float(m.get("fit_overhead_gib", _d("modes.fit_overhead_gib")))
-        # warm zuerst: ein bereits geladenes Modell aus der Tier-Liste schlaegt einen Kaltstart eines hoeheren Tiers
+        # warm first: an already loaded model from the tier list beats a cold start of a higher tier
         self.warm_first = bool(m.get("warm_first", _d("modes.warm_first")))
-        # Vorwaermen der Rang-1-Modelle, damit die Liste nach busy nicht dauerhaft beim Kleinmodell haengen bleibt
+        # Prewarming of rank-1 models so the list doesn't stay stuck on the small model after busy
         pw = m.get("prewarm") or {}
         self.prewarm_on_free = bool(pw.get("on_free", _d("modes.prewarm.on_free")))
         self.prewarm_on_online = bool(pw.get("on_online", _d("modes.prewarm.on_online")))
         self.prewarm_free_delay = float(pw.get("free_delay_s", _d("modes.prewarm.free_delay_s")))
         self.prewarm_online_delay = float(pw.get("online_delay_s", _d("modes.prewarm.online_delay_s")))
-        # Residenz: hat ein konkret angefordertes Fremdmodell das Rang-1-Modell verdraengt und wird seit residency_idle_s
-        # nicht mehr gebraucht, wird Rang-1 wieder vorgewaermt. Ohne das bleibt bei "warm zuerst" die Ausweichstufe auf
-        # einem ANDEREN Knoten dauerhaft bevorzugt (2026-09-10: glm verdraengte qwen, alles lief auf gpu-laptop/gemma4:12b). 0 = aus.
+        # Residency: if a specifically requested foreign model evicted the rank-1 model and hasn't been used for residency_idle_s,
+        # rank-1 is prewarmed again. Without this, "warm first" would permanently prefer the fallback tier on
+        # ANOTHER node (2026-09-10: glm evicted qwen, everything ran on gpu-laptop/gemma4:12b). 0 = off.
         self.residency_idle_s = float(pw.get("residency_idle_s", _d("modes.prewarm.residency_idle_s")))
         self.residency_check_s = float(pw.get("residency_check_s", _d("modes.prewarm.residency_check_s")))
-        # Stufe 3 Scheduler: gewichtbarer Score (scheduler.score), Circuit Breaker je Knoten, Admission Control
+        # Stage 3 Scheduler: weighted score (scheduler.score), Circuit Breaker per node, Admission Control
         self.score = {k: float(_d(f"modes.score.{k}")) for k in settings_mod.SCORE_KEYS}
         for k, v in (m.get("score") or {}).items():
             if k not in self.score:
@@ -497,25 +497,25 @@ class Config:
         self.admission = {"max_inflight_default": int(ad.get("max_inflight_default", _d("modes.admission.max_inflight_default"))),
                           "aging_s": float(ad.get("aging_s", _d("modes.admission.aging_s"))),
                           "max_wait_s": float(ad.get("max_wait_s", _d("modes.admission.max_wait_s"))), "max_queue": int(ad.get("max_queue", _d("modes.admission.max_queue"))),
-                          # Wartebudget je Klasse (admission.max_wait_s): max_wait_s gilt fuer normal
+                          # Wait budget per class (admission.max_wait_s): max_wait_s applies to normal
                           "max_wait_interactive_s": float(ad.get("max_wait_interactive_s", _d("modes.admission.max_wait_interactive_s"))),
                           "max_wait_batch_s": float(ad.get("max_wait_batch_s", _d("modes.admission.max_wait_batch_s")))}
-        # GPU-Schutz (design/gpu-guard.md): der Agent setzt das Power-Limit, der Router reagiert auf dessen Status -
-        # Stufe 2 (gedrosselt) deckelt die Parallelitaet, Hochlast kostet Score, Probleme (unverfuegbar, abgewaehlt,
-        # Spannung, Temperatur) gehen an HA. require_fresh_status: ohne frischen Status ebenfalls deckeln (kostet
-        # Parallelitaet bei jedem Agent-Ausfall, darum Standard aus).
+        # GPU guard (design/gpu-guard.md): the agent sets the power limit, the router reacts to its status -
+        # Stage 2 (throttled) caps parallelism, high load costs score, problems (unavailable, rejected,
+        # voltage, temperature) go to HA. require_fresh_status: cap even without fresh status (costs
+        # parallelism on every agent failure, hence default off).
         gg = m.get("gpu_guard") or {}
         self.gpu_guard = {"enabled": bool(gg.get("enabled", _d("modes.gpu_guard.enabled"))),
                           "throttled_max_inflight": int(gg.get("throttled_max_inflight", _d("modes.gpu_guard.throttled_max_inflight"))),
                           "score_penalty": float(gg.get("score_penalty", _d("modes.gpu_guard.score_penalty"))),
                           "require_fresh_status": bool(gg.get("require_fresh_status", _d("modes.gpu_guard.require_fresh_status")))}
-        # Agent-Update ueber den Router (agentupdate.py): Rollout-Schleife an/aus, Kanarienvogel-Knoten, Wartezeit, optionaler
-        # oeffentlicher Betreiber-Schluessel zur Selbstpruefung des Manifests vor dem Versand.
+        # Agent update via router (agentupdate.py): Rollout loop on/off, canary node, wait time, optional
+        # Public operator key for self-checking the manifest before sending.
         au = m.get("agent_update") or {}
         self.agent_update = {"enabled": bool(au.get("enabled", _d("modes.agent_update.enabled"))), "canary": au.get("canary") or "",
                              "canary_clean_h": float(au.get("canary_clean_h", _d("modes.agent_update.canary_clean_h"))), "public_key": au.get("public_key") or ""}
-        # Ollama-Update ueber den Router (ollamaupdate.py, 0.3.0): Versionspruefung bei GitHub, Rollout im Nachtfenster,
-        # Kanarienvogel (leer = der des Agent-Updates).
+        # Ollama update via router (ollamaupdate.py, 0.3.0): version check on GitHub, rollout in night window,
+        # Canary (empty = same as agent update).
         ou = m.get("ollama_update") or {}
         self.ollama_update = {"enabled": bool(ou.get("enabled", _d("modes.ollama_update.enabled"))), "canary": ou.get("canary") or "",
                               "canary_clean_h": float(ou.get("canary_clean_h", _d("modes.ollama_update.canary_clean_h"))),
@@ -526,8 +526,8 @@ class Config:
                               "release_url": str(ou.get("release_url", _d("modes.ollama_update.release_url")) or "")}
         if self.ollama_update["timezone"]:
             import zoneinfo
-            # nur pruefen, wo es eine Zeitzonendatenbank gibt: die lokale Schema-Pruefung von deploy.py laeuft auch auf Windows-Python
-            # ohne tzdata und wuerde sonst jede Zone ablehnen (2026-09-27)
+            # Only check where a timezone database exists: the local schema check in deploy.py runs on Windows Python
+            # without tzdata and would otherwise reject every zone (2026-09-27)
             if zoneinfo.available_timezones() and self.ollama_update["timezone"] not in zoneinfo.available_timezones():
                 return invalid(f"modes.ollama_update.timezone: unknown time zone {self.ollama_update['timezone']!r}")
         for k in ("window_start", "window_end"):
@@ -557,16 +557,16 @@ class Config:
                     return invalid(f"role {rname}: tier model {t['model']} missing from the model catalog")
                 tier = {"model": t["model"], "num_ctx": int(t["num_ctx"]), "busy_ok": bool(t.get("busy_ok", False))}
                 if (self.models[t["model"]] or {}).get("cloud"):
-                    tier["cloud"] = self.models[t["model"]]["cloud"]   # Stufe 5: Cloud-Stufe
+                    tier["cloud"] = self.models[t["model"]]["cloud"]   # Stage 5: Cloud tier
                 tiers.append(tier)
             lf = r.get("latency_first")   # None = globale Einstellung warm_first
-            prio = r.get("priority", "normal")   # Stufe 3: Standardklasse der Rolle (routing.priority ueberschreibt)
+            prio = r.get("priority", "normal")   # Stage 3: Standard class of the role (routing.priority overrides)
             if prio not in PRIORITIES:
                 return invalid(f"role {rname}: priority must be one of {PRIORITIES}")
             role = {"name": rname, "exposed": exposed, "tiers": tiers,
                     "latency_first": self.warm_first if lf is None else bool(lf),
                     "latency_first_override": lf, "priority": prio}
-            for kind in ("canary", "shadow"):   # Stufe 6: Kandidatenmodell mit echtem Verkehr messen
+            for kind in ("canary", "shadow"):   # Stage 6: Measure candidate model with real traffic
                 spec = r.get(kind)
                 if spec:
                     if spec.get("model") not in self.models:
@@ -579,8 +579,8 @@ class Config:
             self.roles[exposed] = role
 
     def _parse_decision(self, de):
-        """decision_engine pruefen: Optionen sind Rollen (Kurzname), die Auto-Rolle darf keine echte Rolle sein, die Kette
-        kennt nur bekannte Engines und jevlike braucht einen Endpunkt."""
+        """Check decision_engine: options are roles (short name), the auto role must not be a real role, the chain
+        only knows known engines and jevlike needs an endpoint."""
         out = dict(de)
         if not de.get("enabled"):
             out["enabled"] = False
@@ -619,7 +619,7 @@ class Config:
         return out
 
     def catalog_twin(self, model):
-        """Katalog-Eintrag für einen Namen: direkt oder über gleichen Digest (Alias wie `mein-assistent`)."""
+        """Catalog entry for a name: direct or via same digest (alias like `mein-assistent`)."""
         if model in self.models:
             return self.models[model]
         for n in state.NODES.values():
@@ -632,17 +632,17 @@ class Config:
         return None
 
     def real_gib(self, model, ctx):
-        """Echte Belegung (ohne Fit-Zuschlag) eines geladenen Modells bei `ctx`, wenn der Katalog sie gemessen hat
-        (`real: true`, seit 0.3.5), sonst None. /api/ps meldet nur einen Teil: qwen3.6:35b-a3b bei 196k 21,0 GiB,
-        nvidia-smi zeigt 26,4 GiB mehr als mit leerem Ollama (gemessen 2026-09-30). Ohne diese Zahl rechnete der
-        Router geladene Modelle zu klein an - der Rest fiel in die Desktop-Grundlast oder galt als fremdes VRAM."""
+        """Real usage (without fit bonus) of a loaded model at `ctx`, if the catalog measured it
+        (`real: true`, since 0.3.5), else None. /api/ps reports only part: qwen3.6:35b-a3b at 196k 21.0 GiB,
+        nvidia-smi shows 26.4 GiB more than with empty Ollama (measured 2026-09-30). Without this number the
+        router underestimated loaded models - the rest fell into desktop baseline or was treated as foreign VRAM."""
         m = self.catalog_twin(model)
         if m is None or m.get("cloud") or not m.get("real") or not ctx:
             return None
         return float(m["weights_gib"]) + float(m.get("kv_gib_per_1k", 0)) * ctx / 1000.0
 
     def max_parallel(self, model):
-        """Katalog `max_parallel` (auch ueber den Digest-Zwilling eines Alias) oder None = keine Grenze je Modell."""
+        """Catalog `max_parallel` (also via digest twin of an alias) or None = no limit per model."""
         m = self.catalog_twin(model)
         v = m.get("max_parallel") if m is not None else None
         return int(v) if v else None
@@ -652,27 +652,27 @@ class Config:
         if m is not None and m.get("cloud"):
             return 0.0
         if m is not None:
-            # Gemessen per nvidia-smi (real, seit 0.3.5): das ist der ganze Bedarf. Der Fit-Zuschlag glich nur die zu
-            # kleinen /api/ps-Zahlen aus; die Sicherheit liefert die Reserve im Budget (modes.vram_reserve_gib).
+            # Measured via nvidia-smi (real, since 0.3.5): this is the total requirement. The fit bonus only compensated for
+            # small /api/ps numbers; safety is provided by the reserve in the budget (modes.vram_reserve_gib).
             extra = 0.0 if m.get("real") else self.overhead_gib
             return float(m["weights_gib"]) + float(m.get("kv_gib_per_1k", 0)) * ctx / 1000.0 + extra
         if node is not None and node.is_loaded(model):
-            return node.loaded_size(model) + 0.5          # schon resident, passt per Definition
-        # unbekannt und kalt: Dateigrösse aus /api/tags als Gewichte, KV unbekannt -> 20 % Aufschlag
+            return node.loaded_size(model) + 0.5          # Already resident, fits by definition
+        # Unknown and cold: file size from /api/tags as weights, KV unknown -> 20% surcharge
         size = max((n.model_details.get(model, {}).get("size", 0) for n in state.NODES.values()), default=0) / GIB
         return size * 1.2 + self.overhead_gib
 
 
 def cert_fingerprint(pem_path):
-    """SHA-256 (hex) ueber das DER-Zertifikat einer PEM-Datei."""
+    """SHA-256 (hex) over the DER certificate of a PEM file."""
     with open(pem_path, encoding="utf-8") as f:
         der = ssl.PEM_cert_to_DER_cert(f.read())
     return hashlib.sha256(der).hexdigest()
 
 
 def write_overrides(new):
-    """roles.yaml validieren (Probe-Config) und atomar schreiben, dann live neu laden. None = geschrieben und aktiv; ein
-    Problem 400 = ungueltig (nichts geschrieben), 500 = Datei nicht schreibbar (nichts geaendert)."""
+    """Validate roles.yaml (probe config) and write atomically, then reload live. None = written and active; a
+    Problem 400 = invalid (nothing written), 500 = file not writable (nothing changed)."""
     probe = Config.__new__(Config)
     probe._locate(state.CFG.path, True)
     merged = probe.merged(new)
@@ -690,7 +690,7 @@ def write_overrides(new):
         os.replace(tmp, state.CFG.overrides_path)
     except OSError as e:  # exception-ok: file system (disk full, permissions) - only the write itself can tell
         return Problem(500, f"roles.yaml not written: {type(e).__name__}")
-    if failed(problem := state.CFG.reload()):   # die Probe war gueltig - hier nur, falls sich config.yaml dazwischen aenderte
+    if failed(problem := state.CFG.reload()):   # The probe was valid - here only in case config.yaml changed in between
         return problem
     from . import cloud, decision
     cloud.setup()
@@ -699,7 +699,7 @@ def write_overrides(new):
 
 
 def read_overrides():
-    """roles.yaml geparst (Cache nach mtime). Aufrufer, die den Baum veraendern, muessen kopieren."""
+    """roles.yaml parsed (cache by mtime). Callers modifying the tree must copy."""
     import copy
     return copy.deepcopy(load_yaml(state.CFG.overrides_path, {}) or {})
 

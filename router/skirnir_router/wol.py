@@ -19,7 +19,7 @@ def send_magic_packet(mac):
 
 
 async def wake(node):
-    """Weckt einen Knoten und wartet bis Ollama antwortet. True bei Erfolg. Parallel-Anfragen teilen einen Versuch."""
+    """Wakes a node and waits for Ollama to respond. True on success. Parallel requests share one attempt."""
     async with node.wake_lock:
         if node.state != "offline":
             return True
@@ -28,7 +28,7 @@ async def wake(node):
             return False
         node.last_wake = now
         mac = normalize_mac(node.mac)
-        if mac is None:   # aus Fakten oder alter Policy; sonst wuerde bytes.fromhex() hier als 500 beim Client landen
+        if mac is None:   # from facts or old policy; otherwise bytes.fromhex() would result in a 500 on the client
             log.warning("WOL %s: no valid MAC (%r)", node.name, node.mac)
             return False
         log.info("WOL %s (%s)", node.name, mac)

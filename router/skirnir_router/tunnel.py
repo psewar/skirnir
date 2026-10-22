@@ -1,4 +1,4 @@
-"""Agent -> Router: WebSocket-Tunnel mit Binaerrahmen (REQ/RESP/DATA/END/ERR/CANCEL/HB/HBACK/OLLAMA)."""
+"""Agent -> Router: WebSocket tunnel with binary frames (REQ/RESP/DATA/END/ERR/CANCEL/HB/HBACK/OLLAMA)."""
 
 import asyncio
 import json
@@ -10,7 +10,7 @@ from . import poll, state
 from .common import log
 
 
-# Der Agent haelt eine ausgehende WebSocket-Verbindung; der Router schickt seine Ollama-Aufrufe als Streams hindurch.
+# The agent holds an outgoing WebSocket connection; the router sends its Ollama calls as streams through it.
 # Rahmen: typ(1) | stream_id(4, big endian) | payload. Gegenstueck: agent/tunnel.go, test/fake_agent.py.
 TUN_REQ, TUN_RESP, TUN_DATA, TUN_END, TUN_ERR, TUN_CANCEL, TUN_HB, TUN_HBACK = 1, 2, 3, 4, 5, 6, 7, 8
 TUN_OLLAMA = 9   # Agent -> Router: Ollama-Zustand (installiert, geladen, erreichbar), Agent >= 0.14.0
@@ -21,7 +21,7 @@ def tun_frame(t, sid, payload=b""):
 
 
 def response_head(payload):
-    """(status, headers) aus dem RESP-Rahmen des Agenten, None wenn er unlesbar ist."""
+    """(status, headers) from the agent's RESP frame, None if unreadable."""
     try:
         h = json.loads(payload)
     except ValueError:  # exception-ok: untrusted JSON from the agent
@@ -33,7 +33,7 @@ def response_head(payload):
 
 
 class TunnelResponse:
-    """Antwort eines Tunnel-Streams. Bietet, was der Router von aiohttp.ClientResponse nutzt:
+    """Response of a tunnel stream. Provides what the router uses from aiohttp.ClientResponse:
     status, headers, read()/text()/json(), `async for line in resp.content`, async-with."""
 
     def __init__(self, tunnel, sid, deadline):
@@ -106,7 +106,7 @@ class TunnelResponse:
 
 
 class TunnelRequest:
-    """Rueckgabe von Tunnel.request(): wie SESSION.request() per `async with` oder `await` nutzbar."""
+    """Return value of Tunnel.request(): usable via `async with` or `await` like SESSION.request()."""
 
     def __init__(self, tunnel, method, path, json_body=None, timeout=None):
         self.tunnel, self.method, self.path = tunnel, method.upper(), path
@@ -129,7 +129,7 @@ class TunnelRequest:
 
 class Tunnel:
     def __init__(self, node, ws, remote):
-        self.node, self.ws, self.remote = node, ws, remote   # node None = wartet auf Freigabe
+        self.node, self.ws, self.remote = node, ws, remote   # node None = waiting for approval
         self.fp = None
         self.approved = node is not None
         self.streams = {}
@@ -146,17 +146,17 @@ class Tunnel:
             await self.ws.send_bytes(frame)
 
     async def send_quiet(self, frame):
-        """Fire-and-forget (HBACK): schliesst der Tunnel gerade (Router-Stopp, Agent weg), ist das kein Fehler - ohne diese
-        Huelle stand bei jedem Deploy 'Task exception was never retrieved' mit Traceback im Journal (2026-09-25)."""
+        """Fire-and-forget (HBACK): if the tunnel is closing (router stop, agent gone), this is not an error - without this
+        wrapper, every deploy logged 'Task exception was never retrieved' with a traceback (2026-09-25)."""
         try:
             await self.send(frame)
         except (ConnectionError, RuntimeError, ClientError) as e:  # exception-ok: network boundary, the websocket is closing
             log.debug("tunnel %s: answer dropped, connection closing (%s)", self.name(), e)
 
     async def open(self, method, path, body, deadline):
-        """Stream oeffnen und auf den Antwortkopf warten. Wird der Aufrufer vorher abgebrochen (Client trennt waehrend des
-        Prefills, aeussere Zeitgrenze), raeumt open den Stream ab und schickt CANCEL: sonst blieb der Eintrag in `streams`
-        bis zum Tunnelende liegen, und der Agent rechnete die Ollama-Anfrage fuer niemanden zu Ende."""
+        """Open the stream and wait for the response header. If the caller is aborted earlier (client disconnects during
+        Prefills, outer timeout), open cleans up the stream and sends CANCEL: otherwise the entry stayed in `streams`
+        until the tunnel ended, and the agent finished the Ollama request for no one."""
         sid = self.next_id
         self.next_id = self.next_id % 0xFFFFFFFF + 1
         resp = TunnelResponse(self, sid, deadline)
@@ -166,7 +166,7 @@ class Tunnel:
             return await self._open(sid, resp, method, path, body, deadline)
         except asyncio.CancelledError:  # exception-ok: cancellation of the waiting caller; clean up the stream, then pass it on
             if self.streams.pop(sid, None) is not None:
-                state.spawn(self.cancel(sid))   # nicht hier warten: der Abbruch soll sofort weiterlaufen
+                state.spawn(self.cancel(sid))   # do not wait here: the abort should continue immediately
             raise  # exception-ok: cancellation must propagate to the caller
 
     async def _open(self, sid, resp, method, path, body, deadline):
@@ -177,7 +177,7 @@ class Tunnel:
             self.streams.pop(sid, None)
             # exception-ok: emulates aiohttp; the caller handles a ClientError at its network boundary
             raise ClientError(f"tunnel {self.name()}: send failed: {e}") from e
-        wait = (deadline - time.time()) if deadline else 600   # Antwortkopf kommt bei Ollama erst nach dem Modell-Load
+        wait = (deadline - time.time()) if deadline else 600   # Response header arrives from Ollama only after model load
         try:
             t, payload = await asyncio.wait_for(resp.q.get(), max(0.001, wait))
         except asyncio.TimeoutError:  # exception-ok: deadline of the emulated request; clean up the stream, then pass it on

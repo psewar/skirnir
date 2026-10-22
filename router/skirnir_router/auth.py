@@ -1,4 +1,4 @@
-"""Passwort-Hashes und Basic Auth fuer die Control-Plane; Client-Authentifizierung fuer den API-Port (Stufe 2)."""
+"""Password hashes and Basic Auth for the control plane; client authentication for the API port (stage 2)."""
 
 import asyncio
 import hashlib
@@ -17,14 +17,14 @@ from .outcome import Problem
 
 
 # ----------------------------------------------------------------------------- Client-Authentifizierung (11434)
-# Wer den Router rufen darf, steht in config.yaml unter router.client_auth. Drei Wege der Identifikation, in dieser
+# Who may call the router is defined in config.yaml under router.client_auth. Three identification methods, in this
 # Reihenfolge: "Authorization: Bearer <token>" (HA-Ollama-Integration, OpenAI-Clients), "Authorization: Basic
-# <client>:<token>" (Clients, die nur Basic koennen), Quell-IP (Clients, die gar keinen Header senden koennen -
-# node-red-contrib-ollama schickt seinen API-Key nur an ollama.com). Tokens sind zufaellig und lang, deshalb reicht
-# sha256 statt PBKDF2: die Pruefung laeuft bei jeder Anfrage, ein langsamer Hash waere hier Selbstsabotage.
-# Ein falsches Token faellt NICHT auf die IP zurueck - es ist ein Fehler, keine Anonymitaet.
-EXEMPT_PATHS = {"/", "/api/version"}   # Gesundheitsabfragen bleiben ohne Identitaet erreichbar (Smoke-Test, Monitoring)
-_UNAUTH_AUDIT_EVERY_S = 300            # pro Quell-IP hoechstens eine Audit-Zeile in dieser Zeit (sonst flutet ein Poller das Log)
+# <client>:<token>" (clients that only support Basic), source IP (clients that cannot send any header -
+# node-red-contrib-ollama sends its API key only to ollama.com). Tokens are random and long, so
+# sha256 instead of PBKDF2: the check runs on every request; a slow hash would be self-sabotage here.
+# A wrong token does NOT fall back to IP - it is an error, not anonymity.
+EXEMPT_PATHS = {"/", "/api/version"}   # Health checks remain accessible without identity (smoke test, monitoring)
+_UNAUTH_AUDIT_EVERY_S = 300            # at most one audit line per source IP in this time (otherwise a poller floods the log)
 _audit_failed = [False]
 
 
@@ -37,8 +37,8 @@ def client_auth_mode():
 
 
 def audit(event, **fields):
-    """Sicherheitsrelevantes Ereignis als JSON-Zeile ins Audit-Log (config: client_auth.audit_log) und ins Journal.
-    Keine Prompts, keine Tokens - nur wer, was, warum. Scheitert das Schreiben, laeuft der Router weiter."""
+    """Security-relevant event as a JSON line to the audit log (config: client_auth.audit_log) and the journal.
+    No prompts, no tokens - only who, what, why. If writing fails, the router continues."""
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "event": event, **fields}
     line = json.dumps(rec, ensure_ascii=False)
     path = client_auth_cfg().get("audit_log")
@@ -57,7 +57,7 @@ def audit(event, **fields):
 
 
 def resolve_client(request):
-    """(Client-Name, Weg) oder (None, Grund). Weg: bearer | basic | ip; Grund: bad_token | None (nichts geschickt)."""
+    """(client name, method) or (None, reason). Method: bearer | basic | ip; reason: bad_token | None (nothing sent)."""
     clients = client_auth_cfg().get("clients") or {}
     header = request.headers.get("Authorization", "")
     token, user, key_via = None, None, "bearer"
@@ -69,7 +69,7 @@ def resolve_client(request):
         # Anthropic-Clients: Claude Code schickt ANTHROPIC_AUTH_TOKEN als Bearer, ANTHROPIC_API_KEY als x-api-key
         token, key_via = request.headers["x-api-key"].strip(), "x-api-key"
     if token:
-        # Router-eigene Identitaet fuer den Selbstaufruf der UI: nur mit dem Start-Zufall UND nur von localhost
+        # Router-own identity for UI self-call: only with the startup random AND only from localhost
         if state.INTERNAL_TOKEN and not user and (request.remote or "") in ("127.0.0.1", "::1") \
                 and hmac.compare_digest(token, state.INTERNAL_TOKEN):
             return state.INTERNAL_CLIENT, "internal"
@@ -88,7 +88,7 @@ def resolve_client(request):
 
 
 def error_format(path):
-    """Fehlerform nach Pfad: Anthropic (/v1/messages...), OpenAI (uebriges /v1), sonst Ollama."""
+    """Error format by path: Anthropic (/v1/messages...), OpenAI (rest of /v1), else Ollama."""
     if path.startswith("/v1/messages"):
         return anthropic_error
     return openai_error if path.startswith("/v1/") else ollama_error
@@ -108,11 +108,11 @@ def _stats_for(name):
 
 @web.middleware
 async def client_auth_middleware(request, handler):
-    """API-Port: Client identifizieren, Rate Limit pruefen, im enforce-Modus Unbekannte abweisen."""
+    """API port: identify client, check rate limit, reject unknowns in enforce mode."""
     if request.path in EXEMPT_PATHS:
         return await handler(request)
     cfg = client_auth_cfg()
-    if not cfg.get("clients"):          # kein Block konfiguriert -> Port offen wie vor Stufe 2
+    if not cfg.get("clients"):          # no block configured -> port open as before stage 2
         return await handler(request)
     now = time.time()
     name, via = resolve_client(request)
@@ -135,7 +135,7 @@ async def client_auth_middleware(request, handler):
     st = _stats_for(name)
     st["total"] += 1
     st["last_seen"], st["via"] = now, via
-    rpm = (cfg["clients"].get(name) or {}).get("requests_per_minute")   # skirnir-ui steht nicht in der Konfiguration
+    rpm = (cfg["clients"].get(name) or {}).get("requests_per_minute")   # skirnir-ui is not in the configuration
     if rpm:
         rec = st["recent"]
         rec.append(now)
@@ -154,22 +154,22 @@ async def client_auth_middleware(request, handler):
     return await handler(request)
 
 
-# Ein Client mit `inference: false` (z. B. ein Gedaechtnisdienst, der nur rerankt und an seiner Quell-IP erkannt wird) darf auf
-# dem API-Port nur diese Endpunkte. Alles andere ist gesperrt: Inferenz, Memory-Gateway, Session-API. Allowlist statt
-# Sperrliste, damit ein spaeter hinzugefuegter Endpunkt fuer ihn zu bleibt, bis er hier steht. `roles` behaelt seine Bedeutung
-# (leer oder fehlend = alle Rollen); ohne dieses Feld haette so ein Client also jede Rolle.
+# A client with `inference: false` (e.g. a memory service that only reranks and is identified by its source IP) may access
+# only these endpoints on the API port. Everything else is locked: inference, memory gateway, session API. Allowlist instead of
+# blocklist, so a later added endpoint stays closed for it until listed here. `roles` keeps its meaning
+# (empty or missing = all roles); without this field such a client would have every role.
 NON_INFERENCE_ALLOWED = {("POST", "/rerank"), ("GET", "/info")}
 
 
 def inference_refusal(spec, request):
-    """None = erlaubt, sonst das Problem (403, kind inference_disabled)."""
+    """None = allowed, else the problem (403, kind inference_disabled)."""
     if spec.get("inference", True) or (request.method, request.path) in NON_INFERENCE_ALLOWED:
         return None
     return Problem(403, "client may only use POST /rerank and GET /info (inference: false)", "inference_disabled")
 
 
 def client_allows(request, role, concrete):
-    """None = erlaubt, sonst der Grund fuer 403. Unauthentifizierte Anfragen (observe) haben keine Schranken."""
+    """None = allowed, else the reason for 403. Unauthenticated requests (observe) have no restrictions."""
     name = request.get("client")
     if not name:
         return None
@@ -189,7 +189,7 @@ def client_allows(request, role, concrete):
 
 
 def client_auth_view():
-    """Fuer /admin/state und /admin/client_auth: Modus, alle konfigurierten Clients (auch nie gesehene), Unbekannte."""
+    """For /admin/state and /admin/client_auth: mode, all configured clients (even unseen), unknowns."""
     cfg, now = client_auth_cfg(), time.time()
     out = {"mode": client_auth_mode(), "configured_mode": cfg.get("mode", "observe"), "audit_log": cfg.get("audit_log"),
            "clients": {}, "unauthenticated": {}}
@@ -221,7 +221,7 @@ PASSWORD_HASH = re.compile(r"pbkdf2:([1-9][0-9]{0,8}):((?:[0-9a-fA-F]{2})+):((?:
 
 
 def verify_password(password, stored):
-    """Passwort gegen 'pbkdf2:<runden>:<salz-hex>:<hash-hex>' (hash_password); False auch fuer einen unlesbaren Eintrag."""
+    """Password against 'pbkdf2:<rounds>:<salt-hex>:<hash-hex>' (hash_password); False also for an unreadable entry."""
     m = PASSWORD_HASH.fullmatch(str(stored or ""))
     if not m:
         return False
@@ -230,19 +230,19 @@ def verify_password(password, stored):
     return hmac.compare_digest(h.hex(), hash_hex)
 
 
-# Geprueft-Cache fuer Basic Auth (2026-09-11): PBKDF2 mit 200 000 Runden kostet ~200 ms CPU je Aufruf - im Event-Loop. Die UI
-# fragt je Tab alle 3 s vier Endpunkte ab, Firefox des Betreibers hielt 8 Verbindungen: der Router lag im Leerlauf bei 40-50 % CPU und
-# jede Anfrage (auch /api/chat ueber den Tunnel) wartete hinter den Hashes ("Router/Netz 2,6 s" beim Lasttest). Ein einmal
-# geprueftes Paar (Header + gespeicherter Hash) gilt BASIC_CACHE_S. Review 2026-09-25: das Hashing lief im Event-Loop und
-# Fehlversuche waren ungecacht - der Control-Port ist per public_url erreichbar, wenige falsche Anfragen pro Sekunde haetten
-# jede Inferenz gebremst. Jetzt: PBKDF2 in einem Thread, ein Fehlversuch (Header + Hash) gilt BASIC_FAIL_S als abgelehnt,
-# und nach BASIC_FAIL_MAX Fehlversuchen einer Quelladresse in BASIC_FAIL_S antwortet der Router 429 ohne zu hashen.
+# Verified cache for Basic Auth (2026-09-11): PBKDF2 with 200,000 rounds costs ~200 ms CPU per call - in the event loop. The UI
+# polls four endpoints every 3 s per tab, the operator's Firefox held 8 connections: the router idled at 40-50 % CPU and
+# every request (also /api/chat via the tunnel) waited behind the hashes ("Router/Net 2.6 s" in the load test). A once
+# verified pair (header + stored hash) is valid for BASIC_CACHE_S. Review 2026-09-25: hashing ran in the event loop and
+# failures were uncached - the control port is reachable via public_url, a few wrong requests per second would have
+# slowed down every inference. Now: PBKDF2 in a thread, one failure (header + hash) is rejected for BASIC_FAIL_S,
+# and after BASIC_FAIL_MAX failures from a source address in BASIC_FAIL_S the router responds 429 without hashing.
 BASIC_CACHE_S = 600
 BASIC_FAIL_S = 60
 BASIC_FAIL_MAX = 5
 _BASIC_OK = {}     # sha256(header|stored) -> Ablaufzeit
 _BASIC_FAIL = {}   # sha256(header|stored) -> Ablaufzeit
-_BASIC_SRC = {}    # Quelladresse -> deque(Zeitpunkte der Fehlversuche)
+_BASIC_SRC = {}    # Source address -> deque(timestamps of failures)
 
 
 def _prune(cache, now, limit=256):
@@ -254,7 +254,7 @@ def _prune(cache, now, limit=256):
 
 
 def _basic_cached(key):
-    """True/False aus dem Cache, None = muss gehasht werden."""
+    """True/False from cache, None = must be hashed."""
     now = time.time()
     if _BASIC_OK.get(key, 0) > now:
         return True
@@ -270,7 +270,7 @@ def _basic_note(key, ok):
 
 
 def _basic_fail_src(remote, note):
-    """Fehlversuche je Quelladresse; True = gebremst (429 ohne Hashing)."""
+    """Failures per source address; True = throttled (429 without hashing)."""
     now = time.time()
     q = _BASIC_SRC.setdefault(remote, deque())
     while q and q[0] <= now - BASIC_FAIL_S:
@@ -285,7 +285,7 @@ def _basic_fail_src(remote, note):
 
 @web.middleware
 async def basic_auth_middleware(request, handler):
-    """UI und /admin/* verlangen Basic Auth; der Agent-Heartbeat (/v1/...) bleibt beim Token."""
+    """UI and /admin/* require Basic Auth; the agent heartbeat (/v1/...) stays on the token."""
     if request.path.startswith("/v1/") or not state.CFG.control_users:
         return await handler(request)
     auth = request.headers.get("Authorization", "")
@@ -301,7 +301,7 @@ async def basic_auth_middleware(request, handler):
                 if _basic_fail_src(remote, note=False):
                     return web.json_response({"error": "too many failed logins, try again in a minute"}, status=429,
                                              headers={"Retry-After": str(BASIC_FAIL_S)})
-                ok = await asyncio.to_thread(verify_password, pw, stored)   # PBKDF2 (~200 ms) nicht im Event-Loop
+                ok = await asyncio.to_thread(verify_password, pw, stored)   # PBKDF2 (~200 ms) not in the event loop
                 _basic_note(key, ok)
         if not ok:
             _basic_fail_src(remote, note=True)

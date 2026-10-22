@@ -1,9 +1,9 @@
-"""Regel-Engine: Stichwort-Treffer je Option, deterministisch, ohne Abhaengigkeiten.
+"""Rule engine: keyword hits per option, deterministic, no dependencies.
 
-Dient als Vergleichsbasis ("Rules" in der Messreihe) und als letztes Glied der Kette, wenn alles andere ausfaellt oder
-unsicher ist. Die Stichwoerter kommen aus `decision_engine.rules` (Option -> Liste); fehlt eine Option dort, bekommt sie
-nur die Grundgewichtung. Die Verteilung ist eine Softmax ueber die Trefferzahl - eine Heuristik, keine Wahrscheinlichkeit
-im statistischen Sinn, darum bleibt `calibrated_confidence` leer.
+Serves as a baseline ("Rules" in the measurement series) and as the final fallback when everything else fails or is
+uncertain. Keywords come from `decision_engine.rules` (option -> list); if an option is missing there, it only gets
+the baseline weighting. The distribution is a softmax over the hit count - a heuristic, not a probability in the
+statistical sense, so `calibrated_confidence` remains empty.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ DEFAULT_RULES = {
     "standard": ["fasse zusammen", "zusammenfassung", "uebersetze", "übersetze", "erklaere", "erkläre", "was ist", "wer ist",
                  "formuliere", "schreib eine mail", "korrigiere", "umschreib", "kurz", "liste", "summarize", "translate", "explain"],
 }
-LONG_CONTEXT_CHARS = 1500   # ab hier zaehlt der Umfang als Indiz fuer die grosse Rolle
+LONG_CONTEXT_CHARS = 1500   # from this length on, the size hints at the big role
 
 
 class RulesEngine(DecisionEngine):
@@ -38,7 +38,7 @@ class RulesEngine(DecisionEngine):
     def __init__(self, rules: dict | None = None, temperature: float = 0.8, base_option: str | None = None):
         self.rules = {k: [w.lower() for w in v] for k, v in (rules or DEFAULT_RULES).items()}
         self.temperature = temperature
-        self.base_option = base_option   # bekommt bei null Treffern den Zuschlag (z. B. standard)
+        self.base_option = base_option   # gets a bonus on zero hits (e.g., standard)
 
     async def decide(self, req: DecisionRequest) -> DecisionResult:
         t0 = time.perf_counter()
@@ -57,7 +57,7 @@ class RulesEngine(DecisionEngine):
         if option == "code" and re.search(r"\b(def|class|import|function|const|let|SELECT|FROM)\b", req.context):
             hits += 1
         if option == "assist" and len(req.context) < 60 and not req.metadata.get("tools"):
-            hits += 0.5   # kurze Saetze ohne Werkzeuge: eher Sprachbefehl
+            hits += 0.5   # short sentences without tools: likely a voice command
         if req.metadata.get("tools") and option in ("code", "standard"):
             hits += 0.5
         if option == self.base_option:

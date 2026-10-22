@@ -1,13 +1,13 @@
-"""Trainingsdaten aus dem Betrieb sammeln (Abschnitt 9): JSONL im Jevlike-Format plus Herkunft.
+"""Collect operational training data (Section 9): JSONL in Jevlike format plus provenance.
 
-Zwei Quellen von Labels:
-  * `client`: der Client hat selbst eine konkrete Rolle verlangt (standard/gross/assist/code). Das ist das Label - echt,
-    kostenlos, aber durch den Client eingefaerbt (HA fragt fast nur assist).
-  * `engine`: die Auto-Rolle wurde von einer Engine entschieden. Das ist ein Pseudo-Label und wird so markiert; es taugt
-    erst nach Sichtung als Trainingsdatum.
-Datenschutz: nur fuer Clients, die in `capture.clients` stehen (Opt-in), Kontext auf `max_context_chars` gekuerzt und
-anonymisiert (Schluessel/Passwoerter wie beim Cloud-Credential-Scan, E-Mail, IP, lange Zahlen, URLs). `group` ist ein Hash
-der normalisierten ersten Woerter, damit decision-eval aehnliche Anfragen nicht ueber train/validation/test verteilt.
+Two label sources:
+  * `client`: the client explicitly requested a specific role (standard/gross/assist/code). This is the label - real,
+    free, but biased by the client (HA almost always requests assist).
+  * `engine`: the auto-role was decided by an engine. This is a pseudo-label and marked as such; it is only usable
+    as training data after review.
+Privacy: only for clients listed in `capture.clients` (opt-in), context truncated to `max_context_chars` and
+anonymized (keys/passwords like in the Cloud-Credential-Scan, email, IP, long numbers, URLs). `group` is a hash
+of the normalized first words, so decision-eval does not distribute similar requests across train/validation/test.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ LONG_NUMBER = re.compile(r"\b\d{6,}\b")
 
 
 def anonymize(text: str) -> str:
-    from .. import cloud   # spaet: cloud importiert viel; SECRET_PATTERNS ist die gleiche Liste wie beim Credential-Scan
+    from .. import cloud   # late: cloud imports a lot; SECRET_PATTERNS is the same list as in the Credential-Scan
     for _name, rx in cloud.SECRET_PATTERNS:
         text = rx.sub("<secret>", text)
     text = URL.sub("<url>", text)
@@ -54,7 +54,7 @@ class Capture:
 
     def record(self, context: str, options: list[str], label: str | None, source: str, client: str | None, request_id: str,
                decision: dict | None = None):
-        """Eine Zeile anhaengen; Fehler beim Schreiben duerfen den Request nie stoeren."""
+        """Append a line; write errors must never disturb the request."""
         if not self.allowed(client) or label not in options:
             return
         ctx = context[: self.max_chars]

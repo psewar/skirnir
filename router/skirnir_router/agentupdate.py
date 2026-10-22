@@ -1,19 +1,17 @@
-"""Agent-Update ueber den Router (2026-09-25): der Router verteilt signierte Agent-Binaries, der Agent holt sie durch die
-bestehende Verbindung und tauscht sich selbst. Grund: Knoten ohne Fernzugriff (nur ausgehender Tunnel) und wachsende Zahl
-von Geraeten.
+"""Agent update via router (2026-09-25): the router distributes signed agent binaries; the agent fetches them over the
+existing connection and replaces itself. Reason: nodes without remote access (outbound tunnel only) and growing device count.
 
-Ablauf
-  1. `deploy.py --agent` legt die Binaries samt Manifest nach <config-dir>/agent/ (manifest.json = {"manifest": {...},
-     "signature": base64}); die Signatur stammt vom Betreiber-Schluessel im Ops-Ordner, NICHT vom Router - ein kompromittierter
-     Router kann Inferenz umlenken, aber keinen Code auf die Knoten bringen.
-  2. Auftrag (UI-Knopf oder Rollout-Schleife): Knoten muss freigegeben, verbunden und im Leerlauf sein. Der Router schickt
-     durch den Tunnel {"t": "update", version, file, url, sha256, size, token, manifest, signature}; das Token gilt 15 min
-     fuer den Download von /v1/agent/binary/<file> (kein Basic Auth, der Agent hat keins).
-  3. Der Agent prueft Signatur und SHA-256, testet die neue Binary (`version`), tauscht und startet neu; sein Heartbeat
-     traegt `update: {state, version, message}`. Meldet er sich mit der neuen Version, gilt der Auftrag als erledigt.
-  4. Rollout: Policy `auto_update` je Knoten; `modes.agent_update.canary` bekommt neue Versionen zuerst, alle anderen erst,
-     wenn der Kanarienvogel die Version `canary_clean_h` Stunden faehrt. Waehrend eines Auftrags bekommt der Knoten keine
-     neuen Anfragen (Drain, 10 min). Haengt ein Auftrag 15 min oder meldet der Agent einen Fehler -> HA-Problem.
+Flow
+  1. `deploy.py --agent` places binaries and manifest in <config-dir>/agent/ (manifest.json = {"manifest": {...},
+     "signature": base64}); signature comes from the operator key in the ops folder, NOT the router - a compromised
+     router can redirect inference but cannot push code to nodes.
+  2. Request (UI button or rollout loop): node must be approved, connected, and idle. Router sends via tunnel {"t": "update", version, file, url, sha256, size, token, manifest, signature}; token valid 15 min
+     for download from /v1/agent/binary/<file> (no Basic Auth, agent has none).
+  3. Agent verifies signature and SHA-256, tests new binary (`version`), swaps and restarts; its Heartbeat
+     carries `update: {state, version, message}`. Once it reports the new version, the request is complete.
+  4. Rollout: Policy `auto_update` per node; `modes.agent_update.canary` gets new versions first, others only
+     after the canary has run the version for `canary_clean_h` hours. During a request, the node receives no
+     new requests (Drain, 10 min). If a request hangs 15 min or the agent reports an error -> HA Problem.
 """
 import asyncio
 import base64
@@ -35,7 +33,7 @@ TOKEN_TTL_S = 900
 DRAIN_S = 600
 STALL_S = 900
 _MANIFEST = {"mtime": None, "data": None}
-STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")   # version_since, vom Router selbst geschrieben
+STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")   # version_since, written by the router itself
 
 
 def agent_dir():
@@ -43,12 +41,12 @@ def agent_dir():
 
 
 def canonical(manifest):
-    """Signierte Form: kompaktes JSON mit sortierten Schluesseln (deploy.py signiert genau diese Bytes)."""
+    """Signed form: compact JSON with sorted keys (deploy.py signs exactly these bytes)."""
     return json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
 def load_manifest():
-    """Manifest aus <agent_dir>/manifest.json (Cache nach mtime). None = kein Update hinterlegt oder unlesbar."""
+    """Manifest from <agent_dir>/manifest.json (cache by mtime). None = no update stored or unreadable."""
     p = os.path.join(agent_dir(), "manifest.json")
     try:
         mtime = os.stat(p).st_mtime
@@ -81,8 +79,8 @@ def file_for(manifest, os_name, arch):
 
 
 def verify_with(public_key_b64, manifest, signature_b64):
-    """Optionale Selbstpruefung auf dem Router (wenn modes.agent_update.public_key gesetzt ist): dieselbe Pruefung wie im Agenten.
-    None, wenn die Signatur passt, sonst der Grund."""
+    """Optional self-check on the router (if modes.agent_update.public_key is set): same check as in the agent.
+    None if signature matches, otherwise the reason."""
     try:
         key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64))
         key.verify(base64.b64decode(signature_b64), canonical(manifest))
@@ -94,7 +92,7 @@ def verify_with(public_key_b64, manifest, signature_b64):
 
 
 def available_for(e):
-    """(Manifest-Version, Datei) fuer den Knoten, oder (None, None), wenn nichts Passendes hinterlegt ist."""
+    """(Manifest version, file) for the node, or (None, None) if nothing suitable is stored."""
     m = load_manifest()
     if not m:
         return None, None
@@ -104,7 +102,7 @@ def available_for(e):
 
 
 def update_view(e, now=None):
-    """Fuer /admin/nodes und HA: aktuelle Version, verfuegbare Version, Auftragsstand."""
+    """For /admin/nodes and HA: current version, available version, request status."""
     now = now or time.time()
     facts = e.get("facts") or {}
     avail, _ = available_for(e)
@@ -116,7 +114,7 @@ def update_view(e, now=None):
 
 
 def note_hello(e, facts, now=None):
-    """Beim Anmelden eines Agenten: Versionswechsel festhalten und einen offenen Auftrag abschliessen."""
+    """On agent login: record version change and close any open request."""
     now = now or time.time()
     v = facts.get("agent_version")
     if v and v != (e.get("facts") or {}).get("agent_version"):
@@ -134,7 +132,7 @@ def note_hello(e, facts, now=None):
 
 
 def note_report(node, report, now=None):
-    """`update`-Block aus dem Heartbeat des Agenten: Zwischenstand (downloading, applied) oder Fehler."""
+    """`update` block from the agent's Heartbeat: progress (downloading, applied) or error."""
     if not isinstance(report, dict) or not report.get("state") or state.REG is None or not node.fp:
         return
     e = state.REG.nodes.get(node.fp)
@@ -145,13 +143,13 @@ def note_report(node, report, now=None):
     if u.get("state") in ("done",) and report["state"] != "failed":
         return
     if report.get("version") and u.get("version") and report["version"] != u["version"]:
-        return   # alter Bericht zu einem frueheren Auftrag
-    kind = report.get("kind") if isinstance(report.get("kind"), str) else None   # feste Fehlerart, Agent >= 0.19.1 ("" = keine)
+        return   # old report for a previous task
+    kind = report.get("kind") if isinstance(report.get("kind"), str) else None   # fixed error type, Agent >= 0.19.1 ("" = none)
     changed = report["state"] != u.get("state") or (report.get("message") or "") != (u.get("message") or "") or kind != u.get("kind")
     if changed:
         u.update(state=report["state"], message=report.get("message") or "", t=now, ts=time.strftime("%Y-%m-%dT%H:%M:%S"), version=u.get("version") or report.get("version"))
         if kind is None:
-            u.pop("kind", None)   # aelterer Agent: kein Feld, retry_after faellt auf den Meldungstext zurueck
+            u.pop("kind", None)   # older agent: no field, retry_after falls back to the message text
         else:
             u["kind"] = kind
         e["update"] = u
@@ -164,7 +162,7 @@ def note_report(node, report, now=None):
 
 
 def problems(now=None):
-    """HA-Probleme: fehlgeschlagene oder haengende Updates."""
+    """HA Problems: failed or hanging updates."""
     now = now or time.time()
     out = []
     if state.REG is None:
@@ -188,7 +186,7 @@ def make_token(fp, name):
 
 
 async def order_update(fp, reason="ui", force=False):
-    """Auftrag an einen Knoten. Liefert (ok, Meldung)."""
+    """Task for a node. Returns (ok, message)."""
     e = state.REG.nodes.get(fp)
     if e is None:
         return False, "unknown fingerprint"
@@ -233,7 +231,7 @@ async def order_update(fp, reason="ui", force=False):
 
 
 async def handle_binary(request):
-    """GET /v1/agent/binary/{name} mit Bearer-Token aus dem Auftrag (ohne Basic Auth; der Agent hat keine UI-Zugangsdaten)."""
+    """GET /v1/agent/binary/{name} with Bearer token from the request (no Basic Auth; agent has no UI credentials)."""
     name = request.match_info["name"]
     auth = request.headers.get("Authorization", "")
     tok = auth[7:] if auth.startswith("Bearer ") else ""
@@ -254,7 +252,7 @@ async def handle_binary(request):
 
 
 async def handle_manifest(request):
-    """GET /admin/agent-update: Manifest und Rollout-Sicht fuer die UI."""
+    """GET /admin/agent-update: Manifest and rollout view for the UI."""
     m = load_manifest()
     cfg = state.CFG.agent_update or {}
     return web.json_response({"manifest": m["manifest"] if m else None, "signed": bool(m and m.get("signature")),
@@ -263,7 +261,7 @@ async def handle_manifest(request):
 
 
 def canary_clean(cfg, version, now):
-    """Faehrt der Kanarienvogel diese Version seit canary_clean_h Stunden und ist er online?"""
+    """Has the canary been running this version for canary_clean_h hours and is it online?"""
     name = cfg.get("canary")
     if not name or state.REG is None:
         return False
@@ -281,13 +279,13 @@ APP_CONTROL_RETRY_S = 1800
 
 
 def retry_after(u):
-    """Wartezeit nach einem Fehlschlag: 30 min, wenn Smart App Control / WDAC die neue Binary blockte (das Cloud-Urteil ueber eine
-    unsignierte Datei kippt oft binnen Minuten bis Stunden: 2026-09-26 0.11.0 nach 11 min, 0.12.0 nach < 6 h), sonst 6 h.
-    Agent >= 0.19.1 meldet die Art als Feld `kind` (am Windows-Fehlercode erkannt, agent/updater.go updateKind)."""
+    """Wait time after failure: 30 min if Smart App Control / WDAC blocked the new binary (the cloud verdict on an
+    unsigned file often flips within minutes to hours: 2026-09-26 0.11.0 after 11 min, 0.12.0 after < 6 h), otherwise 6 h.
+    Agent >= 0.19.1 reports the type as field `kind` (detected via Windows error code, agent/updater.go updateKind)."""
     if "kind" in u:
         return APP_CONTROL_RETRY_S if u["kind"] == "app_control" else 6 * 3600
-    # Rueckfall fuer Agenten vor 0.19.1, die kein `kind` senden: nur ihr (lokalisierter) Meldungstext verraet den Block.
-    # Entfernen, sobald alle Knoten Agent >= 0.19.1 fahren.
+    # Fallback for agents before 0.19.1 that do not send `kind`: only their (localized) message text reveals the block.
+    # Remove once all nodes run Agent >= 0.19.1.
     msg = (u.get("message") or "").lower()
     if "application control" in msg or "anwendungssteuerung" in msg:
         return APP_CONTROL_RETRY_S
@@ -295,8 +293,8 @@ def retry_after(u):
 
 
 async def rollout_loop():
-    """Alle 60 s: Knoten mit Policy auto_update auf die Manifest-Version bringen - erst der Kanarienvogel, die anderen
-    einer nach dem anderen, sobald der Kanarienvogel die Version lange genug sauber faehrt."""
+    """Every 60 s: bring nodes with policy auto_update to the manifest version - canary first, others
+    one by one, once the canary has run the version cleanly long enough."""
     await asyncio.sleep(30)
     while True:
         try:
@@ -325,7 +323,7 @@ async def rollout_once(now=None):
         if u.get("version") == version and u.get("state") in ("requested", "downloading", "applied") and now - (u.get("t") or 0) < STALL_S:
             continue
         if u.get("version") == version and u.get("state") in ("failed", "stalled") and now - (u.get("t") or 0) < retry_after(u):
-            continue   # nach einem Fehlschlag frueh. nach 6 h wieder probieren (oder von Hand)
+            continue   # early after a failure. retry after 6 h (or manually)
         is_canary = e["name"] == cfg.get("canary")
         if not is_canary and cfg.get("canary") and not canary_clean(cfg, version, now):
             continue

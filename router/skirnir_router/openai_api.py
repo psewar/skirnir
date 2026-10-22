@@ -1,4 +1,4 @@
-"""OpenAI-kompatibles /v1 als Uebersetzung auf die native Ollama-API."""
+"""OpenAI-compatible /v1 translated to the native Ollama API."""
 
 import json
 import re
@@ -47,7 +47,7 @@ def oa_messages_to_native(msgs, preserve_tool_ids=False):
             continue
         n = {"role": m.get("role", "user")}
         content = m.get("content")
-        if isinstance(content, list):   # Inhaltsteile: Text zusammenfuegen, data-URL-Bilder als Base64 uebergeben
+        if isinstance(content, list):   # Content parts: join text, pass data-URL images as Base64
             texts, images = [], []
             for part in content:
                 if not isinstance(part, dict):
@@ -100,7 +100,7 @@ def oa_options(b):
 
 
 def oa_think(b):
-    """think: explizit (nicht-standard), sonst reasoning_effort ('none' = aus), sonst Konfig-Default."""
+    """think: explicit (non-standard), else reasoning_effort ('none' = off), else config default."""
     if "think" in b:
         return bool(b["think"])
     eff = b.get("reasoning_effort")
@@ -133,7 +133,7 @@ def oa_chat_to_native(b):
     if think is not None:
         native["think"] = think
     if "routing" in b:
-        native["routing"] = b["routing"]   # Stufe 1: routing-Block (nicht-standard), Router nimmt ihn wieder heraus
+        native["routing"] = b["routing"]   # Stage 1: routing block (non-standard), router removes it again
     return native
 
 
@@ -207,14 +207,14 @@ class OpenAIChatShape:
         return b"data: [DONE]\n\n"
 
     def stream_error(self, status, msg, why=None):
-        """Fehler mitten im Stream (Ollama-Abbruch, Knoten weg): OpenAI-Fehlerobjekt als eigenes SSE-Ereignis, danach [DONE]."""
+        """Error mid-stream (Ollama abort, node gone): OpenAI error object as separate SSE event, then [DONE]."""
         e = {"message": msg, "type": "api_error" if status >= 500 else "invalid_request_error", "param": None,
              "code": "upstream_error" if status >= 500 else None}
         return self._sse({"error": e})
 
 
 class OpenAICompletionShape(OpenAIChatShape):
-    """Legacy /v1/completions ueber /api/generate: text_completion."""
+    """Legacy /v1/completions via /api/generate: text_completion."""
 
     def __init__(self, include_usage=False):
         super().__init__(include_usage)
@@ -277,7 +277,7 @@ ISO_SECONDS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
 
 async def handle_oa_models(request):
-    if anthropic_api.wants_anthropic(request):   # gleicher Pfad, Anthropic-Form fuer Claude Code u. a.
+    if anthropic_api.wants_anthropic(request):   # same path, Anthropic format for Claude Code etc.
         return anthropic_api.models_response(proxy.tags_list())
     return web.json_response({"object": "list", "data": [oa_model_entry(t) for t in proxy.tags_list()]})
 

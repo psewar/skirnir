@@ -1,20 +1,19 @@
-"""Vorabpruefung des Kontexts: passt eine Anfrage ueberhaupt in num_ctx?
+"""Pre-check of context: does a request fit into num_ctx at all?
 
-Ollama kuerzt zu lange Prompts still. Beim Chat entfernt seine Go-Schicht vorne ganze Nachrichten, bevor der Prompt
-an llama-server geht - das steht nur mit OLLAMA_DEBUG im Log (Beleg 2026-09-24 02:29:19: 350k Zeichen kamen als
-`task.n_tokens = 2477` an, ohne eine einzige Log-Zeile). Der Client bekommt eine normale Antwort, nur fehlt ihm ein
-Teil des Verlaufs. Der Knoten-Agent sieht das nicht; der Router sieht aber beides: was geschickt wurde und was laut
-Ollama angekommen ist (prompt_eval_count = volle Promptlaenge, auch bei gecachtem Praefix).
+Ollama silently truncates overly long prompts. In chat, its Go layer removes whole messages from the front before the prompt
+reaches llama-server - this only appears in the log with OLLAMA_DEBUG (Evidence 2026-09-24 02:29:19: 350k characters arrived as
+`task.n_tokens = 2477`, without a single log line). The client receives a normal response, just missing part of the history. The node agent
+does not see this; the router sees both: what was sent and what arrived according to Ollama (prompt_eval_count = full prompt length, even with cached prefix).
 
-Zwei Stufen, damit eine grobe Schaetzung keinen Fehlalarm ausloest:
-  vorher  - Schaetzung "jede Ziffer 1 Token, Rest Bytes/3,5" (Qwen zerlegt Zahlen in Einzelziffern). Gemessen an 80
-            echten Agenten-Texten (Werkzeugausgaben, Nutzernachrichten) gegen qwen3.6: echt/Schaetzung Median 0,99,
-            p90 1,10, max 1,26. Liegt sie ueber
-            num_ctx, ist die Anfrage ein Kandidat.
-  nachher - Kamen laut Ollama weniger als BESTAETIGT x Schaetzung an, ist die Kuerzung bestaetigt: Journal-Ereignis
-            `context_truncated`, Metrik, Warnung, HA-Ereignis. Kam etwa die Schaetzung an, hat nur die Schaetzung
-            uebertrieben - kein Alarm, nur eine Info-Zeile (Kalibrierhilfe).
-Cloud-Stufen bleiben aussen vor: Anbieter lehnen zu lange Prompts mit Fehler ab statt still zu kuerzen.
+Two tiers, so a rough estimate does not trigger a false alarm:
+  before  - Estimate "every digit 1 token, rest Bytes/3.5" (Qwen splits numbers into single digits). Measured against 80
+            real agent texts (tool outputs, user messages) vs qwen3.6: real/estimate median 0.99,
+            p90 1.10, max 1.26. If it exceeds
+            num_ctx, the request is a candidate.
+  after   - If less than CONFIRMED x estimate arrived according to Ollama, truncation is confirmed: journal event
+            `context_truncated`, metric, warning, HA event. If roughly the estimate arrived, only the estimate
+            overshot - no alarm, just an info line (calibration aid).
+Cloud tiers are excluded: providers reject overly long prompts with an error instead of silently truncating.
 """
 import json
 
@@ -22,13 +21,13 @@ from . import state
 from .common import log
 
 BYTES_PER_TOKEN = 3.5
-MESSAGE_OVERHEAD = 4   # Rollen- und Trennmarken des Chat-Templates je Nachricht
-CONFIRMED = 0.8          # angekommen < 0,8 x geschaetzt -> wahrscheinlich gekuerzt
-CERTAIN = 0.45             # angekommen < 0,45 x geschaetzt -> sicher gekuerzt (schlechteste Ueberschaetzung gemessen: 0,46)
-# Grenzen, gemessen 2026-09-24 an 80 echten Texten (echt/Schaetzung): p10 0,85, min 0,46 - 4 von 80 lagen unter 0,8,
-# alle mit viel Leerraum (eingerueckte Ausgaben; Leerzeichenfolgen sind fuer den Tokenizer fast gratis). Feinere Regeln
-# (Leerraum getrennt zaehlen) gewannen nur in der Stichprobe, nicht in der 5-fach-Kreuzvalidierung. Folge: eine
-# Kuerzung um weniger als ~25 % ist von einem Schaetzfehler nicht zu unterscheiden und bleibt unsichtbar.
+MESSAGE_OVERHEAD = 4   # Roles and separators of the chat template per message
+CONFIRMED = 0.8          # arrived < 0.8 x estimated -> likely truncated
+CERTAIN = 0.45             # arrived < 0.45 x estimated -> definitely truncated (worst overestimation measured: 0.46)
+# Bounds, measured 2026-09-24 on 80 real texts (real/estimate): p10 0.85, min 0.46 - 4 of 80 were below 0.8,
+# all with lots of whitespace (indented outputs; whitespace sequences are nearly free for the tokenizer). Finer rules
+# (counting whitespace separately) only won in the sample, not in 5-fold cross-validation. Consequence: a
+# truncation of less than ~25% is indistinguishable from an estimation error and remains invisible.
 _DIGITS = "0123456789"
 
 
@@ -44,7 +43,7 @@ def estimate_text(text):
 
 
 def _upper_bound(body):
-    """Billige Obergrenze: kein Byte wird zu mehr als einem Token (Ziffern genau 1, CJK 3 Bytes je Token)."""
+    """Cheap upper bound: no byte becomes more than one token (digits exactly 1, CJK 3 bytes per token)."""
     n = sum(len(body.get(k) or "") for k in ("system", "prompt", "suffix") if isinstance(body.get(k), str))
     for m in body.get("messages") or []:
         c = m.get("content")
@@ -57,8 +56,8 @@ def _upper_bound(body):
 
 
 def estimate_body(body):
-    """Geschaetzte Prompt-Tokens eines Ollama-Bodys (/api/chat oder /api/generate). Bilder zaehlen nicht mit -
-    ihr Preis haengt vom Modell ab und steckt nicht in den Bytes."""
+    """Estimated prompt tokens of an Ollama body (/api/chat or /api/generate). Images do not count -
+    their cost depends on the model and is not in the bytes."""
     n = sum(estimate_text(body.get(k)) for k in ("system", "prompt", "suffix"))
     for m in body.get("messages") or []:
         n += MESSAGE_OVERHEAD + estimate_text(m.get("content"))
@@ -70,17 +69,17 @@ def estimate_body(body):
 
 
 def before_request(body, ctx, is_cloud=False):
-    """Schaetzung, wenn die Anfrage num_ctx ueberschreiten koennte, sonst None (auch fuer Cloud/ohne ctx)."""
+    """Estimate if the request might exceed num_ctx, else None (also for cloud/no ctx)."""
     if is_cloud or not ctx:
         return None
     if _upper_bound(body) < ctx:
-        return None   # passt sicher - die allermeisten Anfragen enden hier ohne Schaetzung
+        return None   # fits safely - the vast majority of requests end here without estimation
     est = estimate_body(body)
     return est if est > ctx else None
 
 
 def after_request(estimated, received, ctx, info):
-    """Abgleich nach der Antwort. Liefert True, wenn die Kuerzung bestaetigt und gemeldet wurde."""
+    """Comparison after the response. Returns True if truncation was confirmed and reported."""
     if not estimated or not received:
         return False
     if received >= CONFIRMED * estimated:

@@ -1,4 +1,4 @@
-"""Leistungsdaten (passiv + Benchmark) und das Vermessen von Modellen fuer den Katalog."""
+"""Performance data (passive + benchmark) and model profiling for the catalog."""
 
 import asyncio
 import os
@@ -32,7 +32,7 @@ def _num(x):
 
 
 def perf_stats(stats, ttft_s):
-    """Ollama-Antwortfelder (Nanosekunden) -> tok/s und Millisekunden. None wenn unbrauchbar."""
+    """Ollama response fields (nanoseconds) -> tok/s and milliseconds. None if unusable."""
     if not isinstance(stats, dict):
         return None
     ec, ed, pc, pd, ld = (stats.get(k) or 0 for k in ("eval_count", "eval_duration", "prompt_eval_count", "prompt_eval_duration", "load_duration"))
@@ -46,9 +46,9 @@ def perf_stats(stats, ttft_s):
 
 
 async def _ollama(node, method, path, body=None, timeout=60, answer=True):
-    """Ollama auf dem Knoten fragen (Tunnel oder direkt): die JSON-Antwort als dict oder ein Problem 502 mit dem Grund.
-    answer=False: nur Erfolg zaehlt, der Koerper wird gelesen und verworfen ({}) - /api/generate zum Laden/Entladen
-    streamt NDJSON (mehrere Zeilen), das ist kein einzelnes JSON-Dokument."""
+    """Query Ollama on the node (tunnel or direct): the JSON response as a dict or a Problem 502 with the reason.
+    answer=False: only success counts, the body is read and discarded ({}) - /api/generate for loading/unloading
+    streams NDJSON (multiple lines), not a single JSON document."""
     try:
         async with nodes.nreq(node, method, path, json=body, timeout=ClientTimeout(total=timeout)) as r:
             if r.status >= 400:
@@ -64,7 +64,7 @@ async def _ollama(node, method, path, body=None, timeout=60, answer=True):
 
 def perf_record(model, node_name, stats, ttft_s, kind="passive"):
     s = perf_stats(stats, ttft_s)
-    if not s or s["load_ms"] > 1500:      # nur warme Laeufe zaehlen
+    if not s or s["load_ms"] > 1500:      # only count warm runs
         return
     key = f"{model}@{node_name}"
     e = state.PERF.setdefault(key, {"model": model, "node": node_name, "samples": [], "count": 0})
@@ -77,7 +77,7 @@ def perf_record(model, node_name, stats, ttft_s, kind="passive"):
                         "prompt_tps": round(sum(x["prompt_tps"] for x in smp if x["prompt_tps"]) / max(1, sum(1 for x in smp if x["prompt_tps"])), 1),
                         "ttft_ms": round(sum(x["ttft_ms"] for x in smp if x["ttft_ms"] is not None) / max(1, sum(1 for x in smp if x["ttft_ms"] is not None))),
                         "n": len(smp)}
-    # Stufe 3: exponentiell geglaettete Kennzahlen fuer den Score (reagieren schneller als der 20er-Mittelwert)
+    # Stage 3: exponentially smoothed metrics for the score (reacts faster than the 20-sample average)
     ew = e.setdefault("ewma", {})
     ew["gen_tps"] = round(s["gen_tps"] if ew.get("gen_tps") is None else EWMA_ALPHA * s["gen_tps"] + (1 - EWMA_ALPHA) * ew["gen_tps"], 1)
     if s["ttft_ms"] is not None:
@@ -91,7 +91,7 @@ RECENT_N = 20
 
 
 def perf_outcome(model, node_name, outcome):
-    """Stufe 3: Erfolgs-/Fehler-/Timeout-/Structured-Output-Raten je Modell@Knoten (alle Laeufe, auch kalte)."""
+    """Stage 3: success/error/timeout/structured-output rates per model@node (all runs, including cold)."""
     if outcome not in OUTCOMES:
         return
     e = state.PERF.setdefault(f"{model}@{node_name}", {"model": model, "node": node_name, "samples": [], "count": 0})
@@ -104,7 +104,7 @@ def perf_outcome(model, node_name, outcome):
 
 
 def error_rate(model, node_name):
-    """Anteil Nicht-ok der letzten RECENT_N Ergebnisse (0..1); 0 ohne Daten."""
+    """Fraction of non-ok in the last RECENT_N results (0..1); 0 if no data."""
     recent = ((state.PERF.get(f"{model}@{node_name}") or {}).get("outcomes") or {}).get("recent") or []
     return (sum(1 for x in recent if x != "ok") / len(recent)) if recent else 0.0
 
@@ -118,7 +118,7 @@ BENCH_PROMPT = ("Erkläre in etwa 200 Wörtern, was ein Netzwerk-Router macht, w
 
 
 async def bench_model(model, node):
-    """Standardisierter Warm-Benchmark: 1 Aufwaermlauf + 2 Messlaeufe mit identischem Prompt, num_predict 200, temperature 0."""
+    """Standardized warm benchmark: 1 warmup + 2 measurement runs with identical prompt, num_predict 200, temperature 0."""
     state.BENCHING[model] = {"node": node.name, "step": "start", "started": time.time(), "error": None}
     node.inflight += 1
     try:
@@ -146,7 +146,7 @@ async def bench_model(model, node):
 
 
 async def _bench_runs(model, node, ctx):
-    """Aufwaermlauf + 2 Messlaeufe: die beiden Messungen oder ein Problem."""
+    """Warmup + 2 measurement runs: the two measurements or a Problem."""
     body = {"model": model, "stream": False, "keep_alive": "5m", "options": {"num_ctx": ctx, "num_predict": 200, "temperature": 0, "seed": 42},
             "messages": [{"role": "user", "content": BENCH_PROMPT}]}
     runs = []
@@ -168,7 +168,7 @@ async def _bench_runs(model, node, ctx):
 
 
 def _free_node_for(model, node_name=None, prefer_loaded=False):
-    """Freier Knoten ohne laufende Anfragen, der das Modell hat: groesste Karte zuerst (Benchmark: geladenes Modell zuerst)."""
+    """Free node with no active requests that has the model: largest card first (benchmark: loaded model first)."""
     cands = [n for n in state.NODES.values() if n.state == "free" and n.inflight == 0 and model in n.models]
     if node_name:
         cands = [n for n in cands if n.name == node_name]
@@ -179,10 +179,10 @@ def _free_node_for(model, node_name=None, prefer_loaded=False):
 
 
 async def _release_node(node, model, why):
-    """Nach Messung oder Benchmark: Messobjekt entladen (ausser es ist ein Rang-1-Modell), Poll, Rang-1 wieder vorwaermen."""
+    """After measurement or benchmark: unload the measurement object (unless it is a rank-1 model), poll, prewarm rank-1 again."""
     rank1 = {r["tiers"][0]["model"] for r in state.CFG.roles.values()}
     if not any(node.same_blob(model, m) for m in rank1):
-        await _ollama(node, "post", "/api/generate", {"model": model, "keep_alive": 0}, answer=False)   # best effort: der Poll danach zeigt, was geladen blieb
+        await _ollama(node, "post", "/api/generate", {"model": model, "keep_alive": 0}, answer=False)   # best effort: the subsequent poll shows what remained loaded
     await poll.poll_node(node)
     if state.CFG.prewarm_on_free:
         state.spawn(poll.prewarm(node, 0, why))
@@ -205,12 +205,12 @@ async def handle_bench(request):
     return web.json_response({"started": True, "node": node.name, "model": model})
 
 
-MEASURE_CTX_FIX = (8192, 32768)   # dazu jeder Kontext, mit dem eine Rolle das Modell laedt
+MEASURE_CTX_FIX = (8192, 32768)   # plus every context with which a role loads the model
 
 
 def measure_ctxs(model):
-    """Messpunkte: die festen Kontexte plus jeder, mit dem eine Stufe das Modell laedt - gemessen wird dort, wo es
-    laeuft, statt von 32k auf 196k hochzurechnen."""
+    """Measurement points: the fixed contexts plus every one with which a tier loads the model - measured where it
+    runs, instead of extrapolating from 32k to 196k."""
     tiers = {int(t["num_ctx"]) for r in state.CFG.roles.values() for t in r["tiers"] if t["model"] == model and not t.get("cloud")}
     return sorted(set(MEASURE_CTX_FIX) | tiers)
 
@@ -225,7 +225,7 @@ def fit_linear(points):
 
 
 async def _ps_models(node):
-    """Geladene Modelle laut /api/ps (Liste von dicts) oder ein Problem."""
+    """Loaded models per /api/ps (list of dicts) or a Problem."""
     data = await _ollama(node, "get", "/api/ps", timeout=10)
     if failed(data):
         return data
@@ -234,7 +234,7 @@ async def _ps_models(node):
 
 
 async def _ps_entry(node, model):
-    """Eintrag des Modells in /api/ps, None wenn nicht geladen, oder ein Problem."""
+    """Model entry in /api/ps, None if not loaded, or a Problem."""
     models = await _ps_models(node)
     return models if failed(models) else next((m for m in models if _is_model(node, m, model)), None)
 
@@ -249,8 +249,8 @@ async def _load(node, model, ctx):
 
 
 async def _unload_all(node):
-    """Alles entladen und warten, bis /api/ps leer ist - sonst misst der Zuwachs ein anderes Modell mit. Liefert, was
-    /api/ps vorher als size_vram meldete (GiB): so viel muss nvidia-smi danach mindestens freigeben. Oder ein Problem."""
+    """Unload everything and wait until /api/ps is empty - otherwise the delta measures a different model. Returns what
+    /api/ps previously reported as size_vram (GiB): nvidia-smi must free at least this much afterwards. Or a Problem."""
     loaded = await _ps_models(node)
     if failed(loaded):
         return loaded
@@ -269,10 +269,10 @@ async def _unload_all(node):
 
 
 async def _empty_used(node, before, unloaded, timeout=120):
-    """Grundlast nach dem Entladen. /api/ps ist sofort leer, der Speicher wird aber erst Sekunden spaeter frei - zwei
-    gleiche Heartbeats hintereinander bewiesen das nicht (0.3.5: nach dem Entladen von 26 GiB las die Messung "leer" bei
-    noch voller Karte, der erste Messpunkt wurde negativ). Darum erst warten, bis nvidia-smi mindestens 90 % dessen
-    freigegeben hat, was /api/ps vorher meldete, dann die ruhige Belegung ablesen. Oder ein Problem."""
+    """Baseline after unloading. /api/ps is empty immediately, but memory is freed seconds later - two consecutive
+    heartbeats proved this not to be the case (0.3.5: after unloading 26 GiB, the measurement read "empty" while the
+    card was still full, the first measurement point was negative). Therefore wait until nvidia-smi has freed at least 90 % of what
+    /api/ps previously reported, then read the idle usage. Or a Problem."""
     if before is not None and unloaded > 0.5:
         target = before - 0.9 * unloaded
         deadline = time.time() + timeout
@@ -285,8 +285,8 @@ async def _empty_used(node, before, unloaded, timeout=120):
 
 
 async def _stable_used(node, after, timeout=90):
-    """Belegung laut nvidia-smi (Heartbeat), sobald sie steht: zwei Heartbeats nach `after`, < 0,1 GiB auseinander.
-    Oder ein Problem, wenn sie in `timeout` nicht zur Ruhe kommt."""
+    """Usage per nvidia-smi (Heartbeat), once stable: two heartbeats after `after`, < 0.1 GiB apart.
+    Or a Problem if it does not settle within `timeout`."""
     last, last_ts = None, after
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -299,10 +299,10 @@ async def _stable_used(node, after, timeout=90):
 
 
 async def _measure_real(model, node):
-    """Seit 0.3.5: je Kontext alles entladen, Grundlast ablesen, laden, Zuwachs laut nvidia-smi = echte Belegung.
-    /api/ps meldet nur einen Teil (qwen3.6:35b-a3b 21,0 statt 26,4 GiB bei 196k, laguna-xs-2.1 19,2 statt 29,7 GiB bei
-    131k - gemessen 2026-09-30); mit diesen Zahlen verrechnete sich der Router bei Budget, fremdem VRAM und Grundlast.
-    Liefert {ctx: (belegt, ps_size_vram, ps_size)} oder ein Problem."""
+    """Since 0.3.5: for each context unload everything, read baseline, load, delta per nvidia-smi = actual usage.
+    /api/ps reports only part (qwen3.6:35b-a3b 21.0 instead of 26.4 GiB at 196k, laguna-xs-2.1 19.2 instead of 29.7 GiB at
+    131k - measured 2026-09-30); with these numbers the router miscalculated budget, foreign VRAM and baseline.
+    Returns {ctx: (used, ps_size_vram, ps_size)} or a Problem."""
     res = {}
     for ctx in measure_ctxs(model):
         for attempt in range(1, MEASURE_TRIES + 1):
@@ -327,9 +327,9 @@ def _is_model(node, m, model):
 
 
 async def _others_loading(node, model, timeout=300):
-    """Warten, bis kein ANDERER Ladevorgang laeuft (prewarm, echte Anfrage). 0.3.5: das prewarm nach der vorigen Messung
-    lud qwen3.6 genau dann, als die naechste Messung ihre Grundlast las - /api/ps war noch leer, nichts wurde entladen.
-    None, sobald nichts anderes mehr laedt, oder ein Problem."""
+    """Wait until no OTHER load operation is running (prewarm, real request). 0.3.5: the prewarm after the previous measurement
+    loaded qwen3.6 exactly when the next measurement read its baseline - /api/ps was still empty, nothing was unloaded.
+    None once nothing else is loading, or a Problem."""
     deadline = time.time() + timeout
     while any(m != model and deadline_m > time.time() for m, (_g, deadline_m) in node.loading.items()):
         if time.time() > deadline:
@@ -339,9 +339,9 @@ async def _others_loading(node, model, timeout=300):
 
 
 async def _measure_point(model, node, ctx):
-    """Ein Messpunkt. Liefert (belegt, ps_vram, ps_size) oder einen Grund, warum er verworfen wurde (dann neu versuchen):
-    ein anderes Modell kam dazwischen, oder der Zuwachs ist kleiner als Ollamas eigene Meldung. Ein Problem bricht die
-    Messung ab."""
+    """A measurement point. Returns (used, ps_vram, ps_size) or a reason why it was discarded (then retry):
+    another model interfered, or the delta is smaller than Ollama's own report. A Problem aborts the
+    measurement."""
     waited = await _others_loading(node, model)
     if failed(waited):
         return waited
@@ -361,15 +361,15 @@ async def _measure_point(model, node, ctx):
     if foreign or any(m != model for m in node.loading):
         return f"another model loaded: {foreign or list(node.loading)}"
     used_gib, sv = full_gib - empty_gib, entry.get("size_vram", 0) / GIB
-    # Plausibel: nie weniger als das, was Ollama selbst meldet - sonst war die Grundlast falsch, und der Katalog
-    # bekaeme Unsinn (0.3.5: gemma4:26b "-7,67 GiB" bei 8k). Lieber keine Messung als eine falsche.
+    # Plausible: never less than what Ollama itself reports - otherwise the baseline was wrong, and the catalog
+    # would get nonsense (0.3.5: gemma4:26b "-7.67 GiB" at 8k). Better no measurement than a wrong one.
     if used_gib < sv - 0.3:
         return f"implausible: nvidia-smi increase {used_gib:.2f} GiB < /api/ps {sv:.2f} GiB"
     return used_gib, sv, entry.get("size", 0) / GIB
 
 
 async def _measure_ps(model, node):
-    """Rueckfall ohne GPU-Werte im Heartbeat (bis 0.3.4 der einzige Weg): /api/ps bei 8k und 32k."""
+    """Fallback without GPU values in the Heartbeat (only way until 0.3.4): /api/ps at 8k and 32k."""
     res = {}
     for ctx in MEASURE_CTX_FIX:
         state.MEASURING[model]["step"] = f"loading @{ctx}"
@@ -381,10 +381,10 @@ async def _measure_ps(model, node):
 
 
 def catalog_entry(res, node_name, real):
-    """Messergebnis {ctx: (belegt, ps_vram, ps_size)} -> Katalog-Eintrag. Bei Teil-Auslagerung in den RAM misst
-    nvidia-smi nur den GPU-Teil; der ausgelagerte Rest (size - size_vram) kommt dazu, damit der Katalog den ganzen Bedarf
-    kennt und der Router das Modell bei diesem Kontext nicht mehr fuer passend haelt (0.3.5 liess solche Punkte weg:
-    granite4.2:30b stand danach mit flachen 21 GiB im Katalog, obwohl es bei 32k nicht auf die Karte passt)."""
+    """Measurement result {ctx: (used, ps_vram, ps_size)} -> catalog entry. With partial offloading to RAM,
+    nvidia-smi only measures the GPU part; the offloaded remainder (size - size_vram) is added so the catalog knows the total
+    requirement and the router no longer considers the model suitable for this context (0.3.5 skipped such points:
+    granite4.2:30b then showed flat 21 GiB in the catalog, although it does not fit on the card at 32k)."""
     partial = sorted(ctx for ctx, (_b, sv, st) in res.items() if sv + 0.05 < st)
     points = [(ctx, b + (max(0.0, st - sv) if ctx in partial else 0.0)) for ctx, (b, sv, st) in res.items()]
     weights, kv = fit_linear(points)
@@ -402,11 +402,11 @@ def catalog_entry(res, node_name, real):
 
 
 async def measure_model(model, node):
-    """Modell vermessen und den Katalog-Eintrag in roles.yaml schreiben. Mit GPU-Werten im Heartbeat (Agent) echt per
-    nvidia-smi bei jedem genutzten Kontext, sonst wie bis 0.3.4 per /api/ps. Laeuft nur auf einem freien Knoten ohne
-    laufende Anfragen; entlaedt dabei alle Modelle (danach prewarm), der Zustandsautomat ruht so lange (poll.evaluate)."""
+    """Profile the model and write the catalog entry to roles.yaml. With GPU values in the Heartbeat (Agent) real per
+    nvidia-smi for each used context, otherwise like until 0.3.4 per /api/ps. Runs only on a free node without
+    active requests; unloads all models during this (prewarm afterwards), the state machine rests meanwhile (poll.evaluate)."""
     state.MEASURING[model] = {"node": node.name, "step": "start", "started": time.time(), "error": None}
-    node.inflight += 1          # Router waehlt den Knoten nicht fuer anderes
+    node.inflight += 1          # Router does not select the node for other tasks
     try:
         real = bool(node.gpu_known(time.time()) and node.vram_used_gib is not None)
         res = await (_measure_real(model, node) if real else _measure_ps(model, node))
@@ -420,7 +420,7 @@ async def measure_model(model, node):
         models[model] = e
         ov["models"] = models
         written = config.write_overrides(ov)
-        if failed(written):   # Messung gelungen, Katalog nicht geschrieben: als Fehler melden, nicht als fertig
+        if failed(written):   # Measurement succeeded, catalog not written: report as error, not as done
             log.warning("measure %s on %s: catalog not written: %s", model, node.name, written.message)
             state.MEASURING[model].update(step="error", error=written.message)
             return

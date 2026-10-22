@@ -1,7 +1,7 @@
-"""Werte aus fremder Eingabe (UI, Admin-API) pruefen: der Wert oder ein Problem 400 mit Klartext.
+"""Validate values from external input (UI, Admin API): return the value or a Problem 400 with plain text.
 
-Die einzigen Stellen, an denen die Referenzparser fuer Zahlentext und IP-Adressen ihr ValueError werfen duerfen; alle anderen
-Pruefungen sind ausdrueckliche Tests (AGENTS.md "Explicit control flow")."""
+The only places where the reference parsers for numeric text and IP addresses may raise ValueError; all other
+checks are explicit tests (AGENTS.md "Explicit control flow")."""
 import ipaddress
 import math
 
@@ -9,8 +9,8 @@ from .outcome import invalid
 
 
 def number(value, what, *, integer=False):
-    """Zahl aus int, float oder Zahlentext (1e3, -0.5); bool zaehlt nicht, unendlich und NaN auch nicht. integer=True verlangt
-    eine ganze Zahl (3.0 ja, 3.5 nein) und liefert int."""
+    """Number from int, float, or numeric text (1e3, -0.5); bool does not count, nor do infinity and NaN. integer=True requires
+    an integer (3.0 yes, 3.5 no) and returns int."""
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return invalid(f"{what}: number expected")
     if isinstance(value, int):

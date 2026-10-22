@@ -1,11 +1,11 @@
-"""POST /rerank auf dem API-Port: TEI-kompatibles Reranking, weitergereicht an den Reranker-Dienst eines Knotens.
+"""POST /rerank on the API port: TEI-compatible reranking, forwarded to a node's Reranker service.
 
-Draht wie Text Embeddings Inference (TEI): `{"query": str, "texts": [str], "return_text": bool}` -> 200 mit
-`[{"index": int, "score": float}, ...]`, ein Eintrag je Text, absteigend nach Score. Der Reranker laeuft als Kind des
-Agenten hinter dessen Tunnel-Route `rerank`; ob er gesund ist, meldet der Agent im Heartbeat (`routes`, poll.route_health).
+Wire format like Text Embeddings Inference (TEI): `{"query": str, "texts": [str], "return_text": bool}` -> 200 with
+`[{"index": int, "score": float}, ...]`, one entry per text, sorted by score descending. The Reranker runs as a child of
+the Agent behind its Tunnel route `rerank`; its health is reported by the Agent in the Heartbeat (`routes`, poll.route_health).
 
-Bewusst schlicht: kein WOL, keine Warteschlange, keine Wiederholung. Ein Aufrufer wie Hindsight hat einen eigenen
-CPU-Reranker als naechstes Glied seiner Kette; der ist schneller da als jeder Versuch, einen Knoten zu wecken.
+Deliberately simple: no WOL, no queue, no retry. A caller like Hindsight has its own
+CPU Reranker as the next link in its chain; that is faster than any attempt to wake a node.
 """
 
 import asyncio
@@ -19,12 +19,12 @@ from . import auth, metrics, nodes, state
 from .common import log
 from .outcome import Problem, failed
 
-ROUTE = "rerank"   # Name der Tunnel-Route im Agenten und des Eintrags im Heartbeat-Feld routes
-MODEL_ID = "skirnir-rerank"   # GET /info: der Router kennt das Modell des Knotens nicht, er meldet sich selbst
+ROUTE = "rerank"   # Name of the Tunnel route in the Agent and the entry in the Heartbeat field routes
+MODEL_ID = "skirnir-rerank"   # GET /info: the Router does not know the node's model, it reports itself
 
-# Kein GPU-Reranker nutzbar -> 424 Failed Dependency, nie 503 und nie Retry-After. Hindsights TEI-Client wiederholt 429 und
-# alle 5xx dreimal mit Backoff (und beachtet Retry-After), einen Circuit Breaker hat er nicht: jeder Recall kostete dann
-# Sekunden, bevor sein CPU-Fallback greift. Andere 4xx wiederholt er nicht, sondern nimmt sofort das naechste Glied der Kette.
+# No GPU Reranker available -> 424 Failed Dependency, never 503 and never Retry-After. Hindsight's TEI client retries 429 and
+# all 5xx three times with backoff (and honors Retry-After), it has no Circuit Breaker: every Recall would then cost
+# seconds before its CPU fallback kicks in. Other 4xx are not retried, it immediately takes the next link in the chain.
 UNAVAILABLE = 424
 OUTER_GRACE_S = 0.25
 REASONS = ("disabled_node", "node_offline", "tunnel_down", "reranker_down", "gpu_busy", "timeout", "upstream_invalid", "upstream_error")
@@ -35,24 +35,24 @@ def unusable(reason):
 
 
 def node_block(node, cfg, now):
-    """Warum dieser Knoten jetzt nicht reranken kann, oder "" wenn er es kann. Online heisst hier: der Agent meldet sich
-    (frischer Heartbeat). Ob Ollama antwortet, spielt keine Rolle, der Reranker ist ein eigener Dienst."""
+    """Why this node cannot rerank right now, or "" if it can. Online means here: the Agent reports in
+    (fresh Heartbeat). Whether Ollama responds is irrelevant, the Reranker is a separate service."""
     if node is None:
-        return "disabled_node"      # nicht konfiguriert, nicht freigegeben oder gesperrt
+        return "disabled_node"      # not configured, not released or locked
     if not node.gpu_known(now):
         return "node_offline"
     if node.tunnel is None:
         return "tunnel_down"
     route = node.routes.get(ROUTE)
     if route is None or not route["up"]:
-        return "reranker_down"      # auch ein Agent, der das Feld routes noch nicht kennt
+        return "reranker_down"      # also an Agent that does not know the routes field yet
     if node.state == "busy" and not cfg.busy_ok:
         return "gpu_busy"
     return ""
 
 
 def choose(cfg, now):
-    """Erster nutzbarer Knoten aus rerank.nodes, sonst das Problem mit dem Grund des bevorzugten (ersten) Knotens."""
+    """First usable node from rerank.nodes, otherwise the Problem with the reason for the preferred (first) node."""
     first = ""
     for name in cfg.nodes:
         node = state.NODES.get(name)
@@ -64,7 +64,7 @@ def choose(cfg, now):
 
 
 async def read_request(request, cfg):
-    """Body pruefen: (query, texts, return_text) oder ein Problem (400/413)."""
+    """Check body: (query, texts, return_text) or a Problem (400/413)."""
     if request.content_length is not None and request.content_length > cfg.max_body_bytes:
         return Problem(413, f"body larger than {cfg.max_body_bytes} bytes", "too_large")
     raw = await request.read()
@@ -89,8 +89,8 @@ async def read_request(request, cfg):
 
 
 def check_scores(raw, count):
-    """Antwort des Rerankers pruefen: Liste mit genau einem Eintrag je Text, index ganzzahlig im Bereich und eindeutig,
-    score eine endliche Zahl. Liefert die Liste absteigend nach Score oder das Problem upstream_invalid."""
+    """Check Reranker response: list with exactly one entry per text, index integer in range and unique,
+    score a finite number. Returns the list sorted by score descending or the Problem upstream_invalid."""
     try:
         data = json.loads(raw)
     except ValueError:  # exception-ok: parsing the node's answer; whether it is JSON shows only the parse
@@ -113,10 +113,10 @@ def check_scores(raw, count):
 
 
 async def exchange(node, query, texts, timeout_s):
-    """Eine Anfrage durch den Tunnel an die Route des Agenten: (Status, Body) oder ein Problem (timeout, upstream_error)."""
+    """A request through the Tunnel to the Agent's route: (Status, Body) or a Problem (timeout, upstream_error)."""
     try:
-        # Die Frist des Tunnels (ClientTimeout) greift zuerst und raeumt ihren Stream selbst ab. Die aeussere Grenze ist nur
-        # das Netz dahinter: liefe sie gleichzeitig ab, braeche sie Tunnel.open per Cancel ab und der Stream bliebe liegen.
+        # The Tunnel's deadline (ClientTimeout) applies first and cleans up its stream itself. The outer limit is only
+        # the network behind it: if it expired simultaneously, it would abort Tunnel.open via Cancel and the stream would remain.
         async with asyncio.timeout(timeout_s + OUTER_GRACE_S):
             async with nodes.nreq(node, "POST", "/" + ROUTE, json={"query": query, "texts": texts},
                                   timeout=ClientTimeout(total=timeout_s)) as resp:
@@ -129,7 +129,7 @@ async def exchange(node, query, texts, timeout_s):
 
 
 def admit(request):
-    """Gemeinsame Pruefung fuer /rerank und /info: None = zugelassen, sonst das Problem (404 aus, 403 ohne Recht)."""
+    """Shared check for /rerank and /info: None = admitted, otherwise the Problem (404 out, 403 without permission)."""
     if not state.CFG.rerank.enabled:
         return Problem(404, "rerank is not enabled", "disabled")
     name = request.get("client")
@@ -141,7 +141,7 @@ def admit(request):
 
 
 async def rerank(request):
-    """Ergebnisliste fuer die Antwort oder ein Problem."""
+    """Result list for the response or a Problem."""
     cfg = state.CFG.rerank
     refused = admit(request)
     if refused is not None:
@@ -171,16 +171,16 @@ async def rerank(request):
 
 
 def error_response(problem):
-    if problem.status == UNAVAILABLE:   # ohne Retry-After, siehe UNAVAILABLE
+    if problem.status == UNAVAILABLE:   # without Retry-After, see UNAVAILABLE
         return web.json_response({"error": {"code": "rerank_unavailable", "reason": problem.kind}}, status=UNAVAILABLE)
     return web.json_response({"error": {"code": problem.kind, "message": problem.message}}, status=problem.status)
 
 
 async def handle_info(request):
-    """GET /info wie bei TEI. Hindsights TEI-Client ruft es einmal beim Initialisieren ab und braucht `model_id`; ohne
-    /info scheitert das Glied an der Initialisierung, und die Kette nimmt fuer immer den Rueckfall (Ende-zu-Ende-Test
-    2026-10-20). Bewusst unabhaengig vom Knotenzustand: initialisiert wird nur einmal je Prozess, einen Ausfall faengt das
-    424 auf /rerank je Anfrage ab. Nur Recht und Schalter gelten wie bei /rerank."""
+    """GET /info like TEI. Hindsight's TEI client fetches it once during initialization and needs `model_id`; without
+    /info the link fails initialization, and the chain takes the fallback forever (End-to-End test
+    2026-10-20). Deliberately independent of node state: initialization happens only once per process, a failure is caught by
+    424 on /rerank per request. Only permission and switch apply as with /rerank."""
     refused = admit(request)
     if refused is not None:
         return error_response(refused)

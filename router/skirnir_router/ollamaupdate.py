@@ -1,20 +1,20 @@
-"""Ollama-Update ueber den Router (Router 0.3.0, Agent 0.12.0, 2026-09-26). Seit Ollama auf den Knoten als Kind des Agent-
-Dienstes laeuft, greift der Updater der Tray-App nicht mehr (laeuft unter dem Benutzer, Pro-Benutzer-Installer). Der Router
-uebernimmt die Rolle des Updaters: er kennt die neueste Version und weiss, wann ein Knoten frei ist.
+"""Ollama update via the router (Router 0.3.0, Agent 0.12.0, 2026-09-26). Since Ollama runs on the node as a child of the Agent
+service, the Tray-App updater no longer works (runs as the user, Pro-user installer). The router
+takes over the updater role: it knows the latest version and when a node is free.
 
-Ablauf
-  1. Versionspruefung: alle `check_interval_h` Stunden GET `release_url` (GitHub-API, neuestes Release von ollama/ollama),
-     dazu `sha256sum.txt` des Releases -> LATEST = {version, files: {"windows/amd64": {name, url, size, sha256}, ...}},
-     gesichert in <config-dir>/ollama-latest.json (ueberlebt einen Neustart).
-  2. Auftrag (UI-Knopf oder Rollout-Schleife): Knoten freigegeben, verbunden, `free`, nichts inflight. Durch den Tunnel geht
-     {"t": "ollama-update", version, file, url, sha256, size}. Der Agent laedt das Archiv SELBST von seiner festen Quelle
-     (GitHub) und vergleicht den Hash mit der dortigen sha256sum.txt - der Router kann nur die Version waehlen, nicht den
-     Code (anders als beim Agent-Update gibt es keinen Betreiber-Schluessel, dafuer die feste Quelle im Agenten).
-  3. Stand kommt im Heartbeat (`ollama_update: {state, version, message}`): checking, downloading (mit Prozent), extracting,
-     swapping, applied, failed. Meldet der Heartbeat (`ollama_version`) oder der Poll (/api/version) die Zielversion, ist
-     der Auftrag `done`. Waehrend des Auftrags bekommt der Knoten keine neuen Anfragen (Drain). Fehler oder Stille -> HA-Problem.
-  4. Rollout: Policy `ollama_auto_update` je Knoten, nur im Nachtfenster (`window_start`..`window_end`, Ortszeit), Kanarien-
-     vogel zuerst (`canary`, sonst der des Agent-Updates), die anderen erst nach `canary_clean_h` Stunden sauberem Betrieb.
+Flow
+  1. Version check: every `check_interval_h` hours GET `release_url` (GitHub-API, latest release of ollama/ollama),
+     plus the release's `sha256sum.txt` -> LATEST = {version, files: {"windows/amd64": {name, url, size, sha256}, ...}},
+     persisted in <config-dir>/ollama-latest.json (survives restarts).
+  2. Task (UI button or rollout loop): node admitted, connected, `free`, nothing inflight. Via the tunnel goes
+     {"t": "ollama-update", version, file, url, sha256, size}. The Agent downloads the archive ITSELF from its fixed source
+     (GitHub) and compares the hash with the sha256sum.txt there - the router can only choose the version, not the
+     code (unlike the Agent update, there is no operator key, instead the fixed source in the Agent).
+  3. Status comes in the Heartbeat (`ollama_update: {state, version, message}`): checking, downloading (with percent), extracting,
+     swapping, applied, failed. If the Heartbeat (`ollama_version`) or the Poll (/api/version) reports the target version, the
+     task is `done`. During the task, the node receives no new requests (Drain). Errors or silence -> HA Problem.
+  4. Rollout: Policy `ollama_auto_update` per node, only in the night window (`window_start`..`window_end`, local time), canary
+     first (`canary`, otherwise the one from the Agent update), the others only after `canary_clean_h` hours of clean operation.
 """
 import asyncio
 import os
@@ -32,12 +32,12 @@ ASSETS = {("windows", "amd64"): "ollama-windows-amd64.zip", ("windows", "arm64")
           ("linux", "amd64"): "ollama-linux-amd64.tar.zst", ("linux", "arm64"): "ollama-linux-arm64.tar.zst"}
 LATEST = {"version": None, "checked": 0.0, "checked_ts": None, "files": {}, "error": None, "source": None}
 RUNNING = ("requested", "checking", "downloading", "extracting", "ready", "swapping", "applied")
-DRAIN_S = 1800     # Agenten ohne Freigabe-Schritt (< 0.15.0): vom Auftrag bis zum Tausch keine neuen Anfragen an den Knoten
-SWAP_DRAIN_S = 1800   # ab "ready": so lange darf das Leerwerden dauern, danach bricht der Router ab (Agent wartet 30 min)
+DRAIN_S = 1800     # Agents without approval step (< 0.15.0): no new requests to the node from task until swap
+SWAP_DRAIN_S = 1800   # from "ready": how long it may take to drain, after which the router aborts (Agent waits 30 min)
 SWAP_WAIT_S = 25 * 60
-STALL_S = 3600     # ohne neuen Stand im Heartbeat gilt der Auftrag als haengend
-RETRY_S = 6 * 3600 # nach failed/stalled erst nach 6 h wieder automatisch probieren
-AGENT_FRESH_S = 600  # vom Agenten gemeldete Ollama-Version hat 10 min Vorrang vor dem Poll (/api/version alle 5 min)
+STALL_S = 3600     # without new status in the Heartbeat, the task is considered stalled
+RETRY_S = 6 * 3600 # after failed/stalled, automatically retry only after 6 h
+AGENT_FRESH_S = 600  # Ollama version reported by the Agent has 10 min priority over the Poll (/api/version every 5 min)
 
 
 def _ts(now=None):
@@ -49,7 +49,7 @@ def _cfg():
 
 
 def _vt(v):
-    """Versions-Tupel zum Vergleichen: '0.34.4' -> (0, 34, 4); Vor-Release-Anhaengsel zaehlen nicht."""
+    """Version tuple for comparison: '0.34.4' -> (0, 34, 4); pre-release suffixes do not count."""
     return tuple(int(x) for x in re.findall(r"\d+", str(v or "").split("-")[0].split("+")[0]))
 
 
@@ -64,11 +64,11 @@ def load_latest():
 
 
 def save_latest():
-    save_json_file(latest_path(), LATEST, "ollama-latest.json", indent=1)   # klappt es nicht, bleibt LATEST im Speicher
+    save_json_file(latest_path(), LATEST, "ollama-latest.json", indent=1)   # if it fails, LATEST remains in memory
 
 
 def parse_checksums(txt):
-    """Zeilen '<hex>  ./<datei>' (auch '*<datei>' oder ohne Praefix) -> {datei: hex}."""
+    """Lines '<hex>  ./<file>' (also '*<file>' or without prefix) -> {file: hex}."""
     out = {}
     for line in txt.splitlines():
         f = line.split()
@@ -79,7 +79,7 @@ def parse_checksums(txt):
 
 
 async def check_latest():
-    """Neueste Version bei der Quelle erfragen (GitHub-API: tag_name, assets) samt sha256sum.txt; Ergebnis in LATEST."""
+    """Query latest version from the source (GitHub-API: tag_name, assets) including sha256sum.txt; result in LATEST."""
     url = _cfg().get("release_url") or ""
     found = await _fetch_release(url) if url else invalid("modes.ollama_update.release_url is empty")
     if failed(found):
@@ -97,7 +97,7 @@ async def check_latest():
 
 
 async def _fetch_release(url):
-    """(version, {"os/arch": Archiv}) des neuesten Releases oder ein Problem 502 mit dem Grund."""
+    """(version, {"os/arch": archive}) of the latest release or a Problem 502 with the reason."""
     headers = {"Accept": "application/vnd.github+json", "User-Agent": f"skirnir-router/{VERSION}"}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=40)) as s:
@@ -131,25 +131,25 @@ async def _fetch_release(url):
 
 
 def available_for(e):
-    """(neueste Version, Archiv) fuer OS/Arch des Knotens, oder (None, None)."""
+    """(latest version, archive) for the node's OS/Arch, or (None, None)."""
     facts = e.get("facts") or {}
     f = LATEST["files"].get(f"{facts.get('os')}/{facts.get('arch')}")
     return (LATEST["version"], f) if f else (None, None)
 
 
 def current_version(e):
-    """Zuletzt beobachtete Ollama-Version des Knotens (Register; Heartbeat/Poll pflegen sie), sonst aus der Anmeldung."""
+    """Last observed Ollama version of the node (Register; Heartbeat/Poll maintain it), otherwise from registration."""
     return e.get("ollama_version") or (e.get("facts") or {}).get("ollama_version") or None
 
 
 def swap_gate(e):
-    """Tauscht der Agent erst nach Freigabe (Fakt `ollama_swap_gate`, Agent >= 0.15.0)? Dann bleibt der Knoten waehrend Download
-    und Pruefung im Routing, und der Router gibt den Tausch frei, sobald keine Anfrage mehr laeuft."""
+    """Does the Agent swap only after approval (Fact `ollama_swap_gate`, Agent >= 0.15.0)? Then the node stays in routing during download
+    and check, and the router releases the swap as soon as no request is running."""
     return (e.get("facts") or {}).get("ollama_swap_gate") is True
 
 
 def update_running(node, now=None):
-    """Laeuft auf diesem Knoten gerade ein Ollama-Update (Auftrag bis Neustart)? Dann kein Vorwaermen: der Tausch beendet Ollama."""
+    """Is an Ollama update currently running on this node (task until restart)? Then no prewarming: the swap terminates Ollama."""
     if state.REG is None or not node.fp:
         return False
     u = (state.REG.nodes.get(node.fp) or {}).get("ollama_update") or {}
@@ -157,8 +157,8 @@ def update_running(node, now=None):
 
 
 async def release_swap(node, version):
-    """Nach "ready": Knoten aus dem Routing nehmen, warten, bis keine Anfrage mehr laeuft, dann den Tausch freigeben.
-    Wird der Knoten in SWAP_WAIT_S nicht leer, bricht der Router ab (nichts getauscht, Knoten wieder im Routing)."""
+    """After "ready": remove node from routing, wait until no request is running, then release the swap.
+    If the node does not drain within SWAP_WAIT_S, the router aborts (nothing swapped, node back in routing)."""
     node.draining_until = time.time() + SWAP_DRAIN_S
     try:
         deadline = time.time() + SWAP_WAIT_S
@@ -167,7 +167,7 @@ async def release_swap(node, version):
         e = state.REG.nodes.get(node.fp) if state.REG is not None else None
         u = (e or {}).get("ollama_update") or {}
         if u.get("version") != version or u.get("state") != "ready":
-            return   # Auftrag ist weiter, abgebrochen oder ersetzt
+            return   # Task is ongoing, aborted, or replaced
         if node.inflight > 0:
             now = time.time()
             u.update(state="failed", message=f"Knoten wurde in {SWAP_WAIT_S // 60} min nicht leer ({node.inflight} Anfragen) - nicht getauscht",
@@ -190,20 +190,20 @@ async def release_swap(node, version):
 
 
 def managed(e):
-    """Aktualisiert der Agent dieses Knotens Ollama? Das meldet der Agent bei jeder Anmeldung selbst (Fakt `ollama_managed`, ab
-    Agent 0.12.1: Ollama ist eines seiner Kinder). Ohne den Fakt schickt der Router keine Ollama-Auftraege."""
+    """Does the Agent of this node update Ollama? The Agent reports this itself on every registration (Fact `ollama_managed`, from
+    Agent 0.12.1: Ollama is one of its children). Without the Fact, the router sends no Ollama tasks."""
     return (e.get("facts") or {}).get("ollama_managed") is True
 
 
 def unmanaged_reason(e):
-    """None = verwaltet; 'tray' = Ollama laeuft nicht als Kind des Agenten (typisch die Tray-App unter dem Benutzer, die sich selbst
-    aktualisiert); 'agent' = der Agent meldet es nicht (aelter als 0.12.1)."""
+    """None = managed; 'tray' = Ollama does not run as a child of the Agent (typically the Tray-App under the user, which updates itself);
+    'agent' = the Agent does not report it (older than 0.12.1)."""
     f = (e.get("facts") or {}).get("ollama_managed")
     return None if f is True else "tray" if f is False else "agent"
 
 
 def update_view(e, now=None):
-    """Fuer /admin/nodes, UI und HA: laufende Version, neueste Version, Auftragsstand, ob der Agent Ollama verwaltet."""
+    """For /admin/nodes, UI and HA: running version, latest version, task status, whether the Agent manages Ollama."""
     now = now or time.time()
     cur = current_version(e)
     avail, _ = available_for(e)
@@ -212,22 +212,22 @@ def update_view(e, now=None):
         u["state"], u["message"] = "stalled", f"no report for {int((now - u['t']) // 60)} min"
     m = managed(e)
     if not m and u.get("state") not in RUNNING:
-        u = {}   # Auftragsstand nur, wo der Router Ollama-Updates schickt (eine alte Ablehnung ist kein HA-Problem)
+        u = {}   # Task status only where the router sends Ollama updates (an old rejection is not an HA Problem)
     return {"current": cur, "available": avail, "pending": bool(avail and cur and _vt(avail) > _vt(cur)), "managed": m,
             "unmanaged_reason": unmanaged_reason(e),
             "auto": bool((e.get("policy") or {}).get("ollama_auto_update")), "version_since": e.get("ollama_version_since"), **u}
 
 
 def note_version(node, version, now=None, source="poll"):
-    """Beobachtete Ollama-Version eines Knotens (Poll /api/version oder Heartbeat des Agenten): Wechsel festhalten, offenen
-    Auftrag abschliessen. Die Agent-Meldung hat 10 min Vorrang vor dem Poll (der Poll sieht die neue Version erst spaeter)."""
+    """Observed Ollama version of a node (Poll /api/version or Agent Heartbeat): record change, close open
+    task. The Agent report has 10 min priority over the Poll (the Poll sees the new version later)."""
     if not version or version == "?" or state.REG is None or not node.fp:
         return
     now = now or time.time()
     if source == "agent":
         node.ollama_version_agent_ts = now
     elif now - getattr(node, "ollama_version_agent_ts", 0.0) < AGENT_FRESH_S:
-        return   # Agent hat gerade gemeldet: der Poll ist die aeltere Sicht
+        return   # Agent just reported: the Poll is the older view
     node.ollama_version = version
     e = state.REG.nodes.get(node.fp)
     if e is None:
@@ -246,13 +246,13 @@ def note_version(node, version, now=None, source="poll"):
         state.MQTT_DIRTY.append(True)
         node.draining_until = 0.0
         log.info("node %s: Ollama update to %s completed", node.name, version)
-        if state.CFG.prewarm_on_online and node.state == "free":   # das Vorwaermen beim Neustart entfiel, das Update lief noch
+        if state.CFG.prewarm_on_online and node.state == "free":   # the prewarming at restart was skipped, the update was still running
             from . import poll
             state.spawn(poll.prewarm(node, 0, "after Ollama update"))
 
 
 def note_hello(e, facts):
-    """Anmeldung eines Agenten: Ollama-Version aus den Fakten uebernehmen, falls das Register noch keine kennt."""
+    """Agent registration: adopt Ollama version from Facts if the Register does not know it yet."""
     e.pop("ollama_managed", None)   # Altlast von Router 0.3.2 (gelernt statt gemeldet)
     v = (facts or {}).get("ollama_version")
     if v and not e.get("ollama_version"):
@@ -260,7 +260,7 @@ def note_hello(e, facts):
 
 
 def note_report(node, report, now=None):
-    """`ollama_update`-Block aus dem Heartbeat des Agenten: Zwischenstand oder Fehler."""
+    """`ollama_update` block from the Agent Heartbeat: intermediate status or error."""
     if not isinstance(report, dict) or not report.get("state") or state.REG is None or not node.fp:
         return
     e = state.REG.nodes.get(node.fp)
@@ -271,13 +271,13 @@ def note_report(node, report, now=None):
     if u.get("state") == "done" and report["state"] != "failed":
         return
     if report.get("version") and u.get("version") and report["version"] != u["version"]:
-        return   # alter Bericht zu einem frueheren Auftrag
+        return   # old report for a previous task
     if report["state"] == "ready" and swap_gate(e) and getattr(node, "swap_pending", None) != u.get("version"):
-        # jede "ready"-Meldung ohne laufende Freigabe startet eine (auch nach einem Router-Neustart mitten im Warten)
+        # every "ready" report without an ongoing approval starts one (also after a router restart while waiting)
         node.swap_pending = u.get("version") or report.get("version")
         state.spawn(release_swap(node, node.swap_pending))
     if u.get("state") == "failed" and report["state"] == "failed" and (report.get("message") or "") == (u.get("message") or ""):
-        return   # derselbe Fehler, jeden Heartbeat wiederholt
+        return   # the same error, repeated every Heartbeat
     changed = report["state"] != u.get("state") or (report.get("message") or "") != (u.get("message") or "")
     if not changed:
         return
@@ -294,7 +294,7 @@ def note_report(node, report, now=None):
 
 
 def problems(now=None):
-    """HA-Probleme: fehlgeschlagene oder haengende Ollama-Updates, gescheiterte Versionspruefung nur nach drei Tagen Stille."""
+    """HA Problems: failed or stalled Ollama updates, failed version check only after three days of silence."""
     now = now or time.time()
     out = []
     if state.REG is None:
@@ -311,12 +311,12 @@ def problems(now=None):
 
 
 def _last_ok():
-    """Zeitpunkt der letzten erfolgreichen Versionspruefung (checked wird auch bei Fehlern gesetzt)."""
+    """Time of the last successful version check (checked is also set on errors)."""
     return LATEST.get("checked_ok") or 0.0
 
 
 def pending_nodes(now=None):
-    """{Knotenname: {current, available}} fuer alle Knoten, denen ein neueres Ollama fehlt (HA-Sensor, Metrik)."""
+    """{node_name: {current, available}} for all nodes missing a newer Ollama (HA sensor, metric)."""
     out = {}
     if state.REG is None:
         return out
@@ -330,7 +330,7 @@ def pending_nodes(now=None):
 
 
 async def order_update(fp, reason="ui", force=False):
-    """Auftrag an einen Knoten. Liefert (ok, Meldung)."""
+    """Task for a node. Returns (ok, message)."""
     e = state.REG.nodes.get(fp)
     if e is None:
         return False, "unknown fingerprint"
@@ -347,7 +347,7 @@ async def order_update(fp, reason="ui", force=False):
     if not agent_capable(av):
         return False, f"agent {av} cannot update Ollama (needs agent 0.12.0 or newer)"
     why = unmanaged_reason(e)
-    if why == "tray":   # auch mit force nicht: der Agent koennte es nicht
+    if why == "tray":   # not even with force: the agent might not be able to
         return False, "Ollama is not a child of this agent (tray app); it updates itself"
     if why == "agent" and not force:
         return False, f"agent {av} does not report whether it manages Ollama (needs agent 0.12.1 or newer)"
@@ -364,7 +364,7 @@ async def order_update(fp, reason="ui", force=False):
         return False, f"node is serving {node.inflight} request(s)"
     msg = {"t": "ollama-update", "version": version, "file": f["name"], "url": f["url"], "sha256": f["sha256"], "size": f.get("size", 0)}
     e["ollama_update"] = {"version": version, "state": "requested", "message": "", "t": now, "ts": _ts(now), "by": reason}
-    if not swap_gate(e):   # alter Agent tauscht sofort nach dem Download: Knoten von Anfang an leeren
+    if not swap_gate(e):   # old agent swaps immediately after download: clear node from the start
         node.draining_until = now + DRAIN_S
     state.REG.save()
     from .registry import send_ctl
@@ -376,19 +376,19 @@ async def order_update(fp, reason="ui", force=False):
 
 
 def agent_capable(agent_version):
-    """Versteht der Agent den Auftrag? Ab 0.12.0; eine Version ohne Zahlen (Testagent) gilt als faehig."""
+    """Does the agent understand the task? Since 0.12.0; a version without numbers (test agent) is considered capable."""
     t = _vt(agent_version)
     return not t or t >= (0, 12)
 
 
 def _local(cfg, now):
-    """Uhrzeit fuer das Fenster: in `timezone` (z. B. Europe/Zurich), sonst Ortszeit des Routers. Container laufen oft auf UTC -
-    2026-09-26 lief das erste Ollama-Update deshalb um 06:58 Schweizer Zeit statt im Fenster 02:00-05:00."""
+    """Time for the window: in `timezone` (e.g. Europe/Zurich), otherwise router local time. Containers often run on UTC -
+    2026-09-26 the first Ollama update ran at 06:58 Swiss time instead of the 02:00-05:00 window."""
     tz = (cfg.get("timezone") or "").strip()
     if tz:
         import zoneinfo
         from datetime import datetime
-        if tz in zoneinfo.available_timezones():   # vorher pruefen statt Exception abfangen
+        if tz in zoneinfo.available_timezones():   # check beforehand instead of catching exceptions
             return datetime.fromtimestamp(now, zoneinfo.ZoneInfo(tz)).timetuple()
         if not _TZ_WARNED:
             log.warning("ollama-update: time zone %r unknown here (no time zone database?) - window in the router's local time", tz)
@@ -398,14 +398,14 @@ def _local(cfg, now):
 
 _TZ_WARNED = []
 HHMM = re.compile(r"\d{2}:\d{2}")
-STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")   # _ts(), vom Router selbst geschrieben
+STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")   # _ts(), written by the router itself
 
 
 def in_window(cfg, now=None):
-    """Liegt die Uhrzeit (Zeitzone `timezone`, sonst Ortszeit des Routers) im Fenster window_start..window_end (auch ueber
-    Mitternacht)? Leeres Fenster = immer."""
+    """Is the time (timezone `timezone`, otherwise router local time) within window_start..window_end (also across
+    midnight)? Empty window = always."""
     start, end = (cfg.get("window_start") or "").strip(), (cfg.get("window_end") or "").strip()
-    if not (HHMM.fullmatch(start) and HHMM.fullmatch(end)):   # leer oder unlesbar = kein Fenster
+    if not (HHMM.fullmatch(start) and HHMM.fullmatch(end)):   # empty or unreadable = no window
         return True
     a = int(start[:2]) * 60 + int(start[3:5])
     b = int(end[:2]) * 60 + int(end[3:5])
@@ -419,7 +419,7 @@ def canary_name(cfg):
 
 
 def canary_clean(cfg, version, now):
-    """Faehrt der Kanarienvogel diese Ollama-Version seit canary_clean_h Stunden und ist er online?"""
+    """Has the canary been running this Ollama version for canary_clean_h hours and is it online?"""
     name = canary_name(cfg)
     if not name or state.REG is None:
         return False
@@ -434,7 +434,7 @@ def canary_clean(cfg, version, now):
 
 
 async def rollout_loop():
-    """Alle 60 s: Versionspruefung faellig? Dann Knoten mit Policy ollama_auto_update im Nachtfenster nachziehen."""
+    """Every 60 s: version check due? Then update nodes with policy ollama_auto_update in the night window."""
     load_latest()
     await asyncio.sleep(45)
     while True:
@@ -492,12 +492,12 @@ def status_view(now=None):
 
 
 async def handle_status(request):
-    """GET /admin/ollama-update: neueste Version, Fenster, ausstehende Knoten (UI)."""
+    """GET /admin/ollama-update: latest version, window, pending nodes (UI)."""
     return web.json_response(status_view())
 
 
 async def handle_check(request):
-    """POST /admin/ollama-update/check: Versionspruefung jetzt (UI-Knopf, Tests)."""
+    """POST /admin/ollama-update/check: version check now (UI button, tests)."""
     await check_latest()
     if not LATEST.get("error"):
         LATEST["checked_ok"] = LATEST["checked"]

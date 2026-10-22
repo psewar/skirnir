@@ -1,23 +1,23 @@
-"""Stufe 5 (design/roadmap.md): Cloud-Anbieter als Stufen in Rollen - lokal zuerst, Cloud nur wo die Rolle es erlaubt.
+"""Stage 5 (design/roadmap.md): Cloud providers as tiers in roles - local first, cloud only where the role allows it.
 
-Entscheidung des Betreibers (2026-09-10): kein Opt-in pro Client, sondern der Router legt in den Rollen fest, wo Cloud eine Stufe
-sein darf (`tiers: [{model: "openai:gpt-5-mini", num_ctx: 128000}]`). Cloud kommt so zum Zug, wenn (1) kein lokaler Knoten
-kann (beide Rechner spielen, gpu-desktop aus), (2) eine Faehigkeit lokal fehlt (vision, structured, ...: die lokalen Stufen fallen
-durch `require` weg) oder (3) der Client es ausdruecklich will (`routing.execution: cloud` rueckt die Cloud-Stufen nach vorn).
-Der Client kann sich schuetzen: `routing.execution: local` oder `client_auth.clients.<c>.cloud: false` (Opt-out).
+Operator decision (2026-09-10): no per-client opt-in; instead, the router defines in roles where cloud can be a tier
+(`tiers: [{model: "openai:gpt-5-mini", num_ctx: 128000}]`). Cloud is used when (1) no local node
+can (both machines busy, gpu-desktop off), (2) a capability is missing locally (vision, structured, ...: local tiers fail
+`require`) or (3) the client explicitly requests it (`routing.execution: cloud` moves cloud tiers forward).
+The client can protect itself: `routing.execution: local` or `client_auth.clients.<c>.cloud: false` (opt-out).
 
-Schranken, alle konfigurierbar (`router.cloud`):
-- Datenklassen als DEKLARATION (kein Inhaltsklassifikator): `routing.data_class`, sonst Client-Default, sonst
-  `default_data_class` (personal). Cloud nur, wenn die Klasse hoechstens `max_cloud_data_class` (internal) ist.
-- Credential-Scan: Prompts mit erkennbaren Schluesseln/Passwoertern gehen nicht in die Cloud (`credential_scan: block`).
-- Budget je Anbieter und Monat in CHF (Preise je Modell im Katalog); erschoepft = Anbieter ist keine Stufe mehr; Warnung
-  ab `warn_at_percent` als HA-Problem.
-- Egress: nur die Hosts der konfigurierten Anbieter (Allowlist), Schluessel aus secrets.env (Secret-Store) - nie im Log.
-- Circuit Breaker wie bei Knoten.
+Constraints, all configurable (`router.cloud`):
+- Data classes as DECLARATION (no content classifier): `routing.data_class`, else client default, else
+  `default_data_class` (personal). Cloud only if class is at most `max_cloud_data_class` (internal).
+- Credential scan: prompts with recognizable keys/passwords do not go to cloud (`credential_scan: block`).
+- Budget per provider and month in CHF (prices per model in catalog); exhausted = provider is no longer a tier; warning
+  at `warn_at_percent` as HA Problem.
+- Egress: only hosts of configured providers (allowlist), keys from secrets.env (Secret-Store) - never in log.
+- Circuit breaker like for nodes.
 
-Adapter: `openai` (auch fuer OpenAI-kompatible Endpunkte wie Gemini) und `anthropic`. Beide uebersetzen die native
-Ollama-Anfrage (Chat, Generate, Embed; Tools, Bilder, format, Stream) in die Anbieter-API und die Antwort zurueck in das
-Ollama-Format - danach greifen dieselben Wege wie bei lokalen Knoten (Shapes fuer /v1, Routing-Info, Metriken, Usage).
+Adapters: `openai` (also for OpenAI-compatible endpoints like Gemini) and `anthropic`. Both translate the native
+Ollama request (Chat, Generate, Embed; Tools, Images, format, Stream) to the provider API and the response back to
+Ollama format - then the same paths apply as for local nodes (Shapes for /v1, Routing-Info, Metrics, Usage).
 """
 
 import json
@@ -44,10 +44,10 @@ SECRET_PATTERNS = [
 
 
 class CloudTarget(Breaker):
-    """Ein Cloud-Anbieter in der Rolle eines Knotens: dieselben Methoden, die Scheduler/Proxy an einem Node nutzen."""
+    """A cloud provider in the role of a node: same methods used by Scheduler/Proxy on a Node."""
 
     is_cloud = True
-    guard_policy = False   # kein GPU-Schutz in der Cloud (scheduler.score fragt nicht weiter)
+    guard_policy = False   # no GPU guard in the cloud (scheduler.score does not check further)
 
     def __init__(self, provider, spec):
         self.provider = provider
@@ -104,10 +104,10 @@ class CloudTarget(Breaker):
                 "budget_percent": round(100 * spend / budget, 1) if budget else None, "max_data_class": self.spec.get("max_data_class")}
 
 
-# ---------------- Aufbau aus der Konfiguration ----------------
+# ---------------- Setup from configuration ----------------
 
 def setup():
-    """Nach dem Konfigurationslesen: Targets anlegen/aktualisieren, Schluessel laden (nie loggen)."""
+    """After reading configuration: create/update targets, load keys (never log)."""
     cfg = state.CFG.cloud
     new = {}
     for name, spec in (cfg.get("providers") or {}).items():
@@ -152,8 +152,8 @@ def class_index(name):
 # ---------------- Schranken ----------------
 
 def request_block_reason(req, body, client_name):
-    """Warum diese ANFRAGE nicht in die Cloud darf (unabhaengig vom Anbieter) - oder None. Wird als Grund an jeder
-    Cloud-Stufe gemeldet (`skipped`), lokale Stufen laufen normal weiter."""
+    """Why this REQUEST cannot go to cloud (independent of provider) - or None. Reported as reason at each
+    cloud tier (`skipped`), local tiers continue normally."""
     cfg = state.CFG.cloud
     if not cfg.get("enabled"):
         return "cloud disabled in the configuration"
@@ -327,8 +327,8 @@ def _oa_body(body, path, model_id, stream):
         oa["max_completion_tokens"] = int(opts["num_predict"])
     if stream:
         oa["stream_options"] = {"include_usage": True}
-    # Ollama `think` -> OpenAI reasoning_effort, nur fuer Modelle, die der Katalog als reasoning markiert (gpt-5, o-Serie):
-    # think: false = minimal (HA-AI-Tasks; sonst denkt gpt-5-mini fuer ein "OK" 130 Token lang), think: true = Anbieter-Default.
+    # Ollama `think` -> OpenAI reasoning_effort, only for models marked as reasoning in catalog (gpt-5, o-series):
+    # think: false = minimal (HA-AI-Tasks; otherwise gpt-5-mini thinks 130 tokens for an "OK"), think: true = provider default.
     e = state.CFG.models.get(oa_model_key(model_id)) or {}
     if body.get("think") is False and e.get("reasoning"):
         oa["reasoning_effort"] = "minimal"
@@ -481,8 +481,8 @@ class CloudError(Exception):
 
 
 async def run(target, path, body, model, stream):
-    """Anfrage an den Anbieter. Liefert (info, chunks): info = {"p_tok","c_tok","finish"} nach Abschluss gefuellt,
-    chunks = async-Generator von Ollama-Chunks (bei stream) bzw. genau ein fertiges Ollama-JSON (nicht stream)."""
+    """Request to provider. Returns (info, chunks): info = {"p_tok","c_tok","finish"} filled after completion,
+    chunks = async generator of Ollama chunks (if stream) or exactly one finished Ollama-JSON (not stream)."""
     model_id = _model_id(model)
     kind = target.spec["kind"]
     t0 = time.time()

@@ -1,10 +1,10 @@
-"""Engine "local_llm": ein kleines lokales Sprachmodell klassifiziert ueber den eigenen Router (Rolle oder konkretes Modell),
-mit erzwungenem JSON-Schema, ohne Denken, wenige Tokens. Liefert genau eine Option - die Verteilung ist deshalb
-einpunktig und `model_probability` bleibt None (ein generatives Modell gibt keine Wahrscheinlichkeit ueber Optionen aus).
+"""Engine "local_llm": a small local language model classifies via the local router (role or specific model),
+with enforced JSON schema, no thinking, few tokens. Returns exactly one option - the distribution is therefore
+point-mass and `model_probability` remains None (a generative model does not output probabilities over options).
 
-Laeuft durch /api/chat des Routers selbst (Identitaet skirnir-ui wie der Ausprobieren-Knopf), damit Admission, Breaker und
-Metriken greifen. Kostet eine Modellantwort (0,3-1 s warm) - darum sinnvoll als Fallback fuer unsichere Faelle, nicht als
-erste Stufe.
+Runs through the router's own /api/chat (identity skirnir-ui like the Try button), so admission, breaker, and
+metrics apply. Costs one model response (0.3-1 s warm) - hence useful as a fallback for uncertain cases, not as
+the first tier.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ PROMPT = ("Du ordnest eine Benutzeranfrage genau einer Kategorie zu. Antworte nu
 
 
 def chosen_option(content, options):
-    """Die Option aus der Modellantwort: das Feld `option` des erzwungenen JSON, sonst die erste Option im Klartext."""
+    """The option from the model response: the `option` field of the enforced JSON, otherwise the first option in plain text."""
     try:
         parsed = json.loads(content)
     except ValueError:  # exception-ok: the model's output is untrusted JSON; whether it parses shows only the parser
