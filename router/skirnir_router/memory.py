@@ -88,6 +88,20 @@ def scope_for_principal(principal, project, *, read=False, write=False, explicit
                  shared, bool(grant.get("delete")), strategy, private)
 
 
+def curator_scopes(principal):
+    """The shared scopes this client curates: read and delete granted on a project bound to a shared scope. A curator
+    may list the scope and delete any operation in it, also other clients' (memory_gateway.curation_target)."""
+    policy = ((auth.client_auth_cfg().get("clients") or {}).get(principal) or {}).get("memory") or {}
+    scopes = []
+    for project, grant in (policy.get("projects") or {}).items():
+        if not (isinstance(grant, dict) and grant.get("scope") and grant.get("read") and grant.get("delete")):
+            continue
+        scope = scope_for_principal(principal, project, read=True, explicit=True)
+        if not failed(scope) and scope.shared_scope and scope.delete:
+            scopes.append(scope)
+    return scopes
+
+
 def recall_with(principal, project):
     """Further projects a client reads together with `project` (memory project option recall_with), as configured."""
     spec = (auth.client_auth_cfg().get("clients") or {}).get(principal) or {}
@@ -470,15 +484,16 @@ def register(app):
     app.cleanup_ctx.append(lifecycle)
     app.router.add_post(PREFIX + "/recall", handle_recall)
     app.router.add_post(PREFIX + "/retain", handle_retain)
+    app.router.add_post(PREFIX + "/list", handle_list)
     from .memory_gateway import register
     register(app)
 
 
-async def _api(request, write):
+async def _api(request, result_for):
     service = request.app.get(SERVICE_KEY)
     if service is None or not service.active():
         return session_api.fail(404, "memory is disabled (backend changes require restart)")
-    result = await _api_result(request, service, write)
+    result = await result_for(service)
     if isinstance(result, Problem):
         if result.status == 401:
             return auth._deny(request, 401, UNAUTHENTICATED.message)
@@ -525,11 +540,72 @@ async def _api_result(request, service, write):
 
 
 async def handle_recall(request):
-    return await _api(request, False)
+    return await _api(request, lambda service: _api_result(request, service, False))
 
 
 async def handle_retain(request):
-    return await _api(request, True)
+    return await _api(request, lambda service: _api_result(request, service, True))
+
+
+async def handle_list(request):
+    return await _api(request, lambda service: _list_result(request, service))
+
+
+LIST_TYPES = ("world", "experience", "observation")
+LIST_LIMIT = 50   # one page stays well below max_response_bytes (a unit with metadata is ~1-2 KB upstream)
+CURATOR_ONLY = denied("listing needs read and delete on a shared scope (curator)")
+
+
+async def _list_result(request, service):
+    """One page of a shared scope for its curator: every memory unit with the operation it came from (document_id), so
+    wrong or outdated knowledge can be deleted. Units the content filter rejects are withheld, listed by id only."""
+    data = await session_api.body(request)
+    if failed(data):
+        return data
+    if failed(problem := session_api.fields(data, ("project", "type", "query", "limit", "offset"), ("project",))):
+        return problem
+    project = session_api.text(data["project"], "project")
+    if failed(project):
+        return project
+    scope = scope_for(request, project, read=True, explicit=True)
+    if failed(scope):
+        return scope
+    if not (scope.shared_scope and scope.delete):
+        return CURATOR_ONLY
+    kind, query = data.get("type"), data.get("query")
+    limit, offset = data.get("limit", 20), data.get("offset", 0)
+    if kind not in (None, *LIST_TYPES):
+        return invalid("list type must be world, experience or observation")
+    if query is not None and (not isinstance(query, str) or not query.strip() or len(query.encode()) > service.cfg.max_query_bytes):
+        return invalid("list query must be a short nonempty string")
+    if type(limit) is not int or not 1 <= limit <= LIST_LIMIT or type(offset) is not int or offset < 0:
+        return invalid(f"list limit must be 1..{LIST_LIMIT} and offset at least 0")
+    page = await service.client.list_memories(service.bank(scope), kind=kind, query=query, limit=limit, offset=offset,
+                                              authorize=lambda: service.current(scope, read=True))
+    if failed(page):
+        return page
+    items, withheld = [], []
+    for unit in page.get("items") or []:
+        if not isinstance(unit, dict) or not isinstance(unit.get("id"), str):
+            continue
+        document = unit.get("document_id") if isinstance(unit.get("document_id"), str) else None
+        text = unit.get("text") if isinstance(unit.get("text"), str) else ""
+        if rejected_content(text, service.cfg, private_addresses=scope.private_addresses):
+            withheld.append({"id": unit["id"][:128], "document_id": document})
+            continue
+        from .provenance import recall_metadata
+        sources = unit.get("source_memory_ids") if isinstance(unit.get("source_memory_ids"), list) else []
+        entry = {"id": unit["id"][:128], "type": unit.get("fact_type"), "text": text, "document_id": document,
+                 "source_memory_ids": [s[:128] for s in sources[:32] if isinstance(s, str)],
+                 "provenance": recall_metadata(unit["metadata"]) if isinstance(unit.get("metadata"), dict) else {}}
+        for key in ("date", "updated_at"):
+            if isinstance(unit.get(key), str):
+                entry[key] = unit[key][:64]
+        items.append(entry)
+    count("list", "curator")
+    total = page.get("total") if type(page.get("total")) is int else None
+    return web.json_response({"items": items, "withheld": withheld, "total": total, "offset": offset, "limit": limit,
+                              "trusted": False}, headers={"Cache-Control": "no-store"})
 
 
 async def prepare(request, path, body, req):

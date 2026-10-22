@@ -136,7 +136,7 @@ class SharedGatewayTests(MemoryHarness):
 
         async def claim(*args):
             for job in self.jobs.values():
-                if job["state"] == "pending":
+                if job["state"] in ("pending", "delete_pending"):
                     job["state"] = "processing"
                     job["attempts"] += 1
                     return copy.deepcopy(job)
@@ -144,8 +144,21 @@ class SharedGatewayTests(MemoryHarness):
 
         async def finish(operation, lease, status, delay, error=None):
             self.jobs[str(operation)]["state"] = status
+
+        async def find(operation):
+            value = self.jobs.get(str(operation))
+            return OPERATION_NOT_FOUND if value is None else value
+
+        async def delete(owner, operation, scope):
+            value = self.jobs.get(str(operation))
+            if value is None or value["owner"] != owner:
+                return OPERATION_NOT_FOUND
+            value.update(state="delete_pending", delete_requested=True, scope=scope)
+            return None
         store.outbox_put.side_effect = put
         store.outbox_get.side_effect = get
+        store.outbox_find.side_effect = find
+        store.outbox_delete.side_effect = delete
         store.outbox_claim.side_effect = claim
         store.outbox_finish.side_effect = finish
         self.service.outbox = store
@@ -516,6 +529,7 @@ class SharedGatewayTests(MemoryHarness):
         self.service.client.operation = AsyncMock(return_value={"status": "completed"})
         data = {"project": SHARED, "event_id": "one", "content": "Synthetic fact", "confirmed": True}
         operation = (await (await self.api(memory.PREFIX + "/retain", data)).json())["operation_id"]
+        state.CFG.client_auth["clients"]["client-b"]["memory"]["projects"][SHARED]["delete"] = False   # reader, not curator
         self.assertEqual((await self.api(memory.PREFIX + "/operations/" + operation, token="client-b", method="get")).status, 404)
         await memory_outbox.step(self.service)
         response = await self.api(memory.PREFIX + "/operations/" + operation, method="get")
@@ -523,6 +537,68 @@ class SharedGatewayTests(MemoryHarness):
         self.assertEqual(value["upstream_status"], "completed")
         self.assertNotIn("payload", value)
         self.assertNotIn("scope", value)
+
+    async def test_curator_deletes_foreign_operations_only_in_its_shared_scope(self):
+        self.shared()
+        await self.durable()
+        self.service.client.operation = AsyncMock(return_value={"status": "completed"})
+        shared_op = (await (await self.api(memory.PREFIX + "/retain", {"project": SHARED, "event_id": "one",
+                                                                       "content": "Synthetic fact", "confirmed": True})).json())["operation_id"]
+        private_op = (await (await self.api(memory.PREFIX + "/retain", {"project": PROJECT, "event_id": "two",
+                                                                        "content": "Synthetic note", "confirmed": True})).json())["operation_id"]
+        await memory_outbox.step(self.service)
+        await memory_outbox.step(self.service)
+        path = memory.PREFIX + "/operations/"
+        # client-b holds read and delete on the shared scope: it curates, also what client-a wrote.
+        self.assertEqual((await self.api(path + shared_op, token="client-b", method="get")).status, 200)
+        self.assertEqual((await self.api(path + shared_op + "/retry", {"retry_id": "r1"}, token="client-b")).status, 404)
+        self.assertEqual((await self.api(path + private_op + "/delete", {}, token="client-b")).status, 404)
+        response = await self.api(path + shared_op + "/delete", {}, token="client-b")
+        self.assertEqual(response.status, 202, await response.text())
+        job = self.jobs[shared_op]
+        self.assertEqual((job["owner"], job["state"], job["scope"]["principal"]), ("client-a", "delete_pending", "client-b"))
+        self.assertEqual(job["scope"]["__bank"], self.service.bank(memory.scope_for_principal("client-a", SHARED, explicit=True)))
+        before = len(self.deleted_documents)
+        await memory_outbox.step(self.service)
+        self.assertEqual(self.deleted_documents[before:], [(job["scope"]["__bank"], shared_op)])
+        self.assertEqual(self.jobs[shared_op]["state"], "deleted")
+        # Without delete it is a reader again: foreign operations stay invisible.
+        second = (await (await self.api(memory.PREFIX + "/retain", {"project": SHARED, "event_id": "three",
+                                                                    "content": "Synthetic other fact", "confirmed": True})).json())["operation_id"]
+        state.CFG.client_auth["clients"]["client-b"]["memory"]["projects"][SHARED]["delete"] = False
+        self.assertEqual((await self.api(path + second + "/delete", {}, token="client-b")).status, 404)
+        self.assertEqual((await self.api(path + second + "/delete", {}, token="client-owned")).status, 404)
+        self.assertEqual(self.jobs[second]["state"], "pending")
+
+    async def test_curator_lists_the_shared_scope_and_withholds_filtered_units(self):
+        self.shared()
+        mail = "@".join(("synthetic", "example.invalid"))   # assembled, so the publication guard stays quiet
+        self.list_units = [
+            {"id": "unit-1", "fact_type": "world", "text": "Synthetic fact one.", "document_id": "doc-1", "date": "2026-01-02",
+             "metadata": {"kind": "assistant_derivation", "origin_client": "client-a", "unlisted": "dropped"}},
+            {"id": "unit-2", "fact_type": "observation", "text": "Synthetic summary.", "document_id": None,
+             "source_memory_ids": ["unit-1"]},
+            {"id": "unit-3", "fact_type": "world", "text": "Reach " + mail, "document_id": "doc-3"}]
+        response = await self.api(memory.PREFIX + "/list", {"project": SHARED, "limit": 10}, token="client-b")
+        self.assertEqual(response.status, 200, await response.text())
+        value = await response.json()
+        self.assertEqual([i["id"] for i in value["items"]], ["unit-1", "unit-2"])
+        self.assertEqual(value["items"][0]["document_id"], "doc-1")
+        self.assertEqual(value["items"][0]["provenance"], {"kind": "assistant_derivation", "origin_client": "client-a"})
+        self.assertEqual(value["items"][1]["source_memory_ids"], ["unit-1"])
+        self.assertEqual(value["withheld"], [{"id": "unit-3", "document_id": "doc-3"}])
+        self.assertEqual((value["total"], value["trusted"]), (3, False))
+        bank, query = self.list_queries[-1]
+        self.assertEqual(bank, self.service.bank(memory.scope_for_principal("client-b", SHARED, read=True, explicit=True)))
+        self.assertEqual((query["limit"], query["offset"]), ("10", "0"))
+        # Only curators, only shared scopes, bounded pages.
+        for data, token, status in (({"project": SHARED, "limit": 0}, "client-b", 400),
+                                    ({"project": SHARED, "type": "opinion"}, "client-b", 400),
+                                    ({"project": PROJECT}, "client-b", 403),
+                                    ({"project": SHARED}, "client-owned", 403)):
+            self.assertEqual((await self.api(memory.PREFIX + "/list", data, token=token)).status, status, (data, token))
+        state.CFG.client_auth["clients"]["client-b"]["memory"]["projects"][SHARED]["delete"] = False
+        self.assertEqual((await self.api(memory.PREFIX + "/list", {"project": SHARED}, token="client-b")).status, 403)
 
     async def test_strategies_auto_hybrid_manual_off_and_default_legacy(self):
         spec = state.CFG.client_auth["clients"]["client-a"]["memory"]

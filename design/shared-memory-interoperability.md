@@ -260,6 +260,17 @@ Keep authorization and secret configuration consistent across worker instances.
 | `GET /operations/{uuid}` | Owner-only state, attempts, timestamps, action and upstream status after acknowledgment; no payload/scope. |
 | `DELETE /operations/{uuid}` | Cancel a never-attempted job. Ambiguous or in-flight work returns 409. |
 | `POST /operations/{uuid}/delete` with `{}` | Separate `delete` grant; durable selective source deletion. 202 while pending, 200 once deleted. |
+| `POST /list` with `{project, type?, query?, limit?, offset?}` | Curators only (see below): one page (1-50, default 20) of the shared scope's memory units with `document_id` (the operation they came from), `source_memory_ids` and provenance. Units the content filter rejects are listed under `withheld` by id only. |
+
+**Curators of a shared scope.** A client with both `read` and `delete` on a project
+bound to a shared `scope` curates that scope: it may list it (`POST /list`) and see the
+status of and delete any operation in that scope's bank, also other clients' (REST
+only; never cancel or retry them, never a private bank). For every other client an
+operation stays owner-only and a foreign one answers 404. Each curated deletion is
+logged with curator, owner and scope and counted as `outcome="curated"`; the deletion
+worker then runs under the curator's grant, so revoking it stops pending deletions.
+"Changing" a fact means writing the corrected fact and deleting the old operation;
+Hindsight's in-place curation is not exposed.
 
 States are `pending`, `processing`, `accepted`, `completed`, `dead`, `revoked`,
 `cancelled`, `delete_pending`, `deleted`. `accepted` means upstream acknowledged
