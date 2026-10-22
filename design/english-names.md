@@ -28,6 +28,8 @@ German, the entity IDs become English:
 | `kuerzungen` | `sensor.skirnir_truncations` |
 | `kuerzung` | `event.skirnir_truncation` |
 | `node_<node>_state`, `_gpu_util`, `_vram_free`, `_game`, `_ram_free`, `_commit_free` | `sensor.skirnir_node_<node>_<field>` |
+| `node_<node>_gen_tps`, `_prompt_tps` (router 0.9.2) | `sensor.skirnir_node_<node>_<field>` |
+| `node_<node>_ram_spill` (router 0.9.2) | `binary_sensor.skirnir_node_<node>_ram_spill` |
 
 Agent entities (unique_id `<device>_<oid>`) get `<domain>.<device>_<oid>`. The three truncation entities
 are renamed: `ollama_kuerzungen` → `ollama_truncations`, `ollama_letzte_kuerzung` →

@@ -408,6 +408,14 @@ servable, agent silent, budget warning) and a sensor **Node awaiting approval** 
 deleted nodes disappear from Home Assistant, even if they vanished during a router restart. The Home Assistant Ollama integration
 talks to the router directly (`https://router.example.net:11434`, API key = client token); model = role.
 
+**Slowness signals** (router 0.9.2). Nothing fails when a model runs slowly, so these are reported as facts per node:
+`binary_sensor.skirnir_node_<node>_ram_spill` **Model partly in RAM** is on while Ollama has placed part of a loaded model in
+system RAM (`/api/ps`: `size` larger than `size_vram`; those layers run on the CPU, every request is many times slower), with the
+models and GiB as attributes; from `router.ram_spill_problem_gib` (0.5 GiB, 0 = off) it is also a **Problem**.
+`sensor.skirnir_node_<node>_gen_tps` and `_prompt_tps` carry the generation and prompt rate (tok/s) of the last warm request on
+the node, with the model as attribute; a reply under 20 tokens or a prompt under 200 new tokens does not count, nor do
+benchmarks. Their raw values are meant for a baseline in Home Assistant (e.g. a statistics helper with the median of a week).
+
 ## GPU nodes: the agent
 
 [agent/](agent/) contains the agent as a Windows service or Linux binary (Go, own README in German). It

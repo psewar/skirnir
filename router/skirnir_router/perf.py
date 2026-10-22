@@ -71,6 +71,9 @@ def perf_record(model, node_name, stats, ttft_s, kind="passive"):
     e["count"] = e.get("count", 0) + 1
     e["last"] = {**s, "at": time.strftime("%Y-%m-%d %H:%M"), "kind": kind}
     if kind == "passive":
+        node = state.NODES.get(node_name)
+        if node is not None:
+            node.note_perf(model, s, time.time())   # real traffic only, benchmarks would skew the HA baseline
         e["samples"] = (e.get("samples") or [])[-19:] + [s]
         smp = e["samples"]
         e["passive"] = {"gen_tps": round(sum(x["gen_tps"] for x in smp) / len(smp), 1),

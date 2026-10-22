@@ -400,6 +400,15 @@ Knoten-Entitäten werden nachgeführt: gesperrte oder gelöschte Knoten verschwi
 Router-Neustarts verschwanden. Die HA-Ollama-Integration spricht den Router direkt (`https://router.example.net:11434`, API-Key =
 Client-Token); Modell = Rolle.
 
+**Langsamkeits-Signale** (Router 0.9.2). Wenn ein Modell langsam läuft, schlägt nichts fehl; darum meldet der Router es je
+Knoten als Fakt: `binary_sensor.skirnir_node_<knoten>_ram_spill` **Modell teilweise im RAM** ist an, solange Ollama einen Teil
+eines geladenen Modells in den Arbeitsspeicher legen musste (`/api/ps`: `size` grösser als `size_vram`; diese Schichten rechnen
+auf der CPU, jede Anfrage ist vielfach langsamer), mit Modellen und GiB als Attribut; ab `router.ram_spill_problem_gib`
+(0,5 GiB, 0 = aus) ist es auch ein **Problem**. `sensor.skirnir_node_<knoten>_gen_tps` und `_prompt_tps` tragen die Erzeugungs-
+und Prompt-Rate (tok/s) der letzten warmen Anfrage auf dem Knoten, mit dem Modell als Attribut; eine Antwort unter 20 Token, ein
+Prompt unter 200 neuen Token und Benchmarks zählen nicht. Die Rohwerte sind für eine Grundlinie in Home Assistant gedacht (etwa
+ein Statistik-Helfer mit dem Median einer Woche).
+
 ## GPU-Knoten: der Agent
 
 [agent/](agent/) enthält den Agenten als Windows-Dienst bzw. Linux-Binary (Go, eigenes README). Er

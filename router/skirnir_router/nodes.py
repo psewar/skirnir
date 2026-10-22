@@ -10,6 +10,11 @@ from . import config, state
 from .common import log, tls_fingerprint
 
 PUSH_STALE_S = 45   # Agent >= 0.14.0 reports Ollama status on every change and at least every 30 s
+# Slowness watch (router 0.9.2): minimum sizes for a request's rate to reach HA. Below that the rate is mostly noise
+# (a 2-token reply measured 7 tok/s on a model that generates 100; a cached prompt has only a few new tokens).
+PERF_MIN_GEN_TOKENS = 20
+PERF_MIN_PROMPT_TOKENS = 200
+RAM_SPILL_MIN_GIB = 0.05   # below this, size - size_vram is rounding, not layers in system RAM
 
 # GPU guard: Agents before 0.20.0 report states, reasons, and field names in German (design/english-names.md). guard_english
 # translates on receipt so the router only sees English names; remove once all nodes are >= 0.20.0.
@@ -138,6 +143,9 @@ class Node(Breaker):
         self.loaded = {}                 # loaded name -> size_vram GiB (as reported by Ollama)
         self.loaded_digest = {}          # digest -> size_vram GiB
         self.loaded_ctx = {}             # digest -> context_length, with which the model is loaded
+        self.ram_spill = {}              # loaded name -> GiB Ollama placed in system RAM (size - size_vram): runs partly on the CPU
+        self.last_gen = None             # last warm request with enough output tokens: {"model", "tps", "ts"} (HA sensor)
+        self.last_prompt = None          # last warm request with a long enough prompt: {"model", "tps", "ts"} (HA sensor)
         self.misses = 0
         self.state = "offline"
         # Agent-Sicht
@@ -428,9 +436,20 @@ class Node(Breaker):
             log.warning("node %s -> offline (%s)", self.name, why)
         self.state, self.hot_since, self.calm_since = "offline", None, None
         self.prewarm_after_game = False   # online plans its own prewarming
-        self.loaded, self.loaded_digest, self.loaded_ctx, self.loading = {}, {}, {}, {}
+        self.loaded, self.loaded_digest, self.loaded_ctx, self.loading, self.ram_spill = {}, {}, {}, {}, {}
         self.vram_last_gib, self.vram_hold_gib, self.vram_hold_until = 0.0, 0.0, 0.0   # offline: tail is irrelevant
         state.MQTT_DIRTY.append(True)
+
+    def note_perf(self, model, s, now):
+        """Rates of a warm request for the HA sensors (slowness watch). Each rate needs its own minimum size: a reply of a
+        few tokens or a prompt mostly served from the cache gives a noisy rate. Only a changed value counts as news."""
+        changed = False
+        if s.get("tokens", 0) >= PERF_MIN_GEN_TOKENS:
+            self.last_gen, changed = {"model": model, "tps": s["gen_tps"], "ts": now}, True
+        if s.get("prompt_tps") is not None and (s.get("prompt_tokens") or 0) >= PERF_MIN_PROMPT_TOKENS:
+            self.last_prompt, changed = {"model": model, "tps": s["prompt_tps"], "ts": now}, True
+        if changed:
+            state.MQTT_DIRTY.append(True)
 
     def budget_gib(self, now, model):
         """What Ollama may occupy on this node: free VRAM + everything Ollama itself holds (will be
@@ -444,6 +463,8 @@ class Node(Breaker):
         return {
             "state": self.state, "busy_reason": self.busy_reason,
             "models": sorted(self.models), "loaded": {k: round(v, 2) for k, v in self.loaded.items()},
+            "ram_spill_gib": {k: round(v, 2) for k, v in self.ram_spill.items()},   # loaded models partly in system RAM
+            "last_gen": self.last_gen, "last_prompt": self.last_prompt,
             "inflight": self.inflight, "gpu_known": bool(self.gpu_known(now)),
             "gpu_util": self.gpu_util, "vram_free_gib": self.vram_free_gib,
             "vram_used_gib": self.vram_used_gib, "vram_total_gib": self.vram_total_gib, "foreign_vram_gib": round(self.foreign_vram_gib(), 2), "children_vram_gib": round(self.children_vram_gib, 2),

@@ -58,7 +58,13 @@ def ha_snapshot(now=None):
                          "game": (n.game or {}).get("name") if (n.game or {}).get("running") else None,
                          "game_reported": n.game is not None, "memory_pressure": n.mem_pressure,
                          "ram_available_gib": (n.memory or {}).get("ram_available_gib"),
-                         "commit_free_gib": (n.memory or {}).get("commit_free_gib")}
+                         "commit_free_gib": (n.memory or {}).get("commit_free_gib"),
+                         # Router 0.9.2, slowness watch: model partly in system RAM (fact from /api/ps) and the rates of the
+                         # last warm request large enough to measure (None until there was one)
+                         "ram_spill_gib": round(sum(n.ram_spill.values()), 2),
+                         "ram_spill_models": {m: round(g, 2) for m, g in sorted(n.ram_spill.items())},
+                         "gen_tps": (n.last_gen or {}).get("tps"), "gen_tps_model": (n.last_gen or {}).get("model"),
+                         "prompt_tps": (n.last_prompt or {}).get("tps"), "prompt_tps_model": (n.last_prompt or {}).get("model")}
     pending = [e["name"] for e in (state.REG.nodes.values() if state.REG else []) if e.get("state") == "pending"]
     problems = []
     if not online:
@@ -81,6 +87,13 @@ def ha_snapshot(now=None):
     for n in online:
         if n.hb_ts and now - n.hb_ts > state.CFG.agent_missing_s:
             problems.append(f"Knoten {n.name}: kein Agent-Heartbeat seit {int((now - n.hb_ts) // 60)} min")
+    # Router 0.9.2: a loaded model that Ollama had to place partly in system RAM runs there on the CPU, every request is many
+    # times slower. Nothing fails, so without this fact it only shows as slow answers (2026-10-22: a day unnoticed).
+    if state.CFG.ram_spill_problem_gib > 0:
+        for n in online:
+            for m, g in sorted(n.ram_spill.items()):
+                if g >= state.CFG.ram_spill_problem_gib:
+                    problems.append(f"Knoten {n.name}: {m} liegt zu {g:.1f} GiB im Arbeitsspeicher (rechnet langsam auf der CPU)")
     # GPU guard (Agent >= 0.7.0): unavailable (limit not settable), deselected (operator decision: counts as a problem),
     # voltage/temperature/hardware warning. Only if the router should consider this node's status.
     if state.CFG.gpu_guard["enabled"]:
@@ -257,6 +270,18 @@ class HAPublisher:
              dict(unit_of_measurement="GiB", device_class="data_size", icon="mdi:memory", **numeric("ram_available_gib"))),
             ("sensor", f"node_{oid}_commit_free", f"{name} Commit frei",
              dict(unit_of_measurement="GiB", device_class="data_size", icon="mdi:memory", **numeric("commit_free_gib"))),
+            # Router 0.9.2, slowness watch: the RAM fact as a problem sensor, and the rates of the last measurable request
+            # per node as raw values for a baseline in HA (statistics helper; low rate = slow)
+            ("binary_sensor", f"node_{oid}_ram_spill", f"{name} Modell teilweise im RAM",
+             dict(state_topic=nt, value_template="{{ 'ON' if (value_json.ram_spill_gib or 0) > 0 else 'OFF' }}",
+                  device_class="problem", icon="mdi:memory-arrow-down", json_attributes_topic=nt,
+                  json_attributes_template="{{ {'gib': value_json.ram_spill_gib, 'models': value_json.ram_spill_models} | tojson }}")),
+            ("sensor", f"node_{oid}_gen_tps", f"{name} Erzeugung letzte Anfrage",
+             dict(unit_of_measurement="tok/s", icon="mdi:speedometer", json_attributes_topic=nt,
+                  json_attributes_template="{{ {'model': value_json.gen_tps_model} | tojson }}", **numeric("gen_tps"))),
+            ("sensor", f"node_{oid}_prompt_tps", f"{name} Prompt-Verarbeitung letzte Anfrage",
+             dict(unit_of_measurement="tok/s", icon="mdi:speedometer-slow", json_attributes_topic=nt,
+                  json_attributes_template="{{ {'model': value_json.prompt_tps_model} | tojson }}", **numeric("prompt_tps"))),
         ]
 
     def sync_node_discovery(self):

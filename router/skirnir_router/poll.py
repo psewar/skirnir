@@ -31,6 +31,16 @@ async def poll_node(node):
         state.spawn(fetch_version(node))
 
 
+def ram_spill_gib(ps_entry):
+    """GiB of a loaded model that Ollama placed in system RAM instead of VRAM (/api/ps: size - size_vram). Those layers run
+    on the CPU and make every request many times slower (2026-10-22: 3.2 GiB in RAM, 8.8 instead of ~100 tok/s). 0 when
+    the entry carries no sizes."""
+    size, vram = ps_entry.get("size"), ps_entry.get("size_vram")
+    if not (isinstance(size, (int, float)) and isinstance(vram, (int, float))):
+        return 0.0
+    return max(0.0, (size - vram) / GIB)
+
+
 def apply_ollama_state(node, tag_models, ps_models, now):
     """Adopt Ollama state of a node: installed (/api/tags) and loaded models (/api/ps), transition offline ->
     free, reload capabilities, state machine. Shared for router polling and agent reporting
@@ -46,6 +56,10 @@ def apply_ollama_state(node, tag_models, ps_models, now):
             state.REG.dirty = True
     node.digest_of = {m["name"]: m.get("digest") for m in tag_models}
     node.loaded = {m["name"]: m.get("size_vram", 0) / GIB for m in ps_models}
+    spill = {m["name"]: g for m in ps_models if (g := ram_spill_gib(m)) >= nodes.RAM_SPILL_MIN_GIB}
+    if spill.keys() != node.ram_spill.keys():
+        state.MQTT_DIRTY.append(True)   # HA should see a model moving into or out of system RAM right away
+    node.ram_spill = spill
     node.loaded_digest = {}
     node.loaded_ctx = {}
     for m in ps_models:
