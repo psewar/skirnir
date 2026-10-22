@@ -26,7 +26,7 @@ import (
 const helperEnv = "SKIRNIR_TEST_HELFER"
 
 // TestHelferProzess ist kein Test, sondern der Rollenwechsel fuer die Kindprozesse.
-func TestHelferProzess(t *testing.T) {
+func TestHelperProcess(t *testing.T) {
 	switch os.Getenv(helperEnv) {
 	case "":
 		t.Skip("nur als Kindprozess")
@@ -40,13 +40,13 @@ func TestHelferProzess(t *testing.T) {
 		// Erst loslegen, wenn der Test das Elternteil in den Baum gehaengt hat - sonst liefe der Enkel
 		// ausserhalb des Jobs, und der Test wuerde etwas anderes pruefen als den Supervisor.
 		bufio.NewReader(os.Stdin).ReadString('\n')
-		enkel := exec.Command(os.Args[0], "-test.run=^TestHelferProzess$")
-		enkel.Env = append(os.Environ(), helperEnv+"=enkel")
-		if err := enkel.Start(); err != nil {
+		grandchild := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+		grandchild.Env = append(os.Environ(), helperEnv+"=enkel")
+		if err := grandchild.Start(); err != nil {
 			fmt.Println("FEHLER", err)
 			os.Exit(3)
 		}
-		fmt.Println("ENKEL", enkel.Process.Pid)
+		fmt.Println("ENKEL", grandchild.Process.Pid)
 		if os.Getenv(helperEnv) == "eltern-kurz" {
 			os.Exit(0) // "Absturz": das Elternteil geht, der Enkel bleibt
 		}
@@ -56,7 +56,7 @@ func TestHelferProzess(t *testing.T) {
 }
 
 // lebt prueft, ob ein Prozess noch laeuft (WaitForSingleObject mit Zeitlimit 0).
-func lebt(pid int) bool {
+func isAlive(pid int) bool {
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
 		return false // gibt es nicht mehr
@@ -66,28 +66,28 @@ func lebt(pid int) bool {
 	return ev == uint32(windows.WAIT_TIMEOUT)
 }
 
-func wartetBisTot(pid int, frist time.Duration) bool {
-	ende := time.Now().Add(frist)
-	for time.Now().Before(ende) {
-		if !lebt(pid) {
+func waitDead(pid int, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if !isAlive(pid) {
 			return true
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return !lebt(pid)
+	return !isAlive(pid)
 }
 
 // starteFamilie startet ein Elternteil, haengt es in einen Baum und liefert die PID des Enkels.
-func starteFamilie(t *testing.T, g *childGroup, rolle string) (*exec.Cmd, *procTree, int) {
+func startFamily(t *testing.T, g *childGroup, role string) (*exec.Cmd, *procTree, int) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestHelferProzess$")
-	cmd.Env = append(os.Environ(), helperEnv+"="+rolle)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+	cmd.Env = append(os.Environ(), helperEnv+"="+role)
 	cmd.SysProcAttr = childProcAttr()
-	ein, err := cmd.StdinPipe()
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	aus, err := cmd.StdoutPipe()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,12 +99,12 @@ func starteFamilie(t *testing.T, g *childGroup, rolle string) (*exec.Cmd, *procT
 		cmd.Process.Kill()
 		t.Fatalf("track: %v", err)
 	}
-	fmt.Fprintln(ein, "los")
-	sc := bufio.NewScanner(aus)
+	fmt.Fprintln(stdin, "los")
+	sc := bufio.NewScanner(stdout)
 	for sc.Scan() {
 		if f := strings.Fields(sc.Text()); len(f) == 2 && f[0] == "ENKEL" {
 			pid, _ := strconv.Atoi(f[1])
-			if !lebt(pid) {
+			if !isAlive(pid) {
 				t.Fatalf("Enkel %d lebt nicht einmal nach dem Start", pid)
 			}
 			return cmd, tree, pid
@@ -114,7 +114,7 @@ func starteFamilie(t *testing.T, g *childGroup, rolle string) (*exec.Cmd, *procT
 	return nil, nil, 0
 }
 
-func neueGruppe(t *testing.T) *childGroup {
+func newGroup(t *testing.T) *childGroup {
 	t.Helper()
 	g, err := newChildGroup()
 	if err != nil {
@@ -126,41 +126,41 @@ func neueGruppe(t *testing.T) *childGroup {
 
 // Gegenprobe: so verhielt sich der Agent bis 0.5.1. Nur der Hauptprozess stirbt, der Enkel lebt weiter.
 // Faellt DIESER Test um, prueft die Anordnung nicht mehr, was sie soll.
-func TestNurHauptprozessBeendenLaesstEnkelLeben(t *testing.T) {
-	g := neueGruppe(t)
-	cmd, tree, enkel := starteFamilie(t, g, "eltern")
+func TestEndingOnlyMainProcessLeavesGrandchild(t *testing.T) {
+	g := newGroup(t)
+	cmd, tree, grandchild := startFamily(t, g, "eltern")
 	defer tree.release()
 	defer tree.kill()
 
 	killChild(cmd) // der alte Weg
 	cmd.Wait()
-	if wartetBisTot(enkel, 2*time.Second) {
-		t.Fatalf("Enkel %d ist mitgestorben - die Gegenprobe zeigt den alten Fehler nicht mehr", enkel)
+	if waitDead(grandchild, 2*time.Second) {
+		t.Fatalf("Enkel %d ist mitgestorben - die Gegenprobe zeigt den alten Fehler nicht mehr", grandchild)
 	}
 }
 
 // Der Fehler vom 2026-09-23: ein Neustart muss den ganzen Baum beenden.
-func TestNeustartBeendetAuchDenEnkel(t *testing.T) {
-	g := neueGruppe(t)
-	cmd, tree, enkel := starteFamilie(t, g, "eltern")
+func TestRestartAlsoEndsGrandchild(t *testing.T) {
+	g := newGroup(t)
+	cmd, tree, grandchild := startFamily(t, g, "eltern")
 	defer tree.release()
 
 	stopChild(cmd, tree)
 	cmd.Wait()
-	if !wartetBisTot(enkel, 5*time.Second) {
+	if !waitDead(grandchild, 5*time.Second) {
 		tree.kill()
-		t.Fatalf("Enkel %d lebt nach dem Neustart weiter - genau der Waisen-Fehler", enkel)
+		t.Fatalf("Enkel %d lebt nach dem Neustart weiter - genau der Waisen-Fehler", grandchild)
 	}
 }
 
 // Stuerzt das Elternteil von selbst ab, raeumt reapTree den verwaisten Enkel weg und meldet ihn.
-func TestAbsturzHinterlaesstKeineWaise(t *testing.T) {
-	g := neueGruppe(t)
-	cmd, tree, enkel := starteFamilie(t, g, "eltern-kurz")
+func TestCrashLeavesNoOrphan(t *testing.T) {
+	g := newGroup(t)
+	cmd, tree, grandchild := startFamily(t, g, "eltern-kurz")
 	defer tree.release()
 	cmd.Wait() // das Elternteil ist weg, der Enkel noch da
 
-	if !lebt(enkel) {
+	if !isAlive(grandchild) {
 		t.Fatal("Enkel ist schon ohne Aufraeumen tot - der Test beweist so nichts")
 	}
 	if n := tree.alive(); n != 1 {
@@ -176,22 +176,22 @@ func TestAbsturzHinterlaesstKeineWaise(t *testing.T) {
 	s := &Supervisor{log: log}
 	s.reapTree("ollama", tree)
 
-	if !wartetBisTot(enkel, 5*time.Second) {
-		t.Fatalf("verwaister Enkel %d lebt nach reapTree weiter", enkel)
+	if !waitDead(grandchild, 5*time.Second) {
+		t.Fatalf("verwaister Enkel %d lebt nach reapTree weiter", grandchild)
 	}
-	inhalt := logInhalt(t, dir)
-	if !strings.Contains(inhalt, "ollama: 1 verwaiste(r) Prozess(e) im Prozessbaum beendet") {
-		t.Fatalf("Aufraeumen nicht im Log vermerkt:\n%s", inhalt)
+	content := logContent(t, dir)
+	if !strings.Contains(content, "ollama: 1 orphaned process(es) in the process tree ended") {
+		t.Fatalf("Aufraeumen nicht im Log vermerkt:\n%s", content)
 	}
 }
 
 // Ein Kind, das sauber endet und nichts zuruecklaesst, darf keine Warnung erzeugen.
-func TestSauberesEndeOhneWarnung(t *testing.T) {
-	g := neueGruppe(t)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestHelferProzess$")
+func TestCleanEndWithoutWarning(t *testing.T) {
+	g := newGroup(t)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
 	cmd.Env = append(os.Environ(), helperEnv+"=sofort")
 	cmd.SysProcAttr = childProcAttr()
-	ein, err := cmd.StdinPipe()
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestSauberesEndeOhneWarnung(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tree.release()
-	fmt.Fprintln(ein, "los")
+	fmt.Fprintln(stdin, "los")
 	cmd.Wait()
 
 	dir := t.TempDir()
@@ -213,20 +213,20 @@ func TestSauberesEndeOhneWarnung(t *testing.T) {
 	}
 	t.Cleanup(func() { log.file.Close() })
 	(&Supervisor{log: log}).reapTree("stt", tree)
-	if inhalt := logInhalt(t, dir); strings.Contains(inhalt, "verwaist") {
-		t.Fatalf("Warnung ohne Waise:\n%s", inhalt)
+	if content := logContent(t, dir); strings.Contains(content, "orphaned") {
+		t.Fatalf("Warnung ohne Waise:\n%s", content)
 	}
 }
 
-func logInhalt(t *testing.T, dir string) string {
+func logContent(t *testing.T, dir string) string {
 	t.Helper()
-	var alles strings.Builder
+	var whole strings.Builder
 	filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
 		if err == nil && !info.IsDir() {
 			b, _ := os.ReadFile(p)
-			alles.Write(b)
+			whole.Write(b)
 		}
 		return nil
 	})
-	return alles.String()
+	return whole.String()
 }

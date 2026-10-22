@@ -41,10 +41,10 @@ type OllamaProxy struct {
 func newOllamaProxy(cfg ProxyCfg, token, node string, log *Logger) (*OllamaProxy, error) {
 	cert, fp, created, err := loadOrCreateCert(cfg.CertDir, node)
 	if err != nil {
-		return nil, fmt.Errorf("ollama-proxy Zertifikat: %w", err)
+		return nil, fmt.Errorf("ollama-proxy certificate: %w", err)
 	}
 	if created {
-		log.Infof("ollama-proxy: neues Zertifikat erzeugt in %s", cfg.CertDir)
+		log.Infof("ollama-proxy: new certificate created in %s", cfg.CertDir)
 	}
 	return &OllamaProxy{cfg: cfg, token: token, log: log, cert: cert, fp: fp}, nil
 }
@@ -164,7 +164,7 @@ func (p *OllamaProxy) Run(ctx context.Context) {
 		defer cancel()
 		srv.Shutdown(c)
 	}()
-	p.log.Infof("ollama-proxy: https://%s -> %s, Zertifikat sha256:%s, Token-Pflicht=%v", p.cfg.Listen, p.cfg.Upstream, p.fp[:16], p.cfg.requireToken())
+	p.log.Infof("ollama-proxy: https://%s -> %s, certificate sha256:%s, token required=%v", p.cfg.Listen, p.cfg.Upstream, p.fp[:16], p.cfg.requireToken())
 	if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 		p.log.Errorf("ollama-proxy: %v", err)
 	}

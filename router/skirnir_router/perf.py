@@ -20,7 +20,7 @@ def perf_load():
     if isinstance(data, dict):
         state.PERF.update(data)
     elif data is not None:
-        log.warning("perf.json ist kein Mapping - ignoriert")
+        log.warning("perf.json is not a mapping - ignored")
 
 
 def perf_save():
@@ -59,7 +59,7 @@ async def _ollama(node, method, path, body=None, timeout=60, answer=True):
             data = await r.json(content_type=None)
     except (ClientError, asyncio.TimeoutError, ValueError) as e:  # exception-ok: network boundary and the node's JSON
         return bad_gateway(f"Ollama {path}: {e or type(e).__name__}")
-    return data if isinstance(data, dict) else bad_gateway(f"Ollama {path}: keine JSON-Antwort")
+    return data if isinstance(data, dict) else bad_gateway(f"Ollama {path}: not a JSON answer")
 
 
 def perf_record(model, node_name, stats, ttft_s, kind="passive"):
@@ -159,7 +159,7 @@ async def _bench_runs(model, node, ctx):
         wall = time.time() - t0
         s = perf_stats(data, None)
         if not s:
-            return bad_gateway("keine eval-Statistik in der Antwort")
+            return bad_gateway("no eval statistics in the answer")
         # TTFT-Naeherung im Non-Stream-Modus: Wandzeit - Generierzeit - Ladezeit
         s["ttft_ms"] = max(0, round((wall - (data.get("eval_duration") or 0) / 1e9 - (data.get("load_duration") or 0) / 1e9) * 1000))
         if i > 0:
@@ -230,7 +230,7 @@ async def _ps_models(node):
     if failed(data):
         return data
     models = data.get("models") or []
-    return [m for m in models if isinstance(m, dict)] if isinstance(models, list) else bad_gateway("Ollama /api/ps: models ist keine Liste")
+    return [m for m in models if isinstance(m, dict)] if isinstance(models, list) else bad_gateway("Ollama /api/ps: models is not a list")
 
 
 async def _ps_entry(node, model):
@@ -244,17 +244,17 @@ async def _load(node, model, ctx):
     loaded = await _ollama(node, "post", "/api/generate", {"model": model, "keep_alive": "2m", "options": {"num_ctx": ctx}}, timeout=900, answer=False)
     entry = loaded if failed(loaded) else await _ps_entry(node, model)
     if entry is None:
-        return bad_gateway(f"Modell nach dem Laden nicht in /api/ps (ctx {ctx})")
+        return bad_gateway(f"model not in /api/ps after loading (ctx {ctx})")
     return entry
 
 
 async def _unload_all(node):
     """Alles entladen und warten, bis /api/ps leer ist - sonst misst der Zuwachs ein anderes Modell mit. Liefert, was
     /api/ps vorher als size_vram meldete (GiB): so viel muss nvidia-smi danach mindestens freigeben. Oder ein Problem."""
-    geladen = await _ps_models(node)
-    if failed(geladen):
-        return geladen
-    for m in geladen:
+    loaded = await _ps_models(node)
+    if failed(loaded):
+        return loaded
+    for m in loaded:
         unloaded = await _ollama(node, "post", "/api/generate", {"model": m.get("name"), "keep_alive": 0}, answer=False)
         if failed(unloaded):
             return unloaded
@@ -263,9 +263,9 @@ async def _unload_all(node):
         if failed(still):
             return still
         if not still:
-            return sum(m.get("size_vram", 0) for m in geladen) / GIB
+            return sum(m.get("size_vram", 0) for m in loaded) / GIB
         await asyncio.sleep(1)
-    return unavailable("Ollama entlaedt nicht (nach 60 s noch Modelle in /api/ps)")
+    return unavailable("Ollama does not unload (models still in /api/ps after 60 s)")
 
 
 async def _empty_used(node, before, unloaded, timeout=120):
@@ -274,11 +274,11 @@ async def _empty_used(node, before, unloaded, timeout=120):
     noch voller Karte, der erste Messpunkt wurde negativ). Darum erst warten, bis nvidia-smi mindestens 90 % dessen
     freigegeben hat, was /api/ps vorher meldete, dann die ruhige Belegung ablesen. Oder ein Problem."""
     if before is not None and unloaded > 0.5:
-        ziel = before - 0.9 * unloaded
+        target = before - 0.9 * unloaded
         deadline = time.time() + timeout
-        while node.vram_used_gib is None or node.vram_used_gib > ziel:
+        while node.vram_used_gib is None or node.vram_used_gib > target:
             if time.time() > deadline:
-                return unavailable(f"Speicher wird nach dem Entladen nicht frei ({node.vram_used_gib} GiB, erwartet <= {ziel:.2f})")
+                return unavailable(f"memory is not freed after unloading ({node.vram_used_gib} GiB, expected <= {target:.2f})")
             await asyncio.sleep(0.5)
     await asyncio.sleep(state.CFG.vram_settle_s)
     return await _stable_used(node, time.time())
@@ -295,7 +295,7 @@ async def _stable_used(node, after, timeout=90):
             if last is not None and abs(node.vram_used_gib - last) < 0.1:
                 return node.vram_used_gib
             last, last_ts = node.vram_used_gib, node.hb_ts
-    return unavailable("VRAM-Belegung kam nicht zur Ruhe (Heartbeats)")
+    return unavailable("VRAM use did not settle (heartbeats)")
 
 
 async def _measure_real(model, node):
@@ -305,16 +305,16 @@ async def _measure_real(model, node):
     Liefert {ctx: (belegt, ps_size_vram, ps_size)} oder ein Problem."""
     res = {}
     for ctx in measure_ctxs(model):
-        for versuch in range(1, MEASURE_TRIES + 1):
-            punkt = await _measure_point(model, node, ctx)
-            if failed(punkt):
-                return punkt
-            if isinstance(punkt, tuple):
-                res[ctx] = punkt
+        for attempt in range(1, MEASURE_TRIES + 1):
+            point = await _measure_point(model, node, ctx)
+            if failed(point):
+                return point
+            if isinstance(point, tuple):
+                res[ctx] = point
                 break
-            log.info("measure %s@%d on %s: Versuch %d verworfen (%s)", model, ctx, node.name, versuch, punkt)
+            log.info("measure %s@%d on %s: attempt %d dropped (%s)", model, ctx, node.name, attempt, point)
         else:
-            return unavailable(f"Messung @{ctx} nach {MEASURE_TRIES} Versuchen nicht sauber: {punkt}")
+            return unavailable(f"measurement @{ctx} not clean after {MEASURE_TRIES} attempts: {point}")
     return res
 
 
@@ -333,7 +333,7 @@ async def _others_loading(node, model, timeout=300):
     deadline = time.time() + timeout
     while any(m != model and deadline_m > time.time() for m, (_g, deadline_m) in node.loading.items()):
         if time.time() > deadline:
-            return unavailable("anderer Ladevorgang endet nicht")
+            return unavailable("another load does not finish")
         await asyncio.sleep(1)
     return None
 
@@ -346,26 +346,26 @@ async def _measure_point(model, node, ctx):
     if failed(waited):
         return waited
     state.MEASURING[model]["step"] = f"unloading for @{ctx}"
-    vorher = node.vram_used_gib
+    before_gib = node.vram_used_gib
     unloaded = await _unload_all(node)
-    leer = unloaded if failed(unloaded) else await _empty_used(node, vorher, unloaded)
-    if failed(leer):
-        return leer
+    empty_gib = unloaded if failed(unloaded) else await _empty_used(node, before_gib, unloaded)
+    if failed(empty_gib):
+        return empty_gib
     state.MEASURING[model]["step"] = f"loading @{ctx}"
     entry = await _load(node, model, ctx)
-    voll = entry if failed(entry) else await _stable_used(node, time.time())
-    geladen = voll if failed(voll) else await _ps_models(node)
-    if failed(geladen):
-        return geladen
-    fremd = [m.get("name") for m in geladen if not _is_model(node, m, model)]
-    if fremd or any(m != model for m in node.loading):
-        return f"anderes Modell geladen: {fremd or list(node.loading)}"
-    belegt, sv = voll - leer, entry.get("size_vram", 0) / GIB
+    full_gib = entry if failed(entry) else await _stable_used(node, time.time())
+    loaded = full_gib if failed(full_gib) else await _ps_models(node)
+    if failed(loaded):
+        return loaded
+    foreign = [m.get("name") for m in loaded if not _is_model(node, m, model)]
+    if foreign or any(m != model for m in node.loading):
+        return f"another model loaded: {foreign or list(node.loading)}"
+    used_gib, sv = full_gib - empty_gib, entry.get("size_vram", 0) / GIB
     # Plausibel: nie weniger als das, was Ollama selbst meldet - sonst war die Grundlast falsch, und der Katalog
     # bekaeme Unsinn (0.3.5: gemma4:26b "-7,67 GiB" bei 8k). Lieber keine Messung als eine falsche.
-    if belegt < sv - 0.3:
-        return f"unplausibel: nvidia-smi-Zuwachs {belegt:.2f} GiB < /api/ps {sv:.2f} GiB"
-    return belegt, sv, entry.get("size", 0) / GIB
+    if used_gib < sv - 0.3:
+        return f"implausible: nvidia-smi increase {used_gib:.2f} GiB < /api/ps {sv:.2f} GiB"
+    return used_gib, sv, entry.get("size", 0) / GIB
 
 
 async def _measure_ps(model, node):
@@ -424,10 +424,10 @@ async def measure_model(model, node):
             log.warning("measure %s on %s: catalog not written: %s", model, node.name, written.message)
             state.MEASURING[model].update(step="error", error=written.message)
             return
-        teil = f", PARTIAL OFFLOAD bei {e['partial_offload']}" if e.get("partial_offload") else ""
-        log.info("measured %s on %s (%s): weights %.2f GiB, kv %.4f GiB/1k, Punkte %s%s", model, node.name,
+        partial = f", PARTIAL OFFLOAD bei {e['partial_offload']}" if e.get("partial_offload") else ""
+        log.info("measured %s on %s (%s): weights %.2f GiB, kv %.4f GiB/1k, points %s%s", model, node.name,
                  "nvidia-smi" if real else "/api/ps", e["weights_gib"], e["kv_gib_per_1k"],
-                 {c: round(v[0], 2) for c, v in sorted(res.items())}, teil)
+                 {c: round(v[0], 2) for c, v in sorted(res.items())}, partial)
         state.remember({"event": "measure", "node": node.name, "model": model, "weights_gib": e["weights_gib"],
                         "kv_gib_per_1k": e["kv_gib_per_1k"], "real": real})
         state.MEASURING[model]["step"] = "done"

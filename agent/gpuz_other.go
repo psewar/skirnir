@@ -9,6 +9,6 @@ type gpuzReader struct{}
 
 func newGPUZReader(*Logger) *gpuzReader { return nil }
 
-func (r *gpuzReader) read() (*gpuzData, error) { return nil, errors.New("GPU-Z nur unter Windows") }
+func (r *gpuzReader) read() (*gpuzData, error) { return nil, errors.New("GPU-Z only on Windows") }
 
-func runGPUZRelay(string) error { return errors.New("gpuz-relay gibt es nur unter Windows") }
+func runGPUZRelay(string) error { return errors.New("gpuz-relay exists only on Windows") }

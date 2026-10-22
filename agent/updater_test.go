@@ -76,7 +76,7 @@ func TestUpdaterVerifyOrder(t *testing.T) {
 
 // Review 2026-09-25: eine gesperrte .old wird beim Tausch als .old-<ts> geparkt; Cleanup kannte nur .old und liess die
 // geparkten liegen - und startete das Relay genau dann nicht neu.
-func TestUpdaterCleanupRaeumtGeparkteAlteBinaries(t *testing.T) {
+func TestUpdaterCleanupRemovesParkedOldBinaries(t *testing.T) {
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "agent.exe")
 	for _, n := range []string{exe + ".old", exe + ".old-1758800000", exe + ".new"} {

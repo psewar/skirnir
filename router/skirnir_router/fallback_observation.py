@@ -85,15 +85,15 @@ def adopt_file_before_0_9():
     p = file_path()
     if not p or (state.CFG.decision or {}).get("observe_path"):
         return
-    alt = os.path.join(os.path.dirname(p), FILE_NAME_BEFORE_0_9)
+    old_path = os.path.join(os.path.dirname(p), FILE_NAME_BEFORE_0_9)
     for suffix in ("", ".1"):
-        if os.path.exists(alt + suffix) and not os.path.exists(p + suffix):
+        if os.path.exists(old_path + suffix) and not os.path.exists(p + suffix):
             try:
-                os.replace(alt + suffix, p + suffix)
+                os.replace(old_path + suffix, p + suffix)
             except OSError as e:  # exception-ok: file system boundary; the old file stays and a new one starts
-                log.warning("%s nicht uebernommen: %s", alt + suffix, e)
+                log.warning("%s not taken over: %s", old_path + suffix, e)
                 continue
-            log.info("%s -> %s (Router 0.9.0)", alt + suffix, p + suffix)
+            log.info("%s -> %s (Router 0.9.0)", old_path + suffix, p + suffix)
 
 
 def begin(path, body):
@@ -141,7 +141,7 @@ def _write(rec, task):
     except OSError as e:  # exception-ok: file system boundary
         if time.time() - _warned[0] > 600:
             _warned[0] = time.time()
-            log.warning("requests.jsonl schreiben (%s): %s", p, e)
+            log.warning("requests.jsonl write (%s): %s", p, e)
 
 
 async def _observe(body, path, role, tiers, req, node, model, reason, client):

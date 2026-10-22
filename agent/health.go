@@ -40,14 +40,14 @@ func (h *HealthServer) Run(ctx context.Context) {
 		}
 		if h.app.ctlToken == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Agent-Token")), []byte(h.app.ctlToken)) != 1 {
 			w.WriteHeader(403)
-			w.Write([]byte("X-Agent-Token fehlt oder falsch (control.token neben der Config)\n"))
+			w.Write([]byte("X-Agent-Token missing or wrong (control.token next to the config)\n"))
 			return
 		}
 		if h.app.sup.RestartChild(r.URL.Query().Get("name")) {
-			w.Write([]byte("restart angestossen\n"))
+			w.Write([]byte("restart triggered\n"))
 		} else {
 			w.WriteHeader(404)
-			w.Write([]byte("kein laufendes Kind mit diesem Namen\n"))
+			w.Write([]byte("no running child with this name\n"))
 		}
 	})
 	mux.HandleFunc("/gpuz", func(w http.ResponseWriter, r *http.Request) {

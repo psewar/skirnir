@@ -285,81 +285,81 @@ def coerce(path, value, c):
     nur, wenn nullable (darum failed() pruefen, nicht auf None)."""
     spec = spec_for(path)
     if spec is None:
-        return invalid(f"settings.{path}: nicht ueber die UI aenderbar (nur config.yaml)")
+        return invalid(f"settings.{path}: cannot be changed in the UI (config.yaml only)")
     if path == "router.client_auth.mode" and ((c.get("router") or {}).get("client_auth") or {}).get("locked"):
-        return invalid("settings.router.client_auth.mode: gesperrt (client_auth.locked in config.yaml) - nur per Deploy aenderbar")
+        return invalid("settings.router.client_auth.mode: locked (client_auth.locked in config.yaml) - change it by deploy")
     parts = path.split(".")
     if "*" in spec_key(path):
         # der benannte Eintrag (Anbieter/Client) muss in config.yaml existieren - die UI legt keine neuen an
         parent, ok = _get(c, parts[:-1])
         if not ok or not isinstance(parent, dict):
-            return invalid(f"settings.{path}: {'.'.join(parts[:-1])} gibt es in config.yaml nicht")
+            return invalid(f"settings.{path}: {'.'.join(parts[:-1])} does not exist in config.yaml")
     if value is None:
         if spec.get("nullable"):
             return None
-        return invalid(f"settings.{path}: darf nicht leer sein")
+        return invalid(f"settings.{path}: must not be empty")
     t = spec["type"]
     if t == "bool":
         if isinstance(value, bool):
             return value
         if isinstance(value, str) and value.lower() in ("true", "false", "1", "0", "an", "aus"):
             return value.lower() in ("true", "1", "an")
-        return invalid(f"settings.{path}: true/false erwartet")
+        return invalid(f"settings.{path}: true/false expected")
     if t in ("int", "float"):
         v = values.number(value, f"settings.{path}", integer=t == "int")
         if failed(v):
             return v
         lo, hi = spec.get("min"), spec.get("max")
         if (lo is not None and v < lo) or (hi is not None and v > hi):
-            return invalid(f"settings.{path}: {v} liegt nicht zwischen {lo} und {hi}")
+            return invalid(f"settings.{path}: {v} is not between {lo} and {hi}")
         return v
     if t == "choice":
         ch = spec["choices"]
         if ch == "data_classes":
             ch = _classes(c)
         if value not in ch:
-            return invalid(f"settings.{path}: {value!r} ist keine der Optionen {ch}")
+            return invalid(f"settings.{path}: {value!r} is not one of the options {ch}")
         return value
     if t == "tristate":
         if value in (True, False, None):
             return value
         if isinstance(value, str) and value.lower() in ("true", "false", "null", ""):
             return {"true": True, "false": False}.get(value.lower())
-        return invalid(f"settings.{path}: true/false/leer erwartet")
+        return invalid(f"settings.{path}: true/false/empty expected")
     if t == "str":
         s = str(value).strip()
         if len(s) > spec.get("maxlen", 200):
-            return invalid(f"settings.{path}: zu lang")
+            return invalid(f"settings.{path}: too long")
         return s
     if t == "list":
         if isinstance(value, str):
             value = [x.strip() for x in value.split(",") if x.strip()]
         if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
-            return invalid(f"settings.{path}: Liste von Namen erwartet")
+            return invalid(f"settings.{path}: list of names expected")
         if spec.get("choices") == "roles":
             known = set(c.get("roles") or {}) | {"*"}
             bad = [x for x in value if x not in known]
             if bad:
-                return invalid(f"settings.{path}: unbekannte Rolle(n) {bad}")
+                return invalid(f"settings.{path}: unknown role(s) {bad}")
         return [x.strip() for x in value] or spec.get("default") or []
     if t == "iplist":
         if isinstance(value, str):
             value = [x.strip() for x in value.replace(";", ",").split(",") if x.strip()]
         if not isinstance(value, list):
-            return invalid(f"settings.{path}: Liste von IP-Adressen erwartet")
+            return invalid(f"settings.{path}: list of IP addresses expected")
         out = [values.ip_address(x, f"settings.{path}") for x in value]
         problem = next((p for p in out if failed(p)), None)
         return problem or out or None
     if t == "keep_alive":
         if isinstance(value, bool):
-            return invalid(f"settings.{path}: -1, 0 oder Dauer wie 5m erwartet")
+            return invalid(f"settings.{path}: -1, 0 or a duration like 5m expected")
         if isinstance(value, (int, float)):
             return int(value)
         s = str(value).strip()
         if not _KEEP_ALIVE.match(s):
-            return invalid(f"settings.{path}: -1, 0 oder Dauer wie 5m/1h erwartet")
+            return invalid(f"settings.{path}: -1, 0 or a duration like 5m/1h expected")
         return int(s) if s.lstrip("-").isdigit() else s
-    return invalid(f"settings.{path}: unbekannter Typ {t}")
+    return invalid(f"settings.{path}: unknown type {t}")
 
 
 def spec_key(path):
@@ -378,7 +378,7 @@ def apply(c, settings):
     """settings {pfad: wert} geprueft in die (noch ungeparste) Konfiguration c legen. Liefert die geprueften Werte
     oder das Problem des ersten ungueltigen (dann ist c teilweise belegt - Aufrufer arbeiten auf einer Kopie)."""
     if not isinstance(settings, dict):
-        return invalid("settings muss ein Mapping Pfad -> Wert sein")
+        return invalid("settings must be a mapping path -> value")
     out = {}
     for path, value in settings.items():
         v = coerce(str(path), value, c)

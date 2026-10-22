@@ -18,7 +18,7 @@ func writeCfg(t *testing.T, body string) string {
 
 // Review 2026-09-25: identity/logs lagen immer neben der Standard-Config, auch bei `--config X` - ein Testlauf teilte so die
 // Identitaet und Provisionierung des Dienstes.
-func TestConfigBasisordnerAusConfigPfad(t *testing.T) {
+func TestConfigBaseDirFromConfigPath(t *testing.T) {
 	p := writeCfg(t, "router:\n  url: https://router.example.net:11435\n")
 	c, err := loadConfig(p)
 	if err != nil {
@@ -33,7 +33,7 @@ func TestConfigBasisordnerAusConfigPfad(t *testing.T) {
 	}
 }
 
-func TestConfigSecretStoreDomainPflicht(t *testing.T) {
+func TestConfigSecretStoreDomainRequired(t *testing.T) {
 	body := "router:\n  url: https://r.example.net\nmqtt:\n  host: mqtt.example.net\n  password_secret: MQTT_PASSWORD\n" +
 		"secret_store:\n  project_id: p\n  client_id: c\n  client_secret: s\n"
 	if _, err := loadConfig(writeCfg(t, body)); err == nil || !strings.Contains(err.Error(), "domain") {
@@ -50,7 +50,7 @@ func TestConfigSecretStoreDomainPflicht(t *testing.T) {
 	}
 }
 
-func TestConfigProxyBrauchtToken(t *testing.T) {
+func TestConfigProxyNeedsToken(t *testing.T) {
 	if _, err := loadConfig(writeCfg(t, "router:\n  url: https://r.example.net\nollama_proxy:\n  enabled: true\n")); err == nil || !strings.Contains(err.Error(), "router.token") {
 		t.Fatalf("Proxy ohne Token akzeptiert (waere offen fuer das LAN): %v", err)
 	}

@@ -102,25 +102,25 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		fmt.Printf("quelle=%s name=%q util=%d%% vram=%d/%d MiB frei=%d MiB  dauer=%.2f ms je Messung (20 Messungen)\n",
+		fmt.Printf("source=%s name=%q util=%d%% vram=%d/%d MiB free=%d MiB  duration=%.2f ms per sample (20 samples)\n",
 			g.Source(), s.Name, s.UtilPct, s.UsedMiB, s.TotalMiB, s.FreeMiB, float64(time.Since(t0).Microseconds())/1000/20)
 		if s.Sensors != nil {
 			b, _ := json.MarshalIndent(s.Sensors, "", "  ")
-			fmt.Printf("sensoren (gpuz=%v):\n%s\n", s.Sensors.GPUZ, b)
+			fmt.Printf("sensors (gpuz=%v):\n%s\n", s.Sensors.GPUZ, b)
 		}
 		// 0.13.0: Grafikspeicher je Prozess (Leistungsindikator) - Grundlage fuer children_vram_mib im Heartbeat
-		if proz, err := gpuProcessVRAM(); err != nil {
-			fmt.Printf("grafikspeicher je prozess: %v\n", err)
+		if procVRAM, err := gpuProcessVRAM(); err != nil {
+			fmt.Printf("graphics memory per process: %v\n", err)
 		} else {
-			printGPUProcs(proz)
+			printGPUProcs(procVRAM)
 		}
 		// GPU-Schutz, Trockenlauf: was der Guard mit den Standardwerten setzen WUERDE (setzt nichts)
 		if lim := g.PowerLimits(); !lim.OK {
-			fmt.Printf("gpu-guard: Limits nicht lesbar (%s) -> Zustand unverfuegbar\n", lim.Err)
+			fmt.Printf("gpu-guard: limits not readable (%s) -> state unavailable\n", lim.Err)
 		} else {
-			dauer, stufe2 := newGuardEngine(GuardCfg{}, nil).targets(lim)
-			fmt.Printf("gpu-guard (Trockenlauf, Standardwerte): Limit aktuell %.0f W, Standard %.0f W, erlaubt %.0f-%.0f W -> Dauerlimit %.0f W (80 %%), Stufe 2 %.0f W (70 %%)\n",
-				lim.Cur, lim.Def, lim.Min, lim.Max, dauer, stufe2)
+			sustained, stage2 := newGuardEngine(GuardCfg{}, nil).targets(lim)
+			fmt.Printf("gpu-guard (dry run, defaults): limit now %.0f W, default %.0f W, allowed %.0f-%.0f W -> sustained limit %.0f W (80 %%), stage 2 %.0f W (70 %%)\n",
+				lim.Cur, lim.Def, lim.Min, lim.Max, sustained, stage2)
 		}
 		return
 	}
@@ -144,18 +144,18 @@ func main() {
 		// Dienst steuern und Zustand zeigen geht auch ohne die Config: seit 0.9.0 duerfen die steuernden Benutzer das
 		// Config-Verzeichnis nicht mehr lesen (nur das Dienst-Steuerrecht) - Standardnamen reichen fuer diese Verben.
 		if (os.IsPermission(err) || os.IsNotExist(err)) && (verb == "status" || verb == "start" || verb == "stop" || verb == "restart") {
-			fmt.Fprintf(os.Stderr, "(Konfiguration nicht lesbar - Standardwerte: Dienst SkirnirAgent, Health 127.0.0.1:10398)\n")
+			fmt.Fprintf(os.Stderr, "(configuration not readable - defaults: service SkirnirAgent, health 127.0.0.1:10398)\n")
 			cfg = &Config{}
 			cfg.applyDefaults()
 		} else {
-			fmt.Fprintf(os.Stderr, "Konfiguration: %v\n", err)
+			fmt.Fprintf(os.Stderr, "configuration: %v\n", err)
 			os.Exit(1)
 		}
 	}
 	var verr error
 	switch verb {
 	case "check-config":
-		fmt.Printf("ok: node=%s router=%s upstream=%s mqtt-lokal=%v kinder=%d identity=%s dienst=%s konto=%s\n", cfg.Node, cfg.Router.URL, cfg.Tunnel.Upstream,
+		fmt.Printf("ok: node=%s router=%s upstream=%s mqtt-local=%v children=%d identity=%s service=%s account=%s\n", cfg.Node, cfg.Router.URL, cfg.Tunnel.Upstream,
 			cfg.MQTT.Host != "", len(cfg.Children), cfg.Identity.Dir, cfg.Install.ServiceName, firstNonEmpty(cfg.Install.Account, "LocalSystem"))
 	case "identity":
 		log, _ := newLogger(cfg.Logging, "agent", false)
@@ -164,7 +164,7 @@ func main() {
 			verr = err
 			break
 		}
-		fmt.Printf("Fingerprint: %s\nPublic Key:  %s\nKnoten:      %s\n", id.Fingerprint(), id.PublicB64(), cfg.Node)
+		fmt.Printf("Fingerprint: %s\nPublic key:  %s\nNode:        %s\n", id.Fingerprint(), id.PublicB64(), cfg.Node)
 	case "run":
 		verr = runConsole(cfg)
 	case "install":
@@ -190,13 +190,13 @@ func main() {
 	case "mqtt-clear":
 		log, _ := newLogger(cfg.Logging, "agent", true)
 		if cfg.MQTT.Host == "" {
-			verr = fmt.Errorf("mqtt-clear braucht eine lokale mqtt-Konfiguration (host, password)")
+			verr = fmt.Errorf("mqtt-clear needs a local mqtt configuration (host, password)")
 			break
 		}
 		m := newMQTT(cfg.MQTT, cfg.SecretStore, cfg.Node, log, nil, nil, nil, nil)
 		verr = m.clearDiscovery(context.Background())
 		if verr == nil {
-			fmt.Printf("Discovery fuer %s geloescht\n", cfg.MQTT.DeviceID)
+			fmt.Printf("discovery for %s deleted\n", cfg.MQTT.DeviceID)
 		}
 	default:
 		usage()
@@ -226,7 +226,7 @@ func printHealth(listen string) {
 	c := &http.Client{Timeout: 3 * time.Second}
 	resp, err := c.Get("http://" + listen + "/health")
 	if err != nil {
-		fmt.Printf("/health nicht erreichbar (%v)\n", err)
+		fmt.Printf("/health unreachable (%v)\n", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -236,41 +236,41 @@ func printHealth(listen string) {
 		fmt.Println(string(raw))
 		return
 	}
-	fmt.Printf("Version %s, node %s, laeuft seit %s, Identitaet %s\n", s.Version, s.Node, s.Uptime, s.Identity)
+	fmt.Printf("version %s, node %s, running for %s, identity %s\n", s.Version, s.Node, s.Uptime, s.Identity)
 	if s.GPU != nil {
-		fmt.Printf("GPU %s: %d %%, VRAM %d/%d MiB belegt\n", s.GPU.Name, s.GPU.UtilPct, s.GPU.UsedMiB, s.GPU.TotalMiB)
+		fmt.Printf("GPU %s: %d %%, VRAM %d/%d MiB used\n", s.GPU.Name, s.GPU.UtilPct, s.GPU.UsedMiB, s.GPU.TotalMiB)
 	}
-	fmt.Printf("Heartbeat: ok=%v router sagt '%s' %s (gesendet %d, Fehler %d) %s\n", s.Heartbeat.OK, s.Heartbeat.State, s.Heartbeat.BusyReason, s.Heartbeat.Sent, s.Heartbeat.Failures, s.Heartbeat.LastError)
+	fmt.Printf("heartbeat: ok=%v router says '%s' %s (sent %d, failures %d) %s\n", s.Heartbeat.OK, s.Heartbeat.State, s.Heartbeat.BusyReason, s.Heartbeat.Sent, s.Heartbeat.Failures, s.Heartbeat.LastError)
 	if s.Tunnel != nil {
-		fmt.Printf("Tunnel: verbunden=%v status=%s knoten=%s seit %s, Anfragen %d %s\n", s.Tunnel.Connected, s.Tunnel.State, s.Tunnel.Node, s.Tunnel.Since, s.Tunnel.Requests, s.Tunnel.LastError)
+		fmt.Printf("tunnel: connected=%v status=%s node=%s since %s, requests %d %s\n", s.Tunnel.Connected, s.Tunnel.State, s.Tunnel.Node, s.Tunnel.Since, s.Tunnel.Requests, s.Tunnel.LastError)
 	}
 	if s.MQTT != nil {
-		fmt.Printf("MQTT: verbunden=%v geraet=%s veroeffentlicht=%d %s\n", s.MQTT.Connected, s.MQTT.DeviceID, s.MQTT.Published, s.MQTT.LastError)
+		fmt.Printf("MQTT: connected=%v device=%s published=%d %s\n", s.MQTT.Connected, s.MQTT.DeviceID, s.MQTT.Published, s.MQTT.LastError)
 	} else {
-		fmt.Println("MQTT: aus (nicht konfiguriert / noch nicht provisioniert)")
+		fmt.Println("MQTT: off (not configured / not provisioned yet)")
 	}
 	if s.Proxy != nil {
-		fmt.Printf("Ollama-TLS-Proxy: %s -> %s, sha256:%s, Anfragen %d %s\n", s.Proxy.Listen, s.Proxy.Upstream, s.Proxy.Fingerprint, s.Proxy.Requests, s.Proxy.LastError)
+		fmt.Printf("Ollama TLS proxy: %s -> %s, sha256:%s, requests %d %s\n", s.Proxy.Listen, s.Proxy.Upstream, s.Proxy.Fingerprint, s.Proxy.Requests, s.Proxy.LastError)
 	}
 	for name, ch := range s.Children {
-		fmt.Printf("Kind %s: laeuft=%v gesund=%v pid=%d neustarts=%d %s\n", name, ch.Running, ch.Healthy, ch.PID, ch.Restarts, ch.LastExit)
+		fmt.Printf("child %s: running=%v healthy=%v pid=%d restarts=%d %s\n", name, ch.Running, ch.Healthy, ch.PID, ch.Restarts, ch.LastExit)
 	}
 }
 
 // printGPUProcs: die groessten Belegungen (ab 50 MiB) absteigend, fuer den Diagnose-Befehl `gpu`.
-func printGPUProcs(proz map[uint32]uint64) {
+func printGPUProcs(procVRAM map[uint32]uint64) {
 	type e struct {
 		pid uint32
 		mib uint64
 	}
 	var l []e
-	for pid, b := range proz {
+	for pid, b := range procVRAM {
 		if b>>20 >= 50 {
 			l = append(l, e{pid, b >> 20})
 		}
 	}
 	sort.Slice(l, func(i, j int) bool { return l[i].mib > l[j].mib })
-	fmt.Printf("grafikspeicher je prozess (ab 50 MiB, %d Prozesse mit GPU-Speicher):\n", len(proz))
+	fmt.Printf("graphics memory per process (from 50 MiB, %d processes with GPU memory):\n", len(procVRAM))
 	for _, x := range l {
 		fmt.Printf("  pid %-7d %6d MiB\n", x.pid, x.mib)
 	}

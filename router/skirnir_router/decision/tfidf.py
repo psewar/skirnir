@@ -66,14 +66,14 @@ MODEL_KEYS = ("classes", "vocab", "idf", "weights", "bias")
 def load_model(path: str) -> TfidfModel | Problem:
     """Modelldatei lesen: das Modell oder ein Problem (fehlt, unlesbar, unvollstaendig) - dann faellt die Engine aus der Kette."""
     if not os.path.exists(path):
-        return engine_failed(f"{path} fehlt")
+        return engine_failed(f"{path} missing")
     try:
         with open(path, encoding="utf-8") as f:
             m = json.load(f)
     except (OSError, ValueError) as e:  # exception-ok: file system and the model file's JSON
         return engine_failed(f"{path}: {e}")
     if not isinstance(m, dict) or any(k not in m for k in MODEL_KEYS) or not isinstance(m["classes"], list):
-        return engine_failed(f"{path}: Modell unvollstaendig (braucht {', '.join(MODEL_KEYS)})")
+        return engine_failed(f"{path}: model incomplete (needs {', '.join(MODEL_KEYS)})")
     return TfidfModel(m, path)
 
 

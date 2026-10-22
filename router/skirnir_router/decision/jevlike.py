@@ -40,10 +40,10 @@ class JevlikeEngine(DecisionEngine):
                     return engine_failed(f"{self.name} HTTP {r.status}: {(await r.text())[:120]}")
                 data = await r.json(content_type=None)
         except (ClientError, TimeoutError, OSError, ValueError) as e:  # exception-ok: network boundary and the service's JSON
-            return engine_failed(f"{self.name} nicht erreichbar: {type(e).__name__}: {e}")
+            return engine_failed(f"{self.name} unreachable: {type(e).__name__}: {e}")
         probs = normalize(data.get("probabilities"), req.options) if isinstance(data, dict) else {}
         if not probs:
-            return engine_failed(f"{self.name}: keine verwertbare Verteilung")
+            return engine_failed(f"{self.name}: no usable distribution")
         selected = max(probs, key=probs.get)
         return DecisionResult(selected=selected, probabilities=probs, engine=self.name, model=data.get("model") or self.model,
                               latency_ms=(time.perf_counter() - t0) * 1000, model_probability=probs[selected],
@@ -57,5 +57,5 @@ class JevlikeEngine(DecisionEngine):
         except (ClientError, TimeoutError, OSError, ValueError) as e:  # exception-ok: network boundary and the service's JSON
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
         if not isinstance(data, dict):
-            return {"ok": False, "error": "keine JSON-Antwort"}
+            return {"ok": False, "error": "not a JSON answer"}
         return {"ok": status == 200 and bool(data.get("ok")), **{k: v for k, v in data.items() if k != "ok"}}

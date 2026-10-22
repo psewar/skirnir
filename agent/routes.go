@@ -102,9 +102,9 @@ func (r *Routes) checkAll(ctx context.Context) {
 			continue
 		}
 		if h.Up {
-			r.log.Infof("route %s: bereit (%s%s)", rc.Name, rc.Upstream, rc.Health)
+			r.log.Infof("route %s: ready (%s%s)", rc.Name, rc.Upstream, rc.Health)
 		} else {
-			r.log.Warnf("route %s: nicht bereit, Grund %s (%s%s)", rc.Name, h.Reason, rc.Upstream, rc.Health)
+			r.log.Warnf("route %s: not ready, reason %s (%s%s)", rc.Name, h.Reason, rc.Upstream, rc.Health)
 		}
 	}
 }

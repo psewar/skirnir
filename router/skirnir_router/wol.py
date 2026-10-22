@@ -29,7 +29,7 @@ async def wake(node):
         node.last_wake = now
         mac = normalize_mac(node.mac)
         if mac is None:   # aus Fakten oder alter Policy; sonst wuerde bytes.fromhex() hier als 500 beim Client landen
-            log.warning("WOL %s: keine gueltige MAC (%r)", node.name, node.mac)
+            log.warning("WOL %s: no valid MAC (%r)", node.name, node.mac)
             return False
         log.info("WOL %s (%s)", node.name, mac)
         state.remember({"event": "wol", "node": node.name})

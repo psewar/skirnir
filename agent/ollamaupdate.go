@@ -133,7 +133,7 @@ func (u *OllamaUpdater) awaitSwap(ctx context.Context, version string) error {
 			if v == version {
 				return nil
 			}
-			u.log.Warnf("ollama-update: Freigabe fuer %s ignoriert, der Auftrag ist %s", v, version)
+			u.log.Warnf("ollama-update: release for %s ignored, the order is %s", v, version)
 		case <-t.C:
 			return fmt.Errorf("Router gab den Tausch nicht innerhalb %s frei - nichts getauscht, Ollama laeuft unveraendert", u.swapWait)
 		case <-ctx.Done():
@@ -172,7 +172,7 @@ func (u *OllamaUpdater) Handle(o OllamaUpdateOrder) {
 	u.mu.Lock()
 	if u.busy {
 		u.mu.Unlock()
-		u.log.Warnf("ollama-update: Auftrag auf %s verworfen, es laeuft schon einer", o.Version)
+		u.log.Warnf("ollama-update: order for %s dropped, one is already running", o.Version)
 		return
 	}
 	u.busy = true
@@ -183,10 +183,10 @@ func (u *OllamaUpdater) Handle(o OllamaUpdateOrder) {
 			u.busy = false
 			u.mu.Unlock()
 		}()
-		u.log.Infof("ollama-update: Auftrag auf %s (%s, %d MB)", o.Version, o.File, o.Size>>20)
+		u.log.Infof("ollama-update: order for %s (%s, %d MB)", o.Version, o.File, o.Size>>20)
 		if err := u.run(o); err != nil {
 			u.set("failed", o.Version, err.Error())
-			u.log.Warnf("ollama-update: fehlgeschlagen: %v", err)
+			u.log.Warnf("ollama-update: failed: %v", err)
 		}
 	}()
 }
@@ -543,12 +543,12 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 	for time.Now().Before(deadline) {
 		time.Sleep(u.verifyPoll)
 		if v := u.live(ctx); v == o.Version {
-			u.log.Infof("ollama-update: Ollama laeuft mit %s", v)
+			u.log.Infof("ollama-update: Ollama runs %s", v)
 			u.syncRegistration(v) // Windows-Eintrag (Apps, winget) nachfuehren, sonst bietet winget das Release weiter an
 			return nil
 		}
 	}
-	u.log.Warnf("ollama-update: Ollama meldet sich nicht mit %s - zurueck auf die Sicherung", o.Version)
+	u.log.Warnf("ollama-update: Ollama does not report %s - back to the backup", o.Version)
 	u.hold()
 	rerr := rollbackTop(u.dir, newDir, backup, moved)
 	u.release()

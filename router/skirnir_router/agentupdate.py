@@ -61,14 +61,14 @@ def load_manifest():
         with open(p, encoding="utf-8") as f:
             raw = json.load(f)
     except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
-        log.warning("agent/manifest.json unlesbar: %s", e)
+        log.warning("agent/manifest.json unreadable: %s", e)
         raw = None
     m = raw.get("manifest") if isinstance(raw, dict) else None
     data = None
     if isinstance(m, dict) and m.get("version") and isinstance(m.get("files"), list):
         data = {"manifest": m, "signature": raw.get("signature", ""), "raw": raw}
     elif raw is not None:
-        log.warning("agent/manifest.json unlesbar: manifest mit version/files fehlt")
+        log.warning("agent/manifest.json unreadable: manifest with version/files missing")
     _MANIFEST.update(mtime=mtime, data=data)
     return data
 
@@ -127,7 +127,7 @@ def note_hello(e, facts, now=None):
         e["update"] = u
         state.remember({"event": "agent_update", "node": e["name"], "state": "done", "version": v})
         state.MQTT_DIRTY.append(True)
-        log.info("node %s: Agent-Update auf %s abgeschlossen", e["name"], v)
+        log.info("node %s: agent update to %s completed", e["name"], v)
     node = state.NODES.get(e["name"])
     if node is not None:
         node.draining_until = 0.0
@@ -228,7 +228,7 @@ async def order_update(fp, reason="ui", force=False):
     await send_ctl(node.tunnel, msg)
     state.remember({"event": "agent_update", "node": e["name"], "state": "requested", "version": version, "reason": reason})
     state.MQTT_DIRTY.append(True)
-    log.info("node %s: Agent-Update auf %s angestossen (%s, %s)", e["name"], version, reason, f["name"])
+    log.info("node %s: agent update to %s ordered (%s, %s)", e["name"], version, reason, f["name"])
     return True, f"update to {version} started"
 
 
@@ -249,7 +249,7 @@ async def handle_binary(request):
     e = state.REG.nodes.get(t["fp"]) if state.REG else None
     if e is not None and (e.get("update") or {}).get("state") == "requested":
         e["update"].update(state="downloading", t=time.time(), ts=time.strftime("%Y-%m-%dT%H:%M:%S"))
-    log.info("agent-update: %s laedt %s", e["name"] if e else t["fp"][:12], name)
+    log.info("agent-update: %s downloads %s", e["name"] if e else t["fp"][:12], name)
     return web.FileResponse(path, headers={"Content-Type": "application/octet-stream"})
 
 

@@ -79,7 +79,7 @@ def busy_unload_check(node, now):
         big = [m for m, gib in node.loaded.items() if gib >= 0.5 and not any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models)]
         if big:
             node.last_busy_unload = now
-            log.info("node %s busy, aber %s geladen -> entlade", node.name, ", ".join(big))
+            log.info("node %s busy, but %s loaded -> unloading", node.name, ", ".join(big))
             state.spawn(unload_big_models(node))
 
 
@@ -147,7 +147,7 @@ def evaluate(node, now):
         heavy, why = game_needs_gpu(node)
         if heavy:
             node.game_heavy, node.game_heavy_why = True, why
-            log.info("node %s: Spiel %s braucht die GPU (%s)", node.name, (node.game or {}).get("name"), why)
+            log.info("node %s: game %s needs the GPU (%s)", node.name, (node.game or {}).get("name"), why)
             state.remember({"event": "game_heavy", "node": node.name, "name": (node.game or {}).get("name"), "why": why})
         else:
             node.game_heavy_why = why
@@ -185,7 +185,7 @@ def evaluate(node, now):
     if (node.state == "free" and node.prewarm_after_game and not node.mem_pressure and not game_blocks_prewarm(node, now)):
         node.prewarm_after_game = False
         why = "game_light" if node.game_since is not None else "game_ended"
-        log.info("node %s: Vorwaermen nachgeholt (%s)", node.name, why)
+        log.info("node %s: prewarm caught up (%s)", node.name, why)
         state.spawn(prewarm(node, 0, why, since=node.free_at))
 
 
@@ -202,15 +202,15 @@ def game_needs_gpu(node):
     g = node.game or {}
     ded, shared, pct = g.get("gpu_dedicated_mib"), g.get("gpu_shared_mib"), g.get("gpu_pct")
     if not isinstance(ded, (int, float)) or not isinstance(shared, (int, float)):
-        return True, "GPU-Bedarf nicht gemeldet"
+        return True, "GPU use not reported"
     gib = (ded + shared) / 1024
     if gib >= state.CFG.game_min_gpu_gib:
-        return True, f"Grafikspeicher {gib:.1f} GiB (eigen {ded:.0f} MiB, geteilt {shared:.0f} MiB)"
+        return True, f"graphics memory {gib:.1f} GiB (dedicated {ded:.0f} MiB, shared {shared:.0f} MiB)"
     if isinstance(pct, (int, float)) and pct >= state.CFG.game_min_gpu_pct:
-        return True, f"GPU-Engine {pct:.0f} %"
+        return True, f"GPU engine {pct:.0f} %"
     if node.mem_pressure:
-        return True, "Speicherdruck"
-    return False, f"leicht: {gib:.1f} GiB, GPU-Engine " + (f"{pct:.0f} %" if isinstance(pct, (int, float)) else "noch ohne Rate")
+        return True, "memory pressure"
+    return False, f"light: {gib:.1f} GiB, GPU engine " + (f"{pct:.0f} %" if isinstance(pct, (int, float)) else "no rate yet")
 
 
 async def unload_big_models(node):
@@ -238,11 +238,11 @@ async def prewarm(node, delay, reason, since=None):
     if delay:
         await asyncio.sleep(delay)
     if since is not None and (node.free_at != since or node.state != "free"):
-        log.info("prewarm on %s entfaellt (%s): Zustand hat seit dem Planen gewechselt", node.name, reason)
+        log.info("prewarm on %s dropped (%s): state changed since it was planned", node.name, reason)
         return
     if time.time() < node.draining_until or ollamaupdate.update_running(node):
         # 2026-10-01: waehrend eines Ollama-Updates lud das Vorwaermen qwen3.8 (131k), das der Tausch 30 s spaeter wieder beendete
-        log.info("prewarm on %s entfaellt (%s): Update laeuft", node.name, reason)
+        log.info("prewarm on %s dropped (%s): update running", node.name, reason)
         return
     # Erst den Heartbeat urteilen lassen. Ein frisch (neu) gestarteter Router haelt jeden erreichbaren Knoten zunaechst
     # fuer free; am 2026-09-06 lud er so qwen3.6 in ein von einem Spiel belegtes VRAM (Ueberlauf in den Shared Memory,
@@ -256,7 +256,7 @@ async def prewarm(node, delay, reason, since=None):
             break
         await asyncio.sleep(1)
     if node.state != "free" or node.foreign_since is not None:
-        log.info("prewarm on %s uebersprungen (%s): fremdes VRAM %.1f GiB", node.name, reason, node.foreign_vram_gib())
+        log.info("prewarm on %s skipped (%s): foreign VRAM %.1f GiB", node.name, reason, node.foreign_vram_gib())
         return
     # Ein Spiel, das die GPU braucht oder noch nicht beurteilt ist (game_sustain-Fenster), sperrt das Vorwaermen; ein leichtes
     # (0.8.7) nicht - sonst bliebe die Karte neben einem kleinen Spiel leer. Braucht es spaeter doch die GPU, wird es schwer,
@@ -267,7 +267,7 @@ async def prewarm(node, delay, reason, since=None):
     if node.mem_pressure or game_blocks:
         # Agent >= 0.17.0: Hauptspeicher knapp oder Spiel gemeldet (z. B. noch im game_sustain-Fenster) - kein Laden, das
         # den Speicher weiter fuellt; nach Spielende erst, wenn auch der Speicherdruck vorbei ist (kein Laden-Entladen-Pingpong)
-        log.info("prewarm on %s uebersprungen (%s): %s", node.name, reason, "Speicherdruck" if node.mem_pressure else "Spiel laeuft")
+        log.info("prewarm on %s skipped (%s): %s", node.name, reason, "memory pressure" if node.mem_pressure else "game running")
         return
     now = time.time()
     # Budget = Karte minus Reserve minus dem, was WIRKLICH fremd ist (Desktop-Grundverbrauch + fremdes VRAM); Ollamas eigene
@@ -306,7 +306,7 @@ async def prewarm(node, delay, reason, since=None):
     await poll_node(node)
     if node.state == "busy" and state.CFG.unload_on_busy:
         # waehrend des Ladens busy geworden (Race mit unload_on_busy): gleich wieder raus
-        log.info("prewarm on %s: Knoten wurde waehrend des Ladens busy, entlade wieder", node.name)
+        log.info("prewarm on %s: node went busy while loading, unloading again", node.name)
         await unload_big_models(node)
 
 
@@ -321,20 +321,20 @@ def apply_ollama_push(node, msg, now):
     Agenten, dass sein Ollama nicht antwortet - der Router muss das nicht mehr aus fehlgeschlagenen Abfragen erschliessen."""
     if not isinstance(msg, dict) or not isinstance(msg.get("up"), bool):
         node.ollama_push_ts = 0.0   # unbrauchbare Meldung: bis zur naechsten gueltigen wieder Poll, nicht die letzte behalten
-        log.warning("node %s: Ollama-Zustand vom Agenten ohne 'up' - verworfen, Router pollt", node.name)
+        log.warning("node %s: Ollama state from the agent without 'up' - dropped, the router polls", node.name)
         return
     # Agent 0.14.0 schickte eine nie gesetzte leere Liste als null (Go: nil-Slice) - gleichbedeutend mit []. Ab 0.14.1 immer [].
     tags = [] if msg.get("tags") is None else msg.get("tags")
     ps = [] if msg.get("ps") is None else msg.get("ps")
     if msg["up"] and not (isinstance(tags, list) and isinstance(ps, list)):
         node.ollama_push_ts = 0.0
-        log.warning("node %s: Ollama-Zustand vom Agenten ohne gueltige tags/ps - verworfen, Router pollt", node.name)
+        log.warning("node %s: Ollama state from the agent without valid tags/ps - dropped, the router polls", node.name)
         return
     node.ollama_push_ts = now
     if not msg["up"]:
         node.ollama_push_error = str(msg.get("error") or "?")[:200]
         if node.state != "offline":
-            node.go_offline(f"Ollama antwortet nicht laut Agent: {node.ollama_push_error}")
+            node.go_offline(f"Ollama not answering according to the agent: {node.ollama_push_error}")
         return
     node.ollama_push_error = None
     apply_ollama_state(node, _named(tags), _named(ps), now)
@@ -387,7 +387,7 @@ def residency_check(node, now):
     room = node.vram_total_gib - cfg.reserve.get("free", 1.0) - sum(node.loaded_size(m) for m, _ in rank1 if node.is_loaded(m))
     if not any(cfg.need_gib(m, ctx, node) <= room for m, ctx in missing):
         return
-    log.info("node %s: Rang-1 %s verdraengt durch %s, seit >%ds ungenutzt -> vorwaermen", node.name,
+    log.info("node %s: rank 1 %s displaced by %s, unused for >%ds -> prewarm", node.name,
              ", ".join(m for m, _ in missing), ", ".join(displacers), int(cfg.residency_idle_s))
     state.spawn(prewarm(node, 0, "residency"))
 
@@ -421,7 +421,7 @@ async def handle_heartbeat(request):
     Kein Agentenweg mehr (der HTTP-Heartbeat des Agenten ist seit 0.9.1 weg), sondern Hebel fuer Tests und Diagnose;
     ohne router.heartbeat_token abgeschaltet."""
     if not state.CFG.heartbeat_token:
-        return web.json_response({"error": "Heartbeat-Einspeisung abgeschaltet (router.heartbeat_token nicht gesetzt)"}, status=410)
+        return web.json_response({"error": "heartbeat injection is off (router.heartbeat_token not set)"}, status=410)
     if request.headers.get("X-Router-Token") != state.CFG.heartbeat_token:
         return web.json_response({"error": "bad token"}, status=401)
     name = request.match_info["node"]
@@ -452,7 +452,7 @@ def note_game_memory(node, b, now):
             node.game_since = None
             node.game_heavy, node.game_heavy_why = False, ""
         if running != was:
-            log.info("node %s: Spiel %s%s", node.name, "laeuft" if running else "beendet", f" ({g.get('name')})" if running else "")
+            log.info("node %s: game %s%s", node.name, "running" if running else "ended", f" ({g.get('name')})" if running else "")
             state.remember({"event": "game", "node": node.name, "running": running, "name": g.get("name") if running else None})
             state.MQTT_DIRTY.append(True)
     elif g is None:
@@ -463,15 +463,15 @@ def note_game_memory(node, b, now):
         node.memory, node.mem_low_count, node.mem_pressure = None, 0, False
         return
     node.memory = {k: m.get(k) for k in ("ram_available_gib", "commit_free_gib", "ram_total_gib", "commit_limit_gib") if m.get(k) is not None}
-    grenze = state.CFG.memory_pressure["min_free_gib"]
-    knapp = any(isinstance(m.get(k), (int, float)) and m[k] < grenze for k in ("ram_available_gib", "commit_free_gib"))
-    node.mem_low_count = node.mem_low_count + 1 if knapp else 0
-    druck = node.mem_low_count >= state.CFG.memory_pressure["polls"]
-    if druck != node.mem_pressure:
-        node.mem_pressure = druck
-        log.info("node %s: Speicherdruck %s (RAM frei %s GiB, Commit frei %s GiB, Grenze %s GiB)", node.name,
-                 "beginnt" if druck else "vorbei", m.get("ram_available_gib"), m.get("commit_free_gib"), grenze)
-        state.remember({"event": "memory_pressure", "node": node.name, "on": druck, "ram_available_gib": m.get("ram_available_gib"),
+    limit = state.CFG.memory_pressure["min_free_gib"]
+    low = any(isinstance(m.get(k), (int, float)) and m[k] < limit for k in ("ram_available_gib", "commit_free_gib"))
+    node.mem_low_count = node.mem_low_count + 1 if low else 0
+    pressure = node.mem_low_count >= state.CFG.memory_pressure["polls"]
+    if pressure != node.mem_pressure:
+        node.mem_pressure = pressure
+        log.info("node %s: memory pressure %s (RAM free %s GiB, commit free %s GiB, limit %s GiB)", node.name,
+                 "begins" if pressure else "over", m.get("ram_available_gib"), m.get("commit_free_gib"), limit)
+        state.remember({"event": "memory_pressure", "node": node.name, "on": pressure, "ram_available_gib": m.get("ram_available_gib"),
                         "commit_free_gib": m.get("commit_free_gib")})
         state.MQTT_DIRTY.append(True)
 
@@ -506,12 +506,12 @@ def apply_heartbeat(node, b, now):
     fp = b.get("ollama_tls_sha256")
     if fp and node.tls and node.tls_mode == "auto" and str(fp).lower() != node.tls_fp:
         if node.set_fingerprint(fp):
-            log.info("node %s: TLS-Fingerprint vom Agenten uebernommen (%s...)", node.name, node.tls_fp[:16])
+            log.info("node %s: TLS fingerprint taken from the agent (%s...)", node.name, node.tls_fp[:16])
         else:
-            log.warning("node %s: TLS-Fingerprint ungueltig: %r", node.name, fp)
+            log.warning("node %s: invalid TLS fingerprint: %r", node.name, fp)
     node.gpu_util = b.get("gpu_util_pct")
-    tot = b.get("vram_total_mib"); used = b.get("vram_used_mib"); free = b.get("vram_free_mib")
-    node.vram_total_reported_gib = tot / 1024 if tot is not None else None
+    total = b.get("vram_total_mib"); used = b.get("vram_used_mib"); free = b.get("vram_free_mib")
+    node.vram_total_reported_gib = total / 1024 if total is not None else None
     node.vram_used_gib = used / 1024 if used is not None else None
     node.vram_free_gib = free / 1024 if free is not None else None
     op = b.get("ollama_proc_mib")
@@ -535,7 +535,7 @@ def apply_heartbeat(node, b, now):
         node.guard, node.guard_ts = g, now
         if g.get("state") != prev.get("state") or bool(g.get("problem")) != bool(prev.get("problem")):
             reason = g.get("reason") or ", ".join(g.get("warnings") or [])
-            log.info("node %s: GPU-Schutz %s%s%s", node.name, g.get("state"), f" ({reason})" if reason else "",
+            log.info("node %s: GPU guard %s%s%s", node.name, g.get("state"), f" ({reason})" if reason else "",
                      f" Limit {g.get('limit_w')} W" if g.get("limit_w") is not None else "")
             state.remember({"event": "gpu_guard", "node": node.name, "state": g.get("state"), "limit_w": g.get("limit_w"),
                             "problem": bool(g.get("problem")), "reason": reason})

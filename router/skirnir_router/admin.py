@@ -22,7 +22,7 @@ UI_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 async def handle_ui(request):
     if not os.path.exists(UI_PATH):
-        return web.Response(text="ui.html fehlt", status=404)
+        return web.Response(text="ui.html missing", status=404)
     return web.FileResponse(UI_PATH, headers={"Cache-Control": "no-store"})
 
 
@@ -81,14 +81,14 @@ def clients_view():
 def _client_spec(name, v):
     """Felder eines Clients aus der UI pruefen: die Felder oder ein Problem 400 mit Klartext."""
     if not isinstance(v, dict):
-        return invalid(f"Client {name}: Objekt erwartet")
+        return invalid(f"client {name}: object expected")
     bad = set(v) - set(CLIENT_FIELDS)
     if bad:
-        return invalid(f"Client {name}: Feld(er) {sorted(bad)} nicht ueber die UI setzbar (Secret: POST /admin/clients/{name}/token)")
+        return invalid(f"client {name}: field(s) {sorted(bad)} cannot be set in the UI (secret: POST /admin/clients/{name}/token)")
     spec = {}
     if v.get("ip"):
         ips = v["ip"] if isinstance(v["ip"], list) else [x.strip() for x in str(v["ip"]).replace(";", ",").split(",") if x.strip()]
-        spec["ip"] = [values.ip_address(x, f"Client {name}") for x in ips]
+        spec["ip"] = [values.ip_address(x, f"client {name}") for x in ips]
         problem = next((p for p in spec["ip"] if failed(p)), None)
         if problem:
             return problem
@@ -98,7 +98,7 @@ def _client_spec(name, v):
         if v.get(k) is not None:
             spec[k] = bool(v[k])
     if v.get("requests_per_minute") is not None:
-        spec["requests_per_minute"] = values.number(v["requests_per_minute"], f"Client {name}: requests_per_minute", integer=True)
+        spec["requests_per_minute"] = values.number(v["requests_per_minute"], f"client {name}: requests_per_minute", integer=True)
         if failed(spec["requests_per_minute"]):
             return spec["requests_per_minute"]
     for k in ("max_priority", "data_class"):
@@ -189,13 +189,13 @@ async def handle_config_put(request):
 def _overrides_from_request(b):
     """Body der UI -> Override-Abschnitte (validiert, noch nicht mit dem Bestand zusammengefuehrt), oder ein Problem 400."""
     if not isinstance(b, dict):
-        return invalid("Objekt erwartet")
+        return invalid("object expected")
     for key in ("roles", "models", "settings", "clients"):   # Stufe 7 settings: {pfad: wert}; null = Override entfernen
         if not isinstance(b.get(key) or {}, dict):
-            return invalid(f"{key} muss ein Mapping sein")
+            return invalid(f"{key} must be a mapping")
     for key in ("delete_models", "delete_clients"):
         if not isinstance(b.get(key) or [], list):
-            return invalid(f"{key} muss eine Liste sein")
+            return invalid(f"{key} must be a list")
     ov = {}
     if "roles" in b:
         ov["roles"] = _roles_from(b["roles"] or {})
@@ -216,8 +216,8 @@ def _overrides_from_request(b):
 
 def _tier_from(role, t):
     if not isinstance(t, dict) or not t.get("model"):
-        return invalid(f"Rolle {role}: jedes Tier braucht model und num_ctx")
-    ctx = values.number(t.get("num_ctx"), f"Rolle {role}: num_ctx", integer=True)
+        return invalid(f"role {role}: every tier needs model and num_ctx")
+    ctx = values.number(t.get("num_ctx"), f"role {role}: num_ctx", integer=True)
     return ctx if failed(ctx) else {"model": str(t["model"]), "num_ctx": ctx, "busy_ok": bool(t.get("busy_ok", False))}
 
 
@@ -226,10 +226,10 @@ def _roles_from(raw):
     for name, r in raw.items():
         name = str(name).strip()
         if not name or ":" in name or " " in name:
-            return invalid(f"ungültiger Rollenname {name!r}")
+            return invalid(f"invalid role name {name!r}")
         tiers = (r.get("tiers") if isinstance(r, dict) else None) or []
         if not isinstance(tiers, list) or not tiers:
-            return invalid(f"Rolle {name}: mindestens ein Tier")
+            return invalid(f"role {name}: at least one tier")
         roles[name] = {"exposed_as": f"{name}:latest", "tiers": [_tier_from(name, t) for t in tiers]}
         problem = next((t for t in roles[name]["tiers"] if failed(t)), None)
         if problem:
@@ -247,36 +247,36 @@ def _models_from(raw):
     for m, v in raw.items():
         m = str(m).strip()
         if not m or " " in m:
-            return invalid(f"ungültiger Modellname {m!r}")
+            return invalid(f"invalid model name {m!r}")
         if not isinstance(v, dict):
-            return invalid(f"Modell {m}: Objekt erwartet")
+            return invalid(f"model {m}: object expected")
         entry = _cloud_model_entry(m, v) if v.get("cloud") else _local_model_entry(m, v)
         if failed(entry):
             return entry
         if v.get("max_parallel"):   # 0.6.5: Grenze gleichzeitiger Anfragen je Knoten fuer dieses Modell
-            entry["max_parallel"] = values.number(v["max_parallel"], f"Modell {m}: max_parallel", integer=True)
+            entry["max_parallel"] = values.number(v["max_parallel"], f"model {m}: max_parallel", integer=True)
             if failed(entry["max_parallel"]):
                 return entry["max_parallel"]
             if entry["max_parallel"] < 1:
-                return invalid(f"Modell {m}: max_parallel muss mindestens 1 sein")
+                return invalid(f"model {m}: max_parallel must be at least 1")
         models[m] = entry
     return models
 
 
 def _local_model_entry(m, v):
-    weights = values.number(v.get("weights_gib"), f"Modell {m}: weights_gib")
-    kv = values.number(v.get("kv_gib_per_1k", 0), f"Modell {m}: kv_gib_per_1k")
+    weights = values.number(v.get("weights_gib"), f"model {m}: weights_gib")
+    kv = values.number(v.get("kv_gib_per_1k", 0), f"model {m}: kv_gib_per_1k")
     return next((x for x in (weights, kv) if failed(x)), None) or {"weights_gib": weights, "kv_gib_per_1k": kv}
 
 
 def _cloud_model_entry(m, v):
     """Stufe 7: Cloud-Modell im Katalog anlegen/aendern (Anbieter, Preise, Kontext, Faehigkeiten)."""
     if v["cloud"] not in (state.CFG.cloud.get("providers") or {}):
-        return invalid(f"Modell {m}: Cloud-Anbieter {v['cloud']} ist nicht konfiguriert")
+        return invalid(f"model {m}: cloud provider {v['cloud']} is not configured")
     pr = v.get("price_chf_per_m") or {}
     if not isinstance(pr, dict) or not isinstance(v.get("capabilities") or {}, dict):
-        return invalid(f"Modell {m}: price_chf_per_m und capabilities muessen Mappings sein")
-    prices = {k: values.number(pr.get(k, 0), f"Modell {m}: price_chf_per_m.{k}") for k in ("input", "output")}
+        return invalid(f"model {m}: price_chf_per_m and capabilities must be mappings")
+    prices = {k: values.number(pr.get(k, 0), f"model {m}: price_chf_per_m.{k}") for k in ("input", "output")}
     problem = next((p for p in prices.values() if failed(p)), None)
     if problem:
         return problem
@@ -284,7 +284,7 @@ def _cloud_model_entry(m, v):
     if v.get("provider_model"):
         e["provider_model"] = str(v["provider_model"]).strip()
     if v.get("context_tokens"):
-        e["context_tokens"] = values.number(v["context_tokens"], f"Modell {m}: context_tokens", integer=True)
+        e["context_tokens"] = values.number(v["context_tokens"], f"model {m}: context_tokens", integer=True)
         if failed(e["context_tokens"]):
             return e["context_tokens"]
     if v.get("reasoning") is not None:
@@ -301,7 +301,7 @@ def _clients_from(raw):
     for name, v in raw.items():
         name = str(name).strip()
         if not CLIENT_NAME.match(name):
-            return invalid(f"ungültiger Client-Name {name!r} (a-z, 0-9, -, _)")
+            return invalid(f"invalid client name {name!r} (a-z, 0-9, -, _)")
         clients[name] = _client_spec(name, v or {})
         if failed(clients[name]):
             return clients[name]
@@ -317,7 +317,7 @@ def _estimate_unknown_tier_models(ov):
                 continue
             size = max((n.model_details.get(t["model"], {}).get("size", 0) for n in state.NODES.values()), default=0)
             if not size:
-                return invalid(f"Rolle {name}: Modell {t['model']} ist weder im Katalog noch auf einem Knoten")
+                return invalid(f"role {name}: model {t['model']} is neither in the catalog nor on a node")
             ov.setdefault("models", {})[t["model"]] = {"weights_gib": round(size / GIB * 1.05, 2), "kv_gib_per_1k": 0.1,
                                                         "source": "estimated", "note": "estimated from the file size, please measure"}
             known.add(t["model"])
@@ -330,13 +330,13 @@ def _merge_overrides(current, ov):
         cur_models = current.get("models", {})
         merged = dict(cur_models)
         for m, e in ov["models"].items():
-            alt = cur_models.get(m) or {}
+            old_entry = cur_models.get(m) or {}
             # Die UI schickt nur Gewichte + KV. Sind sie unveraendert, bleibt der gemessene Eintrag samt real /
             # vram_real_gib (0.3.5) stehen - sonst verloere jedes Speichern im Katalog-Tab die echte Messung.
-            if (alt.get("real") and not e.get("cloud") and alt.get("weights_gib") == e.get("weights_gib")
-                    and alt.get("kv_gib_per_1k") == e.get("kv_gib_per_1k")):
+            if (old_entry.get("real") and not e.get("cloud") and old_entry.get("weights_gib") == e.get("weights_gib")
+                    and old_entry.get("kv_gib_per_1k") == e.get("kv_gib_per_1k")):
                 if "max_parallel" in e:   # 0.6.5: die Messung bleibt, die Grenze aus der UI kommt trotzdem an
-                    merged[m] = {**alt, "max_parallel": e["max_parallel"]}
+                    merged[m] = {**old_entry, "max_parallel": e["max_parallel"]}
                 continue
             merged[m] = e
         ov["models"] = merged
@@ -370,7 +370,7 @@ def _apply_delete_models(current, ov):
     gone = [m for m in ov.pop("delete_models") if m not in base_models]
     ov["models"] = {m: v for m, v in {**current.get("models", {}), **ov.get("models", {})}.items() if m not in gone}
     used = [(r, t["model"]) for r, rr in {**current.get("roles", {}), **ov.get("roles", {})}.items() for t in rr.get("tiers", []) if t["model"] in gone]
-    return invalid(f"Modell wird noch in Rollen benutzt: {used}") if used else None
+    return invalid(f"model is still used in roles: {used}") if used else None
 
 
 def _merge_clients(current, incoming):
@@ -386,7 +386,7 @@ def _merge_clients(current, incoming):
 def _apply_delete_clients(current, ov):
     blocked = [n for n in ov["delete_clients"] if n in base_clients()]
     if blocked:
-        return invalid(f"Client(s) {blocked} stehen in config.yaml und lassen sich nur per Deploy entfernen")
+        return invalid(f"client(s) {blocked} are in config.yaml and can only be removed by deploy")
     gone = set(ov.pop("delete_clients"))
     ov["clients"] = {n: v for n, v in {**(current.get("clients") or {}), **ov.get("clients", {})}.items() if n not in gone}
     ov["settings"] = {k: v for k, v in {**(current.get("settings") or {}), **ov.get("settings", {})}.items()
@@ -397,7 +397,7 @@ def _after_config_change(b, new):
     if "settings" in b and any(k == "router.client_auth.mode" for k in b.get("settings") or {}):
         state.CLIENT_AUTH_MODE = None   # der dauerhafte Wert gilt; ein aelterer Laufzeit-Schalter (POST /admin/client_auth) verfaellt
         auth.audit("client_auth_mode", mode=state.CFG.client_auth["mode"], by="admin-ui-settings")
-    log.info("config via UI geaendert: %d Rollen, expose_concrete=%s, settings=%d", len(state.CFG.roles), state.CFG.expose_concrete, len(new.get("settings") or {}))
+    log.info("config changed via UI: %d roles, expose_concrete=%s, settings=%d", len(state.CFG.roles), state.CFG.expose_concrete, len(new.get("settings") or {}))
     state.remember({"event": "config", "roles": sorted(r["name"] for r in state.CFG.roles.values()),
                     "settings": sorted((b.get("settings") or {}).keys())[:12]})
 
@@ -618,7 +618,7 @@ async def handle_client_auth(request):
             return web.json_response({"error": "client_auth.mode is locked (client_auth.locked in config.yaml), change it via deploy"}, status=403)
         state.CLIENT_AUTH_MODE = mode
         auth.audit("client_auth_mode", mode=mode, by="admin-api")
-        log.warning("client_auth: Modus zur Laufzeit auf %s gesetzt (dauerhaft nur ueber config.yaml)", mode)
+        log.warning("client_auth: mode set to %s at runtime (permanent only via config.yaml)", mode)
     elif request.method != "GET":
         return web.json_response({"error": "method not allowed"}, status=405)
     return web.json_response(auth.client_auth_view())

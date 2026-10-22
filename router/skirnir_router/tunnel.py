@@ -151,7 +151,7 @@ class Tunnel:
         try:
             await self.send(frame)
         except (ConnectionError, RuntimeError, ClientError) as e:  # exception-ok: network boundary, the websocket is closing
-            log.debug("tunnel %s: Antwort verworfen, Verbindung schliesst (%s)", self.name(), e)
+            log.debug("tunnel %s: answer dropped, connection closing (%s)", self.name(), e)
 
     async def open(self, method, path, body, deadline):
         """Stream oeffnen und auf den Antwortkopf warten. Wird der Aufrufer vorher abgebrochen (Client trennt waehrend des
@@ -176,7 +176,7 @@ class Tunnel:
         except Exception as e:  # noqa: BLE001  # exception-ok: network boundary of the websocket send
             self.streams.pop(sid, None)
             # exception-ok: emulates aiohttp; the caller handles a ClientError at its network boundary
-            raise ClientError(f"tunnel {self.name()}: senden fehlgeschlagen: {e}") from e
+            raise ClientError(f"tunnel {self.name()}: send failed: {e}") from e
         wait = (deadline - time.time()) if deadline else 600   # Antwortkopf kommt bei Ollama erst nach dem Modell-Load
         try:
             t, payload = await asyncio.wait_for(resp.q.get(), max(0.001, wait))
@@ -197,7 +197,7 @@ class Tunnel:
         try:
             await self.send(tun_frame(TUN_CANCEL, sid))
         except Exception as e:  # noqa: BLE001  # exception-ok: network boundary; a lost CANCEL ends with the tunnel anyway
-            log.debug("tunnel %s: CANCEL verworfen (%s)", self.name(), e)
+            log.debug("tunnel %s: CANCEL dropped (%s)", self.name(), e)
 
     def name(self):
         return self.node.name if self.node is not None else f"pending-{(self.fp or '')[:12]}"
@@ -223,7 +223,7 @@ class Tunnel:
                 try:
                     msg = json.loads(payload)
                 except ValueError:  # exception-ok: untrusted JSON from the agent; whether it parses shows only the parser
-                    log.warning("node %s: Ollama-Zustand vom Agenten ist kein JSON", self.node.name)
+                    log.warning("node %s: Ollama state from the agent is not JSON", self.node.name)
                     return
                 poll.apply_ollama_push(self.node, msg, time.time())
             return

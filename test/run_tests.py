@@ -608,7 +608,7 @@ def main():
         # --- Stufe 6: Betrieb - Config-Schema, Idempotency, Canary, Shadow, Supply Chain ---
         router_py = os.path.join(HERE, "..", "router", "router.py")
         rc = subprocess.run([PY, router_py, "--check", os.path.join(HERE, "test-config.yaml"), "--pure"], capture_output=True, text=True, cwd=HERE)
-        check("router.py --check: Testkonfiguration gueltig (rc 0)", rc.returncode == 0 and "Konfiguration ok" in rc.stdout, (rc.stdout + rc.stderr)[-200:])
+        check("router.py --check: Testkonfiguration gueltig (rc 0)", rc.returncode == 0 and "configuration ok" in rc.stdout, (rc.stdout + rc.stderr)[-200:])
         bad = os.path.join(HERE, "bad-config.yaml")
         open(bad, "w", encoding="utf-8").write(open(os.path.join(HERE, "test-config.yaml"), encoding="utf-8").read().replace("  limits: {", "  limitz: {"))
         rc = subprocess.run([PY, router_py, "--check", bad, "--pure"], capture_output=True, text=True, cwd=HERE)
@@ -753,9 +753,9 @@ def main():
         ri = rinfo(raw, st)
         check("nach der Budget-Erhoehung bedient die Cloud-Stufe wieder", st == 200 and ri.get("node") == "cloud:testcloud", str({k: ri.get(k) for k in ("node", "skipped")}))
         st, raw = http(C + "/admin/config", {"settings": {"router.cloud.providers.testcloud.base_url": "http://evil"}}, method="PUT")
-        check("nicht freigegebener Pfad (base_url) -> 400", st == 400 and "nicht ueber die UI" in raw.decode(), raw.decode()[:120])
+        check("nicht freigegebener Pfad (base_url) -> 400", st == 400 and "cannot be changed in the UI" in raw.decode(), raw.decode()[:120])
         st, raw = http(C + "/admin/config", {"settings": {"modes.admission.max_inflight_default": 0}}, method="PUT")
-        check("Wert ausserhalb des Bereichs -> 400", st == 400 and "zwischen" in raw.decode(), raw.decode()[:120])
+        check("Wert ausserhalb des Bereichs -> 400", st == 400 and "between" in raw.decode(), raw.decode()[:120])
         st, raw = http(C + "/admin/config", {"settings": {"router.cloud.providers.gibtsnicht.enabled": False}}, method="PUT")
         check("unbekannter Anbieter -> 400 (die UI legt keine Anbieter an)", st == 400, raw.decode()[:120])
         st, raw = http(C + "/admin/config", {"settings": {"router.client_auth.clients.tester.data_class": "internal"}}, method="PUT")
@@ -770,7 +770,7 @@ def main():
         txt7 = open(os.path.join(HERE, "roles.yaml"), encoding="utf-8").read()
         check("roles.yaml traegt den settings-Block (Budget), der zurueckgesetzte Client-Eintrag ist weg", "budget_month_chf: 50" in txt7 and "tester.data_class" not in txt7, txt7[-300:])
         rc7 = subprocess.run([PY, os.path.join(HERE, "..", "router", "router.py"), "--check", os.path.join(HERE, "test-config.yaml")], cwd=HERE, capture_output=True, text=True)
-        check("--check akzeptiert roles.yaml mit settings (Deploy-Pruefung auf dem CT)", rc7.returncode == 0 and "mit roles.yaml" in rc7.stdout, (rc7.stdout + rc7.stderr)[-200:])
+        check("--check akzeptiert roles.yaml mit settings (Deploy-Pruefung auf dem CT)", rc7.returncode == 0 and "with roles.yaml" in rc7.stdout, (rc7.stdout + rc7.stderr)[-200:])
         st, raw = http(C + "/admin/config", {"settings": {"modes.score.errors": 42, "modes.keep_alive.busy": "7m", "router.openai.default_think": None}}, method="PUT")
         check("Score-Gewicht, keep_alive und Tristate live geaendert", st == 200 and state()["scheduler"]["score"]["errors"] == 42.0
               and json.loads(http(C + "/admin/config")[1])["modes"]["keep_alive"]["busy"] == "7m", raw.decode()[:100])
@@ -793,7 +793,7 @@ def main():
         roles7 = cfg7["roles"]; roles7["wolke"]["tiers"].append({"model": "testcloud:maxi", "num_ctx": 100000})
         st, raw = http(C + "/admin/config", {"roles": roles7}, method="PUT")
         st2, raw2 = http(C + "/admin/config", {"delete_models": ["testcloud:maxi"]}, method="PUT")
-        check("UI-Modell in einer Rolle -> Loeschen abgelehnt", st == 200 and st2 == 400 and "Rollen" in raw2.decode(), f"{st} {raw.decode()[:80]} {st2} {raw2.decode()[:100]}")
+        check("UI-Modell in einer Rolle -> Loeschen abgelehnt", st == 200 and st2 == 400 and "roles" in raw2.decode(), f"{st} {raw.decode()[:80]} {st2} {raw2.decode()[:100]}")
         roles7["wolke"]["tiers"].pop()
         http(C + "/admin/config", {"roles": roles7}, method="PUT")
         st2, raw2 = http(C + "/admin/config", {"delete_models": ["testcloud:maxi", "testcloud:mini"]}, method="PUT")
@@ -831,7 +831,7 @@ def main():
               f"{st} {raw.decode()[:80]} client={ri.get('client')} node={ri.get('node')} {ri.get('skipped')}")
         http(C + "/admin/config", {"settings": {"router.cloud.providers.testcloud.budget_month_chf": None}}, method="PUT")
         st, raw = http(C + "/admin/config", {"settings": {"router.client_auth.clients.pi-voice.ip": "nix"}}, method="PUT")
-        check("ungueltige IP -> 400", st == 400 and "IP-Adresse" in raw.decode(), raw.decode()[:100])
+        check("ungueltige IP -> 400", st == 400 and "IP address" in raw.decode(), raw.decode()[:100])
         st, raw = http(C + "/admin/config", {"clients": {"pi-voice": {"token_sha256": "00"}}}, method="PUT")
         check("Hash direkt setzen ist nicht erlaubt (nur ueber /token)", st == 400, raw.decode()[:100])
         st, raw = http(C + "/admin/config", {"delete_clients": ["tester"]}, method="PUT")
@@ -1018,7 +1018,7 @@ def main():
               nb["state"] == "busy" and nb["busy_reason"] == "game" and (nb.get("game") or {}).get("name") == "Diablo IV.exe",
               f"{nb['state']} {nb['busy_reason']} {nb.get('game')} fremd {nb.get('foreign_vram_gib')}")
         check("... ohne gemeldeten GPU-Bedarf (Agent < 0.19.0) wie bis 0.8.6: schwer, Grund 'nicht gemeldet'",
-              nb["game_heavy"] is True and nb["game_heavy_why"] == "GPU-Bedarf nicht gemeldet", f"{nb['game_heavy']} {nb['game_heavy_why']}")
+              nb["game_heavy"] is True and nb["game_heavy_why"] == "GPU use not reported", f"{nb['game_heavy']} {nb['game_heavy_why']}")
         st, raw = http(R + "/v1/skirnir/availability/gross:latest")
         av = json.loads(raw) if st == 200 else {}
         bl = [b for b in av.get("blockers", []) if b.get("node") == "big"]
@@ -1042,8 +1042,8 @@ def main():
         for _ in range(4):   # game_sustain_s 1 im Test
             hb("big", 5, *ruhig, game=leicht, memory=viel); time.sleep(0.6)
         nb = state()["nodes"]["big"]
-        check("Leichtes Spiel (735+32 MiB, 1,8 %) -> big bleibt free, game_heavy false mit Grund 'leicht'",
-              nb["state"] == "free" and nb["game_heavy"] is False and nb["game_heavy_why"].startswith("leicht")
+        check("Leichtes Spiel (735+32 MiB, 1,8 %) -> big bleibt free, game_heavy false mit Grund 'light'",
+              nb["state"] == "free" and nb["game_heavy"] is False and nb["game_heavy_why"].startswith("light")
               and (nb.get("game") or {}).get("gpu_dedicated_mib") == 735, f"{nb['state']} {nb['game_heavy']} {nb['game_heavy_why']} {nb.get('game')}")
         st, raw = http(R + "/v1/skirnir/availability/gross:latest")
         av = json.loads(raw) if st == 200 else {}
@@ -1056,7 +1056,7 @@ def main():
         nb = state()["nodes"]["big"]
         ev = [d for d in state()["decisions"] if d.get("event") == "game_heavy" and d.get("t", 0) >= t_heavy]
         check("Spiel weicht in geteilten Speicher aus (300+2100 MiB, 4 %) -> busy 'game', Grund Grafikspeicher, Journal game_heavy",
-              nb["state"] == "busy" and nb["busy_reason"] == "game" and nb["game_heavy"] is True and "Grafikspeicher" in nb["game_heavy_why"]
+              nb["state"] == "busy" and nb["busy_reason"] == "game" and nb["game_heavy"] is True and "graphics memory" in nb["game_heavy_why"]
               and ev, f"{nb['state']} {nb['busy_reason']} {nb['game_heavy_why']} {ev}")
         for _ in range(3):
             hb("big", 5, *ruhig, game=leicht, memory=viel); time.sleep(0.6)
@@ -1073,7 +1073,7 @@ def main():
         for _ in range(3):
             hb("big", 5, *ruhig, game=rechnet, memory=viel); time.sleep(0.6)
         nb = state()["nodes"]["big"]
-        check("Spiel mit wenig Speicher, aber 35 % Engine -> busy, Grund GPU-Engine", nb["state"] == "busy" and "GPU-Engine" in nb["game_heavy_why"],
+        check("Spiel mit wenig Speicher, aber 35 % Engine -> busy, Grund GPU-Engine", nb["state"] == "busy" and "GPU engine" in nb["game_heavy_why"],
               f"{nb['state']} {nb['game_heavy_why']}")
         for _ in range(10):
             hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=viel); time.sleep(0.6)
@@ -1085,7 +1085,7 @@ def main():
             hb("big", 5, *ruhig, game=leicht, memory=eng); time.sleep(0.6)
         nb = state()["nodes"]["big"]
         check("Leichtes Spiel bei Speicherdruck (Diablo-Fall: RAM 94 %) -> busy, Grund Speicherdruck",
-              nb["state"] == "busy" and nb["game_heavy_why"] == "Speicherdruck", f"{nb['state']} {nb['game_heavy_why']} {nb['memory_pressure']}")
+              nb["state"] == "busy" and nb["game_heavy_why"] == "memory pressure", f"{nb['state']} {nb['game_heavy_why']} {nb['memory_pressure']}")
         for _ in range(10):
             hb("big", 5, *ruhig, game={"supported": True, "running": False}, memory=viel); time.sleep(0.6)
             if state()["nodes"]["big"]["state"] == "free" and not state()["nodes"]["big"]["memory_pressure"]:
@@ -1139,7 +1139,7 @@ def main():
         check("big offline erkannt", state()["nodes"]["big"]["state"] == "offline")
         rlog.seek(0)
         check("... weil der Agent 'Ollama antwortet nicht' meldet (nicht aus fehlgeschlagenen Abfragen erschlossen)",
-              "offline (Ollama antwortet nicht laut Agent" in rlog.read())
+              "offline (Ollama not answering according to the agent" in rlog.read())
         t0 = time.time()
         st, txt = chat("gross:latest")
         dt = time.time() - t0
@@ -1530,7 +1530,7 @@ def main():
         refused = _smod.coerce("router.client_auth.mode", "observe", locked_cfg)   # 0.8.9: Problem statt ValueError
         lock_err = getattr(refused, "message", "") if getattr(refused, "status", None) == 400 else ""
         unlocked_ok = _smod.coerce("router.client_auth.mode", "observe", {"router": {"client_auth": {"mode": "enforce"}}}) == "observe"
-        check("client_auth.locked: Settings lehnen den Modus ab, ungesperrt geht er durch", "gesperrt" in lock_err and unlocked_ok, lock_err[:80])
+        check("client_auth.locked: Settings lehnen den Modus ab, ungesperrt geht er durch", "locked" in lock_err and unlocked_ok, lock_err[:80])
         _yaml_txt = open(os.path.join(HERE, "test-config.yaml"), encoding="utf-8").read()
         _c = yaml.safe_load(_yaml_txt); _c.setdefault("router", {}).setdefault("client_auth", {})["locked"] = True
         _lp = os.path.join(HERE, "locked-config.yaml"); open(_lp, "w", encoding="utf-8").write(yaml.safe_dump(_c, allow_unicode=True, sort_keys=False))
@@ -1638,7 +1638,7 @@ def main():
             time.sleep(0.25)
         rlog.seek(0)
         check("Ollama-Update: erst bei 'ready' aus dem Routing, dann Tausch freigegeben (Knoten leer)",
-              "Ollama-Tausch auf 0.99.0 freigegeben (Knoten leer)" in rlog.read(), f"draining bei ready gesehen: {drained_ready}")
+              "Ollama swap to 0.99.0 released (node idle)" in rlog.read(), f"draining bei ready gesehen: {drained_ready}")
         check("Ollama-Update: Fake-Agent hat geladen, Hash geprueft, gemeldet; Version 0.99.0 im Heartbeat -> done, kein Drain", rb.get("state") == "done" and rb["current"] == "0.99.0" and not rb["pending"] and not state()["nodes"]["big"]["draining"], str(rb))
         evs = [d["state"] for d in state()["decisions"] if d.get("event") == "ollama_update"]
         check("Ollama-Update: Ereignisse requested -> downloading -> ready -> applied -> done", evs[-5:] == ["requested", "downloading", "ready", "applied", "done"], str(evs))

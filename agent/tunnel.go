@@ -125,7 +125,7 @@ func (t *Tunnel) Run(ctx context.Context) {
 		t.mu.Lock()
 		t.lastErr = err.Error()
 		t.mu.Unlock()
-		t.log.Warnf("tunnel: %v, neuer Versuch in %s", err, d)
+		t.log.Warnf("tunnel: %v, retrying in %s", err, d)
 		select {
 		case <-ctx.Done():
 			return
@@ -179,11 +179,11 @@ func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 	_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	var ch ctlMsg
 	if err := conn.ReadJSON(&ch); err != nil || ch.T != "challenge" {
-		return time.Since(start), fmt.Errorf("Anmeldung: keine Challenge (%v)", err)
+		return time.Since(start), fmt.Errorf("login: no challenge (%v)", err)
 	}
 	nonce, err := base64.StdEncoding.DecodeString(ch.Nonce)
 	if err != nil || len(nonce) < 16 {
-		return time.Since(start), fmt.Errorf("Anmeldung: Challenge ungueltig")
+		return time.Since(start), fmt.Errorf("login: invalid challenge")
 	}
 	facts := t.facts(ctx)
 	node := t.hb.node
@@ -193,20 +193,20 @@ func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 	err = conn.WriteJSON(hello)
 	t.wmu.Unlock()
 	if err != nil {
-		return time.Since(start), fmt.Errorf("Anmeldung senden: %w", err)
+		return time.Since(start), fmt.Errorf("send login: %w", err)
 	}
 	var st ctlMsg
 	if err := conn.ReadJSON(&st); err != nil || st.T != "status" {
-		return time.Since(start), fmt.Errorf("Anmeldung: keine Statusantwort (%v)", err)
+		return time.Since(start), fmt.Errorf("login: no status answer (%v)", err)
 	}
 	t.applyStatus(st)
 	if st.State == "revoked" {
-		return time.Since(start), fmt.Errorf("vom Router gesperrt (%s)", st.Message)
+		return time.Since(start), fmt.Errorf("blocked by the router (%s)", st.Message)
 	}
 	t.mu.Lock()
 	t.conn, t.connected, t.since, t.lastErr = conn, true, time.Now(), ""
 	t.mu.Unlock()
-	t.log.Infof("tunnel: verbunden mit %s, Status %s (Knoten %s, Fingerprint %s)", t.url, st.State, t.getNode(), t.id.Fingerprint()[:16])
+	t.log.Infof("tunnel: connected to %s, status %s (node %s, fingerprint %s)", t.url, st.State, t.getNode(), t.id.Fingerprint()[:16])
 
 	// Heartbeat durch den Tunnel
 	hbCtx, hbCancel := context.WithCancel(ctx)
@@ -226,7 +226,7 @@ func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 			t.connected, t.conn = false, nil
 			t.mu.Unlock()
 			t.cancelAll()
-			return time.Since(start), fmt.Errorf("Verbindung: %w", err)
+			return time.Since(start), fmt.Errorf("connection: %w", err)
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 		if mt == websocket.TextMessage {
@@ -234,7 +234,7 @@ func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 			if json.Unmarshal(data, &m) == nil {
 				t.applyStatus(m)
 				if m.State == "revoked" {
-					return time.Since(start), fmt.Errorf("vom Router gesperrt (%s)", m.Message)
+					return time.Since(start), fmt.Errorf("blocked by the router (%s)", m.Message)
 				}
 			}
 			continue
@@ -284,7 +284,7 @@ func (t *Tunnel) applyStatus(m ctlMsg) {
 	if len(m.Config) > 0 {
 		p = &Provision{}
 		if err := json.Unmarshal(m.Config, p); err != nil {
-			t.log.Warnf("tunnel: Konfigurationspaket unlesbar: %v", err)
+			t.log.Warnf("tunnel: configuration package unreadable: %v", err)
 			p = nil
 		}
 	}

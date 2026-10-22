@@ -67,7 +67,7 @@ class Breaker:
     def breaker_allows(self, now):
         if self.breaker == "open" and now >= self.breaker_until:
             self.breaker = "half_open"
-            log.info("%s: Breaker half_open - eine Probe", self.name)
+            log.info("%s: breaker half_open - one probe", self.name)
             state.remember({"event": "breaker", "node": self.name, "state": "half_open"})
         return self.breaker_would_allow(now)
 
@@ -76,13 +76,13 @@ class Breaker:
         self.breaker_fails = [t for t in self.breaker_fails if now - t <= cfg["window_s"]] + [now]
         if self.breaker == "half_open" or len(self.breaker_fails) >= cfg["failures"]:
             self.breaker, self.breaker_until, self.breaker_fails = "open", now + cfg["open_s"], []
-            log.warning("%s: Breaker OPEN fuer %.0fs (%s)", self.name, cfg["open_s"], why)
+            log.warning("%s: breaker OPEN for %.0fs (%s)", self.name, cfg["open_s"], why)
             state.remember({"event": "breaker", "node": self.name, "state": "open", "reason": why})
 
     def breaker_ok(self):
         if self.breaker != "closed":
             self.breaker = "closed"
-            log.info("%s: Breaker closed (Probe erfolgreich)", self.name)
+            log.info("%s: breaker closed (probe succeeded)", self.name)
             state.remember({"event": "breaker", "node": self.name, "state": "closed"})
         self.breaker_fails = []
 
@@ -118,7 +118,7 @@ class Node(Breaker):
         if fp:
             self.tls_mode = "fixed"
             if not self.set_fingerprint(fp):   # config.yaml prueft das Format schon beim Laden
-                log.error("node %s: TLS-Fingerprint ungueltig: %r - Knoten bleibt unerreichbar", name, fp)
+                log.error("node %s: invalid TLS fingerprint: %r - node stays unreachable", name, fp)
         self.vram_total_gib = float(spec.get("vram_total_gib", 0))
         self.mac = spec.get("mac")
         self.wol = bool(spec.get("wol", False))

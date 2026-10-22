@@ -326,7 +326,7 @@ def main():
         rc, out, err = run(c, ct_exec("python3 /opt/skirnir-router/router.py --check /etc/skirnir-router/config.yaml && "
                                   "python3 -c \"import yaml; yaml.safe_load(open(\\\"/etc/skirnir-router/config.yaml\\\"))\""))
         print(out.strip(), err.strip())
-        if rc != 0 or "Konfiguration ok" not in out:
+        if rc != 0 or "configuration ok" not in out:
             print("Abbruch: Schema-Check auf dem CT fehlgeschlagen - Dienst NICHT neu gestartet (alter Prozess laeuft weiter, Dateien sind aber schon ersetzt)")
             c.close()
             sys.exit(1)

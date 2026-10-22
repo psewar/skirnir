@@ -106,7 +106,7 @@ func pdhArray(c windows.Handle, format uintptr) ([]byte, uint32, error) {
 		return make([]byte, 1), 0, nil
 	}
 	if r != pdhMoreData {
-		return nil, 0, fmt.Errorf("PdhGetFormattedCounterArray (Groesse): 0x%x", r)
+		return nil, 0, fmt.Errorf("PdhGetFormattedCounterArray (size): 0x%x", r)
 	}
 	buf := make([]byte, size)
 	if r, _, _ := procPdhGetFormattedCounterAr.Call(uintptr(c), format, uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&n)),

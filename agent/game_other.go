@@ -18,7 +18,7 @@ func gameFolders() []string     { return nil }
 
 // newGPUSampler: ohne Spielerkennung gibt es auch keinen GPU-Bedarf je Spiel zu messen.
 func newGPUSampler() (gpuSampler, error) {
-	return nil, errors.New("GPU-Bedarf je Prozess nur unter Windows")
+	return nil, errors.New("GPU demand per process only on Windows")
 }
 
 // memoryFact: MemAvailable/MemTotal aus /proc/meminfo. Den Commit meldet Linux nur als Rechengroesse - bei der ueblichen

@@ -195,7 +195,7 @@ erholung     <- seit erholung_s in gedrosselt                          -> Limit 
 normal       <- Erholung abgelaufen
 jeder Zustand: Limit != erwartet -> neu setzen (nur senken) + Ereignis limit_gesetzt | fremdeingriff | limit_verweigert
 ```
-Die Zustandsermittlung ist eine reine Funktion über die letzten Messwerte (wie `kuerzung.go`), damit sie ohne Karte
+Die Zustandsermittlung ist eine reine Funktion über die letzten Messwerte (wie `truncation.go`), damit sie ohne Karte
 testbar ist. Der Heartbeat (`heartbeat.payload`) trägt zusätzlich:
 ```json
 "gpu_guard": {"state": "normal", "quelle": "nvml+gpuz", "power_w": 412.0, "pin16_w": 388.5, "pin16_v": 11.93,
@@ -246,7 +246,7 @@ Warnstufe: `… Limit stand auf 575 W (Fremdeingriff?), erneut 460 W`, `… Setz
 Regel für jeden Test mit echter Hardware: Der Guard **klemmt jedes Ziel auf [Min-Limit, Standardlimit]**; ein Test
 darf das Limit nie über den Standard heben. Testreihenfolge vom Ungefährlichen zum Realen:
 
-1. **Agent, reine Funktion** (`gpu_guard_test.go`, Muster `kuerzung_test.go`): synthetische Messreihen ->
+1. **Agent, reine Funktion** (`gpu_guard_test.go`, Muster `truncation_test.go`): synthetische Messreihen ->
    erwartete Zustandsfolge; Hochlast knapp unter `ab_pct` bleibt `normal`; Unterbrechung setzt den Zähler zurück;
    Erholung endet nach `erholung_s`; Spannungswarnung erst nach `bestand_s`; Referenzlernen ignoriert Lastphasen.
 2. **Agent, NVML-Attrappe**: Interface über `nvmlDev` mit Stub, der Set-Aufrufe protokolliert und wahlweise rc=4

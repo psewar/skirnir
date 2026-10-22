@@ -58,7 +58,7 @@ func killChild(cmd *exec.Cmd) {
 func runningAsService() bool { return false }
 
 func runService(cfgPath, name string) error {
-	return errors.New("Dienstmodus gibt es nur unter Windows; auf Linux 'run' per systemd-Unit starten")
+	return errors.New("service mode exists only on Windows; on Linux start 'run' via a systemd unit")
 }
 
 // Kein DPAPI: der Schluessel liegt als Datei mit Modus 0600. Spaeter: Kernel-Keyring oder TPM.
@@ -77,10 +77,10 @@ func systemModel() (string, string) {
 	return rd("/sys/class/dmi/id/sys_vendor"), rd("/sys/class/dmi/id/product_name")
 }
 
-var errNotWindows = errors.New("nur unter Windows verfuegbar")
+var errNotWindows = errors.New("only available on Windows")
 
 func install(cfg *Config, cfgPath string) error    { return errNotWindows }
 func uninstall(cfg *Config) error                  { return errNotWindows }
 func applyRules(cfg *Config, cfgPath string) error { return errNotWindows }
 func controlService(name string, cmd string) error { return errNotWindows }
-func serviceState(name string) (string, error)     { return "kein Dienst (Linux)", nil }
+func serviceState(name string) (string, error)     { return "no service (Linux)", nil }

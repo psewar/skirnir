@@ -6,7 +6,7 @@ import "os"
 
 // restartSelf: unter systemd (Restart=always) reicht Beenden; im Vordergrund ebenso.
 func restartSelf(exe, cfgPath string, log *Logger) {
-	log.Infof("update: beende mich fuer den Neustart (systemd Restart=always)")
+	log.Infof("update: exiting for the restart (systemd Restart=always)")
 	os.Exit(0)
 }
 

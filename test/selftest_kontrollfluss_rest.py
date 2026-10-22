@@ -107,10 +107,10 @@ check("tls_fingerprint: zu kurz -> None", common.tls_fingerprint("abcd") is None
 check("tls_fingerprint: kein Hex -> None", common.tls_fingerprint("zz" * 32) is None)
 
 # --- Werkzeugaufruf-Rettung typisiert nur, was aufgeht
-check("rescue: integer", toolcall_rescue._passend(" 12 ", "integer") == 12)
-check("rescue: integer mit Komma bleibt Text", toolcall_rescue._passend("1,5", "integer") == "1,5")
-check("rescue: number", toolcall_rescue._passend("1.5", "number") == 1.5)
-check("rescue: number unendlich bleibt Text", toolcall_rescue._passend("inf", "number") == "inf")
+check("rescue: integer", toolcall_rescue._fit_type(" 12 ", "integer") == 12)
+check("rescue: integer mit Komma bleibt Text", toolcall_rescue._fit_type("1,5", "integer") == "1,5")
+check("rescue: number", toolcall_rescue._fit_type("1.5", "number") == 1.5)
+check("rescue: number unendlich bleibt Text", toolcall_rescue._fit_type("inf", "number") == "inf")
 
 
 # --- Idempotency: Abbruch des Wartenden geht weiter nach oben

@@ -67,7 +67,7 @@ func ownConsole() bool {
 
 func pause() {
 	if ownConsole() {
-		fmt.Print("\nEnter zum Schliessen ... ")
+		fmt.Print("\nEnter to close ... ")
 		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 	}
 }
@@ -89,18 +89,18 @@ func ask(r *bufio.Reader, prompt, def string) string {
 // setupInteractive: die ganze Einrichtung; ruft install/apply-rules/start ueber die INSTALLIERTE Binary auf, damit der
 // Dienst im SCM auf Program Files zeigt und nicht auf den Download-Ordner.
 func setupInteractive(cfgPath string) error {
-	fmt.Printf("Skirnir Agent %s - Einrichtung\n\n", version)
+	fmt.Printf("Skirnir Agent %s - setup\n\n", version)
 	if !isElevated() {
-		fmt.Println("Dafuer sind Administratorrechte noetig - Windows fragt gleich nach (UAC).")
+		fmt.Println("This needs administrator rights - Windows will ask (UAC).")
 		if err := relaunchElevated([]string{"setup", "--config", cfgPath}); err != nil {
 			pause()
-			return fmt.Errorf("Anhebung abgelehnt oder fehlgeschlagen: %w", err)
+			return fmt.Errorf("elevation refused or failed: %w", err)
 		}
 		return nil
 	}
 	err := setupBody(cfgPath)
 	if err != nil { // vor der Enter-Pause ausgeben, damit es im UAC-Fenster nicht untergeht (2026-09-26)
-		fmt.Printf("\n*** FEHLER: %v ***\n", err)
+		fmt.Printf("\n*** ERROR: %v ***\n", err)
 	}
 	pause()
 	return err
@@ -112,32 +112,32 @@ func setupBody(cfgPath string) error {
 	if moved, err := migrateLegacyInstall(&cfgPath); err != nil {
 		return err
 	} else if moved {
-		fmt.Println("Alte Installation (ollama-router-agent) umgezogen:", filepath.Dir(cfgPath))
+		fmt.Println("Old installation (ollama-router-agent) moved:", filepath.Dir(cfgPath))
 	}
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		if err := setupWriteConfig(in, cfgPath); err != nil {
 			return err
 		}
 	} else {
-		fmt.Println("Konfiguration vorhanden:", cfgPath)
+		fmt.Println("configuration present:", cfgPath)
 		if err := setupUpgradeConfig(in, cfgPath); err != nil {
 			return err
 		}
 	}
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
-		return fmt.Errorf("Konfiguration: %w", err)
+		return fmt.Errorf("configuration: %w", err)
 	}
 	dst := filepath.Join(setupDstDir, setupExe)
 	exe, _ := os.Executable()
 	exe, _ = filepath.Abs(exe)
 	name := cfg.Install.ServiceName
 	st, _ := serviceState(name)
-	exists := st != "nicht installiert"
+	exists := st != serviceNotInstalled
 
 	// Dienst und Relay anhalten, damit die Binary ersetzt werden kann
 	if exists {
-		fmt.Printf("Dienst %s: %s -> stoppen\n", name, st)
+		fmt.Printf("service %s: %s -> stop\n", name, st)
 		_ = controlService(name, "stop")
 	}
 	stopRelayProcesses()
@@ -146,14 +146,14 @@ func setupBody(cfgPath string) error {
 			return err
 		}
 		if err := copyFile(exe, dst); err != nil {
-			return fmt.Errorf("Binary nach %s kopieren: %w", dst, err)
+			return fmt.Errorf("copy binary to %s: %w", dst, err)
 		}
-		fmt.Println("Binary kopiert nach", dst)
+		fmt.Println("binary copied to", dst)
 	}
 	// Konto geaendert (z. B. NT SERVICE -> LocalSystem)? Dann neu anlegen - das Konto laesst sich nur beim Anlegen setzen.
 	if exists {
 		if acct, err := serviceAccount(name); err == nil && !sameAccount(acct, cfg.Install.Account) {
-			fmt.Printf("Dienstkonto ist %q, Konfiguration will %q -> Dienst wird neu angelegt (Identitaet und Logs bleiben)\n", acct, firstNonEmpty(cfg.Install.Account, "LocalSystem"))
+			fmt.Printf("service account is %q, configuration wants %q -> service is recreated (identity and logs stay)\n", acct, firstNonEmpty(cfg.Install.Account, "LocalSystem"))
 			if err := runVisible(dst, "uninstall", "--config", cfgPath); err != nil {
 				return err
 			}
@@ -172,22 +172,22 @@ func setupBody(cfgPath string) error {
 	}
 	if cfg.GPUZ.on() {
 		if err := installRelayTask(dst, cfgPath); err != nil {
-			fmt.Println("  GPU-Z-Relay-Aufgabe:", err, "(ohne Relay laufen NVML-Sensoren weiter)")
+			fmt.Println("  GPU-Z relay task:", err, "(without the relay, NVML sensors keep running)")
 		} else {
-			fmt.Println("  GPU-Z-Relay-Aufgabe angelegt (bei Anmeldung, ohne Adminrechte)")
+			fmt.Println("  GPU-Z relay task created (at logon, without admin rights)")
 		}
 	}
 	if old := `C:\Program Files\ollama-router-agent`; !strings.EqualFold(old, setupDstDir) {
 		if _, err := os.Stat(old); err == nil {
 			if err := os.RemoveAll(old); err == nil {
-				fmt.Println("Alter Programmordner entfernt:", old)
+				fmt.Println("Old program folder removed:", old)
 			}
 		}
 	}
-	fmt.Println("\nWarte auf den Dienst ...")
+	fmt.Println("\nWaiting for the service ...")
 	time.Sleep(6 * time.Second)
 	printHealth(cfg.Health.Listen)
-	fmt.Println("\nNaechster Schritt: Router-UI -> Tab Agenten -> diesen Rechner freigeben (Fingerprint siehe oben).")
+	fmt.Println("\nNext step: router UI -> tab Agents -> approve this computer (fingerprint see above).")
 	return nil
 }
 
@@ -208,7 +208,7 @@ func migrateLegacyInstall(cfgPath *string) (bool, error) {
 		*cfgPath = newDefault
 		return false, nil
 	}
-	fmt.Println("Alte Installation gefunden - Umzug nach skirnir-agent (Dienst, Verzeichnis, Aufgabe) ...")
+	fmt.Println("Old installation found - moving to skirnir-agent (service, directory, task) ...")
 	// Erst die umgeschriebene Konfiguration pruefen, dann anfassen: ein Umzug, der an der Konfiguration scheitert, liesse den
 	// Knoten ohne Dienst zurueck (gesehen 2026-09-26 auf einem Knoten mit alter Config).
 	raw, err := os.ReadFile(legacyConfigPathWindows)
@@ -223,14 +223,14 @@ func migrateLegacyInstall(cfgPath *string) (bool, error) {
 	_, cfgErr := loadConfig(probe)
 	os.Remove(probe)
 	if cfgErr != nil {
-		return false, fmt.Errorf("die vorhandene Konfiguration waere nach dem Umzug ungueltig - nichts veraendert, alter Dienst laeuft weiter.\n  %v\n  Bitte %s von Hand anpassen und setup erneut starten", cfgErr, legacyConfigPathWindows)
+		return false, fmt.Errorf("the existing configuration would be invalid after the move - nothing changed, the old service keeps running.\n  %v\n  Please fix %s by hand and run setup again", cfgErr, legacyConfigPathWindows)
 	}
 	_ = controlService(legacyServiceName, "stop")
 	stopRelayProcesses()
 	runQuiet("schtasks.exe", "/Delete", "/F", "/TN", legacyRelayTaskName)
 	oldDir, newDir := filepath.Dir(legacyConfigPathWindows), filepath.Dir(newDefault)
 	if err := os.Rename(oldDir, newDir); err != nil {
-		return false, fmt.Errorf("%s nach %s verschieben: %w", oldDir, newDir, err)
+		return false, fmt.Errorf("move %s to %s: %w", oldDir, newDir, err)
 	}
 	_ = copyFile(newDefault, newDefault+".vor-umzug-"+time.Now().Format("20060102-150405"))
 	if err := os.WriteFile(newDefault, []byte(s), 0o600); err != nil {
@@ -240,7 +240,7 @@ func migrateLegacyInstall(cfgPath *string) (bool, error) {
 	c.Install.ServiceName = legacyServiceName
 	c.applyDefaults()
 	if err := uninstall(c); err != nil {
-		fmt.Println("  alter Dienst:", err)
+		fmt.Println("  old service:", err)
 	}
 	*cfgPath = newDefault
 	return true, nil
@@ -261,27 +261,27 @@ func upgradeConfigText(s string) string {
 }
 
 func setupWriteConfig(in *bufio.Reader, cfgPath string) error {
-	fmt.Println("Noch keine Konfiguration - drei Fragen:")
+	fmt.Println("No configuration yet - three questions:")
 	url := ""
 	for url == "" {
-		url = strings.TrimRight(ask(in, "Adresse des Routers (z. B. https://router.example.net:11435)", ""), "/")
+		url = strings.TrimRight(ask(in, "Router address (e.g. https://router.example.net:11435)", ""), "/")
 		if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
-			fmt.Println("  bitte mit https:// angeben")
+			fmt.Println("  please include https://")
 			url = ""
 		}
 	}
-	key := ask(in, "Oeffentlicher Update-Schluessel des Betreibers (base64; leer = Selbst-Update spaeter eintragen)", "")
-	user := ask(in, "Benutzer, der den Dienst ohne Adminrechte steuern darf", os.Getenv("COMPUTERNAME")+`\`+os.Getenv("USERNAME"))
+	key := ask(in, "Operator public update key (base64; empty = add self-update later)", "")
+	user := ask(in, "User allowed to control the service without admin rights", os.Getenv("COMPUTERNAME")+`\`+os.Getenv("USERNAME"))
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Skirnir Agent - angelegt von `skirnir-agent.exe setup` am %s\n", time.Now().Format("2006-01-02 15:04"))
-	b.WriteString("# Alle Schluessel: config.example.yaml im Repo (github.com/psewar/skirnir, agent/)\n\n")
+	fmt.Fprintf(&b, "# Skirnir Agent - created by `skirnir-agent.exe setup` on %s\n", time.Now().Format("2006-01-02 15:04"))
+	b.WriteString("# All keys: config.example.yaml in the repo (github.com/psewar/skirnir, agent/)\n\n")
 	fmt.Fprintf(&b, "router:\n  url: %s\n\ntunnel:\n  upstream: http://127.0.0.1:11434\n\n", url)
 	if key != "" {
 		fmt.Fprintf(&b, "update:\n  public_key: %s\n\n", key)
 	} else {
-		b.WriteString("# update:\n#   public_key: <base64>   # Selbst-Update ueber den Router: Schluessel vom Betreiber (deploy.py --agent)\n\n")
+		b.WriteString("# update:\n#   public_key: <base64>   # self-update via the router: key from the operator (deploy.py --agent)\n\n")
 	}
-	b.WriteString("install:\n  service_name: SkirnirAgent\n  display_name: Skirnir Agent\n  account: ''   # LocalSystem: GPU-Schutz (Power-Limit) und GPU-Z direkt\n")
+	b.WriteString("install:\n  service_name: SkirnirAgent\n  display_name: Skirnir Agent\n  account: ''   # LocalSystem: GPU guard (power limit) and GPU-Z directly\n")
 	fmt.Fprintf(&b, "  allow_control_users:\n    - '%s'\n", user)
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		return err
@@ -289,7 +289,7 @@ func setupWriteConfig(in *bufio.Reader, cfgPath string) error {
 	if err := os.WriteFile(cfgPath, []byte(b.String()), 0o600); err != nil {
 		return err
 	}
-	fmt.Println("Konfiguration geschrieben:", cfgPath)
+	fmt.Println("configuration written:", cfgPath)
 	return nil
 }
 
@@ -303,13 +303,13 @@ func setupUpgradeConfig(in *bufio.Reader, cfgPath string) error {
 	s := string(raw)
 	changed := false
 	if !strings.Contains(s, "public_key:") {
-		if key := ask(in, "Update-Schluessel des Betreibers fehlt (update.public_key) - jetzt eintragen (leer = spaeter)", ""); key != "" {
-			s = strings.TrimRight(s, "\r\n") + "\n\n# Selbst-Update ueber den Router: Manifest muss mit dem Betreiber-Schluessel signiert sein\nupdate:\n  public_key: " + key + "\n"
+		if key := ask(in, "Operator update key missing (update.public_key) - enter it now (empty = later)", ""); key != "" {
+			s = strings.TrimRight(s, "\r\n") + "\n\n# self-update via the router: the manifest must be signed with the operator key\nupdate:\n  public_key: " + key + "\n"
 			changed = true
 		}
 	}
 	if strings.Contains(s, "NT SERVICE") {
-		if strings.EqualFold(ask(in, "Dienstkonto steht auf NT SERVICE (kein GPU-Schutz). Auf LocalSystem umstellen? (j/n)", "j"), "j") {
+		if strings.EqualFold(ask(in, "Service account is NT SERVICE (no GPU guard). Switch to LocalSystem? (y/n)", "y"), "y") {
 			lines := strings.Split(s, "\n")
 			for i, l := range lines {
 				if strings.Contains(l, "account:") && strings.Contains(l, "NT SERVICE") {
@@ -322,7 +322,7 @@ func setupUpgradeConfig(in *bufio.Reader, cfgPath string) error {
 	}
 	if strings.Contains(s, "\nmimir:") {
 		s = upgradeConfigText(s)
-		fmt.Println("  Block `mimir:` in `secret_store:` umbenannt (gleiche Schluessel)")
+		fmt.Println("  block `mimir:` renamed to `secret_store:` (same keys)")
 		changed = true
 	}
 	if _, err := loadConfig(cfgPath); err == nil {
@@ -331,7 +331,7 @@ func setupUpgradeConfig(in *bufio.Reader, cfgPath string) error {
 		if os.WriteFile(probe, []byte(s), 0o600) == nil {
 			if _, perr := loadConfig(probe); perr != nil {
 				os.Remove(probe)
-				return fmt.Errorf("Konfiguration waere ungueltig - nichts geschrieben: %w", perr)
+				return fmt.Errorf("configuration would be invalid - nothing written: %w", perr)
 			}
 			os.Remove(probe)
 		}
@@ -341,7 +341,7 @@ func setupUpgradeConfig(in *bufio.Reader, cfgPath string) error {
 		if err := os.WriteFile(cfgPath, []byte(s), 0o600); err != nil {
 			return err
 		}
-		fmt.Println("Konfiguration aktualisiert (Sicherung daneben)")
+		fmt.Println("configuration updated (backup next to it)")
 	}
 	return nil
 }

@@ -21,26 +21,26 @@ import (
 // Wunsch des Betreibers als Problem (HA), damit eine vergessene Abwahl auffaellt.
 
 const (
-	guardAus          = "off"
-	guardUnverfuegbar = "unavailable"
-	guardNormal       = "normal"
-	guardHochlast     = "high_load"
-	guardGedrosselt   = "throttled"
-	guardErholung     = "recovery"
+	guardOff         = "off"
+	guardUnavailable = "unavailable"
+	guardNormal      = "normal"
+	guardHighLoad    = "high_load"
+	guardThrottled   = "throttled"
+	guardRecovery    = "recovery"
 
-	guardEvLimitGesetzt    = "limit_set"
-	guardEvLimitVerweigert = "limit_refused"
-	guardEvFremdeingriff   = "external_change"
-	guardEvHochlast        = "high_load"
-	guardEvGedrosselt      = "throttled"
-	guardEvErholung        = "recovery"
-	guardEvSpannung        = "voltage_low"
-	guardEvTemperatur      = "temperature_high"
-	guardEvHwDrossel       = "hw_throttle"
-	guardEvAbgewaehlt      = "deselected"
+	guardEvLimitSet        = "limit_set"
+	guardEvLimitRefused    = "limit_refused"
+	guardEvExternalChange  = "external_change"
+	guardEvHighLoad        = "high_load"
+	guardEvThrottled       = "throttled"
+	guardEvRecovery        = "recovery"
+	guardEvVoltageLow      = "voltage_low"
+	guardEvTemperatureHigh = "temperature_high"
+	guardEvHwThrottle      = "hw_throttle"
+	guardEvDeselected      = "deselected"
 
-	guardErholungMeldenS = 60.0
-	guardVRefMaxProben   = 1440 // eine Leerlauf-Spannungsprobe je Minute, 24 h
+	guardRecoveryReportS = 60.0
+	guardVRefMaxSamples  = 1440 // eine Leerlauf-Spannungsprobe je Minute, 24 h
 )
 
 // GuardCfg: Block gpu_guard in der Agent-Konfiguration. Fehlende Werte = Standard (guardDefaults).
@@ -138,24 +138,24 @@ type guardEngine struct {
 	p        guardParams
 	setLimit func(w float64) error // nil = kein Hebel (Tests: Attrappe)
 
-	state         string
-	highSince     time.Time
-	lowSince      time.Time // seit wann die Last unter der Schwelle liegt (Luecke); leer = gerade hoch
-	stage2Since   time.Time
-	recoverySince time.Time
-	lastApply     time.Time
-	lastWant      float64 // zuletzt angestrebter Wert (Wechsel -> sofort anwenden, sonst alle reapply_s)
-	lastSetW      float64 // was wir zuletzt erfolgreich gesetzt haben (0 = nie)
-	conflicts     int
-	denied        string
-	deniedAt      time.Time
-	voltLowSince  time.Time
-	voltWarned    bool
-	tempWarned    bool
-	hwWarned      bool
-	fremdWarned   bool
-	vref          []float64 // Leerlauf-Spannungsproben
-	vrefLast      time.Time
+	state          string
+	highSince      time.Time
+	lowSince       time.Time // seit wann die Last unter der Schwelle liegt (Luecke); leer = gerade hoch
+	stage2Since    time.Time
+	recoverySince  time.Time
+	lastApply      time.Time
+	lastWant       float64 // zuletzt angestrebter Wert (Wechsel -> sofort anwenden, sonst alle reapply_s)
+	lastSetW       float64 // was wir zuletzt erfolgreich gesetzt haben (0 = nie)
+	conflicts      int
+	denied         string
+	deniedAt       time.Time
+	voltLowSince   time.Time
+	voltWarned     bool
+	tempWarned     bool
+	hwWarned       bool
+	externalWarned bool
+	vref           []float64 // Leerlauf-Spannungsproben
+	vrefLast       time.Time
 }
 
 func newGuardEngine(cfg GuardCfg, setLimit func(float64) error) *guardEngine {
@@ -165,20 +165,20 @@ func newGuardEngine(cfg GuardCfg, setLimit func(float64) error) *guardEngine {
 func clampf(v, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, v)) }
 
 // targets: Dauerlimit und Stufe-2-Limit, geklemmt auf [Min, Standard]. Ueber den Standard geht es nie.
-func (g *guardEngine) targets(l guardLimits) (dauer, stufe2 float64) {
+func (g *guardEngine) targets(l guardLimits) (sustained, stage2 float64) {
 	lo := l.Min
 	if lo <= 0 {
 		lo = l.Def * 0.5
 	}
 	hi := l.Def
 	if g.p.limitW > 0 {
-		dauer = g.p.limitW
+		sustained = g.p.limitW
 	} else {
-		dauer = l.Def * g.p.limitPct / 100
+		sustained = l.Def * g.p.limitPct / 100
 	}
-	dauer = clampf(math.Round(dauer), lo, hi)
-	stufe2 = clampf(math.Round(l.Def*g.p.stage2Pct/100), lo, dauer)
-	return dauer, stufe2
+	sustained = clampf(math.Round(sustained), lo, hi)
+	stage2 = clampf(math.Round(l.Def*g.p.stage2Pct/100), lo, sustained)
+	return sustained, stage2
 }
 
 func (g *guardEngine) vrefMedian() *float64 {
@@ -210,19 +210,19 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 	g.watchHardware(in, &st, ev)
 
 	if !g.p.enabled {
-		if g.state != guardAus {
-			ev(guardEvAbgewaehlt, "GPU-Schutz per Konfiguration abgewaehlt - kein Limit, nur Messwerte", 0)
+		if g.state != guardOff {
+			ev(guardEvDeselected, "GPU-Schutz per Konfiguration abgewaehlt - kein Limit, nur Messwerte", 0)
 		}
-		g.state = guardAus
-		st.State, st.Problem, st.Reason = guardAus, true, guardEvAbgewaehlt
+		g.state = guardOff
+		st.State, st.Problem, st.Reason = guardOff, true, guardEvDeselected
 		return st, evs
 	}
 	if !in.Limits.OK || in.Limits.Def <= 0 {
-		g.state = guardUnverfuegbar
-		st.State, st.Problem, st.Reason = guardUnverfuegbar, true, firstNonEmpty(in.Limits.Err, "Power-Limit nicht lesbar")
+		g.state = guardUnavailable
+		st.State, st.Problem, st.Reason = guardUnavailable, true, firstNonEmpty(in.Limits.Err, "Power-Limit nicht lesbar")
 		return st, evs
 	}
-	dauer, stufe2 := g.targets(in.Limits)
+	sustained, stage2 := g.targets(in.Limits)
 
 	// Lastmass: Board Power aus NVML. Sie enthaelt den Slot-Anteil, liegt also nie unter der 16-Pin-Leistung, und das
 	// Limit gilt fuer sie. Die 16-Pin-Werte aus GPU-Z kommen ueber das Relay (POST /gpuz, jeder lokale Prozess koennte
@@ -243,13 +243,13 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 		}
 	}
 	switch g.state {
-	case guardGedrosselt:
+	case guardThrottled:
 		if in.Now.Sub(g.stage2Since).Seconds() >= g.p.recoveryS {
-			g.state, g.recoverySince, g.highSince = guardErholung, in.Now, time.Time{}
-			ev(guardEvErholung, fmt.Sprintf("Erholung: zurueck auf %.0f W", dauer), dauer)
+			g.state, g.recoverySince, g.highSince = guardRecovery, in.Now, time.Time{}
+			ev(guardEvRecovery, fmt.Sprintf("Erholung: zurueck auf %.0f W", sustained), sustained)
 		}
-	case guardErholung:
-		if in.Now.Sub(g.recoverySince).Seconds() >= guardErholungMeldenS {
+	case guardRecovery:
+		if in.Now.Sub(g.recoverySince).Seconds() >= guardRecoveryReportS {
 			g.state = guardNormal
 		}
 		if high { // waehrend der Erholung gleich wieder Vollast: Zaehler laeuft normal weiter
@@ -265,13 +265,13 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 			d := in.Now.Sub(g.highSince).Seconds()
 			switch {
 			case d >= g.p.highS:
-				g.state, g.stage2Since = guardGedrosselt, in.Now
-				ev(guardEvGedrosselt, fmt.Sprintf("%.0f s Vollast am Limit - Stufe 2: %.0f W fuer %.0f s", d, stufe2, g.p.recoveryS), stufe2)
+				g.state, g.stage2Since = guardThrottled, in.Now
+				ev(guardEvThrottled, fmt.Sprintf("%.0f s Vollast am Limit - Stufe 2: %.0f W fuer %.0f s", d, stage2, g.p.recoveryS), stage2)
 			case d >= g.p.highS/2:
-				if g.state != guardHochlast {
-					ev(guardEvHochlast, fmt.Sprintf("Hochlast seit %.0f s (%.0f W von %.0f W)", d, *load, in.Limits.Cur), 0)
+				if g.state != guardHighLoad {
+					ev(guardEvHighLoad, fmt.Sprintf("Hochlast seit %.0f s (%.0f W von %.0f W)", d, *load, in.Limits.Cur), 0)
 				}
-				g.state = guardHochlast
+				g.state = guardHighLoad
 			default:
 				g.state = guardNormal
 			}
@@ -285,9 +285,9 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 	}
 
 	// Limit anwenden: gewuenscht = Stufe 2 in gedrosselt, sonst Dauerlimit. Nur senken; tiefer als gewuenscht bleibt.
-	want := dauer
-	if g.state == guardGedrosselt {
-		want = stufe2
+	want := sustained
+	if g.state == guardThrottled {
+		want = stage2
 	}
 	st.TargetW = fptr(want)
 	cur := in.Limits.Cur
@@ -295,7 +295,7 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 	// das tiefer stellt, bleibt unangetastet - und ueber das Standardlimit geht es nie (targets klemmt).
 	// "Selbst gesetzt" heisst auch: das Limit steht auf einem unserer Zielwerte. lastSetW lebt nur im Speicher; nach
 	// einem Dienstneustart mitten in Stufe 2 bliebe die Karte sonst fuer immer auf 70 % (Review 2026-09-25).
-	ownValue := (g.lastSetW > 0 && math.Abs(cur-g.lastSetW) < 0.5) || math.Abs(cur-stufe2) < 0.5 || math.Abs(cur-dauer) < 0.5
+	ownValue := (g.lastSetW > 0 && math.Abs(cur-g.lastSetW) < 0.5) || math.Abs(cur-stage2) < 0.5 || math.Abs(cur-sustained) < 0.5
 	needSet := cur > want+0.5 || (cur < want-0.5 && ownValue)
 	due := g.lastApply.IsZero() || in.Now.Sub(g.lastApply).Seconds() >= g.p.reapplyS || g.lastWant != want
 	if needSet && due {
@@ -304,44 +304,44 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 			g.denied, g.deniedAt = "kein Setz-Weg (NVML/nvidia-smi)", in.Now
 		} else if err := g.setLimit(want); err != nil {
 			if g.denied == "" {
-				ev(guardEvLimitVerweigert, "Power-Limit nicht setzbar: "+err.Error()+" - nur Beobachtung", want)
+				ev(guardEvLimitRefused, "Power-Limit nicht setzbar: "+err.Error()+" - nur Beobachtung", want)
 			}
 			g.denied, g.deniedAt = err.Error(), in.Now
 		} else {
 			// Fremdeingriff: wir hatten schon auf diesen Wert gesetzt, jemand hat ihn wieder angehoben
 			if g.lastSetW == want && cur > want+0.5 {
 				g.conflicts++
-				if g.conflicts >= 3 && !g.fremdWarned {
-					ev(guardEvFremdeingriff, fmt.Sprintf("Limit stand %d-mal wieder auf %.0f W (Fremdeingriff?), erneut %.0f W", g.conflicts, cur, want), want)
-					g.fremdWarned = true
+				if g.conflicts >= 3 && !g.externalWarned {
+					ev(guardEvExternalChange, fmt.Sprintf("Limit stand %d-mal wieder auf %.0f W (Fremdeingriff?), erneut %.0f W", g.conflicts, cur, want), want)
+					g.externalWarned = true
 				}
 			} else {
 				g.conflicts = 0
 			}
 			g.denied, g.lastSetW = "", want
 			st.LimitW = fptr(want)
-			ev(guardEvLimitGesetzt, fmt.Sprintf("Power-Limit %.0f -> %.0f W gesetzt (%s)", cur, want, g.reasonFor(want, dauer, in.Limits.Def)), want)
+			ev(guardEvLimitSet, fmt.Sprintf("Power-Limit %.0f -> %.0f W gesetzt (%s)", cur, want, g.reasonFor(want, sustained, in.Limits.Def)), want)
 		}
 	} else if !needSet {
-		g.conflicts, g.fremdWarned = 0, false
+		g.conflicts, g.externalWarned = 0, false
 		if g.denied != "" && in.Now.Sub(g.deniedAt).Seconds() >= g.p.reapplyS {
 			g.denied = "" // Limit stimmt inzwischen (jemand anders hat gesetzt): kein Problem mehr
 		}
 	}
 	if g.denied != "" { // der Automat laeuft weiter, nach aussen zaehlt: der Hebel fehlt
-		st.State, st.Problem, st.Reason = guardUnverfuegbar, true, "Limit nicht setzbar: "+g.denied
+		st.State, st.Problem, st.Reason = guardUnavailable, true, "Limit nicht setzbar: "+g.denied
 		return st, evs
 	}
 	st.State = g.state
 	if g.conflicts >= 3 {
-		st.Warnings = append(st.Warnings, guardEvFremdeingriff)
+		st.Warnings = append(st.Warnings, guardEvExternalChange)
 	}
 	st.Problem = len(st.Warnings) > 0
 	return st, evs
 }
 
-func (g *guardEngine) reasonFor(want, dauer, def float64) string {
-	if want < dauer {
+func (g *guardEngine) reasonFor(want, sustained, def float64) string {
+	if want < sustained {
 		return fmt.Sprintf("Stufe 2, %.0f %% des Standardlimits", g.p.stage2Pct)
 	}
 	if g.p.limitW > 0 {
@@ -358,7 +358,7 @@ func (g *guardEngine) watchVoltage(in guardInput, st *GuardStatus, ev func(strin
 	v, w := *in.Pin16V, *in.Pin16W
 	if w < 60 && v > 6 && (g.vrefLast.IsZero() || in.Now.Sub(g.vrefLast) >= time.Minute) {
 		g.vref = append(g.vref, v)
-		if len(g.vref) > guardVRefMaxProben {
+		if len(g.vref) > guardVRefMaxSamples {
 			g.vref = g.vref[1:]
 		}
 		g.vrefLast = in.Now
@@ -376,13 +376,13 @@ func (g *guardEngine) watchVoltage(in guardInput, st *GuardStatus, ev func(strin
 	if in.Now.Sub(g.voltLowSince).Seconds() < g.p.voltHoldS {
 		return
 	}
-	st.Warnings = append(st.Warnings, guardEvSpannung)
+	st.Warnings = append(st.Warnings, guardEvVoltageLow)
 	if !g.voltWarned {
 		refS := "keine Referenz"
 		if ref != nil {
 			refS = fmt.Sprintf("Referenz %.2f V", *ref)
 		}
-		ev(guardEvSpannung, fmt.Sprintf("16-Pin-Spannung %.2f V bei %.0f W (%s) - Kabel/Stecker pruefen", v, w, refS), 0)
+		ev(guardEvVoltageLow, fmt.Sprintf("16-Pin-Spannung %.2f V bei %.0f W (%s) - Kabel/Stecker pruefen", v, w, refS), 0)
 		g.voltWarned = true
 	}
 }
@@ -393,7 +393,7 @@ func (g *guardEngine) watchTemperature(in guardInput, st *GuardStatus, ev func(s
 		g.tempWarned = false
 		return
 	}
-	st.Warnings = append(st.Warnings, guardEvTemperatur)
+	st.Warnings = append(st.Warnings, guardEvTemperatureHigh)
 	if !g.tempWarned {
 		m, h := math.NaN(), math.NaN()
 		if in.MemTempC != nil {
@@ -402,7 +402,7 @@ func (g *guardEngine) watchTemperature(in guardInput, st *GuardStatus, ev func(s
 		if in.HotspotC != nil {
 			h = *in.HotspotC
 		}
-		ev(guardEvTemperatur, fmt.Sprintf("Speicher %.0f °C, Hot Spot %.0f °C", m, h), 0)
+		ev(guardEvTemperatureHigh, fmt.Sprintf("Speicher %.0f °C, Hot Spot %.0f °C", m, h), 0)
 		g.tempWarned = true
 	}
 }
@@ -419,9 +419,9 @@ func (g *guardEngine) watchHardware(in guardInput, st *GuardStatus, ev func(stri
 		g.hwWarned = false
 		return
 	}
-	st.Warnings = append(st.Warnings, guardEvHwDrossel)
+	st.Warnings = append(st.Warnings, guardEvHwThrottle)
 	if !g.hwWarned {
-		ev(guardEvHwDrossel, fmt.Sprintf("Hardware-Drosselung aktiv: %v", in.Throttle), 0)
+		ev(guardEvHwThrottle, fmt.Sprintf("Hardware-Drosselung aktiv: %v", in.Throttle), 0)
 		g.hwWarned = true
 	}
 }
@@ -443,9 +443,9 @@ type Guard struct {
 func newGuard(cfg GuardCfg, gpu *GPU, log *Logger) *Guard {
 	g := &Guard{cfg: cfg, gpu: gpu, log: log, events: make(chan guardEvent, 32)}
 	g.engine = newGuardEngine(cfg, gpu.SetPowerLimit)
-	g.status = GuardStatus{State: guardUnverfuegbar, Source: "-", Reason: "noch keine Messung"}
+	g.status = GuardStatus{State: guardUnavailable, Source: "-", Reason: "noch keine Messung"}
 	if !cfg.on() {
-		g.status = GuardStatus{State: guardAus, Source: "-", Problem: true, Reason: guardEvAbgewaehlt}
+		g.status = GuardStatus{State: guardOff, Source: "-", Problem: true, Reason: guardEvDeselected}
 	}
 	return g
 }
@@ -464,9 +464,9 @@ func inputFrom(now time.Time, s *GPUSample, lim guardLimits) guardInput {
 func (g *Guard) Run(ctx context.Context) {
 	p := g.cfg.resolved()
 	if !p.enabled {
-		g.log.Warnf("gpu-guard: per Konfiguration ABGEWAEHLT (gpu_guard.enabled: false) - kein Power-Limit, Meldung als Problem")
+		g.log.Warnf("gpu-guard: DESELECTED by configuration (gpu_guard.enabled: false) - no power limit, reported as a problem")
 	} else {
-		g.log.Infof("gpu-guard: an - Dauerlimit %.0f %% des Standards, Hochlast ab %.0f %% ueber %.0f s -> Stufe 2 %.0f %% fuer %.0f s, Neusetzen alle %.0f s",
+		g.log.Infof("gpu-guard: on - sustained limit %.0f %% of default, high load from %.0f %% over %.0f s -> stage 2 %.0f %% for %.0f s, reapply every %.0f s",
 			p.limitPct, p.highPct, p.highS, p.stage2Pct, p.recoveryS, p.reapplyS)
 	}
 	t := time.NewTicker(2 * time.Second)
@@ -500,7 +500,7 @@ func (g *Guard) tick(ctx context.Context) {
 
 func (g *Guard) emit(e guardEvent) {
 	switch e.Type {
-	case guardEvLimitVerweigert, guardEvFremdeingriff, guardEvSpannung, guardEvTemperatur, guardEvHwDrossel, guardEvAbgewaehlt:
+	case guardEvLimitRefused, guardEvExternalChange, guardEvVoltageLow, guardEvTemperatureHigh, guardEvHwThrottle, guardEvDeselected:
 		g.log.Warnf("gpu-guard: %s: %s", e.Type, e.Msg)
 	default:
 		g.log.Infof("gpu-guard: %s: %s", e.Type, e.Msg)
@@ -518,7 +518,7 @@ func (g *Guard) emit(e guardEvent) {
 // Status: Kopie fuer Heartbeat und /health.
 func (g *Guard) Status() GuardStatus {
 	if g == nil {
-		return GuardStatus{State: guardUnverfuegbar, Source: "-", Reason: "kein Guard"}
+		return GuardStatus{State: guardUnavailable, Source: "-", Reason: "kein Guard"}
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()

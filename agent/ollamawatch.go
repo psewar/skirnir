@@ -154,7 +154,7 @@ func (w *OllamaWatcher) poll(ctx context.Context, now time.Time) {
 			w.st.Up, w.st.Error = false, err.Error()
 			w.st.Rev++
 			w.have = true
-			w.log.Warnf("ollama-watch: Ollama antwortet nicht (%v)", err)
+			w.log.Warnf("ollama-watch: Ollama not answering (%v)", err)
 		}
 		return
 	}
@@ -171,7 +171,7 @@ func (w *OllamaWatcher) poll(ctx context.Context, now time.Time) {
 	}
 	if changed {
 		if !w.st.Up && w.have {
-			w.log.Infof("ollama-watch: Ollama antwortet wieder")
+			w.log.Infof("ollama-watch: Ollama answering again")
 		}
 		w.st.Up, w.st.Error = true, ""
 		w.st.Rev++

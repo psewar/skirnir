@@ -62,14 +62,14 @@ class LocalLLMEngine(DecisionEngine):
                 data = await r.json(content_type=None)
                 status = r.status
         except (ClientError, TimeoutError, OSError, ValueError) as e:  # exception-ok: network boundary of the self-call and its JSON
-            return engine_failed(f"local_llm nicht erreichbar: {type(e).__name__}: {e}")
+            return engine_failed(f"local_llm unreachable: {type(e).__name__}: {e}")
         if status != 200 or not isinstance(data, dict):
             return engine_failed(f"local_llm HTTP {status}: {str(data)[:120]}")
         message = data.get("message") if isinstance(data.get("message"), dict) else {}
         content = str(message.get("content") or "").strip()
         option = chosen_option(content, req.options)
         if option not in req.options:
-            return engine_failed(f"local_llm: keine gueltige Option in {content[:80]!r}")
+            return engine_failed(f"local_llm: no valid option in {content[:80]!r}")
         probs = {o: (1.0 if o == option else 0.0) for o in req.options}
         return DecisionResult(selected=option, probabilities=probs, engine=self.name, model=(data.get("routing") or {}).get("model") or self.model,
                               latency_ms=(time.perf_counter() - t0) * 1000, model_probability=None,

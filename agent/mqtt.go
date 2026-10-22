@@ -76,13 +76,13 @@ var sensorDefs = []sensorDef{
 	// neu: Sicht des Dienstes selbst
 	{"sensor", "agent_version", "Agent Version", "agent_version", "mdi:package-variant", map[string]any{"entity_category": "diagnostic"}},
 	{"binary_sensor", "router_heartbeat", "Router-Heartbeat", "router_heartbeat", "mdi:heart-pulse", map[string]any{"entity_category": "diagnostic"}},
-	// Stille Kuerzungen im Ollama-Log (kuerzung.go): Zaehler seit Dienststart, Zeitpunkt + Details der letzten,
+	// Stille Kuerzungen im Ollama-Log (truncation.go): Zaehler seit Dienststart, Zeitpunkt + Details der letzten,
 	// und ein Ereignis je Kuerzung fuer Automationen (Topic <device>/kuerzung, nicht retained).
 	{"sensor", "ollama_kuerzungen", "Ollama Kürzungen", "ollama_truncations", "mdi:content-cut", map[string]any{"state_class": "total_increasing"}},
 	{"sensor", "ollama_letzte_kuerzung", "Ollama letzte Kürzung", "ollama_last_truncation", "mdi:clock-alert-outline",
 		map[string]any{"device_class": "timestamp", "json_attributes_template": "{{ value_json.truncation_details | tojson }}"}},
 	{"event", "ollama_kuerzung", "Ollama Kürzung", "", "mdi:content-cut",
-		map[string]any{"event_types": []string{kuerzungEingabe, kuerzungKontextVoll}}},
+		map[string]any{"event_types": []string{truncationInput, truncationContextFull}}},
 	// Sensoren (0.6.0). Gruppe "gpu": NVML bzw. nvidia-smi; Gruppe "gpuz": nur wo GPU-Z einmal gesehen wurde.
 	{"sensor", "gpu_temp_c", "GPU Temperatur", "gpu_temp_c", "mdi:thermometer", tempExtra},
 	{"sensor", "gpu_power_w", "GPU Leistung", "gpu_power_w", "mdi:flash", powerExtra},
@@ -102,7 +102,7 @@ var sensorDefs = []sensorDef{
 	{"binary_sensor", "gpu_guard_problem", "GPU-Schutz Problem", "gpu_guard_problem", "mdi:shield-alert", map[string]any{"device_class": "problem"}},
 	{"sensor", "gpu_guard_target_w", "GPU-Schutz Ziel-Limit", "gpu_guard_target_w", "mdi:shield-check", map[string]any{"unit_of_measurement": "W", "device_class": "power", "entity_category": "diagnostic"}},
 	{"event", "gpu_guard", "GPU-Schutz Ereignis", "", "mdi:shield-alert",
-		map[string]any{"event_types": []string{guardEvHochlast, guardEvGedrosselt, guardEvErholung, guardEvLimitGesetzt, guardEvLimitVerweigert, guardEvFremdeingriff, guardEvSpannung, guardEvTemperatur, guardEvHwDrossel, guardEvAbgewaehlt}}},
+		map[string]any{"event_types": []string{guardEvHighLoad, guardEvThrottled, guardEvRecovery, guardEvLimitSet, guardEvLimitRefused, guardEvExternalChange, guardEvVoltageLow, guardEvTemperatureHigh, guardEvHwThrottle, guardEvDeselected}}},
 }
 
 var (
@@ -188,8 +188,8 @@ func (m *MQTTModule) Run(ctx context.Context) {
 		if pw, err = m.password(ctx); err == nil {
 			break
 		}
-		m.setErr("Passwort: " + err.Error())
-		m.log.Warnf("mqtt: %v, neuer Versuch in %s", err, delay)
+		m.setErr("password: " + err.Error())
+		m.log.Warnf("mqtt: %v, retrying in %s", err, delay)
 		select {
 		case <-ctx.Done():
 			return
@@ -208,7 +208,7 @@ func (m *MQTTModule) Run(ctx context.Context) {
 			m.connected = true
 			m.announced = map[string]bool{} // nach einem Reconnect die retained Configs neu abgleichen
 			m.mu.Unlock()
-			m.log.Infof("mqtt: verbunden mit %s", m.broker())
+			m.log.Infof("mqtt: connected to %s", m.broker())
 			st := m.collect(ctx) // erst nachsehen, was es hier gibt, dann die passenden Entitaeten anlegen
 			m.syncDiscovery(c)
 			c.Publish(m.availTopic(), 1, true, "online")
@@ -219,20 +219,20 @@ func (m *MQTTModule) Run(ctx context.Context) {
 			m.connected = false
 			m.mu.Unlock()
 			m.setErr(err.Error())
-			m.log.Warnf("mqtt: Verbindung verloren: %v", err)
+			m.log.Warnf("mqtt: connection lost: %v", err)
 		})
 	c := paho.NewClient(opts)
 	m.mu.Lock()
 	m.client = c
 	m.mu.Unlock()
 	if t := c.Connect(); t.WaitTimeout(15*time.Second) && t.Error() != nil {
-		m.log.Warnf("mqtt: erster Connect: %v (Retry laeuft)", t.Error())
+		m.log.Warnf("mqtt: first connect: %v (retrying)", t.Error())
 	}
 	tick := time.NewTicker(time.Duration(m.cfg.IntervalS * float64(time.Second)))
 	defer tick.Stop()
-	var kuerzung <-chan Kuerzung
+	var truncation <-chan Truncation
 	if m.sup != nil {
-		kuerzung = m.sup.kuerzungen.neu
+		truncation = m.sup.truncations.fresh
 	}
 	var guardEv <-chan guardEvent
 	if m.guard != nil {
@@ -245,11 +245,11 @@ func (m *MQTTModule) Run(ctx context.Context) {
 				m.publishGuardEvent(c, e)
 				m.publishState(ctx, c)
 			}
-		case e := <-kuerzung:
+		case e := <-truncation:
 			// sofort melden statt bis zum naechsten Intervall zu warten; ohne Verbindung verfaellt die Meldung,
 			// der Zaehler im naechsten State stimmt trotzdem
 			if c.IsConnected() {
-				m.publishKuerzung(c, e)
+				m.publishTruncation(c, e)
 				m.publishState(ctx, c)
 			}
 		case <-ctx.Done():
@@ -320,7 +320,7 @@ func (m *MQTTModule) syncDiscovery(c paho.Client) {
 		}
 	}
 	if added > 0 || removed > 0 {
-		m.log.Infof("mqtt: Discovery aktualisiert (%s): %d angelegt, %d entfernt", m.cfg.DeviceID, added, removed)
+		m.log.Infof("mqtt: discovery updated (%s): %d created, %d removed", m.cfg.DeviceID, added, removed)
 	}
 }
 
@@ -358,10 +358,10 @@ func (m *MQTTModule) discoveryPayload(s sensorDef, dev map[string]any) []byte {
 }
 
 // publishKuerzung schickt ein HA-Ereignis je Kuerzung (event_type + Details als Attribute).
-func (m *MQTTModule) publishKuerzung(c paho.Client, e Kuerzung) {
-	p := map[string]any{"event_type": e.Art, "kind": e.Kind, "at": e.Zeit.Format(time.RFC3339)}
-	if e.Art == kuerzungEingabe {
-		p["limit"], p["prompt"], p["truncated_to"] = e.Limit, e.Prompt, e.Neu
+func (m *MQTTModule) publishTruncation(c paho.Client, e Truncation) {
+	p := map[string]any{"event_type": e.Type, "kind": e.Kind, "at": e.At.Format(time.RFC3339)}
+	if e.Type == truncationInput {
+		p["limit"], p["prompt"], p["truncated_to"] = e.Limit, e.Prompt, e.TruncatedTo
 	} else {
 		p["n_tokens"] = e.NTokens
 	}
@@ -370,19 +370,19 @@ func (m *MQTTModule) publishKuerzung(c paho.Client, e Kuerzung) {
 }
 
 // kuerzungState: Zaehler und letzte Kuerzung fuer den regulaeren State. "None" = HA setzt den Zeitsensor auf unbekannt.
-func (m *MQTTModule) kuerzungState(st map[string]any) {
+func (m *MQTTModule) truncationState(st map[string]any) {
 	st["ollama_truncations"], st["ollama_last_truncation"] = 0, "None"
 	if m.sup == nil {
 		return
 	}
-	anzahl, l := m.sup.kuerzungen.Stand()
-	st["ollama_truncations"] = anzahl[kuerzungEingabe] + anzahl[kuerzungKontextVoll]
-	d := map[string]any{kuerzungEingabe: anzahl[kuerzungEingabe], kuerzungKontextVoll: anzahl[kuerzungKontextVoll]}
+	counts, l := m.sup.truncations.Snapshot()
+	st["ollama_truncations"] = counts[truncationInput] + counts[truncationContextFull]
+	d := map[string]any{truncationInput: counts[truncationInput], truncationContextFull: counts[truncationContextFull]}
 	if l != nil {
-		st["ollama_last_truncation"] = l.Zeit.Format(time.RFC3339)
-		d["type"], d["kind"] = l.Art, l.Kind
-		if l.Art == kuerzungEingabe {
-			d["limit"], d["prompt"], d["truncated_to"] = l.Limit, l.Prompt, l.Neu
+		st["ollama_last_truncation"] = l.At.Format(time.RFC3339)
+		d["type"], d["kind"] = l.Type, l.Kind
+		if l.Type == truncationInput {
+			d["limit"], d["prompt"], d["truncated_to"] = l.Limit, l.Prompt, l.TruncatedTo
 		} else {
 			d["n_tokens"] = l.NTokens
 		}
@@ -420,7 +420,7 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 		"ollama_loaded": 0, "vram_used_mb": 0, "ollama_loaded_names": "-", "ollama": "OFF", "stt": "OFF",
 		"agent_version": version, "router_heartbeat": "OFF",
 	}
-	m.kuerzungState(st)
+	m.truncationState(st)
 	m.sensorState(st)
 	m.guardState(st)
 	hs := m.hb.Status()

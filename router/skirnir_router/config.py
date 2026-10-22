@@ -129,20 +129,20 @@ def validate_schema(c, schema=SCHEMA, path=""):
     """Unbekannte Schluessel benennen (mit Vorschlag), Abschnitte muessen Mappings sein. Liefert Fehlerliste."""
     errs = []
     if not isinstance(c, dict):
-        return [f"{path or '<root>'}: muss ein Mapping sein"]
+        return [f"{path or '<root>'}: must be a mapping"]
     for k, v in c.items():
         sub = schema.get(k, schema.get("*", "MISSING"))
         here = f"{path}.{k}" if path else str(k)
         if sub == "MISSING":
             hint = difflib.get_close_matches(str(k), [s for s in schema if s != "*"], n=1, cutoff=0.6)
-            errs.append(f"unbekannter Schluessel {here}" + (f" - meinten Sie '{hint[0]}'?" if hint else "") +
-                        f" (erlaubt: {', '.join(sorted(s for s in schema if s != '*'))})")
+            errs.append(f"unknown key {here}" + (f" - did you mean '{hint[0]}'?" if hint else "") +
+                        f" (allowed: {', '.join(sorted(s for s in schema if s != '*'))})")
             continue
         if isinstance(sub, dict) and v is not None:
             errs += validate_schema(v, sub, here)
         elif isinstance(sub, list) and v is not None:
             if not isinstance(v, list):
-                errs.append(f"{here}: muss eine Liste sein")
+                errs.append(f"{here}: must be a list")
             else:
                 for i, item in enumerate(v):
                     errs += validate_schema(item, sub[0], f"{here}[{i}]")
@@ -250,10 +250,10 @@ class Config:
         darum prueft reload() erst an einer Probe)."""
         errs = validate_schema(c)
         if errs:
-            return invalid("Konfiguration: " + "; ".join(errs))
+            return invalid("configuration: " + "; ".join(errs))
         for sect in ("router", "modes", "roles"):
             if not isinstance(c.get(sect), dict):
-                return invalid(f"Konfiguration: Abschnitt {sect} fehlt")
+                return invalid(f"configuration: section {sect} missing")
         self.raw = c
         r = c["router"]
         for step in (lambda: self._parse_router(r), lambda: self._parse_client_auth(r.get("client_auth") or {})):
@@ -299,7 +299,7 @@ class Config:
                 return problem
         bad_fp = [n for n, spec in c["nodes"].items() if spec.get("ollama_tls_fingerprint") and not tls_fingerprint(spec["ollama_tls_fingerprint"])]
         if bad_fp:
-            return invalid(f"nodes.{bad_fp[0]}.ollama_tls_fingerprint: SHA-256 erwartet (64 Hexziffern, Doppelpunkte erlaubt)")
+            return invalid(f"nodes.{bad_fp[0]}.ollama_tls_fingerprint: SHA-256 expected (64 hex digits, colons allowed)")
         self.nodes = c["nodes"]
         if failed(problem := self._parse_roles(c["roles"])):
             return problem
@@ -343,7 +343,7 @@ class Config:
         # adaptives Denken; qwen3.8 kennt nur an/aus und denkt dann immer.
         self.anthropic_think = str(an.get("think", _d("router.anthropic.think")))
         if self.anthropic_think not in THINK_MODES:
-            return invalid(f"router.anthropic.think muss eine von {THINK_MODES} sein, nicht {self.anthropic_think!r}")
+            return invalid(f"router.anthropic.think must be one of {THINK_MODES}, not {self.anthropic_think!r}")
         # Basic Auth für UI + /admin/*: {user: "pbkdf2:<iter>:<salt_hex>:<hash_hex>"}; leer = offen (nur Tests)
         self.control_users = dict((r.get("control_auth") or {}).get("users") or {})
         # TLS für den Control-Port: {cert: <fullchain.pem>, key: <key.pem>}; fehlt der Block -> Klartext (nur Tests)
@@ -362,13 +362,13 @@ class Config:
         # ip: [..], roles: [..]|["*"], models: bool, requests_per_minute}}. Kein clients-Block = Port offen wie bisher.
         mode = ca.get("mode", _d("router.client_auth.mode"))
         if mode not in ("observe", "enforce"):
-            return invalid(f"client_auth.mode muss observe oder enforce sein, nicht {mode!r}")
+            return invalid(f"client_auth.mode must be observe or enforce, not {mode!r}")
         clients = {}
         for name, spec in (ca.get("clients") or {}).items():
             spec = dict(spec or {})
             th = (spec.get("token_sha256") or "").strip().lower()
             if th and (len(th) != 64 or any(ch not in "0123456789abcdef" for ch in th)):
-                return invalid(f"client_auth.clients.{name}.token_sha256 muss 64 Hex-Zeichen sein")
+                return invalid(f"client_auth.clients.{name}.token_sha256 must be 64 hex characters")
             projects = spec.get("session_projects", [])
             if not isinstance(projects, list) or any(not isinstance(p, str) or not p.strip() or len(p) > 128
                                                      or any(ord(ch) < 32 for ch in p) for p in projects):
@@ -380,19 +380,19 @@ class Config:
             spec["models"] = bool(spec.get("models", True))
             # Recht auf POST /rerank (rerank.py), default nein. Erkennung auch per ip: Hindsights TEI-Client schickt keinen Header.
             if type(spec.get("rerank", False)) is not bool:
-                return invalid(f"client_auth.clients.{name}.rerank muss true oder false sein")
+                return invalid(f"client_auth.clients.{name}.rerank must be true or false")
             spec["rerank"] = spec.get("rerank", False)
             # inference: false = nur POST /rerank und GET /info (auth.inference_refusal); Standard true wie bisher
             if type(spec.get("inference", True)) is not bool:
-                return invalid(f"client_auth.clients.{name}.inference muss true oder false sein")
+                return invalid(f"client_auth.clients.{name}.inference must be true or false")
             spec["inference"] = spec.get("inference", True)
             if spec["rerank"] and spec["inference"] and "*" in spec["roles"]:
-                log.warning("client_auth.clients.%s: rerank: true ohne inference: false und ohne roles-Grenze - der Client darf "
-                            "auch jede Rolle rufen", name)
+                log.warning("client_auth.clients.%s: rerank: true without inference: false and without a roles limit - the client "
+                            "may also call every role", name)
             if spec.get("requests_per_minute") is not None:
                 spec["requests_per_minute"] = int(spec["requests_per_minute"])
             if spec.get("max_priority") is not None and spec["max_priority"] not in PRIORITIES:   # Stufe 3: Kappung der Klasse
-                return invalid(f"client_auth.clients.{name}.max_priority muss eine von {PRIORITIES} sein")
+                return invalid(f"client_auth.clients.{name}.max_priority must be one of {PRIORITIES}")
             clients[str(name)] = spec
         # locked (Audit 2026-09-16): true = der Modus ist NUR ueber config.yaml + Deploy aenderbar; UI-Einstellung und
         # POST /admin/client_auth werden abgelehnt (403/400 + Audit-Eintrag). Ein kompromittiertes UI-Konto kann die
@@ -407,23 +407,23 @@ class Config:
         classes = [str(x) for x in (cl.get("data_classes") or DATA_CLASSES_DEFAULT)]
         for key in ("default_data_class", "max_cloud_data_class"):
             if cl.get(key, _d(f"router.cloud.{key}")) not in classes:
-                return invalid(f"router.cloud.{key} muss eine der Datenklassen {classes} sein")
+                return invalid(f"router.cloud.{key} must be one of the data classes {classes}")
         scan = cl.get("credential_scan", _d("router.cloud.credential_scan"))
         if scan not in ("block", "off"):
-            return invalid("router.cloud.credential_scan muss block oder off sein")
+            return invalid("router.cloud.credential_scan must be block or off")
         allow = {"api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com"} | {str(h) for h in (cl.get("egress_allow") or [])}
         providers = {}
         for pname, spec in (cl.get("providers") or {}).items():
             spec = dict(spec or {})
             if spec.get("kind") not in ("openai", "anthropic"):
-                return invalid(f"router.cloud.providers.{pname}.kind muss openai oder anthropic sein")
+                return invalid(f"router.cloud.providers.{pname}.kind must be openai or anthropic")
             host = urlparse(str(spec.get("base_url") or "")).hostname
             if not host or host not in allow:
-                return invalid(f"router.cloud.providers.{pname}.base_url: Host {host!r} nicht in der Egress-Allowlist {sorted(allow)}")
+                return invalid(f"router.cloud.providers.{pname}.base_url: host {host!r} not in the egress allowlist {sorted(allow)}")
             if not spec.get("api_key_env"):
-                return invalid(f"router.cloud.providers.{pname}.api_key_env fehlt")
+                return invalid(f"router.cloud.providers.{pname}.api_key_env missing")
             if spec.get("max_data_class") is not None and spec["max_data_class"] not in classes:
-                return invalid(f"router.cloud.providers.{pname}.max_data_class muss eine der Datenklassen {classes} sein")
+                return invalid(f"router.cloud.providers.{pname}.max_data_class must be one of the data classes {classes}")
             spec["enabled"] = bool(spec.get("enabled", True))
             providers[str(pname)] = spec
         self.cloud = {"enabled": bool(cl.get("enabled", _d("router.cloud.enabled"))), "data_classes": classes,
@@ -432,7 +432,7 @@ class Config:
                       "credential_scan": scan, "egress_allow": sorted(allow), "providers": providers}
         for cname, cspec in self.client_auth["clients"].items():
             if cspec.get("data_class") is not None and cspec["data_class"] not in classes:
-                return invalid(f"client_auth.clients.{cname}.data_class muss eine der Datenklassen {classes} sein")
+                return invalid(f"client_auth.clients.{cname}.data_class must be one of the data classes {classes}")
 
     def _parse_wol(self, w):
         self.wol_wait_s = float(w.get("wait_up_s", _d("router.wol.wait_up_s")))
@@ -488,7 +488,7 @@ class Config:
         self.score = {k: float(_d(f"modes.score.{k}")) for k in settings_mod.SCORE_KEYS}
         for k, v in (m.get("score") or {}).items():
             if k not in self.score:
-                return invalid(f"modes.score.{k}: unbekanntes Gewicht (bekannt: {', '.join(self.score)})")
+                return invalid(f"modes.score.{k}: unknown weight (known: {', '.join(self.score)})")
             self.score[k] = float(v)
         br = m.get("breaker") or {}
         self.breaker = {"failures": int(br.get("failures", _d("modes.breaker.failures"))), "window_s": float(br.get("window_s", _d("modes.breaker.window_s"))),
@@ -529,23 +529,23 @@ class Config:
             # nur pruefen, wo es eine Zeitzonendatenbank gibt: die lokale Schema-Pruefung von deploy.py laeuft auch auf Windows-Python
             # ohne tzdata und wuerde sonst jede Zone ablehnen (2026-09-27)
             if zoneinfo.available_timezones() and self.ollama_update["timezone"] not in zoneinfo.available_timezones():
-                return invalid(f"modes.ollama_update.timezone: unbekannte Zeitzone {self.ollama_update['timezone']!r}")
+                return invalid(f"modes.ollama_update.timezone: unknown time zone {self.ollama_update['timezone']!r}")
         for k in ("window_start", "window_end"):
             v = self.ollama_update[k]
             if v and not re.match(r"^\d{2}:\d{2}$", v):
-                return invalid(f"modes.ollama_update.{k}: HH:MM erwartet, nicht {v!r}")
+                return invalid(f"modes.ollama_update.{k}: HH:MM expected, not {v!r}")
 
     def _parse_models(self, models):
         self.models = models
         for mname, spec in self.models.items():
             caps = (spec or {}).get("capabilities")
             if caps is not None and (not isinstance(caps, dict) or not all(isinstance(v, bool) for v in caps.values())):
-                return invalid(f"models.{mname}.capabilities muss ein Mapping Faehigkeit -> true/false sein")
+                return invalid(f"models.{mname}.capabilities must be a mapping capability -> true/false")
             if (spec or {}).get("cloud"):
                 if spec["cloud"] not in self.cloud["providers"]:
-                    return invalid(f"models.{mname}.cloud: Anbieter {spec['cloud']} ist unter router.cloud.providers nicht konfiguriert")
+                    return invalid(f"models.{mname}.cloud: provider {spec['cloud']} is not configured under router.cloud.providers")
             elif (spec or {}).get("weights_gib") is None:
-                return invalid(f"models.{mname}: weights_gib fehlt (lokales Modell) oder cloud: <anbieter> (Cloud-Modell)")
+                return invalid(f"models.{mname}: weights_gib missing (local model) or cloud: <provider> (cloud model)")
 
     def _parse_roles(self, roles):
         self.roles = {}
@@ -554,7 +554,7 @@ class Config:
             tiers = []
             for t in r["tiers"]:
                 if t["model"] not in self.models:
-                    return invalid(f"role {rname}: tier model {t['model']} fehlt im Modellkatalog")
+                    return invalid(f"role {rname}: tier model {t['model']} missing from the model catalog")
                 tier = {"model": t["model"], "num_ctx": int(t["num_ctx"]), "busy_ok": bool(t.get("busy_ok", False))}
                 if (self.models[t["model"]] or {}).get("cloud"):
                     tier["cloud"] = self.models[t["model"]]["cloud"]   # Stufe 5: Cloud-Stufe
@@ -562,7 +562,7 @@ class Config:
             lf = r.get("latency_first")   # None = globale Einstellung warm_first
             prio = r.get("priority", "normal")   # Stufe 3: Standardklasse der Rolle (routing.priority ueberschreibt)
             if prio not in PRIORITIES:
-                return invalid(f"role {rname}: priority muss eine von {PRIORITIES} sein")
+                return invalid(f"role {rname}: priority must be one of {PRIORITIES}")
             role = {"name": rname, "exposed": exposed, "tiers": tiers,
                     "latency_first": self.warm_first if lf is None else bool(lf),
                     "latency_first_override": lf, "priority": prio}
@@ -570,10 +570,10 @@ class Config:
                 spec = r.get(kind)
                 if spec:
                     if spec.get("model") not in self.models:
-                        return invalid(f"role {rname}: {kind} model {spec.get('model')} fehlt im Modellkatalog")
+                        return invalid(f"role {rname}: {kind} model {spec.get('model')} missing from the model catalog")
                     pct = float(spec.get("percent", 0))
                     if not 0 <= pct <= 100:
-                        return invalid(f"role {rname}: {kind}.percent muss zwischen 0 und 100 liegen")
+                        return invalid(f"role {rname}: {kind}.percent must be between 0 and 100")
                     role[kind] = {"model": spec["model"], "num_ctx": int(spec.get("num_ctx", tiers[0]["num_ctx"])), "percent": pct,
                                   "busy_ok": bool(spec.get("busy_ok", False))}
             self.roles[exposed] = role
@@ -588,33 +588,33 @@ class Config:
         role_names = {r["name"] for r in self.roles.values()}
         role = str(de.get("role") or "auto")
         if role in role_names or f"{role}:latest" in self.roles:
-            return invalid(f"decision_engine.role {role!r} ist schon eine Rolle")
+            return invalid(f"decision_engine.role {role!r} is already a role")
         options = [str(o) for o in (de.get("options") or [])]
         unknown = [o for o in options if o not in role_names]
         if len(options) < 2 or unknown:
-            return invalid(f"decision_engine.options: mindestens zwei Rollen, unbekannt: {unknown}")
+            return invalid(f"decision_engine.options: at least two roles, unknown: {unknown}")
         default = str(de.get("default") or options[0])
         if default not in options:
-            return invalid(f"decision_engine.default {default!r} steht nicht in options")
+            return invalid(f"decision_engine.default {default!r} is not in options")
         chain = [str(e) for e in (de.get("chain") or ["rules"])]
         bad = [e for e in chain if e not in DECISION_ENGINES]
         if bad:
-            return invalid(f"decision_engine.chain: unbekannte Engine {bad} (erlaubt: {DECISION_ENGINES})")
+            return invalid(f"decision_engine.chain: unknown engine {bad} (allowed: {DECISION_ENGINES})")
         if "jevlike" in chain and not (de.get("jevlike") or {}).get("endpoint"):
-            return invalid("decision_engine.jevlike.endpoint fehlt, aber jevlike steht in der Kette")
+            return invalid("decision_engine.jevlike.endpoint missing, but jevlike is in the chain")
         if "local_llm" in chain and not (de.get("local_llm") or {}).get("model"):
-            return invalid("decision_engine.local_llm.model fehlt, aber local_llm steht in der Kette")
+            return invalid("decision_engine.local_llm.model missing, but local_llm is in the chain")
         light = [str(o) for o in (de.get("observe_light") or [])]
         if [o for o in light if o not in options]:
-            return invalid(f"decision_engine.observe_light: nur Optionen der Engine ({options}), nicht {light}")
+            return invalid(f"decision_engine.observe_light: only options of the engine ({options}), not {light}")
         if "embed" in chain and not (de.get("embed") or {}).get("endpoint"):
-            return invalid("decision_engine.embed.endpoint fehlt, aber embed steht in der Kette")
+            return invalid("decision_engine.embed.endpoint missing, but embed is in the chain")
         if "tfidf" in chain and not (de.get("tfidf") or {}).get("model_path"):
-            return invalid("decision_engine.tfidf.model_path fehlt, aber tfidf steht in der Kette")
+            return invalid("decision_engine.tfidf.model_path missing, but tfidf is in the chain")
         for k, lo, hi in (("min_top_probability", 0, 1), ("min_margin", 0, 1), ("max_entropy_ratio", 0, 1)):
             v = (de.get("policy") or {}).get(k)
             if v is not None and not lo <= float(v) <= hi:
-                return invalid(f"decision_engine.policy.{k} muss zwischen {lo} und {hi} liegen")
+                return invalid(f"decision_engine.policy.{k} must be between {lo} and {hi}")
         out.update({"enabled": True, "role": role, "options": options, "default": default, "chain": chain})
         return out
 
@@ -683,8 +683,8 @@ def write_overrides(new):
     tmp = state.CFG.overrides_path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            f.write("# Von der Router-UI geschrieben (%s). Ueberschreibt roles/models/expose_concrete_models aus config.yaml;\n"
-                    "# settings = einzelne Einstellungen (Pfad -> Wert, Allowlist in settings.py), delete_models = per UI entfernte Katalogeintraege.\n"
+            f.write("# Written by the router UI (%s). Overrides roles/models/expose_concrete_models from config.yaml;\n"
+                    "# settings = single settings (path -> value, allowlist in settings.py), delete_models = catalog entries removed in the UI.\n"
                     % time.strftime("%Y-%m-%d %H:%M:%S"))
             yaml.safe_dump(new, f, allow_unicode=True, sort_keys=False)
         os.replace(tmp, state.CFG.overrides_path)

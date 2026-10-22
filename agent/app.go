@@ -33,7 +33,7 @@ type App struct {
 	updater  *Updater       // Selbst-Update (updater.go)
 	ollamaUp *OllamaUpdater // Ollama-Update ueber den Router (ollamaupdate.go, 0.12.0)
 	ollamaW  *OllamaWatcher // Ollama-Zustand beobachten und melden (ollamawatch.go, 0.14.0)
-	game     *GameWatch     // Spielerkennung (spiel.go, 0.17.0)
+	game     *GameWatch     // Spielerkennung (game.go, 0.17.0)
 	routes   *Routes        // Tunnel-Routen zu weiteren lokalen Diensten (routes.go); nil ohne tunnel.routes
 	rootCtx  context.Context
 	crashed  string // Modul, das mit Panic endete (Run liefert dann einen Fehler, der Dienst startet neu)
@@ -66,7 +66,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.ollamaUp = newOllamaUpdater(cfg.OllamaUpdate, cfg.Children, sup, cfg.Tunnel.Upstream, log)
 	a.hb.ollamaUp, a.hb.upstream = a.ollamaUp, cfg.Tunnel.Upstream
 	if a.ollamaUp.Managed() {
-		log.Infof("ollama-update: Ollama ist Kind %q in %s - Router darf Updates anstossen", a.ollamaUp.child, a.ollamaUp.dir)
+		log.Infof("ollama-update: Ollama is child %q in %s - router may trigger updates", a.ollamaUp.child, a.ollamaUp.dir)
 	}
 	if cfg.OllamaProxy.on() {
 		if a.proxy, err = newOllamaProxy(cfg.OllamaProxy, cfg.Router.Token, cfg.Node, log); err != nil {
@@ -170,9 +170,9 @@ func (a *App) onTunnelStatus(state, node string, p *Provision) {
 		return
 	}
 	if err := saveProvision(a.cfg.Identity.Dir, p); err != nil {
-		a.log.Warnf("provision: speichern: %v", err)
+		a.log.Warnf("provision: save: %v", err)
 	} else {
-		a.log.Infof("provision: Konfigurationspaket vom Router uebernommen (mqtt=%v, heartbeat %.0fs)", p.MQTT != nil, p.HeartbeatIntervalS)
+		a.log.Infof("provision: configuration package from the router applied (mqtt=%v, heartbeat %.0fs)", p.MQTT != nil, p.HeartbeatIntervalS)
 	}
 	if p.HeartbeatIntervalS > 0 && a.tunnel != nil {
 		a.tunnel.SetHeartbeatInterval(time.Duration(p.HeartbeatIntervalS * float64(time.Second)))
@@ -189,7 +189,7 @@ func (a *App) Run(ctx context.Context) error {
 	if a.id != nil {
 		fp = a.id.Fingerprint()[:16]
 	}
-	a.log.Infof("skirnir-agent %s startet: node=%s gpu=%s (%s) kinder=%d tunnel=%v identity=%s", version, a.cfg.Node, a.gpu.Source(), a.gpu.smi, len(a.cfg.Children), a.tunnel != nil, fp)
+	a.log.Infof("skirnir-agent %s starting: node=%s gpu=%s (%s) children=%d tunnel=%v identity=%s", version, a.cfg.Node, a.gpu.Source(), a.gpu.smi, len(a.cfg.Children), a.tunnel != nil, fp)
 	var wg sync.WaitGroup
 	run := func(name string, f func(context.Context)) {
 		wg.Add(1)
@@ -199,7 +199,7 @@ func (a *App) Run(ctx context.Context) error {
 				if r := recover(); r != nil {
 					// Nicht still weiterlaufen: ohne das Modul (z. B. Tunnel) waere der Dienst ein gesunder Zombie, den kein
 					// Recovery neu startet. Alles stoppen, Run liefert einen Fehler, der SCM/systemd startet neu.
-					a.log.Errorf("%s: panic: %v - Dienst wird beendet", name, r)
+					a.log.Errorf("%s: panic: %v - service is stopping", name, r)
 					a.mu.Lock()
 					if a.crashed == "" {
 						a.crashed = name
@@ -230,20 +230,20 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.startMQTT(a.effectiveMQTT())
 	<-ctx.Done()
-	a.log.Infof("stoppe Module ...")
+	a.log.Infof("stopping modules ...")
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(20 * time.Second):
-		return fmt.Errorf("Module haben nach 20 s nicht gestoppt")
+		return fmt.Errorf("modules did not stop within 20 s")
 	}
-	a.log.Infof("gestoppt")
+	a.log.Infof("stopped")
 	a.mu.Lock()
 	crashed := a.crashed
 	a.mu.Unlock()
 	if crashed != "" {
-		return fmt.Errorf("Modul %s ist abgestuerzt (panic)", crashed)
+		return fmt.Errorf("module %s crashed (panic)", crashed)
 	}
 	return nil
 }
@@ -265,7 +265,7 @@ func loadOrCreateControlToken(cfgPath string, log *Logger) string {
 	}
 	tok := fresh()
 	if err := os.WriteFile(p, []byte(tok+"\n"), 0o600); err != nil {
-		log.Warnf("control.token: %v (Token nur im Speicher)", err)
+		log.Warnf("control.token: %v (token in memory only)", err)
 	}
 	return tok
 }

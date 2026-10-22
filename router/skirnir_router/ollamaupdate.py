@@ -81,17 +81,17 @@ def parse_checksums(txt):
 async def check_latest():
     """Neueste Version bei der Quelle erfragen (GitHub-API: tag_name, assets) samt sha256sum.txt; Ergebnis in LATEST."""
     url = _cfg().get("release_url") or ""
-    found = await _fetch_release(url) if url else invalid("modes.ollama_update.release_url ist leer")
+    found = await _fetch_release(url) if url else invalid("modes.ollama_update.release_url is empty")
     if failed(found):
         LATEST.update(error=found.message[:200], checked=time.time(), checked_ts=_ts())
-        log.warning("ollama-update: Versionspruefung: %s", LATEST["error"])
+        log.warning("ollama-update: version check: %s", LATEST["error"])
         return LATEST
     version, files = found
     changed = version != LATEST["version"]
     LATEST.update(version=version, files=files, error=None, source=url, checked=time.time(), checked_ts=_ts())
     save_latest()
     if changed:
-        log.info("ollama-update: neueste Version %s (%s)", version, ", ".join(sorted(files)))
+        log.info("ollama-update: latest version %s (%s)", version, ", ".join(sorted(files)))
         state.MQTT_DIRTY.append(True)
     return LATEST
 
@@ -103,18 +103,18 @@ async def _fetch_release(url):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=40)) as s:
             async with s.get(url, headers=headers) as r:
                 if r.status != 200:
-                    return bad_gateway(f"HTTP {r.status} von {url}")
+                    return bad_gateway(f"HTTP {r.status} from {url}")
                 rel = await r.json(content_type=None)
             if not isinstance(rel, dict):
-                return bad_gateway(f"keine Release-Beschreibung von {url}")
+                return bad_gateway(f"no release description from {url}")
             tag = str(rel.get("tag_name") or rel.get("name") or "")
             version = tag[1:] if tag.startswith("v") else tag
             if not re.match(r"^\d+(\.\d+){1,3}", version):
-                return bad_gateway(f"tag_name {tag!r} ist keine Version")
+                return bad_gateway(f"tag_name {tag!r} is not a version")
             assets = {a["name"]: a for a in rel.get("assets") or [] if isinstance(a, dict) and a.get("name") and a.get("browser_download_url")}
             sums = assets.get("sha256sum.txt")
             if not sums:
-                return bad_gateway("Release ohne sha256sum.txt")
+                return bad_gateway("release without sha256sum.txt")
             async with s.get(sums["browser_download_url"], headers={"User-Agent": headers["User-Agent"]}) as r:
                 if r.status != 200:
                     return bad_gateway(f"sha256sum.txt: HTTP {r.status}")
@@ -127,7 +127,7 @@ async def _fetch_release(url):
         if a and name in checks:
             size = a.get("size") if isinstance(a.get("size"), int) else 0
             files[f"{osn}/{arch}"] = {"name": name, "url": a["browser_download_url"], "size": size, "sha256": checks[name]}
-    return (version, files) if files else bad_gateway("kein bekanntes Archiv im Release")
+    return (version, files) if files else bad_gateway("no known archive in the release")
 
 
 def available_for(e):
@@ -177,14 +177,14 @@ async def release_swap(node, version):
             state.remember({"event": "ollama_update", "node": node.name, "state": "failed", "version": version, "reason": u["message"]})
             state.MQTT_DIRTY.append(True)
             node.draining_until = 0.0
-            log.warning("node %s: Ollama-Tausch auf %s abgebrochen - Knoten wurde nicht leer", node.name, version)
+            log.warning("node %s: Ollama swap to %s aborted - node did not become idle", node.name, version)
             return
         if node.tunnel is None:
-            log.warning("node %s: Ollama-Tausch auf %s nicht freigegeben - kein Tunnel", node.name, version)
+            log.warning("node %s: Ollama swap to %s not released - no tunnel", node.name, version)
             return
         from .registry import send_ctl
         await send_ctl(node.tunnel, {"t": "ollama-swap", "version": version})
-        log.info("node %s: Ollama-Tausch auf %s freigegeben (Knoten leer)", node.name, version)
+        log.info("node %s: Ollama swap to %s released (node idle)", node.name, version)
     finally:
         node.swap_pending = None
 
@@ -245,10 +245,10 @@ def note_version(node, version, now=None, source="poll"):
         state.remember({"event": "ollama_update", "node": e["name"], "state": "done", "version": version})
         state.MQTT_DIRTY.append(True)
         node.draining_until = 0.0
-        log.info("node %s: Ollama-Update auf %s abgeschlossen", node.name, version)
+        log.info("node %s: Ollama update to %s completed", node.name, version)
         if state.CFG.prewarm_on_online and node.state == "free":   # das Vorwaermen beim Neustart entfiel, das Update lief noch
             from . import poll
-            state.spawn(poll.prewarm(node, 0, "nach Ollama-Update"))
+            state.spawn(poll.prewarm(node, 0, "after Ollama update"))
 
 
 def note_hello(e, facts):
@@ -371,7 +371,7 @@ async def order_update(fp, reason="ui", force=False):
     await send_ctl(node.tunnel, msg)
     state.remember({"event": "ollama_update", "node": e["name"], "state": "requested", "version": version, "reason": reason})
     state.MQTT_DIRTY.append(True)
-    log.info("node %s: Ollama-Update %s -> %s angestossen (%s, %s)", e["name"], cur, version, reason, f["name"])
+    log.info("node %s: Ollama update %s -> %s ordered (%s, %s)", e["name"], cur, version, reason, f["name"])
     return True, f"Ollama update to {version} started"
 
 
@@ -391,7 +391,7 @@ def _local(cfg, now):
         if tz in zoneinfo.available_timezones():   # vorher pruefen statt Exception abfangen
             return datetime.fromtimestamp(now, zoneinfo.ZoneInfo(tz)).timetuple()
         if not _TZ_WARNED:
-            log.warning("ollama-update: Zeitzone %r hier unbekannt (keine Zeitzonendatenbank?) - Fenster in Ortszeit des Routers", tz)
+            log.warning("ollama-update: time zone %r unknown here (no time zone database?) - window in the router's local time", tz)
             _TZ_WARNED.append(tz)
     return time.localtime(now)
 

@@ -398,10 +398,10 @@ class _Relay:
         self.stream = bool(self.out.get("stream", True)) and path in STREAM_PATHS
         # Ollama beschraenkt den tools-Pfad nicht und verwirft einen missglueckten Aufruf still;
         # gemessen verliert qwen3-coder:30b so 80 % seiner Calls oberhalb ~12k Token. Siehe toolcall_rescue.
-        self.rescue = state.CFG.toolcall_rescue and toolcall_rescue.aktiv_fuer(self.out)
+        self.rescue = state.CFG.toolcall_rescue and toolcall_rescue.active_for(self.out)
         self.is_cloud = node.is_cloud
         # Passt die Anfrage in num_ctx? Ollama kuerzt sonst still; bestaetigt wird nach der Antwort (context_check)
-        self.geschaetzt = context_check.vorher(self.out, self.ctx, self.is_cloud)
+        self.estimated_tokens = context_check.before_request(self.out, self.ctx, self.is_cloud)
         self.warm = node.is_loaded(self.model)
         self.t0 = time.time()
         self.outcome = None          # Stufe 3: ok | error | timeout | structured_error (perf_outcome + Breaker)
@@ -485,8 +485,8 @@ class _Relay:
         elapsed = time.time() - self.t0
         metrics.observe_request(self.info, self.outcome or "aborted", elapsed, self.ttft_s, self.ptoks, self.ctoks,
                                 self.req.queued_ms / 1000.0, cost)
-        if self.geschaetzt and self.outcome == "ok":
-            context_check.nachher(self.geschaetzt, self.ptoks, self.ctx,
+        if self.estimated_tokens and self.outcome == "ok":
+            context_check.after_request(self.estimated_tokens, self.ptoks, self.ctx,
                                     {**(self.info or {}), "path": self.path, "request_id": self.req.request_id})
         admission.release(node)   # Stufe 3: Platz frei -> bestplatzierten Wartenden wecken
         log.info("done %s node=%s %.1fs%s", self.role["name"], node.name, elapsed, f" {cost:.4f} CHF" if cost else "")
@@ -718,7 +718,7 @@ class _Relay:
         arbeitet, die Ausgabe des Modells war kaputt."""
         self.outcome = "error"
         safe_message = "context response redacted" if self.context_sensitive else msg[:200]
-        log.warning("stream from %s: Fehler von Ollama mitten in der Antwort (%s, req=%s): %s", self.node.name, self.model,
+        log.warning("stream from %s: Ollama error in the middle of the answer (%s, req=%s): %s", self.node.name, self.model,
                     self.req.request_id, safe_message)
         state.remember({"event": "stream_error", "node": self.node.name, "model": self.model, "role": self.role["name"],
                         "client": self.request.get("client"), "request_id": self.req.request_id, "error": safe_message})
@@ -826,19 +826,19 @@ class _Relay:
         tool = toolcall_rescue.rescue_message(jm, self.out.get("tools"))
         if tool:
             self._note_rescue(tool, stream=False)
-        elif not jm.get("tool_calls") and toolcall_rescue.verdacht(jm.get("content")):
+        elif not jm.get("tool_calls") and toolcall_rescue.suspicious(jm.get("content")):
             self._note_lost(stream=False, content=jm.get("content"))
 
     def _note_stream_rescue(self, rescuer):
         if rescuer is None:
             return
-        if rescuer.gerettet:
-            self._note_rescue(rescuer.gerettet, stream=True)
-        elif rescuer.verloren:
+        if rescuer.rescued:
+            self._note_rescue(rescuer.rescued, stream=True)
+        elif rescuer.lost:
             self._note_lost(stream=True)
 
     def _note_rescue(self, tool, stream):
-        log.warning("tool-call gerettet%s: %s hatte %s als Text geschrieben (req=%s)", " (stream)" if stream else "",
+        log.warning("tool call rescued%s: %s had written %s as text (req=%s)", " (stream)" if stream else "",
                     self.model, tool, self.req.request_id)
         state.remember({"event": "toolcall_rescue", "node": self.node.name, "model": self.model, "tool": tool,
                         "stream": stream, "request_id": self.req.request_id})
@@ -846,7 +846,7 @@ class _Relay:
     def _note_lost(self, stream, content=None):
         """Unbekannter Dialekt: fuer den Client verloren, aber nicht mehr stumm."""
         sample = f": {(content or '').replace(chr(10), ' ')[:120]}" if content and not self.context_sensitive else ""
-        log.warning("tool-call VERLOREN (Dialekt unbekannt%s): %s req=%s%s", ", stream" if stream else "", self.model,
+        log.warning("tool call LOST (unknown dialect%s): %s req=%s%s", ", stream" if stream else "", self.model,
                     self.req.request_id, sample)
         state.remember({"event": "toolcall_lost", "node": self.node.name, "model": self.model, "stream": stream,
                         "request_id": self.req.request_id})

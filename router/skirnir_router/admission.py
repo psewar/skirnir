@@ -70,7 +70,7 @@ def release(node):
         return
     best = min(cands, key=lambda w: rank_key(w, now))
     best["fut"].set_result(True)
-    log.info("admission: Platz auf %s frei -> %s (%s, wartete %.1fs, %d weitere)", node.name, best["request_id"], best["prio"],
+    log.info("admission: slot free on %s -> %s (%s, waited %.1fs, %d more)", node.name, best["request_id"], best["prio"],
              now - best["t_enq"], len(cands) - 1)
 
 

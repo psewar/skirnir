@@ -37,7 +37,7 @@ def init():
     cfg = state.CFG.decision
     DECIDER = Decider(cfg) if cfg.get("enabled") else None
     if DECIDER:
-        log.info("decision engine: Rolle %s, Optionen %s, Kette %s, default %s", DECIDER.exposed, DECIDER.options,
+        log.info("decision engine: role %s, options %s, chain %s, default %s", DECIDER.exposed, DECIDER.options,
                  [e.name for e in DECIDER.chain], DECIDER.default)
     return DECIDER
 
@@ -118,7 +118,7 @@ class Decider:
         if tf.get("model_path"):
             engine = TfidfEngine.load(tf["model_path"])
             if failed(engine):   # Modell fehlt/kaputt: Engine faellt aus der Kette, Router startet trotzdem
-                log.warning("decision tfidf: Modell nicht ladbar: %s", engine.message)
+                log.warning("decision tfidf: model not loadable: %s", engine.message)
             else:
                 engines["tfidf"] = engine
         return engines
@@ -159,7 +159,7 @@ class Decider:
             result.uncertainty = uncertainty_of(result.probabilities)
             reasons = uncertain_reasons(result.uncertainty, policy)
             if result.selected not in req.options:
-                reasons.append("unbekannte Option")
+                reasons.append("unknown option")
             result.fallback = list(tried)
             if not reasons:
                 return result

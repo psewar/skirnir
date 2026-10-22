@@ -47,7 +47,7 @@ try:
     bad2["roles"][next(iter(bad2["roles"]))]["tiers"][0]["model"] = "gibt-es-nicht:1b"
     yaml.safe_dump(bad2, open(path, "w", encoding="utf-8"), allow_unicode=True)
     problem = config.Config.load(path, use_overrides=False)
-    check("ungueltig (Rollenstufe ohne Katalogeintrag): Problem", failed(problem) and "fehlt im Modellkatalog" in problem.message,
+    check("ungueltig (Rollenstufe ohne Katalogeintrag): Problem", failed(problem) and "missing from the model catalog" in problem.message,
           getattr(problem, "message", problem))
 
     # Neuladen: gueltig geladen, dann eine Datei mit einem Fehler SPAET im Ablauf (decision_engine, nach Rollen und Modellen)
@@ -77,10 +77,10 @@ try:
     # settings: coerce/apply liefern Probleme
     locked = {"router": {"client_auth": {"mode": "enforce", "locked": True}}}
     p = settings.coerce("router.client_auth.mode", "observe", locked)
-    check("settings.coerce: gesperrter Modus -> Problem 400", failed(p) and p.status == 400 and "gesperrt" in p.message)
+    check("settings.coerce: gesperrter Modus -> Problem 400", failed(p) and p.status == 400 and "locked" in p.message)
     check("settings.coerce: gueltig -> Wert", settings.coerce("router.client_auth.mode", "observe", {"router": {"client_auth": {}}}) == "observe")
     p = settings.coerce("router.request_timeout_s", "schnell", {"router": {}})
-    check("settings.coerce: keine Zahl -> Problem", failed(p) and "Zahl" in p.message)
+    check("settings.coerce: keine Zahl -> Problem", failed(p) and "number" in p.message)
     p = settings.apply({"router": {}}, {"router.request_timeout_s": 30, "router.ollama_poll_s": "nie"})
     check("settings.apply: erster ungueltiger Wert -> sein Problem", failed(p) and "ollama_poll_s" in p.message)
     check("settings.apply: kein Mapping -> Problem", failed(settings.apply({}, ["x"])))
