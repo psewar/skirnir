@@ -21,27 +21,27 @@ def check(name, cond, info=""):
         FAILS.append(name)
 
 
-BASIS = {
+BASE = {
     "qwen3.8:27b": {"weights_gib": 17.86, "kv_gib_per_1k": 0.0641, "real": True, "vram_gib_8k": 18.37, "max_parallel": 1,
                     "capabilities": {"vision": True}, "note": "aus config.yaml"},
     "gemma4:12b": {"weights_gib": 8.3, "kv_gib_per_1k": 0.0172, "real": True},
 }
-MESSUNG = {"weights_gib": 17.76, "kv_gib_per_1k": 0.0404, "real": True, "vram_real_gib": {"196608": 25.7}}
+MEASUREMENT = {"weights_gib": 17.76, "kv_gib_per_1k": 0.0404, "real": True, "vram_real_gib": {"196608": 25.7}}
 
-basis = copy.deepcopy(BASIS)
-m = merge_models(basis, {"qwen3.8:27b": MESSUNG})["qwen3.8:27b"]
-check("Messung aus roles.yaml ersetzt die Groessenangaben als Einheit", m["weights_gib"] == 17.76 and m["kv_gib_per_1k"] == 0.0404
+base = copy.deepcopy(BASE)
+m = merge_models(base, {"qwen3.8:27b": MEASUREMENT})["qwen3.8:27b"]
+check("Measurement from roles.yaml replaces size specs as a unit", m["weights_gib"] == 17.76 and m["kv_gib_per_1k"] == 0.0404
       and m["vram_real_gib"] == {"196608": 25.7}, str(m))
-check("... alte Messwerte der Basis fallen weg (keine Mischung)", "vram_gib_8k" not in m, str(m))
-check("... max_parallel, capabilities, note aus config.yaml bleiben", m.get("max_parallel") == 1 and m.get("capabilities") == {"vision": True}
+check("... old base measurements are dropped (no mixing)", "vram_gib_8k" not in m, str(m))
+check("... max_parallel, capabilities, note from config.yaml remain", m.get("max_parallel") == 1 and m.get("capabilities") == {"vision": True}
       and m.get("note") == "aus config.yaml", str(m))
-m = merge_models(basis, {"qwen3.8:27b": {"max_parallel": 2}})["qwen3.8:27b"]
-check("Overlay ohne Groessenangaben: Basis-Groessen bleiben, Feld wird ueberschrieben", m["weights_gib"] == 17.86
+m = merge_models(base, {"qwen3.8:27b": {"max_parallel": 2}})["qwen3.8:27b"]
+check("Overlay without size specs: base sizes remain, field is overwritten", m["weights_gib"] == 17.86
       and m["vram_gib_8k"] == 18.37 and m["max_parallel"] == 2, str(m))
-out = merge_models(basis, {"neu:7b": {"weights_gib": 5.0}})
-check("neues Modell aus roles.yaml kommt dazu, die anderen bleiben", out["neu:7b"] == {"weights_gib": 5.0} and "gemma4:12b" in out)
-check("Basis wird nicht veraendert (Kopie)", basis == BASIS)
-check("Overlay ohne Mapping (kaputter Eintrag) ersetzt wie bisher", merge_models(basis, {"gemma4:12b": None})["gemma4:12b"] is None)
+out = merge_models(base, {"neu:7b": {"weights_gib": 5.0}})
+check("new model from roles.yaml is added, others remain", out["neu:7b"] == {"weights_gib": 5.0} and "gemma4:12b" in out)
+check("Base is not modified (copy)", base == BASE)
+check("Overlay without mapping (broken entry) replaces as before", merge_models(base, {"gemma4:12b": None})["gemma4:12b"] is None)
 
 print(f"\n{'OK' if not FAILS else 'FEHLER'}: {len(FAILS)} fehlgeschlagen")
 sys.exit(1 if FAILS else 0)

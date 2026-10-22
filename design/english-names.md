@@ -91,7 +91,7 @@ They follow by module group, each as a pull request that changes no code token (
 1. Router (`router/`): done.
 2. Agent (`agent/`): done.
 3. Tests, tools, `deploy/` (comments and output) and the German `selftest_*` file names: done.
-4. Test check labels and German identifiers in the tests.
+4. Test check labels and German identifiers in the tests: done. German test inputs (prompts, user messages) and the German texts the router and the fake agent still produce on purpose stay German.
 
 Roadmap steps from `design/roadmap.md` are "stages" (`Stufe 3` → `Stage 3`); "tier" stays reserved for the tiers of a role.
 

@@ -40,7 +40,7 @@ time.sleep(2)
 logs["agent"] = open(os.path.join(HERE, "dev-agent.log"), "w")
 procs.append(subprocess.Popen([PY, os.path.join(HERE, "fake_agent.py"), "ws://127.0.0.1:21435", "big", "https://127.0.0.1:21001", os.path.join(HERE, "fake-agent-big.key"), "testtoken"],
                               cwd=HERE, stdout=logs["agent"], stderr=subprocess.STDOUT))
-print("Dev-Umgebung laeuft: UI http://127.0.0.1:21435/  (Agent 'big' wartet auf Freigabe in der UI; Strg-C beendet)", flush=True)
+print("dev environment running: UI http://127.0.0.1:21435/  (agent 'big' waits for approval in the UI; Ctrl-C stops)", flush=True)
 try:
     while True:
         time.sleep(3600)
