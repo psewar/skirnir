@@ -135,7 +135,9 @@ func TestKuerzungDiscovery(t *testing.T) {
 	if !ok || ev == "" {
 		t.Fatal("Ereignis-Entitaet nicht angelegt")
 	}
-	for _, soll := range []string{`"state_topic":"testknoten/kuerzung"`, `"event_types":["eingabe_gekuerzt","kontext_voll"]`} {
+	for _, soll := range []string{`"state_topic":"testknoten/truncation"`, `"event_types":["input_truncated","context_full"]`,
+		// unique_id bleibt der Name von 2026 (Verlauf), die Entity-ID ist englisch (0.20.0)
+		`"unique_id":"testknoten_ollama_kuerzung"`, `"default_entity_id":"event.testknoten_ollama_truncation"`} {
 		if !strings.Contains(ev, soll) {
 			t.Fatalf("Ereignis-Config ohne %s: %s", soll, ev)
 		}
@@ -159,20 +161,20 @@ func TestKuerzungEreignisUndState(t *testing.T) {
 	m.sup = &Supervisor{kuerzungen: newKuerzungen()}
 	st := map[string]any{}
 	m.kuerzungState(st)
-	if st["ollama_kuerzungen"] != 0 || st["ollama_letzte_kuerzung"] != "None" {
+	if st["ollama_truncations"] != 0 || st["ollama_last_truncation"] != "None" {
 		t.Fatalf("ohne Kuerzung: %v", st)
 	}
 	m.sup.kuerzungen.pruefe("ollama", zeileEingabe)
 	e := <-m.sup.kuerzungen.neu
 	m.publishKuerzung(c, e)
 	p := c.pubs[len(c.pubs)-1]
-	if p.topic != "testknoten/kuerzung" || !strings.Contains(p.payload, `"event_type":"eingabe_gekuerzt"`) ||
+	if p.topic != "testknoten/truncation" || !strings.Contains(p.payload, `"event_type":"input_truncated"`) ||
 		!strings.Contains(p.payload, `"prompt":65536`) {
 		t.Fatalf("Ereignis falsch: %s %s", p.topic, p.payload)
 	}
 	m.kuerzungState(st)
-	d, _ := st["kuerzung_details"].(map[string]any)
-	if st["ollama_kuerzungen"] != 1 || st["ollama_letzte_kuerzung"] == "None" || d["limit"] != 32770 || d["art"] != kuerzungEingabe {
+	d, _ := st["truncation_details"].(map[string]any)
+	if st["ollama_truncations"] != 1 || st["ollama_last_truncation"] == "None" || d["limit"] != 32770 || d["type"] != kuerzungEingabe {
 		t.Fatalf("State nach Kuerzung: %v", st)
 	}
 }

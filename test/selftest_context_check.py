@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Selbsttest der Kontext-Vorabpruefung (kontextpruefung.py). Laeuft ohne Router und ohne Netz.
+"""Selbsttest der Kontext-Vorabpruefung (context_check.py). Laeuft ohne Router und ohne Netz.
 
 Wichtiger als die Treffer sind die Nicht-Treffer: kleine Anfragen duerfen gar nicht erst geschaetzt werden, und eine
 Anfrage, bei der nur die Schaetzung uebertrieben hat (angekommen ~ geschaetzt), darf keinen Alarm ausloesen.
@@ -12,7 +12,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "router"))
-from skirnir_router import kontextpruefung as kp   # noqa: E402
+from skirnir_router import context_check as kp   # noqa: E402
 from skirnir_router import state   # noqa: E402
 
 FAILS = []
@@ -26,7 +26,7 @@ def check(name, cond, info=""):
 
 
 def zuruecksetzen():
-    state.KUERZUNGEN.update(anzahl=0, letzte=None)
+    state.TRUNCATIONS.update(count=0, last=None)
     state.MQTT_EVENTS.clear()
     state.DECISIONS.clear()
 
@@ -59,17 +59,17 @@ check("/api/generate-Prompt zaehlt", (kp.vorher({"prompt": PROSA * 5000}, 65536)
 zuruecksetzen()
 info = {"role": "nacht", "model": "qwen3.6:35b-a3b", "node": "gpu-desktop", "client": "agent-x", "path": "/api/chat", "request_id": "r1"}
 check("Schaetzung zu hoch, angekommen ~ geschaetzt: kein Alarm", kp.nachher(100_000, 95_000, 131072, info) is False)
-check("... und nichts gezaehlt", state.KUERZUNGEN["anzahl"] == 0 and not state.MQTT_EVENTS)
+check("... und nichts gezaehlt", state.TRUNCATIONS["count"] == 0 and not state.MQTT_EVENTS)
 check("angekommen deutlich weniger: bestaetigt", kp.nachher(160_000, 65_538, 131072, info) is True)
-check("Zaehler 1", state.KUERZUNGEN["anzahl"] == 1)
-l = state.KUERZUNGEN["letzte"] or {}
-check("letzte Kuerzung mit Details", l.get("geschaetzt") == 160_000 and l.get("angekommen") == 65_538 and l.get("client") == "agent-x"
+check("Zaehler 1", state.TRUNCATIONS["count"] == 1)
+l = state.TRUNCATIONS["last"] or {}
+check("letzte Kuerzung mit Details", l.get("estimated") == 160_000 and l.get("received") == 65_538 and l.get("client") == "agent-x"
       and l.get("num_ctx") == 131072 and l.get("ts"), str(l))
-check("HA-Ereignis vorgemerkt", state.MQTT_EVENTS and state.MQTT_EVENTS[-1]["event_type"] == "kontext_gekuerzt")
-check("Journal-Eintrag", any(d.get("event") == "kontext_gekuerzt" for d in state.DECISIONS))
-check("65538 von 160000 (41 %) gilt als sicher", l.get("sicher") is True and l.get("quote") == 0.41, str(l.get("quote")))
+check("HA-Ereignis vorgemerkt", state.MQTT_EVENTS and state.MQTT_EVENTS[-1]["event_type"] == "context_truncated")
+check("Journal-Eintrag", any(d.get("event") == "context_truncated" for d in state.DECISIONS))
+check("65538 von 160000 (41 %) gilt als sicher", l.get("certain") is True and l.get("ratio") == 0.41, str(l.get("ratio")))
 kp.nachher(100_000, 70_000, 65536, info)
-check("70 % gilt nur als wahrscheinlich", state.KUERZUNGEN["letzte"]["sicher"] is False)
+check("70 % gilt nur als wahrscheinlich", state.TRUNCATIONS["last"]["certain"] is False)
 check("MQTT sofort", bool(state.MQTT_DIRTY))
 check("ohne Tokenzahl (Stream abgebrochen): nichts", kp.nachher(160_000, 0, 131072, info) is False)
 check("Grenzfall genau 0,8: kein Alarm", kp.nachher(100_000, 80_000, 65536, info) is False)

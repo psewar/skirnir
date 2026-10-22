@@ -171,7 +171,7 @@ func TestGuardAbgewaehltIstProblem(t *testing.T) {
 	off := false
 	g := newGuardEngine(GuardCfg{Enabled: &off}, c.set)
 	st, evs := g.step(guardIn(time.Now(), c, 500))
-	if st.State != guardAus || !st.Problem || st.Reason != "abgewaehlt" || c.calls != 0 || !hasEvent(evs, guardEvAbgewaehlt) {
+	if st.State != guardAus || !st.Problem || st.Reason != guardEvAbgewaehlt || c.calls != 0 || !hasEvent(evs, guardEvAbgewaehlt) {
 		t.Fatalf("aus: %+v calls=%d", st, c.calls)
 	}
 	if st.PowerW == nil || *st.PowerW != 500 {

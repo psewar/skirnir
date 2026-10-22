@@ -12,7 +12,7 @@ Zwei Stufen, damit eine grobe Schaetzung keinen Fehlalarm ausloest:
             p90 1,10, max 1,26. Liegt sie ueber
             num_ctx, ist die Anfrage ein Kandidat.
   nachher - Kamen laut Ollama weniger als BESTAETIGT x Schaetzung an, ist die Kuerzung bestaetigt: Journal-Ereignis
-            `kontext_gekuerzt`, Metrik, Warnung, HA-Ereignis. Kam etwa die Schaetzung an, hat nur die Schaetzung
+            `context_truncated`, Metrik, Warnung, HA-Ereignis. Kam etwa die Schaetzung an, hat nur die Schaetzung
             uebertrieben - kein Alarm, nur eine Info-Zeile (Kalibrierhilfe).
 Cloud-Stufen bleiben aussen vor: Anbieter lehnen zu lange Prompts mit Fehler ab statt still zu kuerzen.
 """
@@ -88,16 +88,16 @@ def nachher(geschaetzt, angekommen, ctx, info):
                  geschaetzt, ctx, angekommen, info.get("model"))
         return False
     quote = angekommen / geschaetzt
-    e = {"event": "kontext_gekuerzt", "role": info.get("role"), "model": info.get("model"), "node": info.get("node"),
-         "client": info.get("client"), "path": info.get("path"), "num_ctx": ctx, "geschaetzt": geschaetzt,
-         "angekommen": angekommen, "quote": round(quote, 2), "sicher": quote < SICHER, "request_id": info.get("request_id")}
+    e = {"event": "context_truncated", "role": info.get("role"), "model": info.get("model"), "node": info.get("node"),
+         "client": info.get("client"), "path": info.get("path"), "num_ctx": ctx, "estimated": geschaetzt,
+         "received": angekommen, "ratio": round(quote, 2), "certain": quote < SICHER, "request_id": info.get("request_id")}
     log.warning("Kontext %s gekuerzt: %s schickte ~%d Token an %s (%s, num_ctx %d), angekommen %d (%.0f %%) - Ollama kuerzt still (req=%s)",
-                "sicher" if e["sicher"] else "wahrscheinlich", e["client"] or "-", geschaetzt, e["model"], e["node"], ctx,
+                "sicher" if e["certain"] else "wahrscheinlich", e["client"] or "-", geschaetzt, e["model"], e["node"], ctx,
                 angekommen, quote * 100, e["request_id"])
     state.remember(e)
-    state.KUERZUNGEN["anzahl"] += 1
-    state.KUERZUNGEN["letzte"] = {k: v for k, v in e.items() if k not in ("event", "t")}
-    state.MQTT_EVENTS.append({"event_type": "kontext_gekuerzt", **state.KUERZUNGEN["letzte"]})
+    state.TRUNCATIONS["count"] += 1
+    state.TRUNCATIONS["last"] = {k: v for k, v in e.items() if k not in ("event", "t")}
+    state.MQTT_EVENTS.append({"event_type": "context_truncated", **state.TRUNCATIONS["last"]})
     del state.MQTT_EVENTS[:-20]
     return True
 

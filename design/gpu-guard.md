@@ -1,5 +1,9 @@
 # GPU-Schutz (12V-2x6) – Entwurf v0.1 (2026-09-24)
 
+> **Seit Agent 0.20.0 / Router 0.9.0 sind Zustaende, Ereignisse und Felder englisch** (`high_load`, `throttled`,
+> `recovery`, `unavailable`, `off`; `source`, `reason`, `warnings`, `high_load_s`; Tabelle in design/english-names.md).
+> Dieser Entwurf und die Messprotokolle unten nennen die bis dahin gueltigen deutschen Namen.
+
 > **Stand 2026-09-24, abends: umgesetzt** in Agent 0.7.0 (`agent/guard.go`, Tests `guard_test.go`) und Router 0.1.2
 > (`modes.gpu_guard`, Policy `gpu_guard` je Knoten, HA-Probleme, Metriken, UI-Badge). Entscheide des Betreibers: Default
 > 80 %, die Abwahl zählt als HA-Problem (abweichend von Abschnitt 4), `require_fresh_status` Standard aus. Konfigschlüssel

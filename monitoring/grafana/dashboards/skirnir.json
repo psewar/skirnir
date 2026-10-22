@@ -69,9 +69,9 @@
      "datasource": {"type": "prometheus", "uid": "skirnir-prom"},
      "fieldConfig": {"defaults": {"custom": {"fillOpacity": 70, "lineWidth": 0}, "color": {"mode": "fixed"}}, "overrides": [
        {"matcher": {"id": "byRegexp", "options": ".*normal.*"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]},
-       {"matcher": {"id": "byRegexp", "options": ".*hochlast.*"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]},
-       {"matcher": {"id": "byRegexp", "options": ".*gedrosselt.*"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]},
-       {"matcher": {"id": "byRegexp", "options": ".*(unverfuegbar|aus).*"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}]},
+       {"matcher": {"id": "byRegexp", "options": ".*(hochlast|high_load).*"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]},
+       {"matcher": {"id": "byRegexp", "options": ".*(gedrosselt|throttled).*"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]},
+       {"matcher": {"id": "byRegexp", "options": ".*(unverfuegbar|aus|unavailable|off).*"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}]},
      "options": {"showValue": "never", "mergeValues": true, "legend": {"displayMode": "list", "placement": "bottom"}},
      "targets": [{"refId": "A", "expr": "skirnir_node_gpu_guard == 1", "legendFormat": "{{node}} {{state}}"}]},
     {"id": 10, "type": "timeseries", "title": "Breaker and inflight", "gridPos": {"h": 6, "w": 8, "x": 16, "y": 26},

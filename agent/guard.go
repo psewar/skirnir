@@ -17,27 +17,27 @@ import (
 // Limits geht ueber die eingehaengten Funktionen limits/setLimit (NVML unter Windows, nvidia-smi sonst). Der Guard
 // senkt nur, erhoeht nie ueber das Standardlimit, und klemmt jedes Ziel auf [Min-Limit, Standardlimit].
 //
-// Zustaende: aus | unverfuegbar | normal | hochlast | gedrosselt | erholung. Die Abwahl (enabled: false) gilt auf
+// Zustaende: off | unavailable | normal | high_load | throttled | recovery (seit 0.20.0 englisch, design/english-names.md). Die Abwahl (enabled: false) gilt auf
 // Wunsch des Betreibers als Problem (HA), damit eine vergessene Abwahl auffaellt.
 
 const (
-	guardAus          = "aus"
-	guardUnverfuegbar = "unverfuegbar"
+	guardAus          = "off"
+	guardUnverfuegbar = "unavailable"
 	guardNormal       = "normal"
-	guardHochlast     = "hochlast"
-	guardGedrosselt   = "gedrosselt"
-	guardErholung     = "erholung"
+	guardHochlast     = "high_load"
+	guardGedrosselt   = "throttled"
+	guardErholung     = "recovery"
 
-	guardEvLimitGesetzt    = "limit_gesetzt"
-	guardEvLimitVerweigert = "limit_verweigert"
-	guardEvFremdeingriff   = "fremdeingriff"
-	guardEvHochlast        = "hochlast"
-	guardEvGedrosselt      = "gedrosselt"
-	guardEvErholung        = "erholung"
-	guardEvSpannung        = "spannung_niedrig"
-	guardEvTemperatur      = "temperatur_hoch"
-	guardEvHwDrossel       = "hw_drossel"
-	guardEvAbgewaehlt      = "abgewaehlt"
+	guardEvLimitGesetzt    = "limit_set"
+	guardEvLimitVerweigert = "limit_refused"
+	guardEvFremdeingriff   = "external_change"
+	guardEvHochlast        = "high_load"
+	guardEvGedrosselt      = "throttled"
+	guardEvErholung        = "recovery"
+	guardEvSpannung        = "voltage_low"
+	guardEvTemperatur      = "temperature_high"
+	guardEvHwDrossel       = "hw_throttle"
+	guardEvAbgewaehlt      = "deselected"
 
 	guardErholungMeldenS = 60.0
 	guardVRefMaxProben   = 1440 // eine Leerlauf-Spannungsprobe je Minute, 24 h
@@ -111,7 +111,7 @@ type guardInput struct {
 // GuardStatus geht in Heartbeat, /health und MQTT.
 type GuardStatus struct {
 	State         string   `json:"state"`
-	Source        string   `json:"quelle"`
+	Source        string   `json:"source"`
 	PowerW        *float64 `json:"power_w,omitempty"`
 	Pin16W        *float64 `json:"pin16_w,omitempty"`
 	Pin16V        *float64 `json:"pin16_v,omitempty"`
@@ -120,17 +120,17 @@ type GuardStatus struct {
 	DefaultLimitW *float64 `json:"default_limit_w,omitempty"`
 	TargetW       *float64 `json:"target_w,omitempty"`
 	Throttle      []string `json:"throttle,omitempty"`
-	HighLoadS     int      `json:"hochlast_s"`
+	HighLoadS     int      `json:"high_load_s"`
 	Problem       bool     `json:"problem"`
-	Reason        string   `json:"grund,omitempty"`
-	Warnings      []string `json:"warnungen,omitempty"`
+	Reason        string   `json:"reason,omitempty"`
+	Warnings      []string `json:"warnings,omitempty"`
 }
 
 type guardEvent struct {
 	Type   string    `json:"event_type"`
 	Msg    string    `json:"msg"`
 	LimitW float64   `json:"limit_w,omitempty"`
-	At     time.Time `json:"zeit"`
+	At     time.Time `json:"at"`
 }
 
 // guardEngine haelt den Zustand zwischen zwei Messungen. Nicht nebenlaeufig sicher - der Aufrufer serialisiert.
@@ -214,7 +214,7 @@ func (g *guardEngine) step(in guardInput) (GuardStatus, []guardEvent) {
 			ev(guardEvAbgewaehlt, "GPU-Schutz per Konfiguration abgewaehlt - kein Limit, nur Messwerte", 0)
 		}
 		g.state = guardAus
-		st.State, st.Problem, st.Reason = guardAus, true, "abgewaehlt"
+		st.State, st.Problem, st.Reason = guardAus, true, guardEvAbgewaehlt
 		return st, evs
 	}
 	if !in.Limits.OK || in.Limits.Def <= 0 {
@@ -445,7 +445,7 @@ func newGuard(cfg GuardCfg, gpu *GPU, log *Logger) *Guard {
 	g.engine = newGuardEngine(cfg, gpu.SetPowerLimit)
 	g.status = GuardStatus{State: guardUnverfuegbar, Source: "-", Reason: "noch keine Messung"}
 	if !cfg.on() {
-		g.status = GuardStatus{State: guardAus, Source: "-", Problem: true, Reason: "abgewaehlt"}
+		g.status = GuardStatus{State: guardAus, Source: "-", Problem: true, Reason: guardEvAbgewaehlt}
 	}
 	return g
 }

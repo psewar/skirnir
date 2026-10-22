@@ -77,7 +77,7 @@ def score(node, model):
     if admission.saturated(node, model):   # Knoten voll oder Modell an seiner max_parallel-Grenze
         s -= w["saturated"]
     gg = state.CFG.gpu_guard   # GPU-Schutz: Knoten in Hochlast/Stufe 2 weichen einem zweiten Knoten, der die Stufe tragen kann
-    if gg["enabled"] and node.guard_policy and node.guard_state() in ("hochlast", "gedrosselt"):   # CloudTarget: guard_policy False
+    if gg["enabled"] and node.guard_policy and node.guard_state() in ("high_load", "throttled"):   # CloudTarget: guard_policy False
         s -= gg["score_penalty"]
     if node.vram_total_gib and node.vram_free_gib is not None:
         s += w["vram_free"] * (node.vram_free_gib / node.vram_total_gib)
@@ -134,7 +134,7 @@ def _interactive_pick(per_tier, req):
                 free = [n for n in cands if not admission.saturated(n, t["model"]) and (n.is_loaded(t["model"]) or not warm_only)
                         and (n.name not in busy or not other_only)]
                 if free:
-                    req.reason = "ausweichen"
+                    req.reason = "fallback"
                     return i, t, ctx, rank(free, t["model"], req)[0]
     return None
 

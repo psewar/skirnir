@@ -82,7 +82,7 @@ Tests: `ollamawatch_test.go` (Aenderung, nur `expires_at`, neues Modell, drei Fe
 Der Heartbeat traegt zwei Bloecke, damit der Router nicht aus fremdem VRAM raten muss, ob jemand spielt:
 
 - `game: {supported, running, name, via, since, folders, procs, gpu_dedicated_mib, gpu_shared_mib, gpu_pct}`: jede Sekunde
-  (bis 0.18 alle 5 s; ein Durchlauf kostet ~17 ms bei ~500 Prozessen) prueft das Modul `spiel`, ob ein Prozess aus einem
+  (bis 0.18 alle 5 s; ein Durchlauf kostet ~17 ms bei ~500 Prozessen) prueft das Modul `game`, ob ein Prozess aus einem
   Spielordner laeuft. Spielordner sind die Steam-Bibliotheken (`libraryfolders.vdf`, Steam-Ort aus der Registry) und die
   Installationsorte von Spielen bekannter Verlage aus den Deinstallationseintraegen (HKLM 64/32 Bit und jeder geladene
   Benutzer-Zweig), ohne Launcher. Ist der Pfad eines Prozesses nicht lesbar (Anti-Cheat), zaehlt sein Name, wenn eine
@@ -116,7 +116,7 @@ skirnir-agent.exe start|stop|restart      ohne UAC (Installer setzt das Steuerre
 skirnir-agent.exe install|uninstall       Admin
 skirnir-agent.exe check-config | mqtt-clear | version
 skirnir-agent.exe gpu                     Messquelle und alle Sensoren einmal ausgeben (auch GPU-Z, falls es laeuft)
-skirnir-agent.exe spiel                   Spielerkennung und Hauptspeicher einmal ausgeben (Ordner, Programmnamen, Treffer,
+skirnir-agent.exe game                    Spielerkennung und Hauptspeicher einmal ausgeben (Ordner, Programmnamen, Treffer,
                                           GPU-Bedarf des Spiels)
 ```
 
@@ -230,10 +230,10 @@ Dauer-Vollast begrenzen und frueh warnen. Der Agent tut genau das (`guard.go`, r
 | Zustand | Bedeutung |
 |---|---|
 | `normal` | Dauerlimit gesetzt (Standard 80 % des Standardlimits, 5090: 460 W) |
-| `hochlast` | Leistung >= 90 % des aktiven Limits seit der halben Frist (300 s) - Vorwarnung |
-| `gedrosselt` | 600 s am Limit -> Stufe 2 (70 %, 5090: 403 W) fuer 300 s; Luecken bis 15 s (`high_load_gap_s`) unterbrechen den Zaehler nicht (0.7.1 - vorher setzte jede Warteschlangen-Luecke ihn zurueck, gemessen 2026-09-25) |
-| `erholung` | zurueck auf das Dauerlimit, 60 s lang gemeldet |
-| `unverfuegbar` | Limit nicht lesbar oder nicht setzbar (kein NVML, keine Berechtigung, Linux ohne root) - nur Beobachtung, **Problem** |
+| `high_load` | Leistung >= 90 % des aktiven Limits seit der halben Frist (300 s) - Vorwarnung |
+| `throttled` | 600 s am Limit -> Stufe 2 (70 %, 5090: 403 W) fuer 300 s; Luecken bis 15 s (`high_load_gap_s`) unterbrechen den Zaehler nicht (0.7.1 - vorher setzte jede Warteschlangen-Luecke ihn zurueck, gemessen 2026-09-25) |
+| `recovery` | zurueck auf das Dauerlimit, 60 s lang gemeldet |
+| `unavailable` | Limit nicht lesbar oder nicht setzbar (kein NVML, keine Berechtigung, Linux ohne root) - nur Beobachtung, **Problem** |
 | `aus` | `gpu_guard.enabled: false` - kein Limit; zaehlt auf Wunsch des Betreibers als **Problem**, damit eine vergessene Abwahl auffaellt |
 
 Regeln: der Guard **senkt nur** (ein Fremdtool, das tiefer stellt, bleibt), hebt nur von einem selbst gesetzten Wert
@@ -305,8 +305,8 @@ ins Kind-Log schreibt (`kuerzung.go`), und erkennt zwei Muster:
 
 | Art (`event_type`) | Log-Zeile | Bedeutung |
 |---|---|---|
-| `eingabe_gekuerzt` | `msg="truncating input prompt" limit=... prompt=... new=...` | Prompt vor der Verarbeitung abgeschnitten |
-| `kontext_voll` | `stop processing: n_tokens = N, truncated = 1` | Kontextfenster lief waehrend der Verarbeitung voll |
+| `input_truncated` | `msg="truncating input prompt" limit=... prompt=... new=...` | Prompt vor der Verarbeitung abgeschnitten |
+| `context_full` | `stop processing: n_tokens = N, truncated = 1` | Kontextfenster lief waehrend der Verarbeitung voll |
 
 In HA erscheinen drei Entitaeten: `Ollama Kürzungen` (Zaehler seit Dienststart, `total_increasing`),
 `Ollama letzte Kürzung` (Zeitstempel, Details als Attribute) und das Ereignis `Ollama Kürzung` fuer Automationen

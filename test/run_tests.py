@@ -206,19 +206,20 @@ def main():
         # Fremd-VRAM-Transiente (Modellwechsel): ein einzelner Ausreisser darf nicht busy machen
         hb("big", 5, 30000, 2600); time.sleep(0.6); hb("big", 5, 26600, 6000)
         check("einzelner Fremd-VRAM-Ausreisser bleibt free", state()["nodes"]["big"]["state"] == "free", state()["nodes"]["big"]["busy_reason"])
-        # GPU-Schutz (Agent >= 0.7.0): Status im Heartbeat -> Deckel, HA-Problem, Ereignis; kein Einfluss auf free/busy
+        # GPU-Schutz (Agent >= 0.7.0): Status im Heartbeat -> Deckel, HA-Problem, Ereignis; kein Einfluss auf free/busy.
+        # Die ersten drei Meldungen kommen wie von einem Agenten vor 0.20.0 (deutsch), die vierte mit den Namen ab 0.20.0.
         base_cap = state()["nodes"]["big"]["max_inflight"]
         st, txt = hb("big", 5, 26600, 6000, gpu_guard={"state": "gedrosselt", "limit_w": 403, "target_w": 403, "default_limit_w": 575, "problem": False, "quelle": "nvml"})
         n = state()["nodes"]["big"]
-        check("GPU-Schutz gedrosselt -> Deckel 1 gleichzeitig, free bleibt", n["max_inflight"] == 1 and n["gpu_guard"]["state"] == "gedrosselt" and n["state"] == "free", str(n.get("gpu_guard")))
+        check("GPU-Schutz gedrosselt (Agent < 0.20) -> throttled, Deckel 1 gleichzeitig, free bleibt", n["max_inflight"] == 1 and n["gpu_guard"]["state"] == "throttled" and n["state"] == "free", str(n.get("gpu_guard")))
         check("Heartbeat-Antwort traegt gpu_guard_ack", st == 200 and json.loads(txt).get("gpu_guard_ack") is True, txt[:120])
         hb("big", 5, 26600, 6000, gpu_guard={"state": "unverfuegbar", "problem": True, "grund": "Limit nicht setzbar: keine Berechtigung (rc 4)"})
         ha_s = json.loads(http(C + "/admin/ha")[1])
-        check("GPU-Schutz unverfuegbar -> HA-Problem, Deckel wieder normal", any("GPU-Schutz unverfuegbar" in p for p in ha_s["problems"]) and state()["nodes"]["big"]["max_inflight"] == base_cap, str(ha_s["problems"]))
+        check("GPU-Schutz unverfuegbar -> HA-Problem, Deckel wieder normal", any("GPU-Schutz unavailable" in p for p in ha_s["problems"]) and state()["nodes"]["big"]["max_inflight"] == base_cap, str(ha_s["problems"]))
         hb("big", 5, 26600, 6000, gpu_guard={"state": "aus", "problem": True, "grund": "abgewaehlt"})
         ha_s = json.loads(http(C + "/admin/ha")[1])
-        check("GPU-Schutz abgewaehlt -> HA-Problem (Betreiber-Entscheid)", any("abgewaehlt" in p for p in ha_s["problems"]), str(ha_s["problems"]))
-        hb("big", 5, 26600, 6000, gpu_guard={"state": "normal", "limit_w": 460, "target_w": 460, "problem": False, "quelle": "nvml+gpuz"})
+        check("GPU-Schutz abgewaehlt -> HA-Problem (Betreiber-Entscheid)", any("deselected" in p for p in ha_s["problems"]), str(ha_s["problems"]))
+        hb("big", 5, 26600, 6000, gpu_guard={"state": "normal", "limit_w": 460, "target_w": 460, "problem": False, "source": "nvml+gpuz"})
         ha_s = json.loads(http(C + "/admin/ha")[1])
         check("GPU-Schutz normal -> kein Problem, Deckel normal, HA-Knoten traegt Limit", not any("GPU-Schutz" in p for p in ha_s["problems"]) and state()["nodes"]["big"]["max_inflight"] == base_cap and ha_s["nodes"]["big"]["gpu_guard"]["limit_w"] == 460, str(ha_s["nodes"]["big"].get("gpu_guard")))
         evs = [d for d in state()["decisions"] if d.get("event") == "gpu_guard"]
@@ -253,7 +254,7 @@ def main():
         dt_i = time.time() - t_i
         d_i = route(t_i)
         check("interactive bei belegtem warmem qwen (max_parallel 1) -> sofort granite auf dem ANDEREN Knoten (ausweichen), kein Warten",
-              st_q == 200 and st_i == 200 and d_i.get("model") == "granite4.2:8b" and d_i.get("reason") == "ausweichen" and dt_i < 2.0
+              st_q == 200 and st_i == 200 and d_i.get("model") == "granite4.2:8b" and d_i.get("reason") == "fallback" and dt_i < 2.0
               and d_i.get("node") == "small",
               f"{st_q} {st_i} {dt_i:.2f}s {d_i}")
         t_n = time.time()
@@ -1376,10 +1377,10 @@ def main():
               len(obs) == 1 and obs[0].get("wait_reason") == "max_parallel" and obs[0].get("blocked_model") == "granite4.2:8b"
               and obs[0].get("class") in ("standard", "gross", "assist", "code") and obs[0].get("engine") != "local_llm"
               and "would_fallback" in obs[0] and obs[0].get("request_id") == q_mp[0].get("request_id"), str(obs))
-        an_datei = os.path.join(HERE, "anfragen.jsonl")
+        an_datei = os.path.join(HERE, "requests.jsonl")
         zeilen_an = [json.loads(z) for z in open(an_datei, encoding="utf-8")] if os.path.exists(an_datei) else []
         mine = [z for z in zeilen_an if q_mp and z.get("request_id") == q_mp[0].get("request_id")]
-        check("0.6.7 observe_all: Zeile je Anfrage in anfragen.jsonl mit Klasse, Dauer, Wartezeit, Token - ohne Inhalte",
+        check("0.6.7 observe_all: Zeile je Anfrage in requests.jsonl mit Klasse, Dauer, Wartezeit, Token - ohne Inhalte",
               len(mine) == 1 and mine[0].get("class") in ("standard", "gross", "assist", "code") and mine[0].get("duration_s", 0) > 1.5
               and mine[0].get("queued_s", 0) > 1.0 and mine[0].get("outcome") == "ok" and "output_tokens" in mine[0]
               and "zwei" not in json.dumps(mine[0]), f"{len(zeilen_an)} Zeilen, {mine}")
@@ -1450,7 +1451,7 @@ def main():
             time.sleep(0.5)
         cfg = json.loads(http(C + "/admin/config")[1])
         g = cfg["models"]["granite4.2:8b"]
-        check("Messung: weights/kv aus /api/ps abgeleitet, Quelle gemessen", g.get("source") == "gemessen" and abs(g["kv_gib_per_1k"] - 0.158) < 0.01 and abs(g["weights_gib"] - 4.95) < 0.05, str(g))
+        check("Messung: weights/kv aus /api/ps abgeleitet, Quelle gemessen", g.get("source") == "measured" and abs(g["kv_gib_per_1k"] - 0.158) < 0.01 and abs(g["weights_gib"] - 4.95) < 0.05, str(g))
         st, raw = http(C + "/admin/measure", {"model": "qwen3.6:35b-a3b"})
         check("Messung ohne freien Knoten mit dem Modell -> 409", st == 409, raw.decode()[:100])
         # Leistung: passiv aus den bisherigen Anfragen (Fake: 30 Token / 0.5 s = 60 tok/s)

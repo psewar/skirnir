@@ -116,7 +116,7 @@ SCHEMA = {
                         "rules": None, "calibration_path": None,
                         "capture": {"enabled": None, "path": None, "clients": None, "anonymize": None, "max_context_chars": None},
                         # 0.6.7: Beobachtungsmodus - wartet eine Anfrage, klassifizieren und protokollieren, ob eine tiefere freie
-                        # Stufe gereicht haette (ausweich_beobachtung.py); observe_light = Klassen, fuer die das in Frage kaeme
+                        # Stufe gereicht haette (fallback_observation.py); observe_light = Klassen, fuer die das in Frage kaeme
                         "observe_blocked": None, "observe_light": None,
                         # ... und observe_all: JEDE Anfrage im Hintergrund einordnen, Zeile je Anfrage in observe_path
                         # (Vorgabe anfragen.jsonl neben config.yaml) - Klasse, Dauer, Token, keine Inhalte

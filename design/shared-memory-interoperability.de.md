@@ -248,7 +248,7 @@ auch über `GET /v1/skirnir/sessions/{id}/checkpoints/latest` explizit abrufbar.
 `context_manager.optimize_recall` begrenzt Recall auf `recall_budget_percent`
 (Default 20) und entfernt bei Bedarf nachrangige Einträge zugunsten geschützten
 Verlaufs. Vollständige Untrusted-Wrapper bleiben erhalten. Die Schätzung nutzt
-`kontextpruefung`, konservative UTF-8-/Tool-Overheads, Antwort- und Sicherheitsreserve;
+`context_check`, konservative UTF-8-/Tool-Overheads, Antwort- und Sicherheitsreserve;
 sie ersetzt keinen exakten Modell-Tokenizer.
 
 `reduce_tool_results` reduziert nur alte abgeschlossene Tool-Ergebnisse in der

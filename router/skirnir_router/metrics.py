@@ -15,6 +15,7 @@ import os
 import time
 
 from . import admission, perf, scheduler, state
+from . import nodes as nodes_mod
 from .common import VERSION, load_json_file, save_json_file
 
 DURATION_BUCKETS = (0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300)
@@ -241,7 +242,7 @@ def render():
     gauge("skirnir_node_gpu_pin16_v", "voltage at the 16-pin connector (GPU-Z)", [({"node": n.name}, sens(n, "pin16_voltage_v")) for n in nodes])
     gauge("skirnir_node_gpu_temp_c", "GPU temperature", [({"node": n.name}, sens(n, "temp_c")) for n in nodes])
     gauge("skirnir_node_gpu_mem_temp_c", "memory temperature (GPU-Z)", [({"node": n.name}, sens(n, "mem_temp_c")) for n in nodes])
-    gauge("skirnir_node_gpu_guard", "1 for the GPU guard state", [({"node": n.name, "state": s}, 1 if n.guard_state(now) == s else 0) for n in nodes for s in ("aus", "unverfuegbar", "normal", "hochlast", "gedrosselt", "erholung")])
+    gauge("skirnir_node_gpu_guard", "1 for the GPU guard state", [({"node": n.name, "state": s}, 1 if n.guard_state(now) == s else 0) for n in nodes for s in nodes_mod.GUARD_STATES])
     gauge("skirnir_model_loaded_gib", "loaded models and their VRAM", [({"node": n.name, "model": m}, round(g, 3)) for n in nodes for m, g in n.loaded.items()])
     adm = admission.view()
     gauge("skirnir_admission_waiting", "waiting requests per node", [({"node": k}, v) for k, v in adm["by_node"].items()] or [({}, 0)])

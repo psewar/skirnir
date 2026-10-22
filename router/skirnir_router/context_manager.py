@@ -9,7 +9,7 @@ import json
 import math
 import re
 
-from . import kontextpruefung
+from . import context_check
 from .outcome import conflict, too_large
 
 
@@ -68,7 +68,7 @@ def estimate(body, messages):
     # Serialized UTF-8 bytes plus conservative chat/tool template overhead.
     prompt = {k: body[k] for k in ("tools", "format", "system", "prompt", "suffix") if k in body}
     prompt["messages"] = messages
-    return max(kontextpruefung.conservative_bound(prompt), len(encoded(prompt)) + 64 * len(messages) + (256 if body.get("tools") else 0))
+    return max(context_check.conservative_bound(prompt), len(encoded(prompt)) + 64 * len(messages) + (256 if body.get("tools") else 0))
 
 
 def project(context, body, budget, cfg, model, ephemeral=None, max_messages=None):

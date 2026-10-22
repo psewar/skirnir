@@ -13,8 +13,8 @@ import (
 // Zeilen mit, die der Supervisor ohnehin ins Kind-Log schreibt, zaehlt beide Arten und meldet jede sofort per MQTT.
 
 const (
-	kuerzungEingabe     = "eingabe_gekuerzt" // Ollama hat den Prompt vor der Verarbeitung abgeschnitten
-	kuerzungKontextVoll = "kontext_voll"     // das Kontextfenster lief waehrend der Verarbeitung voll
+	kuerzungEingabe     = "input_truncated" // Ollama hat den Prompt vor der Verarbeitung abgeschnitten
+	kuerzungKontextVoll = "context_full"    // das Kontextfenster lief waehrend der Verarbeitung voll
 )
 
 var (
@@ -25,12 +25,12 @@ var (
 )
 
 type Kuerzung struct {
-	Art     string    `json:"art"`
-	Zeit    time.Time `json:"zeit"`
-	Kind    string    `json:"kind"`             // Kindprozess, dessen Log die Zeile enthielt
-	Limit   int       `json:"limit,omitempty"`  // eingabe_gekuerzt: erlaubte Laenge
-	Prompt  int       `json:"prompt,omitempty"` // eingabe_gekuerzt: angelieferte Laenge
-	Neu     int       `json:"neu,omitempty"`    // eingabe_gekuerzt: Laenge nach dem Kuerzen
+	Art     string    `json:"type"`
+	Zeit    time.Time `json:"at"`
+	Kind    string    `json:"kind"`                   // Kindprozess, dessen Log die Zeile enthielt
+	Limit   int       `json:"limit,omitempty"`        // input_truncated: erlaubte Laenge
+	Prompt  int       `json:"prompt,omitempty"`       // input_truncated: angelieferte Laenge
+	Neu     int       `json:"truncated_to,omitempty"` // input_truncated: Laenge nach dem Kuerzen
 	NTokens int       `json:"n_tokens,omitempty"`
 }
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import admission, auth, ausweich_beobachtung, cloud, decision, kontextpruefung, metrics, memory, managed, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
+from . import admission, auth, fallback_observation, cloud, decision, context_check, metrics, memory, managed, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
 from .outcome import Problem, bad_gateway, failed
@@ -234,7 +234,7 @@ class _Acquire:
 
     def __init__(self, name, role, tiers, req, client_ctx, body=None, path=None, client=None):
         self.name, self.role, self.tiers, self.req, self.client_ctx = name, role, tiers, req, client_ctx
-        self.body, self.path, self.client = body, path, client   # fuer den Beobachtungsmodus (ausweich_beobachtung)
+        self.body, self.path, self.client = body, path, client   # fuer den Beobachtungsmodus (fallback_observation)
         self.tried = set()
         self.woke = False
         self.waited_loads = set()   # (Knoten, Modell), auf deren Laden schon gewartet wurde
@@ -320,7 +320,7 @@ class _Acquire:
                             "request_id": self.req.request_id, "inflight": node.inflight, "model": model,
                             "reason": "max_parallel" if model_full else "max_inflight"})
             if _is_role(self.role) and self.body is not None and not self.req.context_sensitive:   # 0.6.7: haette eine tiefere freie Stufe gereicht? (nur Protokoll)
-                ausweich_beobachtung.start(self.body, self.path, self.role, self.tiers, self.req, node, model,
+                fallback_observation.start(self.body, self.path, self.role, self.tiers, self.req, node, model,
                                            "max_parallel" if model_full else "max_inflight", self.client)
         if now >= self.deadline_at:
             waited = round((now - self.t_enq) * 1000)
@@ -400,8 +400,8 @@ class _Relay:
         # gemessen verliert qwen3-coder:30b so 80 % seiner Calls oberhalb ~12k Token. Siehe toolcall_rescue.
         self.rescue = state.CFG.toolcall_rescue and toolcall_rescue.aktiv_fuer(self.out)
         self.is_cloud = node.is_cloud
-        # Passt die Anfrage in num_ctx? Ollama kuerzt sonst still; bestaetigt wird nach der Antwort (kontextpruefung)
-        self.geschaetzt = kontextpruefung.vorher(self.out, self.ctx, self.is_cloud)
+        # Passt die Anfrage in num_ctx? Ollama kuerzt sonst still; bestaetigt wird nach der Antwort (context_check)
+        self.geschaetzt = context_check.vorher(self.out, self.ctx, self.is_cloud)
         self.warm = node.is_loaded(self.model)
         self.t0 = time.time()
         self.outcome = None          # Stufe 3: ok | error | timeout | structured_error (perf_outcome + Breaker)
@@ -414,7 +414,7 @@ class _Relay:
         self.managed_turn = request.get(managed.KEY)
         self.managed_capture = managed.AssistantCapture(self.managed_turn.cfg.max_response_bytes) if self.managed_turn else None
         self.managed_problem = None  # set by _render_chunks when a managed chunk cannot be persisted
-        self.obs_task = None         # 0.6.7: Einordnung im Hintergrund fuer anfragen.jsonl (ausweich_beobachtung, observe_all)
+        self.obs_task = None         # 0.6.7: Einordnung im Hintergrund fuer anfragen.jsonl (fallback_observation, observe_all)
 
     async def run(self):
         self._begin()
@@ -456,7 +456,7 @@ class _Relay:
         self.headers = request_mod.headers_for(self.info)
         if hasattr(self.shape, "bind"):   # Anthropic: Message-ID = Request-ID, model = Name, den der Client kennt
             self.shape.bind(self.req.request_id, self.exposed)
-        self.obs_task = None if self.context_sensitive else ausweich_beobachtung.begin(self.path, self.out)
+        self.obs_task = None if self.context_sensitive else fallback_observation.begin(self.path, self.out)
         request_mod.remember_session(self.req.session_id, node.name, model)
         reason = "loaded" if self.warm else "cold"
         log.info("route %s %s -> tier%d %s ctx=%s node=%s(%s,%s) inflight=%d req=%s%s", self.path, self.role["name"], self.tier_idx,
@@ -486,11 +486,11 @@ class _Relay:
         metrics.observe_request(self.info, self.outcome or "aborted", elapsed, self.ttft_s, self.ptoks, self.ctoks,
                                 self.req.queued_ms / 1000.0, cost)
         if self.geschaetzt and self.outcome == "ok":
-            kontextpruefung.nachher(self.geschaetzt, self.ptoks, self.ctx,
+            context_check.nachher(self.geschaetzt, self.ptoks, self.ctx,
                                     {**(self.info or {}), "path": self.path, "request_id": self.req.request_id})
         admission.release(node)   # Stufe 3: Platz frei -> bestplatzierten Wartenden wecken
         log.info("done %s node=%s %.1fs%s", self.role["name"], node.name, elapsed, f" {cost:.4f} CHF" if cost else "")
-        ausweich_beobachtung.finish(self.obs_task, {
+        fallback_observation.finish(self.obs_task, {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": self.req.request_id, "client": self.request.get("client"),
             "role": self.role["name"], "is_role": _is_role(self.role), "model": model, "node": node.name, "path": self.path,
             "via": self.shape.name if self.shape else "ollama", "stream": self.stream, "priority": self.req.priority,

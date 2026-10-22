@@ -184,7 +184,7 @@ def evaluate(node, now):
     # psewar mit laufendem Spiel online, das Vorwaermen fiel ins Fenster, und die Karte blieb neben dem leichten Spiel leer.
     if (node.state == "free" and node.prewarm_after_game and not node.mem_pressure and not game_blocks_prewarm(node, now)):
         node.prewarm_after_game = False
-        why = "spiel-leicht" if node.game_since is not None else "spiel-vorbei"
+        why = "game_light" if node.game_since is not None else "game_ended"
         log.info("node %s: Vorwaermen nachgeholt (%s)", node.name, why)
         state.spawn(prewarm(node, 0, why, since=node.free_at))
 
@@ -530,10 +530,11 @@ def apply_heartbeat(node, b, now):
         ollamaupdate.note_report(node, b["ollama_update"], now)
     g = b.get("gpu_guard")     # Agent >= 0.7.0: GPU-Schutz (Power-Limit, Hochlast-Stufe, Warnungen) - nur Flag neben dem Zustand
     if isinstance(g, dict):
+        g = nodes.guard_english(g)   # Agenten vor 0.20.0 melden deutsch
         prev = node.guard or {}
         node.guard, node.guard_ts = g, now
         if g.get("state") != prev.get("state") or bool(g.get("problem")) != bool(prev.get("problem")):
-            reason = g.get("grund") or ", ".join(g.get("warnungen") or [])
+            reason = g.get("reason") or ", ".join(g.get("warnings") or [])
             log.info("node %s: GPU-Schutz %s%s%s", node.name, g.get("state"), f" ({reason})" if reason else "",
                      f" Limit {g.get('limit_w')} W" if g.get("limit_w") is not None else "")
             state.remember({"event": "gpu_guard", "node": node.name, "state": g.get("state"), "limit_w": g.get("limit_w"),

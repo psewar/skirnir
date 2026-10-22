@@ -174,7 +174,7 @@ roles:
   When available RAM or free commit stays below `memory_pressure.min_free_gib` (8 GiB) for
   `memory_pressure.polls` heartbeats (2), the node is under memory pressure: nothing is loaded cold and no prewarm runs,
   loaded models keep answering and nothing is unloaded. Reason code `memory_pressure` with `Retry-After` 60 s.
-  `skirnir-agent spiel` prints what the agent detects.
+  `skirnir-agent game` prints what the agent detects.
 - **Prewarm.** After coming online and after `busy → free` the router preloads the rank-1 models of the roles, as many as fit
   into VRAM together. A **residency rule** brings back an evicted rank-1 model once the evictor has not been requested for
   5 min – otherwise "warm first" would stay stuck on the fallback tier forever.
@@ -249,7 +249,7 @@ Size limits before the backend (413): `max_images` 16, `max_tools` 128, `max_mes
   `max_wait_batch_s` (1800 s).
 - **Interactive requests do not queue behind a busy warm model** if another local tier can serve right away: first a free
   warm tier, then a free cold one, other nodes before the busy one (never a cloud tier on this path); the decision log shows
-  `reason: ausweichen`. Without a busy warm model, warm first decides as before; if no tier is free, the request waits
+  `reason: fallback`. Without a busy warm model, warm first decides as before; if no tier is free, the request waits
   within its interactive budget.
 - **Observation mode** (`decision_engine.observe_blocked`): when a request for a role has to wait, the decision engine
   classifies it in the background with its CPU chain only (embedding, TF-IDF, rules; never the LLM, which would queue on
@@ -257,7 +257,7 @@ Size limits before the backend (413): `max_images` 16, `max_tools` 128, `max_mes
   tier of the same role and `would_fallback` for the classes in `observe_light`. Routing does not change; the point is to
   measure how often a free smaller model would have been good enough before letting the router act on it.
   `observe_all` goes further: every request to `/api/chat` or `/api/generate` is classified in the background when it starts,
-  and when it ends the router appends one line to `anfragen.jsonl` next to the configuration (`observe_path`): class,
+  and when it ends the router appends one line to `requests.jsonl` next to the configuration (`observe_path`): class,
   duration, waiting time, tokens, thinking, tool count, client, role, outcome - no prompt contents. A separate file, so the
   decision log keeps its window; it rotates at 20 MB. The response never waits for the classification.
 
@@ -493,7 +493,7 @@ have no LXC host, copy by hand or adapt the two templates `CT_EXEC`/`CT_PUSH` in
 python test/run_tests.py          # about 250 end-to-end checks, ~3 min: two fake Ollama nodes, fake agent through the tunnel,
                                   # fake cloud (OpenAI and Anthropic), fake decision service, self-signed TLS, client auth,
                                   # admission, breaker, canary/shadow, idempotency, cloud limits, UI config round trips
-python test/selftest_kontextpruefung.py   # standalone self-tests without a router: context pre-check and
+python test/selftest_context_check.py   # standalone self-tests without a router: context pre-check and
 python test/selftest_toolcall_rescue.py   # tool-call rescue (a few seconds each)
 python test/dev_env.py            # the same environment for clicking around, without TLS/login
 python test/perf_run.py           # test bench: CPU per request, py-spy profile (test/perf_profile_report.py)
@@ -535,7 +535,7 @@ Since router 0.2.0 / agent 0.11.0 the technical names follow the product: packag
 ("Skirnir Agent"). `deploy.py` moves an existing router installation once (directories, units), and the agent's `setup`
 migrates an existing node (directories, service, relay task). An agent that updated itself under the old file name keeps
 working: old configuration path, service and task names are found as fallbacks until `setup` has run. The MQTT side moved
-too: base topic `skirnir-router`, discovery node id `skirnir_router`, unique ids `skirnir_router_*`, entity ids `sensor.skirnir_*`;
+too: base topic `skirnir-router`, discovery node id `skirnir_router`, unique ids `skirnir_router_*`, entity ids `<domain>.skirnir_*` (English since router 0.9.0 via `default_entity_id`, see design/english-names.md);
 the router clears the retained topics of the old names on its first connect. Home Assistant keeps entity registry entries per
 unique id, so custom entity ids of the old entities have to be carried over once (an operator script does that over the
 WebSocket API); recorder history does not carry over.

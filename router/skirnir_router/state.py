@@ -18,7 +18,7 @@ NODES = {}
 MQTT_DIRTY = []   # nicht-leer = sofort publizieren
 TASKS = set()     # Hintergrund-Tasks (spawn): der Loop haelt nur schwache Referenzen, ein unreferenzierter Task kann vor dem Ende eingesammelt werden
 MQTT_EVENTS = []  # HA-Ereignisse, die ha.py beim naechsten Durchlauf einmal verschickt (nicht retained)
-KUERZUNGEN = {"anzahl": 0, "letzte": None}   # bestaetigte stille Kuerzungen seit Routerstart (kontextpruefung.py)
+TRUNCATIONS = {"count": 0, "last": None}   # bestaetigte stille Kuerzungen seit Routerstart (context_check.py)
 MEASURING = {}    # model -> {"node", "step", "started", "error"} waehrend einer laufenden Messung
 PERF = {}         # "model@node" -> Leistungsdaten (passiv aus echten Anfragen + aktiver Benchmark), persistiert in perf.json
 PERF_DIRTY = [0.0]
@@ -84,8 +84,29 @@ def decisions_load():
     return len(rows)
 
 
+# Namen in events.jsonl vor Router 0.9.0 (design/english-names.md): beim Laden uebersetzt, damit Filter alte und neue
+# Eintraege gleich finden. Schluessel: Feld -> {alt: neu}; dazu die Felder des Kuerzungs-Ereignisses.
+JOURNAL_BEFORE_0_9 = {
+    "event": {"kontext_gekuerzt": "context_truncated"},
+    "reason": {"spiel-leicht": "game_light", "spiel-vorbei": "game_ended", "ausweichen": "fallback", "abgewaehlt": "deselected"},
+    "state": {"aus": "off", "unverfuegbar": "unavailable", "hochlast": "high_load", "gedrosselt": "throttled", "erholung": "recovery"},
+    "status": {"cloud uebersprungen": "cloud_skipped", "kein Knoten": "no_node"},
+}
+TRUNCATION_FIELDS_BEFORE_0_9 = {"geschaetzt": "estimated", "angekommen": "received", "quote": "ratio", "sicher": "certain"}
+
+
+def _journal_english(r):
+    """Ein Eintrag aus events.jsonl mit den Namen ab Router 0.9.0."""
+    for feld, namen in JOURNAL_BEFORE_0_9.items():
+        if r.get(feld) in namen:
+            r[feld] = namen[r[feld]]
+    if r.get("event") == "context_truncated":
+        r = {TRUNCATION_FIELDS_BEFORE_0_9.get(k, k): v for k, v in r.items()}
+    return r
+
+
 def _journal_row(line):
-    """Eine Zeile aus events.jsonl als Eintrag, None fuer Leerzeilen und angerissene Zeilen (Absturz beim Schreiben)."""
+    """Eine Zeile aus events.jsonl als Eintrag (Namen ab 0.9.0), None fuer Leerzeilen und angerissene Zeilen (Absturz beim Schreiben)."""
     import json
     if not line.strip():
         return None
@@ -93,7 +114,7 @@ def _journal_row(line):
         r = json.loads(line)
     except ValueError:  # exception-ok: a line torn by a crash while writing; whether it parses shows only the parser
         return None
-    return r if isinstance(r, dict) and r.get("event") and r.get("t") else None
+    return _journal_english(r) if isinstance(r, dict) and r.get("event") and r.get("t") else None
 
 
 def _decisions_compact():
@@ -145,7 +166,7 @@ def decisions_append(entry):
 def remember(entry):
     entry["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     entry["t"] = time.time()
-    if entry.get("event") in ("busy", "free", "wol", "no_node", "kontext_gekuerzt"):
+    if entry.get("event") in ("busy", "free", "wol", "no_node", "context_truncated"):
         MQTT_DIRTY.append(True)
     DECISIONS.append(entry)
     del DECISIONS[:-DECISIONS_KEEP]

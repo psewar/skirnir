@@ -10,7 +10,7 @@ Klassen betroffen sind, wie viel Wartezeit es sparte und ob die Einordnungen sti
 Nur die CPU-Kette der Engine (embed/tfidf/rules, 10-19 ms auf dem Router-Host): das kleine LLM liefe auf genau der GPU, auf die
 gewartet wird. Laeuft als eigene Aufgabe, die Anfrage wartet nicht darauf.
 
-Dazu (decision_engine.observe_all): jede Anfrage wird eingeordnet und bekommt am Ende eine Zeile in anfragen.jsonl - siehe
+Dazu (decision_engine.observe_all): jede Anfrage wird eingeordnet und bekommt am Ende eine Zeile in requests.jsonl - siehe
 Abschnitt "Mitschreiben fuer alle Anfragen" unten.
 """
 
@@ -24,7 +24,7 @@ from .common import log
 
 LIGHT_DEFAULT = ("standard", "assist")   # Klassen, fuer die eine tiefere Stufe in Frage kaeme (Programmieren, Analysen nicht)
 CLASSIFY_PATHS = ("/api/chat", "/api/generate")
-FILE_MAX_BYTES = 20 * 2 ** 20            # anfragen.jsonl: so gross, dann nach .1 rotieren (~400 B je Zeile, ~50 000 Anfragen)
+FILE_MAX_BYTES = 20 * 2 ** 20            # requests.jsonl: so gross, dann nach .1 rotieren (~400 B je Zeile, ~50 000 Anfragen)
 LATE_WAIT_S = 5.0                        # Einordnung noch nicht fertig, wenn die Anfrage endet: so lange darauf warten
 _warned = [0.0]
 
@@ -60,7 +60,7 @@ def alternative(tiers, blocked_model, req, client_ctx=None, now=None):
 
 # --- Mitschreiben fuer alle Anfragen (decision_engine.observe_all) ---------------------------------------------------
 # Jede Anfrage auf /api/chat oder /api/generate wird beim Start im Hintergrund eingeordnet (CPU-Kette, die Anfrage wartet nicht),
-# am Ende steht eine Zeile in anfragen.jsonl: Klasse, Dauer, Token, Denken, Werkzeuge, Client, Rolle, Ergebnis - keine
+# am Ende steht eine Zeile in requests.jsonl: Klasse, Dauer, Token, Denken, Werkzeuge, Client, Rolle, Ergebnis - keine
 # Prompt-Inhalte. Eigene Datei statt Entscheidungsprotokoll: ~1700 Anfragen am Tag halbierten sonst dessen 2000er-Fenster.
 # Wofuer: pruefen, ob die Klasse die Laufzeit vorhersagt (Retry-After, Wartezeit-Schaetzung), und ob Clients passende Rollen
 # waehlen - erst messen, dann danach handeln.
@@ -69,11 +69,31 @@ def all_enabled():
     return bool((state.CFG.decision or {}).get("observe_all")) and decision.active() is not None
 
 
+FILE_NAME, FILE_NAME_BEFORE_0_9 = "requests.jsonl", "anfragen.jsonl"
+
+
 def file_path():
     p = (state.CFG.decision or {}).get("observe_path")
     if p:
         return p
-    return os.path.join(os.path.dirname(os.path.abspath(state.CFG.path)), "anfragen.jsonl") if getattr(state.CFG, "path", None) else None
+    return os.path.join(os.path.dirname(os.path.abspath(state.CFG.path)), FILE_NAME) if getattr(state.CFG, "path", None) else None
+
+
+def adopt_file_before_0_9():
+    """Beim Start: das bisherige anfragen.jsonl (und seine Rotation .1) als requests.jsonl uebernehmen, wenn es noch keins
+    gibt (Router 0.9.0, design/english-names.md). Ein eigener observe_path bleibt, wie er ist."""
+    p = file_path()
+    if not p or (state.CFG.decision or {}).get("observe_path"):
+        return
+    alt = os.path.join(os.path.dirname(p), FILE_NAME_BEFORE_0_9)
+    for suffix in ("", ".1"):
+        if os.path.exists(alt + suffix) and not os.path.exists(p + suffix):
+            try:
+                os.replace(alt + suffix, p + suffix)
+            except OSError as e:  # exception-ok: file system boundary; the old file stays and a new one starts
+                log.warning("%s nicht uebernommen: %s", alt + suffix, e)
+                continue
+            log.info("%s -> %s (Router 0.9.0)", alt + suffix, p + suffix)
 
 
 def begin(path, body):
@@ -121,7 +141,7 @@ def _write(rec, task):
     except OSError as e:  # exception-ok: file system boundary
         if time.time() - _warned[0] > 600:
             _warned[0] = time.time()
-            log.warning("anfragen.jsonl schreiben (%s): %s", p, e)
+            log.warning("requests.jsonl schreiben (%s): %s", p, e)
 
 
 async def _observe(body, path, role, tiers, req, node, model, reason, client):

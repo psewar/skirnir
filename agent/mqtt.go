@@ -47,6 +47,22 @@ type sensorDef struct {
 	extra                          map[string]any
 }
 
+// entityNames: englischer Name der Entity-ID, wo er von objID abweicht (seit 0.20.0, design/english-names.md). objID
+// bestimmt unique_id und Discovery-Thema und bleibt fuer bestehende Entitaeten fest - eine neue unique_id liesse Verlauf
+// und Automationen an einer Waise.
+var entityNames = map[string]string{
+	"ollama_kuerzungen":      "ollama_truncations",
+	"ollama_letzte_kuerzung": "ollama_last_truncation",
+	"ollama_kuerzung":        "ollama_truncation",
+}
+
+func (s sensorDef) entityName() string {
+	if n, ok := entityNames[s.objID]; ok {
+		return n
+	}
+	return s.objID
+}
+
 // 1:1 aus dem frueheren Python-Skript.
 var sensorDefs = []sensorDef{
 	{"binary_sensor", "stt", "STT-Dienst", "stt", "mdi:microphone-message", nil},
@@ -62,9 +78,9 @@ var sensorDefs = []sensorDef{
 	{"binary_sensor", "router_heartbeat", "Router-Heartbeat", "router_heartbeat", "mdi:heart-pulse", map[string]any{"entity_category": "diagnostic"}},
 	// Stille Kuerzungen im Ollama-Log (kuerzung.go): Zaehler seit Dienststart, Zeitpunkt + Details der letzten,
 	// und ein Ereignis je Kuerzung fuer Automationen (Topic <device>/kuerzung, nicht retained).
-	{"sensor", "ollama_kuerzungen", "Ollama Kürzungen", "ollama_kuerzungen", "mdi:content-cut", map[string]any{"state_class": "total_increasing"}},
-	{"sensor", "ollama_letzte_kuerzung", "Ollama letzte Kürzung", "ollama_letzte_kuerzung", "mdi:clock-alert-outline",
-		map[string]any{"device_class": "timestamp", "json_attributes_template": "{{ value_json.kuerzung_details | tojson }}"}},
+	{"sensor", "ollama_kuerzungen", "Ollama Kürzungen", "ollama_truncations", "mdi:content-cut", map[string]any{"state_class": "total_increasing"}},
+	{"sensor", "ollama_letzte_kuerzung", "Ollama letzte Kürzung", "ollama_last_truncation", "mdi:clock-alert-outline",
+		map[string]any{"device_class": "timestamp", "json_attributes_template": "{{ value_json.truncation_details | tojson }}"}},
 	{"event", "ollama_kuerzung", "Ollama Kürzung", "", "mdi:content-cut",
 		map[string]any{"event_types": []string{kuerzungEingabe, kuerzungKontextVoll}}},
 	// Sensoren (0.6.0). Gruppe "gpu": NVML bzw. nvidia-smi; Gruppe "gpuz": nur wo GPU-Z einmal gesehen wurde.
@@ -154,7 +170,7 @@ func (m *MQTTModule) broker() string {
 
 func (m *MQTTModule) availTopic() string { return m.cfg.DeviceID + "/status" }
 func (m *MQTTModule) stateTopic() string { return m.cfg.DeviceID + "/state" }
-func (m *MQTTModule) eventTopic() string { return m.cfg.DeviceID + "/kuerzung" }
+func (m *MQTTModule) eventTopic() string { return m.cfg.DeviceID + "/truncation" }
 func (m *MQTTModule) guardTopic() string { return m.cfg.DeviceID + "/gpu_guard" }
 
 func (m *MQTTModule) password(ctx context.Context) (string, error) {
@@ -312,7 +328,7 @@ func (m *MQTTModule) discoveryPayload(s sensorDef, dev map[string]any) []byte {
 	cfg := map[string]any{
 		"name":                  s.name,
 		"unique_id":             m.cfg.DeviceID + "_" + s.objID,
-		"object_id":             m.cfg.DeviceID + "_" + s.objID,
+		"default_entity_id":     s.comp + "." + m.cfg.DeviceID + "_" + s.entityName(),
 		"state_topic":           m.stateTopic(),
 		"value_template":        "{{ value_json." + s.field + " }}",
 		"availability_topic":    m.availTopic(),
@@ -343,9 +359,9 @@ func (m *MQTTModule) discoveryPayload(s sensorDef, dev map[string]any) []byte {
 
 // publishKuerzung schickt ein HA-Ereignis je Kuerzung (event_type + Details als Attribute).
 func (m *MQTTModule) publishKuerzung(c paho.Client, e Kuerzung) {
-	p := map[string]any{"event_type": e.Art, "kind": e.Kind, "zeit": e.Zeit.Format(time.RFC3339)}
+	p := map[string]any{"event_type": e.Art, "kind": e.Kind, "at": e.Zeit.Format(time.RFC3339)}
 	if e.Art == kuerzungEingabe {
-		p["limit"], p["prompt"], p["neu"] = e.Limit, e.Prompt, e.Neu
+		p["limit"], p["prompt"], p["truncated_to"] = e.Limit, e.Prompt, e.Neu
 	} else {
 		p["n_tokens"] = e.NTokens
 	}
@@ -355,23 +371,23 @@ func (m *MQTTModule) publishKuerzung(c paho.Client, e Kuerzung) {
 
 // kuerzungState: Zaehler und letzte Kuerzung fuer den regulaeren State. "None" = HA setzt den Zeitsensor auf unbekannt.
 func (m *MQTTModule) kuerzungState(st map[string]any) {
-	st["ollama_kuerzungen"], st["ollama_letzte_kuerzung"] = 0, "None"
+	st["ollama_truncations"], st["ollama_last_truncation"] = 0, "None"
 	if m.sup == nil {
 		return
 	}
 	anzahl, l := m.sup.kuerzungen.Stand()
-	st["ollama_kuerzungen"] = anzahl[kuerzungEingabe] + anzahl[kuerzungKontextVoll]
+	st["ollama_truncations"] = anzahl[kuerzungEingabe] + anzahl[kuerzungKontextVoll]
 	d := map[string]any{kuerzungEingabe: anzahl[kuerzungEingabe], kuerzungKontextVoll: anzahl[kuerzungKontextVoll]}
 	if l != nil {
-		st["ollama_letzte_kuerzung"] = l.Zeit.Format(time.RFC3339)
-		d["art"], d["kind"] = l.Art, l.Kind
+		st["ollama_last_truncation"] = l.Zeit.Format(time.RFC3339)
+		d["type"], d["kind"] = l.Art, l.Kind
 		if l.Art == kuerzungEingabe {
-			d["limit"], d["prompt"], d["neu"] = l.Limit, l.Prompt, l.Neu
+			d["limit"], d["prompt"], d["truncated_to"] = l.Limit, l.Prompt, l.Neu
 		} else {
 			d["n_tokens"] = l.NTokens
 		}
 	}
-	st["kuerzung_details"] = d
+	st["truncation_details"] = d
 }
 
 // clearDiscovery loescht die retained Discovery-Configs (Verb mqtt-clear, z. B. fuer Test-Geraete).
@@ -493,20 +509,20 @@ func (m *MQTTModule) guardState(st map[string]any) {
 	st["gpu_guard_state"] = g.State
 	st["gpu_guard_problem"] = map[bool]string{true: "ON", false: "OFF"}[g.Problem]
 	st["gpu_guard_target_w"] = fval(g.TargetW)
-	d := map[string]any{"quelle": g.Source, "grund": g.Reason, "warnungen": g.Warnings, "hochlast_s": g.HighLoadS,
+	d := map[string]any{"source": g.Source, "reason": g.Reason, "warnings": g.Warnings, "high_load_s": g.HighLoadS,
 		"limit_w": fval(g.LimitW), "default_limit_w": fval(g.DefaultLimitW), "target_w": fval(g.TargetW),
 		"pin16_w": fval(g.Pin16W), "pin16_v": fval(g.Pin16V), "pin16_ref_v": fval(g.Pin16RefV), "throttle": g.Throttle}
 	if e, n := m.guard.LastEvent(); e != nil {
-		d["letztes_ereignis"], d["letztes_ereignis_zeit"], d["ereignisse"] = e.Type+": "+e.Msg, e.At.Format(time.RFC3339), n
+		d["last_event"], d["last_event_at"], d["events"] = e.Type+": "+e.Msg, e.At.Format(time.RFC3339), n
 	}
 	if hs := m.hb.Status(); hs.GuardAck != nil {
-		d["router_beachtet"] = *hs.GuardAck
+		d["router_honors"] = *hs.GuardAck
 	}
 	st["gpu_guard_details"] = d
 }
 
 func (m *MQTTModule) publishGuardEvent(c paho.Client, e guardEvent) {
-	b, _ := json.Marshal(map[string]any{"event_type": e.Type, "msg": e.Msg, "limit_w": e.LimitW, "zeit": e.At.Format(time.RFC3339)})
+	b, _ := json.Marshal(map[string]any{"event_type": e.Type, "msg": e.Msg, "limit_w": e.LimitW, "at": e.At.Format(time.RFC3339)})
 	c.Publish(m.guardTopic(), 1, false, b)
 }
 

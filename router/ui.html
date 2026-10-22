@@ -342,11 +342,6 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   // -- Laufzeit-Strings (t) --
   "aus": "off",
   "an": "on",
-  "unverfuegbar": "unavailable",
-  "normal": "normal",
-  "hochlast": "high load",
-  "gedrosselt": "throttled",
-  "erholung": "recovery",
   "gemessen": "measured",
   "geschaetzt": "estimated",
   "geschätzt": "estimated",
@@ -550,6 +545,22 @@ function t(s, vars) {   // Uebersetzung (Fallback: deutscher Text) und {name}-Pl
   if (vars) for (const k of Object.keys(vars)) r = r.split('{' + k + '}').join(String(vars[k]));
   return r;
 }
+// Laufzeitwerte (Zustaende, Gruende, Schritte) kommen seit Router 0.9.0 englisch (design/english-names.md); die deutsche
+// Ansicht zeigt sie deutsch, die englische lesbar ohne Unterstriche.
+const VALUE_DE = {
+  off: 'aus', unavailable: 'nicht verfügbar', normal: 'normal', high_load: 'Hochlast', throttled: 'gedrosselt', recovery: 'Erholung',
+  deselected: 'abgewählt', start: 'Start', warmup: 'aufwärmen', done: 'fertig', error: 'Fehler',
+  game_light: 'Spiel leicht', game_ended: 'Spiel vorbei', fallback: 'ausweichen', cloud_skipped: 'Cloud übersprungen', no_node: 'kein Knoten',
+};
+const STEP_DE = [[/^run (\d+)\/2$/, 'Messlauf $1/2'], [/^unloading for /, 'entlade für '], [/^loading /, 'lade ']];
+function tv(v) {
+  if (v == null || v === '') return '';
+  const s = String(v);
+  if (LANG !== 'de') return s.replace(/_/g, ' ');
+  if (VALUE_DE[s]) return VALUE_DE[s];
+  for (const [re, de] of STEP_DE) if (re.test(s)) return s.replace(re, de);
+  return s;
+}
 function setLang(l) { try { localStorage.setItem('skirnir.lang', l); } catch {} location.reload(); }
 function translateDom() {   // statisches Markup einmalig: Textknoten (getrimmt, Whitespace drumherum bleibt) sowie title/placeholder/value in header, nav, main
   document.querySelectorAll('#lang button').forEach(b => b.classList.toggle('active', b.dataset.lang === LANG));
@@ -625,7 +636,7 @@ function renderNodes() {
     const vram = n.gpu_known ? `${(n.vram_free_gib ?? 0).toFixed(1)} GiB / ${n.foreign_vram_gib} GiB` : '–';
     const brk = n.breaker && n.breaker !== 'closed' ? ` <span class="badge ${n.breaker}" title="Circuit Breaker">${esc(n.breaker)}</span>` : '';
     const gg = n.gpu_guard || {};
-    const grd = gg.state && gg.state !== 'normal' ? ` <span class="badge ${gg.problem ? 'open' : 'half_open'}" title="${t('GPU-Schutz')}: ${esc(gg.grund || (gg.warnungen || []).join(', ') || t(gg.state))}${gg.limit_w ? ` · Limit ${gg.limit_w} W` : ''}">${t('GPU-Schutz')} ${esc(t(gg.state))}</span>`
+    const grd = gg.state && gg.state !== 'normal' ? ` <span class="badge ${gg.problem ? 'open' : 'half_open'}" title="${t('GPU-Schutz')}: ${esc(tv(gg.reason) || (gg.warnings || []).join(', ') || tv(gg.state))}${gg.limit_w ? ` · Limit ${gg.limit_w} W` : ''}">${t('GPU-Schutz')} ${esc(tv(gg.state))}</span>`
       : gg.state === 'normal' && gg.limit_w ? ` <span class="muted" title="${t('GPU-Schutz normal, Ziel {w} W', { w: gg.target_w ?? '?' })}">🛡 ${gg.limit_w} W</span>` : '';
     const last = `${n.inflight} / ${n.max_inflight ?? '?'}${waiting[name] ? ` · <span class="warn">${waiting[name]} ${t('wartend')}</span>` : ''}`;
     tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(name)}</b><div class="muted">${esc(n.gpu || '')} ${n.wol ? '· WOL' : ''}</div></td>
@@ -690,15 +701,15 @@ function renderModels() {
     const need = k => known ? (c.weights_gib + (c.kv_gib_per_1k || 0) * k + ovh).toFixed(1) : '?';
     let src;
     if (!known) src = `<span class="warn">${t('unbekannt → Dateigrösse +20 %')}</span>`;
-    else if (c.source === 'gemessen') src = `<span class="ok">${t('gemessen')}</span><span class="muted"> ${esc(c.measured_at || '')}${c.measured_on ? ' ' + t('auf {n}', { n: esc(c.measured_on) }) : ''}${c.partial_offload ? ' <span class="bad">⚠ partial offload</span>' : ''}</span>`;
+    else if ((c.source || '').startsWith('measured')) src = `<span class="ok">${t('gemessen')}</span><span class="muted"> ${esc(c.measured_at || '')}${c.measured_on ? ' ' + t('auf {n}', { n: esc(c.measured_on) }) : ''}${c.partial_offload ? ' <span class="bad">⚠ partial offload</span>' : ''}</span>`;
     else if ((c.source || '').startsWith('Alias')) src = `<span class="muted">${esc(c.source)}</span>`;
     else src = `<span class="warn">${t('geschätzt')}</span>`;
     const mst = measuring[m], bst = (STATE.benching || {})[m];
     const busyAny = Object.keys(measuring).length || Object.keys(STATE.benching || {}).length;
-    const btn = mst ? `<span class="warn">${esc(mst.step)}${mst.error ? ': ' + esc(mst.error) : ''}</span>`
-      : bst ? `<span class="warn">Benchmark: ${esc(bst.step)}${bst.error ? ': ' + esc(bst.error) : ''}</span>`
+    const btn = mst ? `<span class="warn">${esc(tv(mst.step))}${mst.error ? ': ' + esc(mst.error) : ''}</span>`
+      : bst ? `<span class="warn">Benchmark: ${esc(tv(bst.step))}${bst.error ? ': ' + esc(bst.error) : ''}</span>`
       : (busyAny ? `<button class="small" disabled>${t('Messen')}</button> <button class="small" disabled>Benchmark</button>`
-        : `<button class="small" onclick="measure('${esc(m)}')" title="${t('lädt das Modell bei 8k und 32k Kontext auf einem freien Knoten (~1 Min.)')}">${t(c.source === 'gemessen' ? 'neu messen' : 'Messen')}</button>
+        : `<button class="small" onclick="measure('${esc(m)}')" title="${t('lädt das Modell bei 8k und 32k Kontext auf einem freien Knoten (~1 Min.)')}">${t((c.source || '').startsWith('measured') ? 'neu messen' : 'Messen')}</button>
            <button class="small" onclick="bench('${esc(m)}')" title="${t('standardisierter Warm-Benchmark (~30 s)')}">Benchmark</button>`);
     tb.insertAdjacentHTML('beforeend', `<tr><td>${esc(m)}</td><td>${known ? c.weights_gib + ' GiB' : '–'}</td>
       <td>${known ? ((c.kv_gib_per_1k || 0) * 1000 < 10 ? '≈ 0' : (c.kv_gib_per_1k * 1024).toFixed(0) + ' MiB') + ' / 1k ' + t('Token') : '–'}</td>
@@ -1076,19 +1087,19 @@ function renderDecisions() {
   if ($('#decCount')) $('#decCount').textContent = `${t('{a} von {b} Einträgen', { a: shown.length, b: all.length })}${all.length ? ' · ' + t('seit') + ' ' + all[0].ts.replace('T', ' ') : ''}`;
   $('#decisions').innerHTML = shown.map(d => {
     const ts = d.ts.startsWith(today) ? d.ts.slice(11) : d.ts.slice(5, 10) + ' ' + d.ts.slice(11);
-    if (d.event === 'route') return `<div>${ts} <b>${esc(d.role)}</b> → ${d.cloud || String(d.node).startsWith('cloud:') ? '<span class="cloudc">☁ </span>' : ''}${esc(d.node)} · ${esc(d.model)} · tier ${d.tier} · ctx ${d.ctx ?? 'default'} · ${d.warm ? '<span class="ok">warm</span>' : t('kalt')}${d.canary ? ' · 🐤' : ''}${d.reason ? ' · <span class="muted">' + esc(d.reason) + '</span>' : ''}${d.skipped ? ` · <span class="warn">${t('{n} übersprungen', { n: d.skipped })}</span>` : ''}${d.client ? ' · 👥 ' + esc(d.client) : ''}${d.via && d.via !== 'ollama' ? ' · ' + esc(d.via) : ''}</div>`;
+    if (d.event === 'route') return `<div>${ts} <b>${esc(d.role)}</b> → ${d.cloud || String(d.node).startsWith('cloud:') ? '<span class="cloudc">☁ </span>' : ''}${esc(d.node)} · ${esc(d.model)} · tier ${d.tier} · ctx ${d.ctx ?? 'default'} · ${d.warm ? '<span class="ok">warm</span>' : t('kalt')}${d.canary ? ' · 🐤' : ''}${d.reason ? ' · <span class="muted">' + esc(tv(d.reason)) + '</span>' : ''}${d.skipped ? ` · <span class="warn">${t('{n} übersprungen', { n: d.skipped })}</span>` : ''}${d.client ? ' · 👥 ' + esc(d.client) : ''}${d.via && d.via !== 'ollama' ? ' · ' + esc(d.via) : ''}</div>`;
     // gpu_busy (Spiel, fremdes VRAM) ist gewollt und vergeht von selbst -> gelb statt rot; Grund seit Router 0.3.4
     if (d.event === 'no_node') return `<div class="${d.code === 'gpu_busy' ? 'warn' : 'bad'}">${ts} <b>${esc(d.role)}</b> → ${t('kein Knoten verfügbar')}${d.code ? ' · <b>' + esc(d.code) + '</b>' : ''}${d.detail ? ' · <span class="muted">' + esc(d.detail) + '</span>' : ''}</div>`;
     if (d.event === 'unsatisfiable') return `<div class="bad">${ts} <b>${esc(d.role)}</b> → ${t('keine Stufe kann')}: ${esc(d.reasons || '')}</div>`;
     if (d.event === 'breaker') return `<div class="${d.state === 'closed' ? 'ok' : 'bad'}">${ts} Breaker ${esc(d.node)} → ${esc(d.state)} ${esc(d.reason || '')}</div>`;
     if (d.event === 'agent_update') return `<div class="${d.state === 'failed' || d.state === 'stalled' ? 'bad' : d.state === 'done' ? 'ok' : 'warn'}">${ts} ${t('Agent-Update')} ${esc(d.node)} → ${esc(d.state)} ${esc(d.version || '')} ${esc(d.reason || '')}</div>`;
     if (d.event === 'ollama_update') return `<div class="${d.state === 'failed' || d.state === 'stalled' ? 'bad' : d.state === 'done' ? 'ok' : 'warn'}">${ts} ${t('Ollama-Update')} ${esc(d.node)} → ${esc(d.state)} ${esc(d.version || '')} ${esc(d.reason || '')}</div>`;
-    if (d.event === 'gpu_guard') return `<div class="${d.problem ? 'bad' : (d.state === 'normal' ? 'ok' : 'warn')}">${ts} ${t('GPU-Schutz')} ${esc(d.node)} → ${esc(t(d.state))}${d.limit_w ? ` (${d.limit_w} W)` : ''} ${esc(d.reason || '')}</div>`;
+    if (d.event === 'gpu_guard') return `<div class="${d.problem ? 'bad' : (d.state === 'normal' ? 'ok' : 'warn')}">${ts} ${t('GPU-Schutz')} ${esc(d.node)} → ${esc(tv(d.state))}${d.limit_w ? ` (${d.limit_w} W)` : ''} ${esc(tv(d.reason))}</div>`;
     if (d.event === 'queued') return `<div class="warn">${ts} ${t('Warteschlange: {r} ({p}) wartet auf {n} ({i} aktiv)', { r: `<b>${esc(d.role)}</b>`, p: esc(d.priority), n: esc(d.node), i: d.inflight })}</div>`;
     if (d.event === 'wait_load') return `<div class="warn">${ts} ${t('{r} wartet, bis {n} {m} geladen hat', { r: `<b>${esc(d.role)}</b>`, n: esc(d.node), m: esc(d.model) })}</div>`;
     if (d.event === 'admission_timeout') return `<div class="bad">${ts} ${t('Deadline: {r} ({p}) nach {ms} ms abgewiesen', { r: `<b>${esc(d.role)}</b>`, p: esc(d.priority), ms: d.waited_ms })}</div>`;
-    if (d.event === 'shadow') return `<div class="muted">${ts} ${t('🌒 Shadow {r} → {m} auf {n}: {s}', { r: `<b>${esc(d.role)}</b>`, m: esc(d.model), n: esc(d.node || '–'), s: esc(d.status) })}${d.ms ? ' · ' + d.ms + ' ms' : ''}</div>`;
-    if (d.event === 'prewarm') return `<div class="muted">${ts} ${t('prewarm {m} auf {n} ({r})', { m: esc(d.model), n: esc(d.node), r: esc(d.reason || '') })}</div>`;
+    if (d.event === 'shadow') return `<div class="muted">${ts} ${t('🌒 Shadow {r} → {m} auf {n}: {s}', { r: `<b>${esc(d.role)}</b>`, m: esc(d.model), n: esc(d.node || '–'), s: esc(tv(d.status)) })}${d.ms ? ' · ' + d.ms + ' ms' : ''}</div>`;
+    if (d.event === 'prewarm') return `<div class="muted">${ts} ${t('prewarm {m} auf {n} ({r})', { m: esc(d.model), n: esc(d.node), r: esc(tv(d.reason)) })}</div>`;
     if (d.event === 'loadtest') return `<div class="muted">${ts} ${t('🧪 Lasttest {n} × {c} parallel: {s} s, {tp} Anfragen/s', { n: d.n, c: d.concurrency, s: d.seconds, tp: d.throughput })}</div>`;
     if (d.event === 'decision') return `<div>${ts} 🧭 ${t('Auto-Rolle')}: ${esc(d.engine)} → <b>${esc(d.selected)}</b> <span class="muted">p ${d.top} · ${t('Abstand')} ${d.margin} · ${d.latency_ms} ms${(d.fallback || []).length ? ' · Fallback: ' + esc(d.fallback.join(' | ')) : ''}</span>${d.client ? ' · 👥 ' + esc(d.client) : ''}</div>`;
     return `<div class="warn">${ts} ${esc(d.event)} ${esc(d.node || '')} ${esc(d.reason || d.state || '')}</div>`;

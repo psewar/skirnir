@@ -126,7 +126,7 @@ async def bench_model(model, node):
         runs = await _bench_runs(model, node, ctx)
         if failed(runs):
             log.warning("bench %s on %s failed: %s", model, node.name, runs.message)
-            state.BENCHING[model].update(step="fehler", error=runs.message)
+            state.BENCHING[model].update(step="error", error=runs.message)
             return
         med = lambda k: sorted(x[k] for x in runs if x[k] is not None)[len(runs) // 2]  # noqa: E731
         key = f"{model}@{node.name}"
@@ -138,7 +138,7 @@ async def bench_model(model, node):
         log.info("bench %s on %s: %.1f tok/s gen, %s tok/s prompt, ttft %d ms (ctx %d)", model, node.name,
                  e["bench"]["gen_tps"], e["bench"]["prompt_tps"], e["bench"]["ttft_ms"], ctx)
         state.remember({"event": "bench", "node": node.name, "model": model, "gen_tps": e["bench"]["gen_tps"]})
-        state.BENCHING[model]["step"] = "fertig"
+        state.BENCHING[model]["step"] = "done"
     finally:
         node.inflight -= 1
         await _release_node(node, model, "bench")
@@ -151,7 +151,7 @@ async def _bench_runs(model, node, ctx):
             "messages": [{"role": "user", "content": BENCH_PROMPT}]}
     runs = []
     for i in range(3):
-        state.BENCHING[model]["step"] = "aufwärmen" if i == 0 else f"Messlauf {i}/2"
+        state.BENCHING[model]["step"] = "warmup" if i == 0 else f"run {i}/2"
         t0 = time.time()
         data = await _ollama(node, "post", "/api/chat", body, timeout=900)
         if failed(data):
@@ -345,13 +345,13 @@ async def _measure_point(model, node, ctx):
     waited = await _others_loading(node, model)
     if failed(waited):
         return waited
-    state.MEASURING[model]["step"] = f"entlade fuer @{ctx}"
+    state.MEASURING[model]["step"] = f"unloading for @{ctx}"
     vorher = node.vram_used_gib
     unloaded = await _unload_all(node)
     leer = unloaded if failed(unloaded) else await _empty_used(node, vorher, unloaded)
     if failed(leer):
         return leer
-    state.MEASURING[model]["step"] = f"lade @{ctx}"
+    state.MEASURING[model]["step"] = f"loading @{ctx}"
     entry = await _load(node, model, ctx)
     voll = entry if failed(entry) else await _stable_used(node, time.time())
     geladen = voll if failed(voll) else await _ps_models(node)
@@ -372,7 +372,7 @@ async def _measure_ps(model, node):
     """Rueckfall ohne GPU-Werte im Heartbeat (bis 0.3.4 der einzige Weg): /api/ps bei 8k und 32k."""
     res = {}
     for ctx in MEASURE_CTX_FIX:
-        state.MEASURING[model]["step"] = f"lade @{ctx}"
+        state.MEASURING[model]["step"] = f"loading @{ctx}"
         entry = await _load(node, model, ctx)
         if failed(entry):
             return entry
@@ -389,7 +389,7 @@ def catalog_entry(res, node_name, real):
     points = [(ctx, b + (max(0.0, st - sv) if ctx in partial else 0.0)) for ctx, (b, sv, st) in res.items()]
     weights, kv = fit_linear(points)
     e = {"weights_gib": round(weights, 2), "kv_gib_per_1k": round(kv, 4),
-         "source": "gemessen (nvidia-smi)" if real else "gemessen", "measured_at": time.strftime("%Y-%m-%d %H:%M"),
+         "source": "measured (nvidia-smi)" if real else "measured", "measured_at": time.strftime("%Y-%m-%d %H:%M"),
          "measured_on": node_name}
     if real:
         e.update(real=True, vram_real_gib={str(c): round(v[0], 2) for c, v in sorted(res.items())},
@@ -412,7 +412,7 @@ async def measure_model(model, node):
         res = await (_measure_real(model, node) if real else _measure_ps(model, node))
         if failed(res):
             log.warning("measure %s on %s failed: %s", model, node.name, res.message)
-            state.MEASURING[model].update(step="fehler", error=res.message)
+            state.MEASURING[model].update(step="error", error=res.message)
             return
         e = catalog_entry(res, node.name, real)
         ov = config.read_overrides()
@@ -422,7 +422,7 @@ async def measure_model(model, node):
         written = config.write_overrides(ov)
         if failed(written):   # Messung gelungen, Katalog nicht geschrieben: als Fehler melden, nicht als fertig
             log.warning("measure %s on %s: catalog not written: %s", model, node.name, written.message)
-            state.MEASURING[model].update(step="fehler", error=written.message)
+            state.MEASURING[model].update(step="error", error=written.message)
             return
         teil = f", PARTIAL OFFLOAD bei {e['partial_offload']}" if e.get("partial_offload") else ""
         log.info("measured %s on %s (%s): weights %.2f GiB, kv %.4f GiB/1k, Punkte %s%s", model, node.name,
@@ -430,7 +430,7 @@ async def measure_model(model, node):
                  {c: round(v[0], 2) for c, v in sorted(res.items())}, teil)
         state.remember({"event": "measure", "node": node.name, "model": model, "weights_gib": e["weights_gib"],
                         "kv_gib_per_1k": e["kv_gib_per_1k"], "real": real})
-        state.MEASURING[model]["step"] = "fertig"
+        state.MEASURING[model]["step"] = "done"
     finally:
         node.inflight -= 1
         node.finish_load(model)
