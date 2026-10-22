@@ -5,5 +5,5 @@ package main
 import "fmt"
 
 func setupInteractive(cfgPath string) error {
-	return fmt.Errorf("setup gibt es nur unter Windows; Linux: Binary nach /usr/local/bin, Config nach /etc/skirnir-agent, systemd-Unit (siehe config.example.yaml)")
+	return fmt.Errorf("setup exists only on Windows; Linux: binary to /usr/local/bin, config to /etc/skirnir-agent, systemd unit (see config.example.yaml)")
 }

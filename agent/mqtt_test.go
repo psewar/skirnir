@@ -58,7 +58,7 @@ func testModule(t *testing.T) *MQTTModule {
 		SecretStoreCfg{}, "testknoten", log, nil, nil, nil, nil)
 }
 
-func TestSyncDiscoveryOhneGruppen(t *testing.T) {
+func TestSyncDiscoveryWithoutGroups(t *testing.T) {
 	m, c := testModule(t), &fakeClient{}
 	m.syncDiscovery(c)
 	// Solange keine Gruppe entschieden ist: Pflichtentitaeten anlegen, optionale unangetastet lassen.
@@ -72,7 +72,7 @@ func TestSyncDiscoveryOhneGruppen(t *testing.T) {
 	}
 }
 
-func TestSyncDiscoveryFremderKnoten(t *testing.T) {
+func TestSyncDiscoveryForeignNode(t *testing.T) {
 	m, c := testModule(t), &fakeClient{}
 	m.setApplies("stt", false)   // kein STT-Kindprozess konfiguriert
 	m.setApplies("alias", false) // Ollama kennt den Alias nicht
@@ -91,7 +91,7 @@ func TestSyncDiscoveryFremderKnoten(t *testing.T) {
 	}
 }
 
-func TestSyncDiscoveryEigenerKnoten(t *testing.T) {
+func TestSyncDiscoveryOwnNode(t *testing.T) {
 	m, c := testModule(t), &fakeClient{}
 	m.setApplies("stt", true)
 	m.setApplies("alias", true)
@@ -107,7 +107,7 @@ func TestSyncDiscoveryEigenerKnoten(t *testing.T) {
 	}
 }
 
-func TestSyncDiscoveryNurEinmalUndNachtraeglich(t *testing.T) {
+func TestSyncDiscoveryOnceAndLater(t *testing.T) {
 	m, c := testModule(t), &fakeClient{}
 	m.setApplies("stt", false)
 	m.setApplies("alias", false)
@@ -127,28 +127,28 @@ func TestSyncDiscoveryNurEinmalUndNachtraeglich(t *testing.T) {
 	}
 }
 
-// Kuerzungsmeldung (kuerzung.go): Discovery des Ereignisses und des Zeitsensors, Ereignis-Payload, State-Felder.
-func TestKuerzungDiscovery(t *testing.T) {
+// Kuerzungsmeldung (truncation.go): Discovery des Ereignisses und des Zeitsensors, Ereignis-Payload, State-Felder.
+func TestTruncationDiscovery(t *testing.T) {
 	m, c := testModule(t), &fakeClient{}
 	m.syncDiscovery(c)
 	ev, ok := c.last("ollama_kuerzung")
 	if !ok || ev == "" {
 		t.Fatal("Ereignis-Entitaet nicht angelegt")
 	}
-	for _, soll := range []string{`"state_topic":"testknoten/truncation"`, `"event_types":["input_truncated","context_full"]`,
+	for _, wantPart := range []string{`"state_topic":"testknoten/truncation"`, `"event_types":["input_truncated","context_full"]`,
 		// unique_id bleibt der Name von 2026 (Verlauf), die Entity-ID ist englisch (0.20.0)
 		`"unique_id":"testknoten_ollama_kuerzung"`, `"default_entity_id":"event.testknoten_ollama_truncation"`} {
-		if !strings.Contains(ev, soll) {
-			t.Fatalf("Ereignis-Config ohne %s: %s", soll, ev)
+		if !strings.Contains(ev, wantPart) {
+			t.Fatalf("Ereignis-Config ohne %s: %s", wantPart, ev)
 		}
 	}
 	if strings.Contains(ev, "value_template") {
 		t.Fatalf("Ereignis darf kein value_template haben (HA liest event_type direkt): %s", ev)
 	}
 	ts, _ := c.last("ollama_letzte_kuerzung")
-	for _, soll := range []string{`"device_class":"timestamp"`, `"json_attributes_topic":"testknoten/state"`} {
-		if !strings.Contains(ts, soll) {
-			t.Fatalf("Zeitsensor ohne %s: %s", soll, ts)
+	for _, wantPart := range []string{`"device_class":"timestamp"`, `"json_attributes_topic":"testknoten/state"`} {
+		if !strings.Contains(ts, wantPart) {
+			t.Fatalf("Zeitsensor ohne %s: %s", wantPart, ts)
 		}
 	}
 	if z, _ := c.last("ollama_kuerzungen"); !strings.Contains(z, `"state_class":"total_increasing"`) {
@@ -156,25 +156,25 @@ func TestKuerzungDiscovery(t *testing.T) {
 	}
 }
 
-func TestKuerzungEreignisUndState(t *testing.T) {
+func TestTruncationEventAndState(t *testing.T) {
 	m, c := testModule(t), &fakeClient{}
-	m.sup = &Supervisor{kuerzungen: newKuerzungen()}
+	m.sup = &Supervisor{truncations: newTruncations()}
 	st := map[string]any{}
-	m.kuerzungState(st)
+	m.truncationState(st)
 	if st["ollama_truncations"] != 0 || st["ollama_last_truncation"] != "None" {
 		t.Fatalf("ohne Kuerzung: %v", st)
 	}
-	m.sup.kuerzungen.pruefe("ollama", zeileEingabe)
-	e := <-m.sup.kuerzungen.neu
-	m.publishKuerzung(c, e)
+	m.sup.truncations.inspect("ollama", lineInput)
+	e := <-m.sup.truncations.fresh
+	m.publishTruncation(c, e)
 	p := c.pubs[len(c.pubs)-1]
 	if p.topic != "testknoten/truncation" || !strings.Contains(p.payload, `"event_type":"input_truncated"`) ||
 		!strings.Contains(p.payload, `"prompt":65536`) {
 		t.Fatalf("Ereignis falsch: %s %s", p.topic, p.payload)
 	}
-	m.kuerzungState(st)
+	m.truncationState(st)
 	d, _ := st["truncation_details"].(map[string]any)
-	if st["ollama_truncations"] != 1 || st["ollama_last_truncation"] == "None" || d["limit"] != 32770 || d["type"] != kuerzungEingabe {
+	if st["ollama_truncations"] != 1 || st["ollama_last_truncation"] == "None" || d["limit"] != 32770 || d["type"] != truncationInput {
 		t.Fatalf("State nach Kuerzung: %v", st)
 	}
 }

@@ -24,7 +24,7 @@ func runGPUZRelay(listen string) error {
 	r := newGPUZReader(nil)
 	cl := &http.Client{Timeout: 3 * time.Second}
 	url := "http://" + listen + "/gpuz"
-	fmt.Printf("gpuz-relay %s: GPU-Z -> %s alle 2 s (Ctrl-C beendet)\n", version, url)
+	fmt.Printf("gpuz-relay %s: GPU-Z -> %s every 2 s (Ctrl-C stops)\n", version, url)
 	last := ""
 	say := func(s string) {
 		if s != last {
@@ -42,23 +42,23 @@ func runGPUZRelay(listen string) error {
 		}
 		var s GPUSensors
 		if !d.apply(&s) {
-			say("GPU-Z liefert keinen der erwarteten Sensoren")
+			say("GPU-Z delivers none of the expected sensors")
 			continue
 		}
 		b, _ := json.Marshal(&s)
 		resp, err := cl.Post(url, "application/json", bytes.NewReader(b))
 		if err != nil {
-			say("Dienst nicht erreichbar: " + err.Error())
+			say("service unreachable: " + err.Error())
 			continue
 		}
 		resp.Body.Close()
 		switch resp.StatusCode {
 		case 200:
-			say(fmt.Sprintf("liefert (%s, %d Sensoren)", d.Card, len(d.Sensors)))
+			say(fmt.Sprintf("delivering (%s, %d sensors)", d.Card, len(d.Sensors)))
 		case 409:
-			say("Dienst hat gpuz.enabled: false - Relay wartet")
+			say("service has gpuz.enabled: false - relay waits")
 		default:
-			say(fmt.Sprintf("Dienst antwortet HTTP %d", resp.StatusCode))
+			say(fmt.Sprintf("service answers HTTP %d", resp.StatusCode))
 		}
 	}
 }
@@ -83,8 +83,8 @@ type gpuzReader struct {
 }
 
 var (
-	errGPUZAbsent = errors.New("GPU-Z laeuft nicht")
-	errGPUZStale  = errors.New("GPU-Z-Werte veraltet")
+	errGPUZAbsent = errors.New("GPU-Z is not running")
+	errGPUZStale  = errors.New("GPU-Z values stale")
 
 	kernel32           = windows.NewLazySystemDLL("kernel32.dll")
 	pOpenFileMapping   = kernel32.NewProc("OpenFileMappingW")
@@ -188,7 +188,7 @@ func (r *gpuzReader) open() error {
 		var mbi windows.MemoryBasicInformation
 		if e := windows.VirtualQuery(view, &mbi, unsafe.Sizeof(mbi)); e != nil || mbi.RegionSize < gpuzSize {
 			pUnmapViewOfFile.Call(view)
-			err = fmt.Errorf("GPU-Z-Block zu klein (%d Bytes)", mbi.RegionSize)
+			err = fmt.Errorf("GPU-Z block too small (%d bytes)", mbi.RegionSize)
 			continue
 		}
 		r.view, r.size = view, mbi.RegionSize
@@ -220,7 +220,7 @@ func (r *gpuzReader) read() (*gpuzData, error) {
 		r.lastTry = time.Now()
 		if err := r.open(); err != nil {
 			if r.seen {
-				r.logf("info", "gpuz: Block nicht mehr da (%v) - Sensoren pausieren", err)
+				r.logf("info", "gpuz: block gone (%v) - sensors pause", err)
 				r.seen = false
 			}
 			return nil, errGPUZAbsent
@@ -247,7 +247,7 @@ func (r *gpuzReader) read() (*gpuzData, error) {
 			r.drop()
 			r.stale = 0
 			if r.seen {
-				r.logf("info", "gpuz: keine frischen Werte seit %d ms - Block losgelassen", age)
+				r.logf("info", "gpuz: no fresh values for %d ms - block released", age)
 				r.seen = false
 			}
 		}
@@ -255,7 +255,7 @@ func (r *gpuzReader) read() (*gpuzData, error) {
 	}
 	r.stale = 0
 	if !r.seen {
-		r.logf("info", "gpuz: Sensoren gefunden (%s, %d Sensoren, Version %d)", d.Card, len(d.Sensors), d.Version)
+		r.logf("info", "gpuz: sensors found (%s, %d sensors, version %d)", d.Card, len(d.Sensors), d.Version)
 		r.seen = true
 	}
 	return d, nil

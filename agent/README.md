@@ -301,7 +301,7 @@ statischen GPU-Z-Daten (Karte, BIOS, Monitor samt Seriennummer) wird nichts uebe
 
 Ollama kuerzt zu lange Prompts **still**: der Client bekommt eine normale Antwort, nur fehlt ihm ein Teil des
 Verlaufs. Die einzige Spur steht in Ollamas eigenem Log. Der Agent liest die Zeilen mit, die der Supervisor ohnehin
-ins Kind-Log schreibt (`kuerzung.go`), und erkennt zwei Muster:
+ins Kind-Log schreibt (`truncation.go`), und erkennt zwei Muster:
 
 | Art (`event_type`) | Log-Zeile | Bedeutung |
 |---|---|---|

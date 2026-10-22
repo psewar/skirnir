@@ -286,7 +286,7 @@ func (g *GameWatch) poll() {
 		g.idx, g.idxAt = idx, time.Now()
 		g.fact.Folders = len(folders)
 		g.mu.Unlock()
-		g.log.Infof("spiel: Index %d Spielordner, %d Programmnamen", len(folders), len(idx.exes))
+		g.log.Infof("game: index %d game folders, %d program names", len(folders), len(idx.exes))
 	}
 	hits := gameHits(listProcesses(), g.idx)
 	running := len(hits) > 0
@@ -311,9 +311,9 @@ func (g *GameWatch) poll() {
 	g.mu.Unlock()
 	if running != was {
 		if running {
-			g.log.Infof("spiel: %s laeuft (per %s)", name, via)
+			g.log.Infof("game: %s running (via %s)", name, via)
 		} else {
-			g.log.Infof("spiel: beendet")
+			g.log.Infof("game: ended")
 		}
 	}
 }
@@ -359,9 +359,9 @@ func (g *GameWatch) noteSampleErr(err error) {
 	}
 	if msg != g.samplerErr {
 		if msg != "" {
-			g.log.Warnf("spiel: GPU-Bedarf nicht messbar: %s", msg)
+			g.log.Warnf("game: GPU demand not measurable: %s", msg)
 		} else if g.samplerErr != "" {
-			g.log.Infof("spiel: GPU-Bedarf wieder messbar")
+			g.log.Infof("game: GPU demand measurable again")
 		}
 		g.samplerErr = msg
 	}
@@ -380,42 +380,42 @@ func (g *GameWatch) Fact() GameFact {
 // probeGame: Befehl "game" - Index, Treffer und Speicher einmal ausgeben (wie spiel-waechter.ps1 -Probe).
 func probeGame() {
 	if !gameScanSupported {
-		fmt.Println("spielerkennung: auf dieser Plattform nicht unterstuetzt")
+		fmt.Println("game detection: not supported on this platform")
 	} else {
 		t0 := time.Now()
 		folders := gameFolders()
 		idx := gameIndex{folders: folders, exes: exeIndex(folders)}
-		fmt.Printf("spielordner (%d, Index in %.1f s):\n", len(folders), time.Since(t0).Seconds())
+		fmt.Printf("game folders (%d, index in %.1f s):\n", len(folders), time.Since(t0).Seconds())
 		for _, f := range folders {
 			fmt.Println("  " + f)
 		}
-		fmt.Printf("programmnamen im index: %d\n", len(idx.exes))
+		fmt.Printf("program names in the index: %d\n", len(idx.exes))
 		t1 := time.Now()
 		procs := listProcesses()
-		ohne := 0
+		noPath := 0
 		for _, p := range procs {
 			if p.Path == "" {
-				ohne++
+				noPath++
 			}
 		}
 		hits := gameHits(procs, idx)
-		fmt.Printf("prozesse: %d (%d ohne lesbaren Pfad), Pruefung %.0f ms\n", len(procs), ohne, float64(time.Since(t1).Microseconds())/1000)
+		fmt.Printf("processes: %d (%d without readable path), check %.0f ms\n", len(procs), noPath, float64(time.Since(t1).Microseconds())/1000)
 		if len(hits) > 0 {
 			var pids []uint32
 			for _, h := range hits {
 				pids = append(pids, h.proc.PID)
-				fmt.Printf("spiel erkannt: %s (pid %d, per %s)\n", h.proc.Name, h.proc.PID, h.via)
+				fmt.Printf("game detected: %s (pid %d, via %s)\n", h.proc.Name, h.proc.PID, h.via)
 			}
 			probeFootprint(pids)
 		} else {
-			fmt.Println("spiel erkannt: nein")
+			fmt.Println("game detected: no")
 		}
 	}
 	if m, ok := memoryFact(); ok {
 		b, _ := json.Marshal(m)
-		fmt.Printf("speicher: %s\n", b)
+		fmt.Printf("memory: %s\n", b)
 	} else {
-		fmt.Println("speicher: nicht lesbar")
+		fmt.Println("memory: not readable")
 	}
 }
 
@@ -424,29 +424,29 @@ func probeGame() {
 func probeFootprint(pids []uint32) {
 	s, err := newGPUSampler()
 	if err != nil {
-		fmt.Println("gpu-bedarf: nicht messbar:", err)
+		fmt.Println("gpu demand: not measurable:", err)
 		return
 	}
 	defer s.close()
 	var u gpuUse
-	var dauer time.Duration
+	var elapsed time.Duration
 	for i := 0; i < 2; i++ {
 		if i > 0 {
 			time.Sleep(time.Second)
 		}
 		t := time.Now()
 		if u, err = s.sample(); err != nil {
-			fmt.Println("gpu-bedarf: nicht messbar:", err)
+			fmt.Println("gpu demand: not measurable:", err)
 			return
 		}
-		dauer = time.Since(t)
+		elapsed = time.Since(t)
 	}
 	d, sh, p, ok := footprint(pids, u)
-	pct := "keine Rate"
+	pct := "no rate"
 	if ok {
 		pct = fmt.Sprintf("%.1f %%", p)
 	}
-	fmt.Printf("gpu-bedarf: eigen %d MiB, geteilt %d MiB, Engine %s (Sammeln %.1f ms)\n", d, sh, pct, float64(dauer.Microseconds())/1000)
+	fmt.Printf("gpu demand: dedicated %d MiB, shared %d MiB, engine %s (collecting %.1f ms)\n", d, sh, pct, float64(elapsed.Microseconds())/1000)
 }
 
 func gib(bytes uint64) float64 {

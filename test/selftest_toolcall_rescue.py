@@ -80,9 +80,9 @@ def t_negativ():
     check("ruehrt echten tool_call nicht an", tr.rescue_message(msg, TOOLS) is None)
 
     check("ohne Werkzeuge inaktiv", tr.rescue_message({"content": ECHT_XML}, []) is None)
-    check("aktiv_fuer: ohne tools nein", tr.aktiv_fuer({"messages": []}) is False)
-    check("aktiv_fuer: mit format nein", tr.aktiv_fuer({"tools": TOOLS, "format": {"type": "object"}}) is False)
-    check("aktiv_fuer: mit tools ja", tr.aktiv_fuer({"tools": TOOLS}) is True)
+    check("aktiv_fuer: ohne tools nein", tr.active_for({"messages": []}) is False)
+    check("aktiv_fuer: mit format nein", tr.active_for({"tools": TOOLS, "format": {"type": "object"}}) is False)
+    check("aktiv_fuer: mit tools ja", tr.active_for({"tools": TOOLS}) is True)
 
 
 def _stream(stuecke, tools=TOOLS, done_extra=None):
@@ -140,19 +140,19 @@ def t_stream():
 def t_verloren():
     """Der Fall, den die Stufe NICHT heilt - er soll wenigstens auffallen."""
     fremd = "<function=run_shell><parameter=command>ls</parameter></function>"
-    check("verdacht: fremdes Werkzeug faellt auf", tr.verdacht(fremd) is True)
-    check("verdacht: Prosa nicht", tr.verdacht("Die Notiz gibt es leider nicht.") is False)
-    check("verdacht: leer nicht", tr.verdacht("") is False)
+    check("verdacht: fremdes Werkzeug faellt auf", tr.suspicious(fremd) is True)
+    check("verdacht: Prosa nicht", tr.suspicious("Die Notiz gibt es leider nicht.") is False)
+    check("verdacht: leer nicht", tr.suspicious("") is False)
     # Zusammenspiel: nicht gerettet UND verdaechtig = der meldepflichtige Fall
     msg = {"role": "assistant", "content": fremd}
     check("nicht gerettet, aber gemeldet",
-          tr.rescue_message(msg, TOOLS) is None and tr.verdacht(msg["content"]) is True)
+          tr.rescue_message(msg, TOOLS) is None and tr.suspicious(msg["content"]) is True)
 
     # Stream: unbekannter Dialekt -> Text geht raus (nicht verschlucken!) und wird gemeldet
     r, raus = _stream(["<function=run_shell>", "<parameter=command>ls</parameter>", "</function>"])
     text = "".join((c.get("message") or {}).get("content") or "" for c in raus)
     check("Stream: unrettbarer Call wird NICHT verschluckt", text == fremd, repr(text)[:80])
-    check("Stream: unrettbarer Call wird gemeldet", r.verloren is True and r.gerettet is None)
+    check("Stream: unrettbarer Call wird gemeldet", r.lost is True and r.rescued is None)
 
 
 if __name__ == "__main__":

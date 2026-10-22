@@ -36,13 +36,13 @@ class NodeRegistry:
                 with open(self.path, encoding="utf-8") as f:
                     data = json.load(f)
             except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
-                log.error("nodes.json unlesbar (%s) - starte mit leerem Register", e)
+                log.error("nodes.json unreadable (%s) - starting with an empty register", e)
                 data = {}
             nodes_ = data.get("nodes") if isinstance(data, dict) else None
             if isinstance(nodes_, dict):
                 self.nodes = nodes_
             elif data:
-                log.error("nodes.json hat kein Mapping 'nodes' - starte mit leerem Register")
+                log.error("nodes.json has no mapping 'nodes' - starting with an empty register")
         self.drop_stale_learned()
         return self
 
@@ -58,7 +58,7 @@ class NodeRegistry:
             if any(not isinstance(v, dict) for v in (learned.get("buckets") or {}).values()):
                 e.pop("learned", None)
                 self.dirty = True
-                log.info("node %s: gelernte Baseline im alten Format verworfen (ohne Ruhe-Filter gesammelt)",
+                log.info("node %s: learned baseline in the old format dropped (collected without the calm filter)",
                          e.get("name") or fp[:16])   # das Register ist nach Fingerprint geschluesselt
 
     def save(self):
@@ -70,7 +70,7 @@ class NodeRegistry:
                 json.dump({"nodes": self.nodes, "saved": time.strftime("%Y-%m-%dT%H:%M:%S")}, f, indent=1, ensure_ascii=False)
             os.replace(tmp, self.path)
         except OSError as e:  # exception-ok: file system boundary
-            log.warning("nodes.json speichern: %s", e)
+            log.warning("nodes.json save: %s", e)
             self.dirty = True
             return Problem(500, "nodes.json not writable")
         self.dirty, self.last_save = False, time.time()
@@ -95,7 +95,7 @@ class NodeRegistry:
             e = {"name": cand, "pubkey": pub_b64, "state": "pending", "facts": {}, "policy": {}, "learned": {},
                  "first_seen": now, "remote": remote}
             self.nodes[fp] = e
-            log.info("node %s: neuer Agent-Schluessel %s... von %s -> wartet auf Freigabe", cand, fp[:16], remote)
+            log.info("node %s: new agent key %s... from %s -> awaiting approval", cand, fp[:16], remote)
             state.remember({"event": "node_pending", "node": cand, "fp": fp[:16]})
         agentupdate.note_hello(e, facts or {})   # Versionswechsel merken, offenen Update-Auftrag abschliessen
         ollamaupdate.note_hello(e, facts or {})  # Ollama-Version aus der Anmeldung, falls das Register noch keine kennt
@@ -159,7 +159,7 @@ def activate_node(fp):
     if node is None:
         node = nodes.Node(e["name"], spec)
         state.NODES[e["name"]] = node
-        log.info("node %s: aus dem Register angelegt (Fingerprint %s...)", node.name, fp[:16])
+        log.info("node %s: created from the register (fingerprint %s...)", node.name, fp[:16])
     else:
         node.apply_spec(spec)
     node.fp, node.reg = fp, e
@@ -174,7 +174,7 @@ async def close_ws(ws):
     try:
         await ws.close()
     except Exception as e:  # noqa: BLE001  # exception-ok: network boundary, the peer may vanish while closing
-        log.debug("tunnel: schliessen: %s", e)
+        log.debug("tunnel: close: %s", e)
 
 
 async def attach_tunnel(node, tun):
@@ -184,7 +184,7 @@ async def attach_tunnel(node, tun):
     if old is not None and old is not tun:
         old.close_all("tunnel replaced")
         await close_ws(old.ws)
-    log.info("node %s: Tunnel verbunden von %s", node.name, tun.remote)
+    log.info("node %s: tunnel connected from %s", node.name, tun.remote)
     state.remember({"event": "tunnel", "node": node.name, "state": "up"})
 
 
@@ -193,7 +193,7 @@ async def send_ctl(tun, msg):
         async with tun.lock:
             await tun.ws.send_json(msg)
     except Exception as e:  # noqa: BLE001  # exception-ok: network boundary; a lost control message is resent on the next hello
-        log.debug("tunnel %s: Steuernachricht: %s", tun.name(), e)
+        log.debug("tunnel %s: control message: %s", tun.name(), e)
 
 
 async def approve_node(fp, policy):
@@ -214,7 +214,7 @@ async def approve_node(fp, policy):
             state.HA_PUB.publish_discovery()
         except Exception as ex:  # noqa: BLE001  # exception-ok: MQTT broker boundary; the next publish cycle repeats discovery
             log.debug("HA discovery: %s", ex)
-    log.info("node %s freigegeben (wol=%s weight=%s mqtt=%s)", node.name, node.wol, node.weight, e["policy"].get("mqtt", True))
+    log.info("node %s approved (wol=%s weight=%s mqtt=%s)", node.name, node.wol, node.weight, e["policy"].get("mqtt", True))
     return node
 
 
@@ -229,17 +229,17 @@ async def revoke_node(fp):
             tun = node.tunnel
         if e["name"] not in state.CFG.nodes:     # rein dynamischer Knoten: raus aus dem Routing
             node.tunnel = None
-            node.go_offline("gesperrt")
+            node.go_offline("blocked")
             del state.NODES[e["name"]]
         else:
             node.tunnel, node.fp, node.reg = None, None, None
     if tun is not None:
-        await send_ctl(tun, {"t": "status", "state": "revoked", "node": e["name"], "message": "in der Router-UI gesperrt"})
+        await send_ctl(tun, {"t": "status", "state": "revoked", "node": e["name"], "message": "revoked in the router UI"})
         tun.close_all("revoked")
         await close_ws(tun.ws)
     state.MQTT_DIRTY.append(True)
     state.remember({"event": "node_revoked", "node": e["name"], "fp": fp[:16]})
-    log.warning("node %s gesperrt (Fingerprint %s...)", e["name"], fp[:16])
+    log.warning("node %s revoked (fingerprint %s...)", e["name"], fp[:16])
 
 
 async def push_config(fp):
@@ -255,26 +255,26 @@ async def receive_hello(ws, nonce, timeout=15):
     done, _ = await asyncio.wait({recv}, timeout=timeout)
     if not done:
         recv.cancel()
-        return unauthenticated(f"kein hello innerhalb von {timeout} s")
+        return unauthenticated(f"no hello within {timeout} s")
     msg = recv.result()
     if msg.type != web.WSMsgType.TEXT:
-        return unauthenticated("kein Textrahmen")
+        return unauthenticated("not a text frame")
     try:
         hello = json.loads(msg.data)
     except ValueError:  # exception-ok: untrusted JSON from the agent
-        return unauthenticated("kein JSON")
+        return unauthenticated("not JSON")
     if not isinstance(hello, dict) or hello.get("t") != "hello":
-        return unauthenticated("kein hello")
+        return unauthenticated("not a hello")
     if not all(isinstance(hello.get(k), str) and BASE64.fullmatch(hello[k]) for k in ("pubkey", "sig")):
-        return unauthenticated("pubkey/sig sind kein Base64")
+        return unauthenticated("pubkey/sig are not base64")
     pub, sig = base64.b64decode(hello["pubkey"]), base64.b64decode(hello["sig"])
     name = str(hello.get("node") or "")[:64]
     if len(pub) != 32:
-        return unauthenticated("Public Key hat nicht 32 Bytes")
+        return unauthenticated("public key is not 32 bytes")
     try:
         Ed25519PublicKey.from_public_bytes(pub).verify(sig, nonce + name.encode() + pub)
     except (InvalidSignature, ValueError):  # exception-ok: cryptography reports a wrong signature or key only as an exception
-        return unauthenticated("Signatur passt nicht")
+        return unauthenticated("signature does not match")
     return pub, name, hello
 
 
@@ -288,7 +288,7 @@ async def handle_tunnel_v2(request):
     await ws.send_json({"t": "challenge", "nonce": base64.b64encode(nonce).decode(), "router": VERSION})
     hello = await receive_hello(ws, nonce)
     if failed(hello):
-        log.warning("tunnel: Anmeldung von %s abgelehnt: %s", request.remote, hello.message)
+        log.warning("tunnel: sign-in from %s refused: %s", request.remote, hello.message)
         await ws.close(code=4001, message=b"auth failed")
         return ws
     pub, name, hello = hello
@@ -296,7 +296,7 @@ async def handle_tunnel_v2(request):
     facts = hello.get("facts") if isinstance(hello.get("facts"), dict) else {}
     e = state.REG.upsert_hello(fp, name or facts.get("hostname") or fp[:12], base64.b64encode(pub).decode(), facts, request.remote)
     if e["state"] == "revoked":
-        await ws.send_json({"t": "status", "state": "revoked", "node": e["name"], "message": "in der Router-UI gesperrt"})
+        await ws.send_json({"t": "status", "state": "revoked", "node": e["name"], "message": "revoked in the router UI"})
         await ws.close()
         return ws
     tun = tunnel.Tunnel(None, ws, request.remote)
@@ -311,7 +311,7 @@ async def handle_tunnel_v2(request):
         if old is not None:
             await close_ws(old.ws)
         state.MQTT_DIRTY.append(True)
-        await ws.send_json({"t": "status", "state": "pending", "node": e["name"], "message": "wartet auf Freigabe in der Router-UI"})
+        await ws.send_json({"t": "status", "state": "pending", "node": e["name"], "message": "awaiting approval in the router UI"})
     state.REG.save()   # scheitert es, bleibt das Register dirty und maybe_save versucht es wieder
     try:
         async for msg in ws:
@@ -328,10 +328,10 @@ async def handle_tunnel_v2(request):
         if node is not None and node.tunnel is tun:
             node.tunnel = None
             node.ollama_push_ts = 0.0   # ohne Tunnel keine Meldungen; nach dem Neuverbinden bis zur ersten Meldung wieder Poll
-            log.warning("node %s: Tunnel getrennt", node.name)
+            log.warning("node %s: tunnel disconnected", node.name)
             state.remember({"event": "tunnel", "node": node.name, "state": "down"})
             if not node.url and node.state != "offline":
-                node.go_offline("Tunnel weg")
+                node.go_offline("tunnel gone")
     return ws
 
 

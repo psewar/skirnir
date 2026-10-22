@@ -9,7 +9,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -27,7 +27,7 @@ def read_env_value(path, key, strip_quotes=False):
         with open(path, encoding="utf-8") as f:
             lines = f.read().splitlines()
     except OSError as e:  # exception-ok: file system boundary (rights, file vanished after the check)
-        log.warning("%s unlesbar: %s", path, e)
+        log.warning("%s unreadable: %s", path, e)
         return None
     v = next((line.split("=", 1)[1] for line in lines if line.startswith(key + "=")), None)
     return v.strip().strip('"').strip("'") if v is not None and strip_quotes else v
@@ -41,7 +41,7 @@ def load_json_file(path, what):
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
-        log.warning("%s unlesbar: %s", what, e)
+        log.warning("%s unreadable: %s", what, e)
         return None
 
 
@@ -53,7 +53,7 @@ def save_json_file(path, data, what, **dump_kw):
             json.dump(data, f, **dump_kw)
         os.replace(tmp, path)
     except (OSError, TypeError, ValueError) as e:  # exception-ok: file system boundary; json reports unencodable data only so
-        log.warning("%s schreiben: %s", what, e)
+        log.warning("%s write: %s", what, e)
         return False
     return True
 

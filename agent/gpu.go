@@ -34,13 +34,13 @@ type GPU struct {
 	gpuzOn bool        // Konfiguration gpuz.enabled (Standard an); gilt auch fuer das Relay
 	// Relay: GPU-Z-Werte, die `gpuz-relay` aus der Anmeldesitzung per POST /gpuz schickt, wenn der Dienst das Objekt
 	// selbst nicht oeffnen darf (virtuelles Dienstkonto). Gelten 15 s.
-	relayMu sync.Mutex
-	relay   *GPUSensors
-	relayAt time.Time
-	mu      sync.Mutex
-	last    *GPUSample
-	err     error
-	falls   int // Zaehler NVML-Fehler -> nach 3 in Folge dauerhaft auf nvidia-smi
+	relayMu    sync.Mutex
+	relay      *GPUSensors
+	relayAt    time.Time
+	mu         sync.Mutex
+	last       *GPUSample
+	err        error
+	failStreak int // Zaehler NVML-Fehler -> nach 3 in Folge dauerhaft auf nvidia-smi
 }
 
 // newGPU: NVML zuerst (Mikrosekunden je Messung, kein Prozessstart), sonst nvidia-smi.exe wie bisher.
@@ -114,7 +114,7 @@ func findNvidiaSmi() (string, error) {
 			return c, nil
 		}
 	}
-	return "", fmt.Errorf("nvidia-smi.exe nicht gefunden")
+	return "", fmt.Errorf("nvidia-smi.exe not found")
 }
 
 // smiFields: was wir nvidia-smi abfragen (Reihenfolge = Spalten der Antwort). Die ersten fuenf sind Pflicht,
@@ -135,13 +135,13 @@ func (g *GPU) Sample(ctx context.Context) (*GPUSample, error) {
 			nv.extra(s.Sensors)
 			g.addGPUZ(s.Sensors)
 			g.mu.Lock()
-			g.last, g.err, g.falls = s, nil, 0
+			g.last, g.err, g.failStreak = s, nil, 0
 			g.mu.Unlock()
 			return s, nil
 		}
 		g.mu.Lock()
-		g.falls++
-		giveUp := g.falls >= 3 && g.smi != "nvml" && g.nvml == nv
+		g.failStreak++
+		giveUp := g.failStreak >= 3 && g.smi != "nvml" && g.nvml == nv
 		if giveUp {
 			g.nvml, g.source = nil, "nvidia-smi"
 		}
@@ -166,7 +166,7 @@ func (g *GPU) Sample(ctx context.Context) (*GPUSample, error) {
 	line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 	f := strings.Split(line, ",")
 	if len(f) < 5 {
-		err := fmt.Errorf("unerwartete nvidia-smi-Ausgabe: %q", line)
+		err := fmt.Errorf("unexpected nvidia-smi output: %q", line)
 		g.setErr(err)
 		return nil, err
 	}

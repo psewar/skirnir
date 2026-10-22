@@ -30,9 +30,9 @@ def keepalive_socket(listen):
     h, p = split_listen(listen)
     sock = socket.create_server((h, p))
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-    for name, wert in KEEPALIVE:
+    for name, value in KEEPALIVE:
         if hasattr(socket, name):
-            sock.setsockopt(socket.IPPROTO_TCP, getattr(socket, name), wert)
+            sock.setsockopt(socket.IPPROTO_TCP, getattr(socket, name), value)
     return sock
 
 
@@ -107,7 +107,7 @@ def install_uvloop():
 async def main(cfg_path):
     cfg = config.Config.load(cfg_path)
     if failed(cfg):
-        log.error("Konfiguration ungueltig, Router startet nicht: %s", cfg.message)
+        log.error("configuration invalid, router does not start: %s", cfg.message)
         sys.exit(2)
     state.CFG = cfg
     state.INTERNAL_TOKEN = secrets.token_urlsafe(32)   # Selbstaufruf der UI (Ausprobieren) im enforce-Modus, nur localhost
@@ -117,16 +117,16 @@ async def main(cfg_path):
     for fp, e in list(state.REG.nodes.items()):
         if e.get("state") == "approved":
             registry.activate_node(fp)
-    log.info("Knotenregister: %d Eintraege (%d freigegeben)", len(state.REG.nodes), sum(1 for e in state.REG.nodes.values() if e["state"] == "approved"))
+    log.info("node register: %d entries (%d approved)", len(state.REG.nodes), sum(1 for e in state.REG.nodes.values() if e["state"] == "approved"))
     perf.perf_load()
     fallback_observation.adopt_file_before_0_9()   # anfragen.jsonl -> requests.jsonl (0.9.0)
     metrics.usage_load()
     n_met = metrics.metrics_load()
     if n_met:
-        log.info("Metriken: %d Reihen aus metrics.json uebernommen (gesamt seit %s)", n_met, state.METRICS.get("since"))
+        log.info("metrics: %d series taken from metrics.json (total since %s)", n_met, state.METRICS.get("since"))
     n_dec = state.decisions_load()
     if n_dec:
-        log.info("Entscheidungsprotokoll: %d Eintraege aus events.jsonl uebernommen", n_dec)
+        log.info("decision journal: %d entries taken from events.jsonl", n_dec)
     cloud.setup()
     state.SESSION = ClientSession()
     api, ctl = build_apps()
@@ -137,9 +137,9 @@ async def main(cfg_path):
         ctl_ssl.minimum_version = ssl.TLSVersion.TLSv1_2
         ctl_ssl.load_cert_chain(state.CFG.control_tls[0], state.CFG.control_tls[1])
     elif state.CFG.control_users:
-        log.warning("Basic Auth ohne TLS: Passwoerter gehen im Klartext ueber das Netz (control_tls setzen)")
+        log.warning("basic auth without TLS: passwords cross the network in plain text (set control_tls)")
     if state.CFG.api_tls and ctl_ssl is None:
-        log.error("api_tls: true braucht control_tls (Zertifikat) - Router startet nicht")
+        log.error("api_tls: true needs control_tls (certificate) - router does not start")
         sys.exit(2)
     for app, listen, sslctx, keepalive in ((api, state.CFG.listen, ctl_ssl if state.CFG.api_tls else None, True),
                                            (ctl, state.CFG.control_listen, ctl_ssl, False)):
@@ -204,13 +204,13 @@ def cli():
         # rc 0 = ok, 2 = ungueltig. --pure ignoriert eine daneben liegende roles.yaml.
         cfg = config.Config.load(sys.argv[2], use_overrides="--pure" not in sys.argv)
         if failed(cfg):
-            print(f"FEHLER: {cfg.message}")
+            print(f"ERROR: {cfg.message}")
             sys.exit(2)
-        print(f"Konfiguration ok: {len(cfg.roles)} Rollen, {len(cfg.models)} Modelle im Katalog, {len(cfg.nodes)} statische Knoten, "
-              f"client_auth {cfg.client_auth['mode']}" + ("" if "--pure" in sys.argv or not os.path.exists(cfg.overrides_path) else " (mit roles.yaml)"))
+        print(f"configuration ok: {len(cfg.roles)} roles, {len(cfg.models)} models in the catalog, {len(cfg.nodes)} static nodes, "
+              f"client_auth {cfg.client_auth['mode']}" + ("" if "--pure" in sys.argv or not os.path.exists(cfg.overrides_path) else " (with roles.yaml)"))
         sys.exit(0)
     logging.basicConfig(level=os.environ.get("ROUTER_LOG", "INFO"),
                         format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
     uv = install_uvloop()
-    logging.getLogger('skirnir-router').info('Event-Loop: %s', 'uvloop' if uv else 'asyncio')
+    logging.getLogger('skirnir-router').info('event loop: %s', 'uvloop' if uv else 'asyncio')
     asyncio.run(main(sys.argv[1] if len(sys.argv) > 1 else "/etc/skirnir-router/config.yaml"))

@@ -21,7 +21,7 @@ type Supervisor struct {
 	mu       sync.Mutex
 	children map[string]*childState
 
-	kuerzungen *Kuerzungen // stille Kuerzungen im Ollama-Log (kuerzung.go)
+	truncations *Truncations // stille Kuerzungen im Ollama-Log (truncation.go)
 }
 
 type childState struct {
@@ -46,7 +46,7 @@ func newSupervisor(specs []ChildSpec, logc LogCfg, log *Logger) (*Supervisor, er
 		return nil, err
 	}
 	s := &Supervisor{specs: specs, logc: logc, log: log, group: g, children: map[string]*childState{},
-		kuerzungen: newKuerzungen()}
+		truncations: newTruncations()}
 	for _, sp := range specs {
 		s.children[sp.Name] = &childState{spec: sp}
 	}
@@ -57,7 +57,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, sp := range s.specs {
 		if !sp.on() {
-			s.log.Infof("supervisor: Kind %s deaktiviert", sp.Name)
+			s.log.Infof("supervisor: child %s disabled", sp.Name)
 			continue
 		}
 		wg.Add(1)
@@ -71,8 +71,8 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 	out := newChildWriter(s.logc, sp.Name)
 	name := sp.Name
 	out.onLine = func(z string) {
-		if s.kuerzungen.pruefe(name, z) {
-			s.log.Warnf("supervisor: %s hat einen Prompt gekuerzt: %s", name, z)
+		if s.truncations.inspect(name, z) {
+			s.log.Warnf("supervisor: %s truncated a prompt: %s", name, z)
 		}
 	}
 	attempt := 0
@@ -91,7 +91,7 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 		s.mu.Lock()
 		held := st.held
 		st.Running, st.Healthy, st.PID = false, false, 0
-		st.LastExit = fmt.Sprintf("%s nach %s", exitMsg, ran.Round(time.Second))
+		st.LastExit = fmt.Sprintf("%s after %s", exitMsg, ran.Round(time.Second))
 		st.Restarts++
 		st.NextStart = time.Now().Add(delay)
 		if held {
@@ -99,7 +99,7 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 		}
 		s.mu.Unlock()
 		if held { // Ollama-Update: angehalten, bis Release() - dann sofort wieder starten, ohne Backoff
-			s.log.Infof("supervisor: %s angehalten (Update), wartet auf Freigabe", sp.Name)
+			s.log.Infof("supervisor: %s stopped (update), waiting for release", sp.Name)
 			for s.isHeld(sp.Name) {
 				select {
 				case <-ctx.Done():
@@ -111,9 +111,9 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 			continue
 		}
 		if err != nil {
-			s.log.Warnf("supervisor: %s: %s, Neustart in %s", sp.Name, exitMsg, delay)
+			s.log.Warnf("supervisor: %s: %s, restart in %s", sp.Name, exitMsg, delay)
 		} else {
-			s.log.Warnf("supervisor: %s beendet (%s), Neustart in %s", sp.Name, exitMsg, delay)
+			s.log.Warnf("supervisor: %s exited (%s), restart in %s", sp.Name, exitMsg, delay)
 		}
 		select {
 		case <-ctx.Done():
@@ -131,11 +131,11 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.SysProcAttr = childProcAttr()
 	if err := cmd.Start(); err != nil {
-		return fmt.Sprintf("Start fehlgeschlagen: %v", err), err
+		return fmt.Sprintf("start failed: %v", err), err
 	}
 	tree, err := s.group.track(cmd.Process.Pid)
 	if err != nil {
-		s.log.Warnf("supervisor: %s: Prozessgruppe: %v", sp.Name, err)
+		s.log.Warnf("supervisor: %s: process group: %v", sp.Name, err)
 	}
 	// Handle am Ende freigeben; unter Windows beendet das (KILL_ON_JOB_CLOSE) auch, was noch uebrig ist.
 	defer tree.release()
@@ -145,7 +145,7 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 	st.kill = func() { stopChild(cmd, tree) }
 	st.tree = tree
 	s.mu.Unlock()
-	s.log.Infof("supervisor: %s gestartet (PID %d): %s %v", sp.Name, cmd.Process.Pid, sp.Cmd, sp.Args)
+	s.log.Infof("supervisor: %s started (PID %d): %s %v", sp.Name, cmd.Process.Pid, sp.Cmd, sp.Args)
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -179,7 +179,7 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 			s.mu.Unlock()
 			if ok {
 				if !wasHealthy {
-					s.log.Infof("supervisor: %s gesund (Port %d offen)", sp.Name, sp.HealthTCPPort)
+					s.log.Infof("supervisor: %s healthy (port %d open)", sp.Name, sp.HealthTCPPort)
 				}
 				misses = 0
 				continue
@@ -189,10 +189,10 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 			}
 			misses++
 			if misses >= 3 {
-				s.log.Warnf("supervisor: %s: Port %d seit %d Pruefungen zu, Prozess wird neu gestartet", sp.Name, sp.HealthTCPPort, misses)
+				s.log.Warnf("supervisor: %s: port %d closed for %d checks, restarting process", sp.Name, sp.HealthTCPPort, misses)
 				stopChild(cmd, tree)
 				<-done
-				return "ungesund (Port zu)", fmt.Errorf("health check failed")
+				return "unhealthy (port closed)", fmt.Errorf("health check failed")
 			}
 		}
 	}
@@ -214,7 +214,7 @@ func (s *Supervisor) reapTree(name string, t *procTree) {
 	}
 	t.kill()
 	if n > 0 {
-		s.log.Warnf("supervisor: %s: %d verwaiste(r) Prozess(e) im Prozessbaum beendet", name, n)
+		s.log.Warnf("supervisor: %s: %d orphaned process(es) in the process tree ended", name, n)
 	}
 }
 
@@ -232,7 +232,7 @@ func (s *Supervisor) childrenVRAM() map[string]int {
 	if len(trees) == 0 {
 		return nil
 	}
-	proz, err := gpuProcessVRAM()
+	procVRAM, err := gpuProcessVRAM()
 	if err != nil {
 		return nil
 	}
@@ -240,7 +240,7 @@ func (s *Supervisor) childrenVRAM() map[string]int {
 	for name, t := range trees {
 		var sum uint64
 		for _, pid := range t.pids() {
-			sum += proz[pid]
+			sum += procVRAM[pid]
 		}
 		out[name] = int(sum >> 20)
 	}

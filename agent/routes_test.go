@@ -61,17 +61,17 @@ func TestRoutesConfig(t *testing.T) {
 		}
 	}
 	dup := routeCfgOK + "    - name: rerank\n      path: /other\n      methods: [POST]\n      upstream: http://127.0.0.1:8091\n      health: /health\n"
-	if _, err := loadConfig(writeCfg(t, dup)); err == nil || !strings.Contains(err.Error(), "doppelt") {
+	if _, err := loadConfig(writeCfg(t, dup)); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Errorf("doppelter Name akzeptiert: %v", err)
 	}
 	dup = routeCfgOK + "    - name: other\n      path: /rerank\n      methods: [POST]\n      upstream: http://127.0.0.1:8091\n      health: /health\n"
-	if _, err := loadConfig(writeCfg(t, dup)); err == nil || !strings.Contains(err.Error(), "doppelt") {
+	if _, err := loadConfig(writeCfg(t, dup)); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Errorf("doppelter Pfad akzeptiert: %v", err)
 	}
 }
 
 // Das auskommentierte Beispiel in config.example.yaml muss einkommentiert laden und genau die Vertrags-Route ergeben.
-func TestRoutesBeispielConfig(t *testing.T) {
+func TestRoutesExampleConfig(t *testing.T) {
 	raw, err := os.ReadFile("config.example.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func newTestTunnel(upstream string, routes *Routes) *Tunnel {
 	return &Tunnel{upstream: upstream, log: quietLogger(), http: &http.Client{}, streams: map[uint32]context.CancelFunc{}, routes: routes}
 }
 
-func TestTunnelRouten(t *testing.T) {
+func TestTunnelRoutes(t *testing.T) {
 	ollama := &countingServer{reply: `{"from":"ollama"}`}
 	osrv := httptest.NewServer(ollama)
 	defer osrv.Close()
@@ -234,7 +234,7 @@ func TestTunnelRouten(t *testing.T) {
 	}
 }
 
-func TestRoutesGesundheit(t *testing.T) {
+func TestRoutesHealth(t *testing.T) {
 	var mu sync.Mutex
 	status, body := 503, `{"status":"starting","reason":"model loading"}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -286,7 +286,7 @@ func TestRoutesGesundheit(t *testing.T) {
 }
 
 // Ohne routes bleibt alles wie bisher: kein Objekt, kein Heartbeat-Feld, Lookup findet nichts.
-func TestRoutesOhneKonfiguration(t *testing.T) {
+func TestRoutesWithoutConfiguration(t *testing.T) {
 	r := newRoutes(nil, quietLogger())
 	if r != nil {
 		t.Fatal("newRoutes(nil) != nil")

@@ -179,18 +179,18 @@ func testUpdater(t *testing.T, srv *httptest.Server, dir string) *OllamaUpdater 
 
 // runMitFreigabe spielt den Router: sobald der Auftrag "ready" meldet, kommt die Freigabe. Liefert den Fehler von run und
 // ob "ready" vor dem Tausch gemeldet wurde, waehrend die alten Dateien noch an ihrem Platz lagen.
-func runMitFreigabe(t *testing.T, u *OllamaUpdater, o OllamaUpdateOrder, dir string) (error, bool) {
+func runWithRelease(t *testing.T, u *OllamaUpdater, o OllamaUpdateOrder, dir string) (error, bool) {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { done <- u.run(o) }()
-	readyVorTausch := false
+	readyBeforeSwap := false
 	for {
 		select {
 		case err := <-done:
-			return err, readyVorTausch
+			return err, readyBeforeSwap
 		case <-time.After(20 * time.Millisecond):
-			if r := u.Report(); r != nil && r.State == "ready" && !readyVorTausch {
-				readyVorTausch = readFile(t, filepath.Join(dir, "ollama.exe")) == "alt"
+			if r := u.Report(); r != nil && r.State == "ready" && !readyBeforeSwap {
+				readyBeforeSwap = readFile(t, filepath.Join(dir, "ollama.exe")) == "alt"
 				u.Swap(o.Version)
 			}
 		}
@@ -209,7 +209,7 @@ func TestOllamaUpdateRun(t *testing.T) {
 	u.live = func(context.Context) string {
 		return strings.TrimPrefix(readFile(t, filepath.Join(dir, "ollama.exe")), "neu ")
 	}
-	err, ready := runMitFreigabe(t, u, OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size}, dir)
+	err, ready := runWithRelease(t, u, OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size}, dir)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestOllamaUpdateRollback(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "lib", "ollama", "a.dll"), "alt")
 	u := testUpdater(t, srv, dir)
 	u.live = func(context.Context) string { return "0.34.0" } // das neue Ollama meldet sich nie
-	err, _ := runMitFreigabe(t, u, OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size}, dir)
+	err, _ := runWithRelease(t, u, OllamaUpdateOrder{Version: ver, File: archive, Sha256: sum, Size: size}, dir)
 	if err == nil || !strings.Contains(err.Error(), "zurueckgesetzt (true)") {
 		t.Fatalf("Rollback erwartet: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestOllamaUpdateRollback(t *testing.T) {
 }
 
 // Ohne Freigabe des Routers wird nichts getauscht: Ollama laeuft unveraendert weiter, der Staging-Ordner ist weg.
-func TestOllamaUpdateOhneFreigabe(t *testing.T) {
+func TestOllamaUpdateWithoutRelease(t *testing.T) {
 	const ver, archive = "0.34.4", "ollama-windows-amd64.zip"
 	srv, sum, size := releaseServer(t, ver, archive)
 	root := t.TempDir()

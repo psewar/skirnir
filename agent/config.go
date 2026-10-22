@@ -255,7 +255,7 @@ func (c *Config) applyDefaults() {
 		in.DisplayName = "Skirnir Agent" // Anzeigename (services.msc); der technische Name SkirnirAgent bleibt
 	}
 	if in.Description == "" {
-		in.Description = "Skirnir Agent: Tunnel zum Router mit GPU-Heartbeat und GPU-Schutz, MQTT-Geraet fuer Home Assistant, Aufsicht ueber lokale KI-Dienste (Ollama, STT)."
+		in.Description = "Skirnir Agent: tunnel to the router with GPU heartbeat and GPU guard, MQTT device for Home Assistant, supervision of local AI services (Ollama, STT)."
 	}
 }
 
@@ -293,32 +293,32 @@ func mqttDefaults(m *MQTTCfg, node string) {
 
 func (c *Config) validate() error {
 	if c.Node == "" {
-		return fmt.Errorf("node fehlt und Hostname nicht ermittelbar")
+		return fmt.Errorf("node missing and host name not available")
 	}
 	if c.Router.URL == "" {
-		return fmt.Errorf("router.url fehlt")
+		return fmt.Errorf("router.url missing")
 	}
 	if c.MQTT.on() && c.MQTT.Host != "" { // lokale MQTT-Config nur pruefen, wenn gesetzt (sonst provisioniert der Router)
 		if c.MQTT.Password == "" && c.MQTT.PasswordSecret == "" {
-			return fmt.Errorf("mqtt.password oder mqtt.password_secret fehlt")
+			return fmt.Errorf("mqtt.password or mqtt.password_secret missing")
 		}
 		if c.MQTT.PasswordSecret != "" && (c.SecretStore.ProjectID == "" || c.SecretStore.ClientID == "" || c.SecretStore.ClientSecret == "") {
-			return fmt.Errorf("mqtt.password_secret gesetzt, aber secret_store.project_id/client_id/client_secret fehlen")
+			return fmt.Errorf("mqtt.password_secret set, but secret_store.project_id/client_id/client_secret missing")
 		}
 		if c.MQTT.PasswordSecret != "" && !strings.HasPrefix(c.SecretStore.Domain, "https://") {
-			return fmt.Errorf("secret_store.domain fehlt oder ist kein https://-URL (frueher stand hier still ein Platzhalter)")
+			return fmt.Errorf("secret_store.domain missing or not an https:// URL (this used to be a silent placeholder)")
 		}
 	}
 	if c.OllamaProxy.on() && c.OllamaProxy.requireToken() && c.Router.Token == "" {
-		return fmt.Errorf("ollama_proxy.enabled braucht router.token (oder ollama_proxy.require_token: false) - sonst waere Ollama fuer das LAN offen")
+		return fmt.Errorf("ollama_proxy.enabled needs router.token (or ollama_proxy.require_token: false) - otherwise Ollama would be open to the LAN")
 	}
 	seen := map[string]bool{}
 	for _, ch := range c.Children {
 		if ch.Name == "" || ch.Cmd == "" {
-			return fmt.Errorf("children: name und cmd sind Pflicht")
+			return fmt.Errorf("children: name and cmd are required")
 		}
 		if seen[ch.Name] {
-			return fmt.Errorf("children: Name %q doppelt", ch.Name)
+			return fmt.Errorf("children: duplicate name %q", ch.Name)
 		}
 		seen[ch.Name] = true
 	}
@@ -336,32 +336,32 @@ func validateRoutes(routes []RouteCfg) error {
 	names, paths := map[string]bool{}, map[string]bool{}
 	for _, r := range routes {
 		if !routeNameRe.MatchString(r.Name) {
-			return fmt.Errorf("tunnel.routes: name %q fehlt oder ist ungueltig (a-z, 0-9, _ und -)", r.Name)
+			return fmt.Errorf("tunnel.routes: name %q missing or invalid (a-z, 0-9, _ and -)", r.Name)
 		}
 		if names[r.Name] {
-			return fmt.Errorf("tunnel.routes: Name %q doppelt", r.Name)
+			return fmt.Errorf("tunnel.routes: duplicate name %q", r.Name)
 		}
 		names[r.Name] = true
 		if !strings.HasPrefix(r.Path, "/") || strings.ContainsAny(r.Path, "?#") {
-			return fmt.Errorf("tunnel.routes[%s]: path %q muss mit / beginnen und darf keine Query enthalten", r.Name, r.Path)
+			return fmt.Errorf("tunnel.routes[%s]: path %q must start with / and must not contain a query", r.Name, r.Path)
 		}
 		if paths[r.Path] {
-			return fmt.Errorf("tunnel.routes[%s]: path %q doppelt", r.Name, r.Path)
+			return fmt.Errorf("tunnel.routes[%s]: duplicate path %q", r.Name, r.Path)
 		}
 		paths[r.Path] = true
 		if len(r.Methods) == 0 {
-			return fmt.Errorf("tunnel.routes[%s]: methods fehlt", r.Name)
+			return fmt.Errorf("tunnel.routes[%s]: methods missing", r.Name)
 		}
 		for _, m := range r.Methods {
 			if !httpMethods[m] {
-				return fmt.Errorf("tunnel.routes[%s]: Methode %q unbekannt", r.Name, m)
+				return fmt.Errorf("tunnel.routes[%s]: unknown method %q", r.Name, m)
 			}
 		}
 		if !loopbackUpstream(r.Upstream) {
-			return fmt.Errorf("tunnel.routes[%s]: upstream %q ist kein Loopback-URL (nur http://127.0.0.1:<port> oder http://[::1]:<port>)", r.Name, r.Upstream)
+			return fmt.Errorf("tunnel.routes[%s]: upstream %q is not a loopback URL (only http://127.0.0.1:<port> or http://[::1]:<port>)", r.Name, r.Upstream)
 		}
 		if !strings.HasPrefix(r.Health, "/") || strings.ContainsAny(r.Health, "#") {
-			return fmt.Errorf("tunnel.routes[%s]: health %q muss ein Pfad sein (z. B. /health)", r.Name, r.Health)
+			return fmt.Errorf("tunnel.routes[%s]: health %q must be a path (e.g. /health)", r.Name, r.Health)
 		}
 	}
 	return nil

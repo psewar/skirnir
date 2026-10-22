@@ -78,7 +78,7 @@ func TestMatchGame(t *testing.T) {
 
 // GOG legt Spiele UNTER dem Launcher-Ordner ab (Registry-Eintraege in dieser Form). Der Launcher darf nicht in den Index,
 // seine Spiele schon - sonst galt GalaxyClient.exe als Spiel (2026-10-21) oder ein GOG-Spiel als keins.
-func TestGOGLauncherUndSpiel(t *testing.T) {
+func TestGOGLauncherAndGame(t *testing.T) {
 	var idx gameIndex
 	for _, e := range [][3]string{
 		{"GOG.com", "GOG GALAXY", `C:\Program Files\GOG Galaxy\`},
@@ -100,7 +100,7 @@ func TestGOGLauncherUndSpiel(t *testing.T) {
 }
 
 // 0.19.0: alle Prozesse eines Spiels zaehlen fuer den GPU-Bedarf (manche Spiele zeichnen in einem Kindprozess).
-func TestGameHitsAlleProzesse(t *testing.T) {
+func TestGameHitsAllProcesses(t *testing.T) {
 	idx := gameIndex{folders: []string{`D:\SteamLibrary\steamapps\common`}, exes: map[string]string{"anticheat game": `x`}}
 	hits := gameHits([]procInfo{
 		{Name: "launcher.exe", Path: `D:\SteamLibrary\steamapps\common\Example\launcher.exe`, PID: 10},

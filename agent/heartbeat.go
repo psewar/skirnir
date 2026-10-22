@@ -19,7 +19,7 @@ type Heartbeat struct {
 	ollamaUp *OllamaUpdater // Ollama-Update: Zwischenstand (0.12.0)
 	upstream string         // lokales Ollama: Version geht mit dem Heartbeat (0.12.0, alle 60 s frisch)
 	sup      *Supervisor    // 0.13.0: Grafikspeicher der eigenen Kinder (ausser Ollama) als Fakt
-	game     *GameWatch     // 0.17.0: laufendes Spiel als Fakt (spiel.go)
+	game     *GameWatch     // 0.17.0: laufendes Spiel als Fakt (game.go)
 	routes   *Routes        // tunnel.routes: Gesundheit der gerouteten Dienste (routes.go); nil = Feld fehlt
 
 	mu         sync.Mutex
@@ -132,7 +132,7 @@ func (h *Heartbeat) ack(r hbResponse) {
 	h.guardAck = r.GuardAck
 	h.mu.Unlock()
 	if changed {
-		h.log.Infof("heartbeat: router sieht uns als '%s' %s", r.State, r.BusyReason)
+		h.log.Infof("heartbeat: router sees us as '%s' %s", r.State, r.BusyReason)
 	}
 }
 
@@ -144,7 +144,7 @@ func (h *Heartbeat) fail(msg string) {
 	h.state = ""
 	h.mu.Unlock()
 	if n == 1 || n%100 == 0 {
-		h.log.Warnf("heartbeat fehlgeschlagen (%d): %s", n, msg)
+		h.log.Warnf("heartbeat failed (%d): %s", n, msg)
 	}
 }
 

@@ -21,34 +21,34 @@ import json
 from . import state
 from .common import log
 
-BYTES_JE_TOKEN = 3.5
-NACHRICHT_AUFSCHLAG = 4   # Rollen- und Trennmarken des Chat-Templates je Nachricht
-BESTAETIGT = 0.8          # angekommen < 0,8 x geschaetzt -> wahrscheinlich gekuerzt
-SICHER = 0.45             # angekommen < 0,45 x geschaetzt -> sicher gekuerzt (schlechteste Ueberschaetzung gemessen: 0,46)
+BYTES_PER_TOKEN = 3.5
+MESSAGE_OVERHEAD = 4   # Rollen- und Trennmarken des Chat-Templates je Nachricht
+CONFIRMED = 0.8          # angekommen < 0,8 x geschaetzt -> wahrscheinlich gekuerzt
+CERTAIN = 0.45             # angekommen < 0,45 x geschaetzt -> sicher gekuerzt (schlechteste Ueberschaetzung gemessen: 0,46)
 # Grenzen, gemessen 2026-09-24 an 80 echten Texten (echt/Schaetzung): p10 0,85, min 0,46 - 4 von 80 lagen unter 0,8,
 # alle mit viel Leerraum (eingerueckte Ausgaben; Leerzeichenfolgen sind fuer den Tokenizer fast gratis). Feinere Regeln
 # (Leerraum getrennt zaehlen) gewannen nur in der Stichprobe, nicht in der 5-fach-Kreuzvalidierung. Folge: eine
 # Kuerzung um weniger als ~25 % ist von einem Schaetzfehler nicht zu unterscheiden und bleibt unsichtbar.
-_ZIFFERN = "0123456789"
+_DIGITS = "0123456789"
 
 
-def schaetze_text(text):
+def estimate_text(text):
     """Tokens eines Texts: ASCII-Ziffern je 1, alles andere ceil(UTF-8-Bytes / 3,5)."""
     if not text:
         return 0
     if not isinstance(text, str):
         text = json.dumps(text, ensure_ascii=False, separators=(",", ":"))
-    ziffern = sum(map(text.count, _ZIFFERN))
-    rest = len(text.encode("utf-8", "replace")) - ziffern
-    return ziffern + int(-(-rest // BYTES_JE_TOKEN))
+    digits = sum(map(text.count, _DIGITS))
+    rest = len(text.encode("utf-8", "replace")) - digits
+    return digits + int(-(-rest // BYTES_PER_TOKEN))
 
 
-def _obergrenze(body):
+def _upper_bound(body):
     """Billige Obergrenze: kein Byte wird zu mehr als einem Token (Ziffern genau 1, CJK 3 Bytes je Token)."""
     n = sum(len(body.get(k) or "") for k in ("system", "prompt", "suffix") if isinstance(body.get(k), str))
     for m in body.get("messages") or []:
         c = m.get("content")
-        n += NACHRICHT_AUFSCHLAG + (len(c.encode("utf-8", "replace")) if isinstance(c, str) else len(json.dumps(c or "")))
+        n += MESSAGE_OVERHEAD + (len(c.encode("utf-8", "replace")) if isinstance(c, str) else len(json.dumps(c or "")))
         if m.get("tool_calls"):
             n += len(json.dumps(m["tool_calls"]))
     if body.get("tools"):
@@ -56,44 +56,44 @@ def _obergrenze(body):
     return n
 
 
-def schaetze_body(body):
+def estimate_body(body):
     """Geschaetzte Prompt-Tokens eines Ollama-Bodys (/api/chat oder /api/generate). Bilder zaehlen nicht mit -
     ihr Preis haengt vom Modell ab und steckt nicht in den Bytes."""
-    n = sum(schaetze_text(body.get(k)) for k in ("system", "prompt", "suffix"))
+    n = sum(estimate_text(body.get(k)) for k in ("system", "prompt", "suffix"))
     for m in body.get("messages") or []:
-        n += NACHRICHT_AUFSCHLAG + schaetze_text(m.get("content"))
+        n += MESSAGE_OVERHEAD + estimate_text(m.get("content"))
         if m.get("tool_calls"):
-            n += schaetze_text(m["tool_calls"])
+            n += estimate_text(m["tool_calls"])
     if body.get("tools"):
-        n += schaetze_text(body["tools"])
+        n += estimate_text(body["tools"])
     return n
 
 
-def vorher(body, ctx, is_cloud=False):
+def before_request(body, ctx, is_cloud=False):
     """Schaetzung, wenn die Anfrage num_ctx ueberschreiten koennte, sonst None (auch fuer Cloud/ohne ctx)."""
     if is_cloud or not ctx:
         return None
-    if _obergrenze(body) < ctx:
+    if _upper_bound(body) < ctx:
         return None   # passt sicher - die allermeisten Anfragen enden hier ohne Schaetzung
-    est = schaetze_body(body)
+    est = estimate_body(body)
     return est if est > ctx else None
 
 
-def nachher(geschaetzt, angekommen, ctx, info):
+def after_request(estimated, received, ctx, info):
     """Abgleich nach der Antwort. Liefert True, wenn die Kuerzung bestaetigt und gemeldet wurde."""
-    if not geschaetzt or not angekommen:
+    if not estimated or not received:
         return False
-    if angekommen >= BESTAETIGT * geschaetzt:
-        log.info("Kontextpruefung: geschaetzt %d > num_ctx %d, angekommen %d - Schaetzung zu hoch, keine Kuerzung (%s)",
-                 geschaetzt, ctx, angekommen, info.get("model"))
+    if received >= CONFIRMED * estimated:
+        log.info("context check: estimated %d > num_ctx %d, received %d - estimate too high, no truncation (%s)",
+                 estimated, ctx, received, info.get("model"))
         return False
-    quote = angekommen / geschaetzt
+    ratio = received / estimated
     e = {"event": "context_truncated", "role": info.get("role"), "model": info.get("model"), "node": info.get("node"),
-         "client": info.get("client"), "path": info.get("path"), "num_ctx": ctx, "estimated": geschaetzt,
-         "received": angekommen, "ratio": round(quote, 2), "certain": quote < SICHER, "request_id": info.get("request_id")}
-    log.warning("Kontext %s gekuerzt: %s schickte ~%d Token an %s (%s, num_ctx %d), angekommen %d (%.0f %%) - Ollama kuerzt still (req=%s)",
-                "sicher" if e["certain"] else "wahrscheinlich", e["client"] or "-", geschaetzt, e["model"], e["node"], ctx,
-                angekommen, quote * 100, e["request_id"])
+         "client": info.get("client"), "path": info.get("path"), "num_ctx": ctx, "estimated": estimated,
+         "received": received, "ratio": round(ratio, 2), "certain": ratio < CERTAIN, "request_id": info.get("request_id")}
+    log.warning("context %s truncated: %s sent ~%d tokens to %s (%s, num_ctx %d), received %d (%.0f %%) - Ollama truncates silently (req=%s)",
+                "certainly" if e["certain"] else "probably", e["client"] or "-", estimated, e["model"], e["node"], ctx,
+                received, ratio * 100, e["request_id"])
     state.remember(e)
     state.TRUNCATIONS["count"] += 1
     state.TRUNCATIONS["last"] = {k: v for k, v in e.items() if k not in ("event", "t")}
@@ -104,4 +104,4 @@ def nachher(geschaetzt, angekommen, ctx, info):
 
 def conservative_bound(body):
     """Reusable text/tool byte bound; excludes model-specific image token costs."""
-    return _obergrenze(body)
+    return _upper_bound(body)

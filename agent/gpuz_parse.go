@@ -37,7 +37,7 @@ type gpuzData struct {
 	Sensors    []gpuzSensor
 }
 
-var errGPUZShort = errors.New("GPU-Z Shared Memory zu kurz")
+var errGPUZShort = errors.New("GPU-Z shared memory too short")
 
 // utf16z dekodiert einen NUL-terminierten UTF-16LE-Puffer.
 func utf16z(b []byte) string {

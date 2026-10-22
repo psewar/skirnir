@@ -65,7 +65,7 @@ func gpuProcessVRAM() (map[uint32]uint64, error) {
 		if r == 0 { // keine Instanzen: kein Prozess nutzt die GPU
 			return map[uint32]uint64{}, nil
 		}
-		return nil, fmt.Errorf("PdhGetFormattedCounterArray (Groesse): 0x%x", r)
+		return nil, fmt.Errorf("PdhGetFormattedCounterArray (size): 0x%x", r)
 	}
 	buf := make([]byte, size)
 	if r, _, _ := procPdhGetFormattedCounterAr.Call(uintptr(c), pdhFmtLarge, uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&n)),

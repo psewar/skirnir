@@ -41,12 +41,12 @@ func hasEvent(evs []guardEvent, t string) bool {
 	return false
 }
 
-func TestGuardSetztDauerlimitUndNieHoeher(t *testing.T) {
+func TestGuardSetsSustainedLimitAndNeverHigher(t *testing.T) {
 	c := newFakeCard()
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Date(2026, 9, 24, 22, 0, 0, 0, time.Local)
 	st, evs := g.step(guardIn(t0, c, 30))
-	if st.State != guardNormal || len(c.sets) != 1 || c.sets[0] != 460 || !hasEvent(evs, guardEvLimitGesetzt) {
+	if st.State != guardNormal || len(c.sets) != 1 || c.sets[0] != 460 || !hasEvent(evs, guardEvLimitSet) {
 		t.Fatalf("Dauerlimit: state=%s sets=%v evs=%v", st.State, c.sets, evs)
 	}
 	if *st.TargetW != 460 || *st.LimitW != 460 || st.Problem {
@@ -70,7 +70,7 @@ func TestGuardSetztDauerlimitUndNieHoeher(t *testing.T) {
 	}
 }
 
-func TestGuardRebootSetztGenauEinmalNach(t *testing.T) {
+func TestGuardRebootReappliesExactlyOnce(t *testing.T) {
 	c := newFakeCard()
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Now()
@@ -90,17 +90,17 @@ func TestGuardRebootSetztGenauEinmalNach(t *testing.T) {
 	}
 }
 
-func TestGuardVerweigertWirdUnverfuegbar(t *testing.T) {
+func TestGuardRefusedBecomesUnavailable(t *testing.T) {
 	c := newFakeCard()
 	c.deny = errors.New("keine Berechtigung (rc 4)")
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Now()
 	st, evs := g.step(guardIn(t0, c, 30))
-	if st.State != guardUnverfuegbar || !st.Problem || !hasEvent(evs, guardEvLimitVerweigert) {
+	if st.State != guardUnavailable || !st.Problem || !hasEvent(evs, guardEvLimitRefused) {
 		t.Fatalf("verweigert: %+v %v", st, evs)
 	}
 	st, evs = g.step(guardIn(t0.Add(2*time.Second), c, 30))
-	if c.calls != 1 || hasEvent(evs, guardEvLimitVerweigert) {
+	if c.calls != 1 || hasEvent(evs, guardEvLimitRefused) {
 		t.Fatalf("zweiter Versuch vor reapply_s oder doppeltes Ereignis: calls=%d evs=%v", c.calls, evs)
 	}
 	g.step(guardIn(t0.Add(31*time.Second), c, 30))
@@ -115,7 +115,7 @@ func TestGuardVerweigertWirdUnverfuegbar(t *testing.T) {
 	}
 }
 
-func TestGuardHochlastStufe2Erholung(t *testing.T) {
+func TestGuardHighLoadStage2Recovery(t *testing.T) {
 	c := newFakeCard()
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Now()
@@ -130,13 +130,13 @@ func TestGuardHochlastStufe2Erholung(t *testing.T) {
 	base := t0.Add(1000 * time.Second)
 	st, _ = g.step(guardIn(base, c, 450))
 	st, evs := g.step(guardIn(base.Add(301*time.Second), c, 450))
-	if st.State != guardHochlast || !hasEvent(evs, guardEvHochlast) || st.HighLoadS < 300 {
+	if st.State != guardHighLoad || !hasEvent(evs, guardEvHighLoad) || st.HighLoadS < 300 {
 		t.Fatalf("Hochlast: %+v %v", st, evs)
 	}
 	// kurze Luecke (unter high_load_gap_s 15 s, z. B. Warteschlange zwischen zwei Anfragen) zaehlt nicht als Unterbrechung
 	st, _ = g.step(guardIn(base.Add(310*time.Second), c, 100))
 	st, _ = g.step(guardIn(base.Add(320*time.Second), c, 450))
-	if st.State != guardHochlast || st.HighLoadS < 319 {
+	if st.State != guardHighLoad || st.HighLoadS < 319 {
 		t.Fatalf("kurze Luecke hat den Zaehler zurueckgesetzt: %+v", st)
 	}
 	// lange Unterbrechung setzt den Zaehler zurueck
@@ -148,16 +148,16 @@ func TestGuardHochlastStufe2Erholung(t *testing.T) {
 	base = base.Add(400 * time.Second)
 	g.step(guardIn(base, c, 455))
 	st, evs = g.step(guardIn(base.Add(601*time.Second), c, 455))
-	if st.State != guardGedrosselt || !hasEvent(evs, guardEvGedrosselt) || c.lim.Cur != 403 {
+	if st.State != guardThrottled || !hasEvent(evs, guardEvThrottled) || c.lim.Cur != 403 {
 		t.Fatalf("Stufe 2: %+v %v limit=%v", st, evs, c.lim.Cur)
 	}
 	// waehrend der Erholungszeit bleibt es bei Stufe 2, danach zurueck auf 460 und 60 s "erholung"
 	st, _ = g.step(guardIn(base.Add(801*time.Second), c, 380))
-	if st.State != guardGedrosselt {
+	if st.State != guardThrottled {
 		t.Fatalf("zu frueh raus: %+v", st)
 	}
 	st, evs = g.step(guardIn(base.Add(902*time.Second), c, 380))
-	if st.State != guardErholung || !hasEvent(evs, guardEvErholung) || c.lim.Cur != 460 {
+	if st.State != guardRecovery || !hasEvent(evs, guardEvRecovery) || c.lim.Cur != 460 {
 		t.Fatalf("Erholung: %+v %v limit=%v", st, evs, c.lim.Cur)
 	}
 	st, _ = g.step(guardIn(base.Add(965*time.Second), c, 100))
@@ -166,12 +166,12 @@ func TestGuardHochlastStufe2Erholung(t *testing.T) {
 	}
 }
 
-func TestGuardAbgewaehltIstProblem(t *testing.T) {
+func TestGuardDeselectedIsProblem(t *testing.T) {
 	c := newFakeCard()
 	off := false
 	g := newGuardEngine(GuardCfg{Enabled: &off}, c.set)
 	st, evs := g.step(guardIn(time.Now(), c, 500))
-	if st.State != guardAus || !st.Problem || st.Reason != guardEvAbgewaehlt || c.calls != 0 || !hasEvent(evs, guardEvAbgewaehlt) {
+	if st.State != guardOff || !st.Problem || st.Reason != guardEvDeselected || c.calls != 0 || !hasEvent(evs, guardEvDeselected) {
 		t.Fatalf("aus: %+v calls=%d", st, c.calls)
 	}
 	if st.PowerW == nil || *st.PowerW != 500 {
@@ -179,15 +179,15 @@ func TestGuardAbgewaehltIstProblem(t *testing.T) {
 	}
 }
 
-func TestGuardOhneLimitsUnverfuegbar(t *testing.T) {
+func TestGuardWithoutLimitsUnavailable(t *testing.T) {
 	g := newGuardEngine(GuardCfg{}, nil)
 	st, _ := g.step(guardInput{Now: time.Now(), Limits: guardLimits{Err: "NVML nicht verfuegbar"}, PowerW: fptr(200)})
-	if st.State != guardUnverfuegbar || !st.Problem || st.Reason != "NVML nicht verfuegbar" {
+	if st.State != guardUnavailable || !st.Problem || st.Reason != "NVML nicht verfuegbar" {
 		t.Fatalf("%+v", st)
 	}
 }
 
-func TestGuardSpannungswarnungNachBestand(t *testing.T) {
+func TestGuardVoltageWarningAfterBaseline(t *testing.T) {
 	c := newFakeCard()
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Now()
@@ -211,11 +211,11 @@ func TestGuardSpannungswarnungNachBestand(t *testing.T) {
 	}
 	// Abfall 0.5 V gegen Referenz: erst nach 30 s Bestand
 	st, evs := load(base.Add(60*time.Second), 11.6)
-	if len(st.Warnings) != 0 || hasEvent(evs, guardEvSpannung) {
+	if len(st.Warnings) != 0 || hasEvent(evs, guardEvVoltageLow) {
 		t.Fatalf("zu frueh gewarnt: %+v", st)
 	}
 	st, evs = load(base.Add(91*time.Second), 11.6)
-	if len(st.Warnings) != 1 || st.Warnings[0] != guardEvSpannung || !hasEvent(evs, guardEvSpannung) || !st.Problem {
+	if len(st.Warnings) != 1 || st.Warnings[0] != guardEvVoltageLow || !hasEvent(evs, guardEvVoltageLow) || !st.Problem {
 		t.Fatalf("Spannungswarnung fehlt: %+v %v", st, evs)
 	}
 	// Referenz bleibt sauber: Lastproben duerfen sie nicht veraendern
@@ -234,13 +234,13 @@ func TestGuardSpannungswarnungNachBestand(t *testing.T) {
 	}
 }
 
-func TestGuardTemperaturUndHardwareDrossel(t *testing.T) {
+func TestGuardTemperatureAndHardwareThrottle(t *testing.T) {
 	c := newFakeCard()
 	g := newGuardEngine(GuardCfg{}, c.set)
 	in := guardIn(time.Now(), c, 300)
 	in.MemTempC, in.Throttle = fptr(96), []string{"sw_power_cap", "hw_thermal"}
 	st, evs := g.step(in)
-	if len(st.Warnings) != 2 || !hasEvent(evs, guardEvTemperatur) || !hasEvent(evs, guardEvHwDrossel) || !st.Problem {
+	if len(st.Warnings) != 2 || !hasEvent(evs, guardEvTemperatureHigh) || !hasEvent(evs, guardEvHwThrottle) || !st.Problem {
 		t.Fatalf("%+v %v", st, evs)
 	}
 	in.Now = in.Now.Add(2 * time.Second)
@@ -255,7 +255,7 @@ func TestGuardTemperaturUndHardwareDrossel(t *testing.T) {
 	}
 }
 
-func TestGuardFremdeingriff(t *testing.T) {
+func TestGuardExternalChange(t *testing.T) {
 	c := newFakeCard()
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Now()
@@ -266,7 +266,7 @@ func TestGuardFremdeingriff(t *testing.T) {
 		c.lim.Cur = 575
 		st, evs = g.step(guardIn(t0.Add(time.Duration(i*31)*time.Second), c, 30))
 	}
-	if !hasEvent(evs, guardEvFremdeingriff) || len(st.Warnings) != 1 || st.Warnings[0] != guardEvFremdeingriff || c.lim.Cur != 460 {
+	if !hasEvent(evs, guardEvExternalChange) || len(st.Warnings) != 1 || st.Warnings[0] != guardEvExternalChange || c.lim.Cur != 460 {
 		t.Fatalf("Fremdeingriff: %+v %v", st, evs)
 	}
 }
@@ -284,7 +284,7 @@ func TestGuardInputFromSample(t *testing.T) {
 
 // Review 2026-09-25: lastSetW lebt nur im Speicher. Startet der Dienst neu, waehrend die Karte auf Stufe 2 steht, muss der
 // Guard den eigenen Zielwert erkennen und wieder auf das Dauerlimit heben - ein fremder Wert bleibt weiter unangetastet.
-func TestGuardNeustartInStufe2HebtWiederAn(t *testing.T) {
+func TestGuardRestartInStage2RaisesAgain(t *testing.T) {
 	c := newFakeCard()
 	c.lim.Cur = 403 // 70 % von 575: unser Stufe-2-Wert, vom Vorgaengerprozess gesetzt
 	g := newGuardEngine(GuardCfg{}, c.set)
@@ -303,7 +303,7 @@ func TestGuardNeustartInStufe2HebtWiederAn(t *testing.T) {
 
 // Die 16-Pin-Leistung kommt per Relay von localhost (jeder lokale Prozess koennte sie schicken): sie darf die
 // Hochlast-Entscheidung nicht treiben, nur die Board Power aus NVML.
-func TestGuardHochlastNurAusBoardPower(t *testing.T) {
+func TestGuardHighLoadOnlyFromBoardPower(t *testing.T) {
 	c := newFakeCard()
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Now()

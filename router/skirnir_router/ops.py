@@ -196,7 +196,7 @@ def build_info():
     if not os.path.exists(manifest_path()):
         return {"present": False}
     m = load_json_file(manifest_path(), "manifest.json")
-    return {"present": True, **m} if isinstance(m, dict) else {"present": False, "error": "manifest.json unlesbar"}
+    return {"present": True, **m} if isinstance(m, dict) else {"present": False, "error": "manifest.json unreadable"}
 
 
 def supply_chain():

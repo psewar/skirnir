@@ -35,32 +35,32 @@ PROSA = "Am Montag kontrollierte der Hausmeister die Leitungen, und alles war in
 ZAHLEN = "23.09. 22:41 Uhr Raum Keller Messwert 412.7 Geraet S-042\n"
 
 # --- Schaetzregel ---
-check("leer = 0", kp.schaetze_text("") == 0 and kp.schaetze_text(None) == 0)
-check("Ziffern je 1 Token", kp.schaetze_text("1234567890") == 10)
-p, z = kp.schaetze_text(PROSA * 100), kp.schaetze_text(ZAHLEN * 100)
+check("leer = 0", kp.estimate_text("") == 0 and kp.estimate_text(None) == 0)
+check("Ziffern je 1 Token", kp.estimate_text("1234567890") == 10)
+p, z = kp.estimate_text(PROSA * 100), kp.estimate_text(ZAHLEN * 100)
 check("Prosa ~ Bytes/3,5", abs(p - len((PROSA * 100).encode()) / 3.5) <= 1, str(p))
 check("Zahlenzeilen teurer als Bytes/4", z > len((ZAHLEN * 100).encode()) / 4 * 1.3, f"{z} vs {len((ZAHLEN * 100).encode()) / 4:.0f}")
-check("Nicht-Text wird als JSON gezaehlt", kp.schaetze_text([{"a": 1}]) > 0)
+check("Nicht-Text wird als JSON gezaehlt", kp.estimate_text([{"a": 1}]) > 0)
 
 # --- vorher ---
 klein = {"messages": [{"role": "user", "content": "Hallo"}]}
-check("kleine Anfrage: None", kp.vorher(klein, 131072) is None)
-check("ohne ctx: None", kp.vorher({"messages": [{"role": "user", "content": ZAHLEN * 5000}]}, None) is None)
-check("Cloud: None", kp.vorher({"messages": [{"role": "user", "content": ZAHLEN * 5000}]}, 1000, is_cloud=True) is None)
+check("kleine Anfrage: None", kp.before_request(klein, 131072) is None)
+check("ohne ctx: None", kp.before_request({"messages": [{"role": "user", "content": ZAHLEN * 5000}]}, None) is None)
+check("Cloud: None", kp.before_request({"messages": [{"role": "user", "content": ZAHLEN * 5000}]}, 1000, is_cloud=True) is None)
 gross = {"messages": [{"role": "system", "content": "Du bist ein Agent."}] +
          [{"role": "user" if i % 2 else "assistant", "content": ZAHLEN * 400} for i in range(20)],
          "tools": [{"type": "function", "function": {"name": "terminal", "parameters": {"type": "object"}}}]}
-est = kp.vorher(gross, 65536)
+est = kp.before_request(gross, 65536)
 check("grosser Verlauf ueber num_ctx: Schaetzung", est is not None and est > 65536, str(est))
-check("gleicher Verlauf passt in 1M: None", kp.vorher(gross, 1_000_000) is None)
-check("/api/generate-Prompt zaehlt", (kp.vorher({"prompt": PROSA * 5000}, 65536) or 0) > 65536)
+check("gleicher Verlauf passt in 1M: None", kp.before_request(gross, 1_000_000) is None)
+check("/api/generate-Prompt zaehlt", (kp.before_request({"prompt": PROSA * 5000}, 65536) or 0) > 65536)
 
 # --- nachher ---
 zuruecksetzen()
 info = {"role": "nacht", "model": "qwen3.6:35b-a3b", "node": "gpu-desktop", "client": "agent-x", "path": "/api/chat", "request_id": "r1"}
-check("Schaetzung zu hoch, angekommen ~ geschaetzt: kein Alarm", kp.nachher(100_000, 95_000, 131072, info) is False)
+check("Schaetzung zu hoch, angekommen ~ geschaetzt: kein Alarm", kp.after_request(100_000, 95_000, 131072, info) is False)
 check("... und nichts gezaehlt", state.TRUNCATIONS["count"] == 0 and not state.MQTT_EVENTS)
-check("angekommen deutlich weniger: bestaetigt", kp.nachher(160_000, 65_538, 131072, info) is True)
+check("angekommen deutlich weniger: bestaetigt", kp.after_request(160_000, 65_538, 131072, info) is True)
 check("Zaehler 1", state.TRUNCATIONS["count"] == 1)
 l = state.TRUNCATIONS["last"] or {}
 check("letzte Kuerzung mit Details", l.get("estimated") == 160_000 and l.get("received") == 65_538 and l.get("client") == "agent-x"
@@ -68,13 +68,13 @@ check("letzte Kuerzung mit Details", l.get("estimated") == 160_000 and l.get("re
 check("HA-Ereignis vorgemerkt", state.MQTT_EVENTS and state.MQTT_EVENTS[-1]["event_type"] == "context_truncated")
 check("Journal-Eintrag", any(d.get("event") == "context_truncated" for d in state.DECISIONS))
 check("65538 von 160000 (41 %) gilt als sicher", l.get("certain") is True and l.get("ratio") == 0.41, str(l.get("ratio")))
-kp.nachher(100_000, 70_000, 65536, info)
+kp.after_request(100_000, 70_000, 65536, info)
 check("70 % gilt nur als wahrscheinlich", state.TRUNCATIONS["last"]["certain"] is False)
 check("MQTT sofort", bool(state.MQTT_DIRTY))
-check("ohne Tokenzahl (Stream abgebrochen): nichts", kp.nachher(160_000, 0, 131072, info) is False)
-check("Grenzfall genau 0,8: kein Alarm", kp.nachher(100_000, 80_000, 65536, info) is False)
+check("ohne Tokenzahl (Stream abgebrochen): nichts", kp.after_request(160_000, 0, 131072, info) is False)
+check("Grenzfall genau 0,8: kein Alarm", kp.after_request(100_000, 80_000, 65536, info) is False)
 for _ in range(30):
-    kp.nachher(160_000, 1000, 131072, info)
+    kp.after_request(160_000, 1000, 131072, info)
 check("Ereignispuffer begrenzt", len(state.MQTT_EVENTS) <= 20, str(len(state.MQTT_EVENTS)))
 
 # --- Nachrechnung an der echten Messung (nur Zaehlwerte) ---
@@ -88,9 +88,9 @@ if os.path.exists(MESSUNG):
     check("Messung: Regel hoechstens 2 von 80 um >25 % zu niedrig", regel <= 2, f"{regel}/{len(rows)}")
     check("Messung: Gegenprobe Bytes/4 faellt durch", alt >= 20, f"{alt}/{len(rows)}")
     quoten = [r["echt"] / (r["ziffern"] + -(-(r["bytes"] - r["ziffern"]) // 3.5)) for r in rows]
-    fehl = sum(q < kp.BESTAETIGT for q in quoten)
+    fehl = sum(q < kp.CONFIRMED for q in quoten)
     check("Messung: 'wahrscheinlich' irrt hoechstens bei 5 von 80 ungekuerzten Texten", fehl <= 5, f"{fehl}/{len(rows)}")
-    check("Messung: 'sicher' irrt bei keinem gemessenen Text", min(quoten) > kp.SICHER, f"min {min(quoten):.2f}")
+    check("Messung: 'sicher' irrt bei keinem gemessenen Text", min(quoten) > kp.CERTAIN, f"min {min(quoten):.2f}")
 else:
     print("SKIP Messung (keine Messdatei)")
 

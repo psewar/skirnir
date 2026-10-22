@@ -116,8 +116,8 @@ def setup():
         t.models = {m for m, e in state.CFG.models.items() if (e or {}).get("cloud") == name}
         t.api_key, t.key_source = _load_key(spec)
         new[name] = t
-        log.info("Cloud-Anbieter %s (%s): %s, Schluessel %s, %d Modelle, Budget %s CHF/Monat", name, spec["kind"],
-                 "aktiv" if spec.get("enabled", True) else "deaktiviert", f"aus {t.key_source}" if t.api_key else "FEHLT",
+        log.info("cloud provider %s (%s): %s, key %s, %d models, budget %s CHF/month", name, spec["kind"],
+                 "active" if spec.get("enabled", True) else "disabled", f"from {t.key_source}" if t.api_key else "MISSING",
                  len(t.models), spec.get("budget_month_chf"))
     state.CLOUD = new
 
@@ -156,7 +156,7 @@ def request_block_reason(req, body, client_name):
     Cloud-Stufe gemeldet (`skipped`), lokale Stufen laufen normal weiter."""
     cfg = state.CFG.cloud
     if not cfg.get("enabled"):
-        return "Cloud in der Konfiguration deaktiviert"
+        return "cloud disabled in the configuration"
     if req.execution == "local":
         return "routing.execution: local (client opt-out)"
     cc = ((state.CFG.client_auth.get("clients") or {}).get(client_name or "") or {})
@@ -489,7 +489,7 @@ async def run(target, path, body, model, stream):
     timeout = ClientTimeout(total=float(target.spec.get("timeout_s", state.CFG.request_timeout_s)), sock_connect=10)
     if path in ("/api/embed", "/api/embeddings"):
         if kind == "anthropic":
-            raise CloudError(501, f"{target.provider}: keine Embeddings")  # exception-ok: same signal as a provider error (CloudError)
+            raise CloudError(501, f"{target.provider}: no embeddings")  # exception-ok: same signal as a provider error (CloudError)
         inp = body.get("input") if "input" in body else body.get("prompt")
         req = {"model": model_id, "input": inp}
         async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout) as r:

@@ -27,10 +27,10 @@ func loadOrCreateIdentity(dir string, log *Logger) (*Identity, error) {
 	if raw, err := os.ReadFile(path); err == nil {
 		seed, err := unprotectBytes(raw)
 		if err != nil {
-			return nil, fmt.Errorf("Identitaet %s: %w", path, err)
+			return nil, fmt.Errorf("identity %s: %w", path, err)
 		}
 		if len(seed) != ed25519.SeedSize {
-			return nil, fmt.Errorf("Identitaet %s: ungueltige Laenge %d", path, len(seed))
+			return nil, fmt.Errorf("identity %s: invalid length %d", path, len(seed))
 		}
 		priv := ed25519.NewKeyFromSeed(seed)
 		return &Identity{priv: priv, pub: priv.Public().(ed25519.PublicKey)}, nil
@@ -47,7 +47,7 @@ func loadOrCreateIdentity(dir string, log *Logger) (*Identity, error) {
 		return nil, err
 	}
 	id := &Identity{priv: priv, pub: pub}
-	log.Infof("identity: neues Schluesselpaar erzeugt, Fingerprint %s", id.Fingerprint())
+	log.Infof("identity: new key pair created, fingerprint %s", id.Fingerprint())
 	return id, nil
 }
 

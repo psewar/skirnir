@@ -119,7 +119,7 @@ func (u *Updater) Handle(o UpdateOrder) {
 	u.mu.Lock()
 	if u.busy {
 		u.mu.Unlock()
-		u.log.Warnf("update: Auftrag auf %s verworfen, es laeuft schon einer", o.Version)
+		u.log.Warnf("update: order for %s dropped, one is already running", o.Version)
 		return
 	}
 	u.busy = true
@@ -130,10 +130,10 @@ func (u *Updater) Handle(o UpdateOrder) {
 			u.busy = false
 			u.mu.Unlock()
 		}()
-		u.log.Infof("update: Auftrag auf %s (%s, %d Bytes)", o.Version, o.File, o.Size)
+		u.log.Infof("update: order for %s (%s, %d bytes)", o.Version, o.File, o.Size)
 		if err := u.run(o); err != nil {
 			u.set("failed", o.Version, err.Error(), updateKind(err))
-			u.log.Warnf("update: fehlgeschlagen: %v", err)
+			u.log.Warnf("update: failed: %v", err)
 		}
 	}()
 }
@@ -244,7 +244,7 @@ func (u *Updater) run(o UpdateOrder) error {
 	if err := u.download(ctx, o.URL, o.Token, newPath, entry); err != nil {
 		return err
 	}
-	u.log.Infof("update: %s geladen und geprueft (SHA-256 %s...)", entry.Name, entry.Sha256[:16])
+	u.log.Infof("update: %s downloaded and verified (SHA-256 %s...)", entry.Name, entry.Sha256[:16])
 	// Rauchtest: die neue Binary muss ihre Version nennen (nach Signatur- und Hashpruefung, nie davor)
 	if err := smokeTest(newPath, o.Version); err != nil {
 		os.Remove(newPath)
@@ -275,7 +275,7 @@ func (u *Updater) run(o UpdateOrder) error {
 		return fmt.Errorf("neue Binary einsetzen: %w", err)
 	}
 	u.set("applied", o.Version, "Binary getauscht, Neustart", "")
-	u.log.Infof("update: %s -> %s eingesetzt, Dienst startet neu", version, o.Version)
+	u.log.Infof("update: %s -> %s installed, service restarts", version, o.Version)
 	time.Sleep(3 * time.Second) // ein Heartbeat mit 'applied' soll noch raus
 	u.restart(exe)
 	return nil
@@ -334,11 +334,11 @@ func cleanupOld(exe string, after func(), wait time.Duration, log *Logger) bool 
 			}
 		}
 		if left == 0 {
-			log.Infof("update: laeuft mit %s, alte Binary entfernt", version)
+			log.Infof("update: running %s, old binary removed", version)
 			return true
 		}
 		time.Sleep(wait)
 	}
-	log.Warnf("update: %s.old* liess sich nicht entfernen (noch in Benutzung?) - beim naechsten Start erneut", filepath.Base(exe))
+	log.Warnf("update: %s.old* could not be removed (still in use?) - retrying at next start", filepath.Base(exe))
 	return false
 }

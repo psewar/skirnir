@@ -69,8 +69,22 @@ English. This also fixes the UI, which showed models measured with nvidia-smi as
 | `kontextpruefung.py`, `ausweich_beobachtung.py` | `context_check.py`, `fallback_observation.py` |
 | agent verb and module `spiel` | `game` |
 
-Go file names (`spiel*.go`, `kuerzung.go`) and German identifiers follow with the code identifiers, since
-nothing outside the agent sees them.
+### Code identifiers and messages (router 0.9.1 / agent 0.20.1)
+
+Nothing outside the code sees these, so they follow in a release of their own:
+
+- Go files `spiel*.go` → `game*.go`, `kuerzung*.go` → `truncation*.go`; German Go and Python identifiers → English.
+- Log lines, API and validation errors, `router.py --check` and the agent's command-line output are English.
+  `deploy.py` checks for `configuration ok` instead of `Konfiguration ok`.
+
+These texts stay German on purpose, because they end up in front of the operator in German:
+
+- Home Assistant problem texts and display names. This includes the GPU guard reasons and events and the
+  agent's and Ollama's update errors, which the router passes into the Home Assistant problem list.
+- The labels and help texts of the settings UI (bilingual).
+- The German keywords of the `rules` decision engine and the German prompts (`local_llm`, measurement prompt).
+
+Comments, docstrings and test names follow by module group.
 
 ## Compatibility
 

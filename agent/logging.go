@@ -20,7 +20,7 @@ type Logger struct {
 
 func newLogger(cfg LogCfg, name string, console bool) (*Logger, error) {
 	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
-		return nil, fmt.Errorf("Log-Verzeichnis %s: %w", cfg.Dir, err)
+		return nil, fmt.Errorf("log directory %s: %w", cfg.Dir, err)
 	}
 	lj := &lumberjack.Logger{
 		Filename:   filepath.Join(cfg.Dir, name+".log"),

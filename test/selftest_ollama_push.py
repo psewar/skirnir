@@ -130,7 +130,7 @@ async def fertig_melden(zustand):
 poll.prewarm = prewarm_attrappe
 state.CFG.prewarm_on_online = True   # oben fuer die Push-Pruefungen abgeschaltet
 r = asyncio.run(fertig_melden("free"))
-check("Update erledigt, Knoten frei: einmal vorwaermen", r == ("done", ["nach Ollama-Update"]), str(r))
+check("Update erledigt, Knoten frei: einmal vorwaermen", r == ("done", ["after Ollama update"]), str(r))
 check("Update erledigt, Knoten belegt (Spiel): nicht vorwaermen", asyncio.run(fertig_melden("busy")) == ("done", []))
 
 print(f"\n{len(FAILS)} failures: {FAILS}")

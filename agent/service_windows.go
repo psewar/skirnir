@@ -27,7 +27,7 @@ func (ws *windowsService) Execute(args []string, req <-chan svc.ChangeRequest, s
 	}
 	cfg, err := loadConfig(ws.cfgPath)
 	if err != nil {
-		ev(elog.Error, fmt.Sprintf("Konfiguration: %v", err))
+		ev(elog.Error, fmt.Sprintf("configuration: %v", err))
 		return true, 1
 	}
 	log, err := newLogger(cfg.Logging, "agent", false)
@@ -46,7 +46,7 @@ func (ws *windowsService) Execute(args []string, req <-chan svc.ChangeRequest, s
 	done := make(chan error, 1)
 	go func() { done <- app.Run(ctx) }()
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
-	ev(elog.Info, fmt.Sprintf("skirnir-agent %s gestartet (node %s)", version, cfg.Node))
+	ev(elog.Info, fmt.Sprintf("skirnir-agent %s started (node %s)", version, cfg.Node))
 
 	for {
 		select {
@@ -60,18 +60,18 @@ func (ws *windowsService) Execute(args []string, req <-chan svc.ChangeRequest, s
 				select {
 				case err := <-done:
 					if err != nil {
-						log.Errorf("Stopp: %v", err)
+						log.Errorf("stop: %v", err)
 					}
 				case <-time.After(25 * time.Second):
-					log.Errorf("Stopp: Timeout")
+					log.Errorf("stop: timeout")
 				}
 				ev(elog.Info, "skirnir-agent gestoppt")
 				return false, 0
 			}
 		case err := <-done:
 			// App ist von selbst zu Ende (sollte nicht passieren): als Fehler melden, damit Recovery greift
-			log.Errorf("App beendet: %v", err)
-			ev(elog.Error, fmt.Sprintf("App unerwartet beendet: %v", err))
+			log.Errorf("app stopped: %v", err)
+			ev(elog.Error, fmt.Sprintf("app stopped unexpectedly: %v", err))
 			return true, 4
 		}
 	}

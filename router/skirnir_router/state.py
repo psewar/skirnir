@@ -74,7 +74,7 @@ def decisions_load():
         with open(DECISIONS_FILE, encoding="utf-8") as f:
             lines = f.read().splitlines()
     except (OSError, ValueError) as e:  # exception-ok: file system and the file's encoding (UnicodeDecodeError)
-        log.warning("events.jsonl unlesbar: %s", e)
+        log.warning("events.jsonl unreadable: %s", e)
         return 0
     rows = [r for r in map(_journal_row, lines) if r is not None]
     rows = rows[-DECISIONS_KEEP:]
@@ -97,9 +97,9 @@ TRUNCATION_FIELDS_BEFORE_0_9 = {"geschaetzt": "estimated", "angekommen": "receiv
 
 def _journal_english(r):
     """Ein Eintrag aus events.jsonl mit den Namen ab Router 0.9.0."""
-    for feld, namen in JOURNAL_BEFORE_0_9.items():
-        if r.get(feld) in namen:
-            r[feld] = namen[r[feld]]
+    for field, names in JOURNAL_BEFORE_0_9.items():
+        if r.get(field) in names:
+            r[field] = names[r[field]]
     if r.get("event") == "context_truncated":
         r = {TRUNCATION_FIELDS_BEFORE_0_9.get(k, k): v for k, v in r.items()}
     return r
@@ -142,7 +142,7 @@ def _warn_journal(e):
     if time.time() - _DEC_WARNED > 600:
         _DEC_WARNED = time.time()
         from .common import log
-        log.warning("events.jsonl schreiben: %s", e)
+        log.warning("events.jsonl write: %s", e)
 
 
 def decisions_append(entry):

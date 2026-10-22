@@ -145,7 +145,7 @@ class HAPublisher:
 
     def start(self):
         if mqtt is None:
-            log.warning("paho-mqtt fehlt -> keine HA-Anbindung")
+            log.warning("paho-mqtt missing -> no HA connection")
             return
         key = self.cfg.get("password_env", "MQTT_PASSWORD")
         pw = read_env_value(self.cfg["password_file"], key) if self.cfg.get("password_file") else None   # roh, wie registry.read_mqtt_password
@@ -170,7 +170,7 @@ class HAPublisher:
         if rc != 0:
             log.error("MQTT connect rc=%s", rc)
             return
-        log.info("MQTT verbunden mit %s", self.cfg["host"])
+        log.info("MQTT connected to %s", self.cfg["host"])
         # Der Broker spielt die eigenen retained Themen zurueck; daraus erkennen wir Karteileichen (Knoten, die es
         # nicht mehr gibt) und raeumen sie in sweep_orphans() auf.
         with self.seen_lock:
@@ -186,7 +186,7 @@ class HAPublisher:
 
     def _on_disconnect(self, client, userdata, rc, *a):
         self.connected = False
-        log.warning("MQTT getrennt (rc=%s)", rc)
+        log.warning("MQTT disconnected (rc=%s)", rc)
 
     def _on_message(self, client, userdata, msg):
         """Nur mitschreiben, welche retained Themen es gibt - der Router hoert sonst auf nichts."""
@@ -293,7 +293,7 @@ class HAPublisher:
         if self.legacy_cfg or self.legacy_state:
             for t in sorted(self.legacy_cfg | self.legacy_state) + [f"{LEGACY_BASE}/state", f"{LEGACY_BASE}/status"]:
                 self.client.publish(t, "", qos=1, retain=True)
-            log.info("MQTT: %d retained Themen der alten Namen (%s, %s) geloescht", len(self.legacy_cfg) + len(self.legacy_state), LEGACY_BASE, LEGACY_NODE_ID)
+            log.info("MQTT: %d retained topics of the old names (%s, %s) deleted", len(self.legacy_cfg) + len(self.legacy_state), LEGACY_BASE, LEGACY_NODE_ID)
             self.legacy_cfg, self.legacy_state = set(), set()
         with self.seen_lock:
             seen_cfg, seen_state = self.seen["cfg"], self.seen["state"]
@@ -309,7 +309,7 @@ class HAPublisher:
             self.client.publish(f"{self.base}/node/{name}", "", qos=0, retain=True)
             gone += 1
         if gone:
-            log.info("HA: %d verwaiste Themen entfernt (Knoten gibt es nicht mehr)", gone)
+            log.info("HA: %d orphaned topics removed (nodes no longer exist)", gone)
 
     def publish_discovery(self):
         ent, st = self._ent, f"{self.base}/state"
@@ -368,7 +368,7 @@ class HAPublisher:
                     self.publish_state()
                     last = time.time()
                 except Exception as e:  # noqa: BLE001  # exception-ok: MQTT boundary in a background loop; the next connect announces again
-                    log.warning("MQTT Anmeldung: %s", e)
+                    log.warning("MQTT announce: %s", e)
             if self.sweep_at and time.time() >= self.sweep_at:
                 self.sweep_at = 0.0
                 try:
@@ -381,7 +381,7 @@ class HAPublisher:
                     try:
                         self.client.publish(f"{self.base}/truncation", json.dumps(e), qos=1, retain=False)
                     except Exception as ex:  # noqa: BLE001  # exception-ok: MQTT broker boundary; one lost event, the loop goes on
-                        log.warning("MQTT Ereignis: %s", ex)
+                        log.warning("MQTT event: %s", ex)
             if state.MQTT_DIRTY or time.time() - last >= self.interval:
                 state.MQTT_DIRTY.clear()
                 try:

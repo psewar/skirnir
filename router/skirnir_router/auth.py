@@ -51,7 +51,7 @@ def audit(event, **fields):
                 f.write(line + "\n")
         except OSError as e:  # exception-ok: file system boundary; the event still goes to the journal below
             if not _audit_failed[0]:
-                log.warning("Audit-Log %s nicht schreibbar (%s) - Ereignisse nur noch im Journal", path, e)
+                log.warning("audit log %s not writable (%s) - events only in the journal", path, e)
                 _audit_failed[0] = True
     log.info("AUDIT %s", line)
 

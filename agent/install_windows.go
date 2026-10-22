@@ -17,6 +17,9 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
+// serviceNotInstalled ist der Zustand von serviceState, wenn es den Dienst nicht gibt; setup vergleicht darauf.
+const serviceNotInstalled = "not installed"
+
 // install legt den Dienst an: Konto, Recovery, Event-Log-Quelle, ACLs, Firewall, Steuerrecht fuer Benutzer.
 // Braucht einmal Admin. Idempotent genug, um nach einem Fehler erneut zu laufen.
 func install(cfg *Config, cfgPath string) error {
@@ -31,7 +34,7 @@ func install(cfg *Config, cfgPath string) error {
 	in := cfg.Install
 	m, err := mgr.Connect()
 	if err != nil {
-		return fmt.Errorf("SCM: %w (Admin-Rechte?)", err)
+		return fmt.Errorf("SCM: %w (admin rights?)", err)
 	}
 	defer m.Disconnect()
 
@@ -43,12 +46,12 @@ func install(cfg *Config, cfgPath string) error {
 	}
 	// Event-Log-Quelle
 	if err := eventlog.InstallAsEventCreate(in.ServiceName, eventlog.Info|eventlog.Warning|eventlog.Error); err != nil && !strings.Contains(err.Error(), "already exists") {
-		fmt.Printf("  Event-Log-Quelle: %v (weiter)\n", err)
+		fmt.Printf("  event log source: %v (continuing)\n", err)
 	}
 	// Dienst
 	if s, err := m.OpenService(in.ServiceName); err == nil {
 		s.Close()
-		return fmt.Errorf("Dienst %s existiert schon (erst 'uninstall')", in.ServiceName)
+		return fmt.Errorf("service %s already exists (run 'uninstall' first)", in.ServiceName)
 	}
 	conf := mgr.Config{
 		DisplayName:      in.DisplayName,
@@ -62,7 +65,7 @@ func install(cfg *Config, cfgPath string) error {
 		return fmt.Errorf("CreateService: %w", err)
 	}
 	defer s.Close()
-	fmt.Printf("  Dienst %s angelegt: %s --config %s (Konto: %s)\n", in.ServiceName, exe, cfgPath, firstNonEmpty(in.Account, "LocalSystem"))
+	fmt.Printf("  service %s created: %s --config %s (account: %s)\n", in.ServiceName, exe, cfgPath, firstNonEmpty(in.Account, "LocalSystem"))
 	if err := s.SetRecoveryActions([]mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
@@ -92,18 +95,18 @@ func applyRules(cfg *Config, cfgPath string) error {
 	if out, err := exec.Command("icacls.exe", acl...).CombinedOutput(); err != nil {
 		fmt.Printf("  ACL %s: %v %s\n", filepath.Dir(cfgPath), err, strings.TrimSpace(string(out)))
 	} else {
-		fmt.Printf("  %s abgeschottet (SYSTEM, Administratoren, %s)\n", filepath.Dir(cfgPath), firstNonEmpty(in.Account, "-"))
+		fmt.Printf("  %s locked down (SYSTEM, Administrators, %s)\n", filepath.Dir(cfgPath), firstNonEmpty(in.Account, "-"))
 	}
 	// Dateirechte fuer das Dienstkonto
 	if in.Account != "" {
 		for _, p := range in.GrantRead {
 			runQuiet("icacls.exe", p, "/grant", fmt.Sprintf("%s:(OI)(CI)RX", in.Account))
-			fmt.Printf("  Lesen fuer %s: %s\n", in.Account, p)
+			fmt.Printf("  read for %s: %s\n", in.Account, p)
 		}
 		for _, p := range append([]string{cfg.Logging.Dir}, in.GrantModify...) {
 			_ = os.MkdirAll(p, 0o755)
 			runQuiet("icacls.exe", p, "/grant", fmt.Sprintf("%s:(OI)(CI)M", in.Account))
-			fmt.Printf("  Aendern fuer %s: %s\n", in.Account, p)
+			fmt.Printf("  modify for %s: %s\n", in.Account, p)
 		}
 	}
 	// Regel der TLS-Vorschaltstelle entfernen, wenn sie abgeschaltet ist (Tunnel braucht keine eingehende Regel)
@@ -125,7 +128,7 @@ func applyRules(cfg *Config, cfgPath string) error {
 		if out, err := exec.Command("netsh.exe", args...).CombinedOutput(); err != nil {
 			fmt.Printf("  Firewall %s: %v %s\n", f.Name, err, strings.TrimSpace(string(out)))
 		} else {
-			fmt.Printf("  Firewall-Regel %s (TCP %d, von %s)\n", f.Name, f.Port, firstNonEmpty(strings.Join(f.Remote, ","), "ueberall"))
+			fmt.Printf("  firewall rule %s (TCP %d, from %s)\n", f.Name, f.Port, firstNonEmpty(strings.Join(f.Remote, ","), "anywhere"))
 		}
 	}
 	// Anzeigename und Beschreibung nachziehen (seit 0.10.0 "Skirnir Agent"; das Konto bleibt, das kann nur install setzen)
@@ -133,7 +136,7 @@ func applyRules(cfg *Config, cfgPath string) error {
 		if c, err := s.Config(); err == nil && (c.DisplayName != in.DisplayName || c.Description != in.Description) {
 			c.DisplayName, c.Description = in.DisplayName, in.Description
 			if err := s.UpdateConfig(c); err == nil {
-				fmt.Printf("  Anzeigename: %s\n", in.DisplayName)
+				fmt.Printf("  display name: %s\n", in.DisplayName)
 			}
 		}
 		done()
@@ -141,9 +144,9 @@ func applyRules(cfg *Config, cfgPath string) error {
 	// Start/Stopp ohne UAC fuer die genannten Benutzer
 	for _, u := range in.AllowControlUsers {
 		if err := allowServiceControl(in.ServiceName, u); err != nil {
-			fmt.Printf("  Steuerrecht %s: %v\n", u, err)
+			fmt.Printf("  control right %s: %v\n", u, err)
 		} else {
-			fmt.Printf("  %s darf den Dienst starten/stoppen\n", u)
+			fmt.Printf("  %s may start/stop the service\n", u)
 		}
 	}
 	return nil
@@ -179,16 +182,16 @@ func uninstall(cfg *Config) error {
 	in := cfg.Install
 	m, err := mgr.Connect()
 	if err != nil {
-		return fmt.Errorf("SCM: %w (Admin-Rechte?)", err)
+		return fmt.Errorf("SCM: %w (admin rights?)", err)
 	}
 	defer m.Disconnect()
 	s, err := m.OpenService(in.ServiceName)
 	if err != nil {
-		return fmt.Errorf("Dienst %s nicht gefunden", in.ServiceName)
+		return fmt.Errorf("service %s not found", in.ServiceName)
 	}
 	defer s.Close()
 	if st, err := s.Query(); err == nil && st.State != svc.Stopped {
-		fmt.Println("  stoppe Dienst ...")
+		fmt.Println("  stopping service ...")
 		_, _ = s.Control(svc.Stop)
 		waitState(s, svc.Stopped, 30*time.Second)
 	}
@@ -199,7 +202,7 @@ func uninstall(cfg *Config) error {
 	for _, f := range in.Firewall {
 		runQuiet("netsh.exe", "advfirewall", "firewall", "delete", "rule", "name="+f.Name)
 	}
-	fmt.Printf("  Dienst %s entfernt (Config, Logs und ACLs bleiben)\n", in.ServiceName)
+	fmt.Printf("  service %s removed (config, logs and ACLs stay)\n", in.ServiceName)
 	return nil
 }
 
@@ -219,7 +222,7 @@ func openServiceLimited(name string, access uint32) (*mgr.Service, func(), error
 	}
 	if err != nil {
 		windows.CloseServiceHandle(h)
-		return nil, nil, fmt.Errorf("Dienst %s: %w", name, err)
+		return nil, nil, fmt.Errorf("service %s: %w", name, err)
 	}
 	s := &mgr.Service{Name: name, Handle: sh}
 	return s, func() { s.Close(); windows.CloseServiceHandle(h) }, nil
@@ -256,7 +259,7 @@ func controlService(name string, cmd string) error {
 		}
 		return waitState(s, svc.Running, 60*time.Second)
 	}
-	return fmt.Errorf("unbekannt: %s", cmd)
+	return fmt.Errorf("unknown: %s", cmd)
 }
 
 // serviceAccount: Konto laut SCM ("" oder LocalSystem = LocalSystem).
@@ -289,7 +292,7 @@ func serviceState(name string) (string, error) {
 	s, done, err := openServiceLimited(name, windows.SERVICE_QUERY_STATUS)
 	if err != nil {
 		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-			return "nicht installiert", nil
+			return serviceNotInstalled, nil
 		}
 		return "", err
 	}
@@ -302,7 +305,7 @@ func serviceState(name string) (string, error) {
 	if n, ok := names[st.State]; ok {
 		return fmt.Sprintf("%s (PID %d)", n, st.ProcessId), nil
 	}
-	return fmt.Sprintf("Zustand %d", st.State), nil
+	return fmt.Sprintf("state %d", st.State), nil
 }
 
 func waitState(s *mgr.Service, want svc.State, timeout time.Duration) error {
@@ -317,7 +320,7 @@ func waitState(s *mgr.Service, want svc.State, timeout time.Duration) error {
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
-	return fmt.Errorf("Dienst hat Zustand %d nicht in %s erreicht", want, timeout)
+	return fmt.Errorf("service did not reach state %d within %s", want, timeout)
 }
 
 func runQuiet(name string, args ...string) {

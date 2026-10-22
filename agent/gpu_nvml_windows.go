@@ -56,7 +56,7 @@ type nvmlDev struct {
 	gpuName  string
 }
 
-func nvmlErr(what string, rc uintptr) error { return fmt.Errorf("NVML %s: Rueckgabe %d", what, rc) }
+func nvmlErr(what string, rc uintptr) error { return fmt.Errorf("NVML %s: return code %d", what, rc) }
 
 // optProc: Prozedur, die fehlen darf (aeltere Treiber) -> nil.
 func optProc(dll *windows.LazyDLL, names ...string) *windows.LazyProc {

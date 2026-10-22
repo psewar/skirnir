@@ -25,20 +25,20 @@ const (
 // vom Job losgeloesten Prozess, der den Stopp des Dienstes ueberlebt. Im Konsolenbetrieb reicht Beenden.
 func restartSelf(exe, cfgPath string, log *Logger) {
 	if !runningAsService() {
-		log.Infof("update: Konsolenbetrieb - beende mich, bitte neu starten")
+		log.Infof("update: console mode - exiting, please restart")
 		os.Exit(0)
 	}
 	cmd := exec.Command(exe, "restart", "--config", cfgPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNewProcessGroup | createBreakawayFromJob | detachedProcess}
 	if err := cmd.Start(); err != nil {
-		log.Warnf("update: Neustart-Prozess: %v - beende mich, Recovery des Dienstes startet neu", err)
+		log.Warnf("update: restart process: %v - exiting, service recovery restarts", err)
 		os.Exit(4)
 	}
-	log.Infof("update: Neustart angestossen (PID %d)", cmd.Process.Pid)
+	log.Infof("update: restart triggered (PID %d)", cmd.Process.Pid)
 	// Falls der SCM-Stopp nicht kommt (Steuerrecht fehlt o. ae.): nach einer Frist selbst beenden, Recovery startet neu.
 	go func() {
 		time.Sleep(restartFallbackExitWait)
-		log.Warnf("update: kein Stopp vom Dienstmanager nach %s - beende mich selbst", restartFallbackExitWait)
+		log.Warnf("update: no stop from the service manager after %s - exiting myself", restartFallbackExitWait)
 		os.Exit(4)
 	}()
 }
@@ -55,9 +55,9 @@ func afterSwap(exe string, log *Logger) {
 	kill := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)
 	hideWindow(kill)
 	if out, err := kill.CombinedOutput(); err == nil && strings.TrimSpace(string(out)) != "" {
-		log.Infof("update: alte Relay-Prozesse beendet (PID %s)", strings.Join(strings.Fields(string(out)), ", "))
+		log.Infof("update: old relay processes ended (PID %s)", strings.Join(strings.Fields(string(out)), ", "))
 	} else if err != nil {
-		log.Debugf("update: Relay-Prozesse beenden: %v %s", err, strings.TrimSpace(string(out)))
+		log.Debugf("update: ending relay processes: %v %s", err, strings.TrimSpace(string(out)))
 	}
 	for _, tn := range []string{gpuzRelayTaskName, legacyRelayTaskName} { // alter Aufgabenname bis setup umgezogen hat
 		ok := true
@@ -71,7 +71,7 @@ func afterSwap(exe string, log *Logger) {
 			}
 		}
 		if ok {
-			log.Infof("update: GPU-Z-Relay-Aufgabe %s neu gestartet", tn)
+			log.Infof("update: GPU-Z relay task %s restarted", tn)
 			break
 		}
 	}

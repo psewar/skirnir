@@ -73,7 +73,7 @@ func (g *childGroup) track(pid int) (*procTree, error) {
 	}
 	defer windows.CloseHandle(h)
 	if err := windows.AssignProcessToJobObject(g.job, h); err != nil {
-		return nil, fmt.Errorf("Dienst-Job: %w", err)
+		return nil, fmt.Errorf("service job: %w", err)
 	}
 	job, err := newKillOnCloseJob()
 	if err != nil {
@@ -81,7 +81,7 @@ func (g *childGroup) track(pid int) (*procTree, error) {
 	}
 	if err := windows.AssignProcessToJobObject(job, h); err != nil {
 		windows.CloseHandle(job)
-		return nil, fmt.Errorf("Kind-Job: %w", err)
+		return nil, fmt.Errorf("child job: %w", err)
 	}
 	return &procTree{job: job}, nil
 }
@@ -160,7 +160,7 @@ func unprotectBytes(b []byte) ([]byte, error) { return dpapi(b, false) }
 
 func dpapi(b []byte, protect bool) ([]byte, error) {
 	if len(b) == 0 {
-		return nil, fmt.Errorf("leere Daten")
+		return nil, fmt.Errorf("empty data")
 	}
 	in := windows.DataBlob{Size: uint32(len(b)), Data: &b[0]}
 	var out windows.DataBlob

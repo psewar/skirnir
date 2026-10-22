@@ -40,10 +40,10 @@ func (u *OllamaUpdater) syncRegistration(version string) {
 	}
 	changed, err := syncUninstallEntries(u.dir, version)
 	for _, c := range changed {
-		u.log.Infof("ollama-update: Windows-Eintrag %s auf %s gesetzt (Apps, winget)", c, version)
+		u.log.Infof("ollama-update: Windows entry %s set to %s (Apps, winget)", c, version)
 	}
 	if err != nil {
-		u.log.Warnf("ollama-update: Windows-Eintrag nicht aktualisiert: %v", err)
+		u.log.Warnf("ollama-update: Windows entry not updated: %v", err)
 	}
 }
 

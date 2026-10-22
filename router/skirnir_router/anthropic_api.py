@@ -139,7 +139,7 @@ def tools_to_native(tools):
         if not isinstance(t, dict) or not t.get("name"):
             continue
         if t.get("type") not in (None, "custom") or "input_schema" not in t:
-            _log_once(f"tool:{t.get('type')}:{t.get('name')}", "Anthropic-Werkzeug %s (Typ %s) ohne Schema ausgelassen",
+            _log_once(f"tool:{t.get('type')}:{t.get('name')}", "Anthropic tool %s (type %s) without schema skipped",
                       t.get("name"), t.get("type"))
             continue
         out.append({"type": "function", "function": {"name": t["name"], "description": t.get("description") or "",
@@ -428,7 +428,7 @@ async def handle_count_tokens(request):
     native, err = to_native(b)
     if err:
         return anthropic_error(400, err)
-    return web.json_response({"input_tokens": context_check.schaetze_body(native)})
+    return web.json_response({"input_tokens": context_check.estimate_body(native)})
 
 
 def wants_anthropic(request):
