@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 )
 
-// Identity: Ed25519-Schluesselpaar des Agenten. Der Public Key ist die Identitaet gegenueber dem Router
-// (Fingerprint = SHA-256 des Public Keys); der Private Key liegt DPAPI-geschuetzt (Windows) bzw. 0600 (Linux).
-// Der Router kennt keinen gemeinsamen Token mehr: die Freigabe eines Knotens ist die Freigabe seines Schluessels.
+// Identity: Ed25519 key pair of the agent. The public key is the identity towards the router
+// (Fingerprint = SHA-256 of the public key); the private key is DPAPI-protected (Windows) or 0600 (Linux).
+// The router no longer knows a shared token: the release of a node is the release of its key.
 type Identity struct {
 	priv ed25519.PrivateKey
 	pub  ed25519.PublicKey
@@ -51,7 +51,7 @@ func loadOrCreateIdentity(dir string, log *Logger) (*Identity, error) {
 	return id, nil
 }
 
-// Fingerprint: SHA-256 des rohen Public Keys, hex - so zeigt es auch die Router-UI.
+// Fingerprint: SHA-256 of the raw public key, hex - as shown in the router UI.
 func (i *Identity) Fingerprint() string {
 	sum := sha256.Sum256(i.pub)
 	return hex.EncodeToString(sum[:])

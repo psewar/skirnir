@@ -7,7 +7,7 @@ import (
 	paho "github.com/eclipse/paho.mqtt.golang"
 )
 
-// fakeClient merkt sich nur, was veroeffentlicht wurde; alles andere ist Kulisse fuer paho.Client.
+// fakeClient only records what was published; everything else is scaffolding for paho.Client.
 type fakeClient struct {
 	pubs []struct{ topic, payload string }
 }
@@ -35,7 +35,7 @@ func (f *fakeClient) Unsubscribe(...string) paho.Token        { return nil }
 func (f *fakeClient) AddRoute(string, paho.MessageHandler)    {}
 func (f *fakeClient) OptionsReader() paho.ClientOptionsReader { return paho.ClientOptionsReader{} }
 
-// last liefert das zuletzt veroeffentlichte Payload zu einer objID (oder "", wenn nie geschickt).
+// last returns the last published payload for an objID (or "" if never sent).
 func (f *fakeClient) last(objID string) (string, bool) {
 	out, ok := "", false
 	for _, p := range f.pubs {
@@ -52,7 +52,7 @@ func testModule(t *testing.T) *MQTTModule {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Windows loescht keine offene Datei: ohne Schliessen scheitert das Aufraeumen von TempDir.
+	// Windows does not delete open files: without closing, TempDir cleanup fails.
 	t.Cleanup(func() { log.file.Close() })
 	return newMQTT(MQTTCfg{DeviceID: "testknoten", DeviceName: "Testknoten", DiscoveryPrefix: "homeassistant"},
 		SecretStoreCfg{}, "testknoten", log, nil, nil, nil, nil)
@@ -61,7 +61,7 @@ func testModule(t *testing.T) *MQTTModule {
 func TestSyncDiscoveryWithoutGroups(t *testing.T) {
 	m, c := testModule(t), &fakeClient{}
 	m.syncDiscovery(c)
-	// Solange keine Gruppe entschieden ist: Pflichtentitaeten anlegen, optionale unangetastet lassen.
+	// Until a group is decided: create mandatory entities, leave optional ones untouched.
 	if _, ok := c.last("ollama"); !ok {
 		t.Fatal("ollama haette angelegt werden muessen")
 	}
@@ -74,8 +74,8 @@ func TestSyncDiscoveryWithoutGroups(t *testing.T) {
 
 func TestSyncDiscoveryForeignNode(t *testing.T) {
 	m, c := testModule(t), &fakeClient{}
-	m.setApplies("stt", false)   // kein STT-Kindprozess konfiguriert
-	m.setApplies("alias", false) // Ollama kennt den Alias nicht
+	m.setApplies("stt", false)   // no STT child process configured
+	m.setApplies("alias", false) // Ollama does not know the alias
 	m.syncDiscovery(c)
 	for _, obj := range []string{"stt", "alias_model", "alias_model_structure"} {
 		p, ok := c.last(obj)
@@ -113,11 +113,11 @@ func TestSyncDiscoveryOnceAndLater(t *testing.T) {
 	m.setApplies("alias", false)
 	m.syncDiscovery(c)
 	n := len(c.pubs)
-	m.syncDiscovery(c) // nichts geaendert -> kein weiteres Publish
+	m.syncDiscovery(c) // nothing changed -> no further publish
 	if len(c.pubs) != n {
 		t.Fatalf("zweiter Lauf hat %d zusaetzliche Publishes erzeugt", len(c.pubs)-n)
 	}
-	m.setApplies("alias", true) // Alias nachtraeglich gepullt
+	m.setApplies("alias", true) // Alias pulled retroactively
 	m.syncDiscovery(c)
 	if p, ok := c.last("alias_model"); !ok || p == "" {
 		t.Fatal("alias_model haette nachtraeglich angelegt werden muessen")
@@ -127,7 +127,7 @@ func TestSyncDiscoveryOnceAndLater(t *testing.T) {
 	}
 }
 
-// Kuerzungsmeldung (truncation.go): Discovery des Ereignisses und des Zeitsensors, Ereignis-Payload, State-Felder.
+// Truncation message (truncation.go): Discovery of the event and time sensor, event payload, state fields.
 func TestTruncationDiscovery(t *testing.T) {
 	m, c := testModule(t), &fakeClient{}
 	m.syncDiscovery(c)
@@ -136,7 +136,7 @@ func TestTruncationDiscovery(t *testing.T) {
 		t.Fatal("Ereignis-Entitaet nicht angelegt")
 	}
 	for _, wantPart := range []string{`"state_topic":"testknoten/truncation"`, `"event_types":["input_truncated","context_full"]`,
-		// unique_id bleibt der Name von 2026 (Verlauf), die Entity-ID ist englisch (0.20.0)
+		// unique_id remains the name from 2026 (history), the entity ID is English (0.20.0)
 		`"unique_id":"testknoten_ollama_kuerzung"`, `"default_entity_id":"event.testknoten_ollama_truncation"`} {
 		if !strings.Contains(ev, wantPart) {
 			t.Fatalf("Ereignis-Config ohne %s: %s", wantPart, ev)

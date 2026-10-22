@@ -13,32 +13,32 @@ import (
 	"time"
 )
 
-// Spiel und Hauptspeicher als Fakt (0.17.0). Anlass 2026-10-04: Diablo IV + qwen3.8@196k -> RAM 94 %, freier Commit 1,8 GB,
-// ~900 Hard Faults/s. Der Router hielt den Knoten fuer frei, weil Diablo kaum VRAM belegte (kein fremdes VRAM) und er den
-// Hauptspeicher nicht kannte. Jetzt meldet der Agent beides selbst: der Router macht den Knoten bei einem Spiel busy und
-// laedt bei knappem Speicher nichts kalt nach. Die Erkennung ist die des Spiel-Waechters (PowerShell, seit 2026-09-25):
-// Prozesspfad unter einem Spielordner; ist der Pfad nicht lesbar (Anti-Cheat), ueber den Namen grosser .exe im Ordner.
+// Game and main memory as fact (0.17.0). Trigger 2026-10-04: Diablo IV + qwen3.8@196k -> RAM 94 %, free commit 1.8 GB,
+// ~900 Hard Faults/s. The router kept the node free because Diablo used little VRAM (no foreign VRAM) and it did not know about
+// main memory. Now the agent reports both: the router marks the node busy during a game and
+// does not cold-load anything when memory is tight. Detection is via the game watcher (PowerShell, since 2026-09-25):
+// process path under a game folder; if the path is unreadable (anti-cheat), match by name of large .exe in the folder.
 
-// GameFact geht mit jedem Heartbeat als Block "game". Supported=false: diese Plattform erkennt keine Spiele (Linux).
+// GameFact is sent with every heartbeat as block "game". Supported=false: this platform does not detect games (Linux).
 type GameFact struct {
 	Supported bool   `json:"supported"`
 	Running   bool   `json:"running"`
 	Name      string `json:"name,omitempty"`  // Programmname, z. B. "Diablo IV.exe"
 	Via       string `json:"via,omitempty"`   // "pfad" | "name"
-	Since     int64  `json:"since,omitempty"` // Unix-Sekunden, seit wann der Agent es sieht
-	Folders   int    `json:"folders"`         // Spielordner im Index (0 = nichts installiert, dann erkennt er auch nichts)
-	// 0.19.0: GPU-Bedarf des Spiels selbst, ueber alle seine Prozesse (Leistungsindikatoren GPU Process Memory / GPU Engine).
-	// Der Router wertet ein Spiel damit nur noch als busy, wenn es die GPU wirklich braucht: ein kleines Spiel (735 MiB, 2 %)
-	// sperrte vorher die ganze Karte. Geteilter Speicher zaehlt mit - ein Spiel, das neben einem grossen Modell kein VRAM mehr
-	// bekommt, weicht dorthin aus (Diablo IV 2026-10-04: kaum VRAM, kaum Last, RAM 94 %). Fehlen die Felder, ist nichts
-	// gemessen (kein Spiel, Messung gescheitert, Linux); GPUPct fehlt auch beim ersten Durchlauf eines Spiels (Rate braucht zwei).
-	Procs           int      `json:"procs,omitempty"`             // Prozesse, die als Spiel zaehlen
+	Since     int64  `json:"since,omitempty"` // Unix seconds since the agent first saw it
+	Folders   int    `json:"folders"`         // Game folder in the index (0 = nothing installed, so nothing detected)
+	// 0.19.0: GPU demand of the game itself, across all its processes (Performance Counters GPU Process Memory / GPU Engine).
+	// The router now only marks a game as busy if it actually needs the GPU: a small game (735 MiB, 2 %)
+	// previously locked the whole card. Shared memory counts - a game that gets no VRAM left next to a large model
+	// falls back to it (Diablo IV 2026-10-04: little VRAM, little load, RAM 94 %). Missing fields mean nothing
+	// was measured (no game, measurement failed, Linux); GPUPct is also missing on the first pass of a game (rate needs two).
+	Procs           int      `json:"procs,omitempty"`             // Processes that count as games
 	GPUDedicatedMiB *int     `json:"gpu_dedicated_mib,omitempty"` // eigener Grafikspeicher
-	GPUSharedMiB    *int     `json:"gpu_shared_mib,omitempty"`    // geteilter (Haupt-)Speicher, den die GPU fuer das Spiel nutzt
-	GPUPct          *float64 `json:"gpu_pct,omitempty"`           // hoechste Auslastung einer GPU-Engine durch das Spiel
+	GPUSharedMiB    *int     `json:"gpu_shared_mib,omitempty"`    // Shared (main) memory used by the GPU for the game
+	GPUPct          *float64 `json:"gpu_pct,omitempty"`           // Highest GPU engine utilization by the game
 }
 
-// MemFact geht als Block "memory". Fehlt ein Wert (CommitFree auf Linux), laesst der Agent ihn weg.
+// MemFact is sent as block "memory". If a value is missing (CommitFree on Linux), the agent omits it.
 type MemFact struct {
 	RAMAvailableGiB float64  `json:"ram_available_gib"`
 	RAMTotalGiB     float64  `json:"ram_total_gib"`
@@ -46,38 +46,38 @@ type MemFact struct {
 	CommitLimitGiB  *float64 `json:"commit_limit_gib,omitempty"`
 }
 
-// procInfo: ein laufender Prozess. Path leer = nicht lesbar (geschuetzter Prozess).
+// procInfo: a running process. Path empty = unreadable (protected process).
 type procInfo struct {
 	Name string
 	Path string
 	PID  uint32
 }
 
-// gameIndex: Spielordner und Namen ihrer grossen Programme (Kleinbuchstaben, ohne .exe) -> voller Pfad.
+// gameIndex: Game folders and names of their large programs (lowercase, without .exe) -> full path.
 type gameIndex struct {
 	folders []string
 	exes    map[string]string
 }
 
 const (
-	gamePoll       = 1 * time.Second // 0.19.0 (vorher 5 s): ein Durchlauf kostet ~17 ms bei ~500 Prozessen (gemessen 2026-10-21)
+	gamePoll       = 1 * time.Second // 0.19.0 (previously 5 s): one pass costs ~17 ms for ~500 processes (measured 2026-10-21)
 	gameReindex    = 6 * time.Hour
-	gameExeMinSize = 20 << 20 // nur grosse Programme: kleine Helfer tragen Allerweltsnamen (crashpad_handler-Fehlalarm 2026-09-25)
+	gameExeMinSize = 20 << 20 // Only large programs: small helpers have generic names (crashpad_handler false positive 2026-09-25)
 	gameExeDepth   = 3
 )
 
-// Verlage, deren Installationsorte als Spielordner gelten, und ihre Launcher, die nicht als Spiel zaehlen.
-// Launcher ohne Gross-/Kleinschreibung: GOG traegt sich als "GOG GALAXY" ein (Fehlalarm 2026-10-21, GalaxyClient.exe galt als Spiel).
+// Publishers whose install locations count as game folders, and their launchers, which do not count as games.
+// Launchers case-insensitive: GOG registers as "GOG GALAXY" (false positive 2026-10-21, GalaxyClient.exe counted as game).
 var (
 	gamePublisher = regexp.MustCompile(`Blizzard|Electronic Arts|Ubisoft|Epic Games|GOG|Riot|Rockstar|Bethesda|Amazon Games`)
 	gameLauncher  = regexp.MustCompile(`(?i)Battle\.net|EA app|Ubisoft Connect|Epic Games Launcher|GOG Galaxy|Riot Client|Rockstar Games Launcher`)
 	vdfPath       = regexp.MustCompile(`"path"\s+"([^"]+)"`)
 )
 
-// Ordner unter steamapps\common, die nie ein Spiel sind (Laufzeit-Installer, Controller-Konfiguration).
+// Folders under steamapps\common that are never games (runtime installers, controller configuration).
 var gameExcluded = []string{`\steamapps\common\steamworks shared\`, `\steamapps\common\steam controller configs\`}
 
-// Allerweltsnamen, die auch ausserhalb von Spielen laufen: nie per Namen werten.
+// Generic names that also run outside games: never evaluate by name.
 var gameGenericExe = map[string]bool{
 	"launcher": true, "setup": true, "installer": true, "unins000": true, "crashreporter": true, "crashreportclient": true,
 	"crashpad_handler": true, "unitycrashhandler64": true, "unitycrashhandler32": true, "dxsetup": true,
@@ -85,7 +85,7 @@ var gameGenericExe = map[string]bool{
 	"cefsharp.browsersubprocess": true, "qtwebengineprocess": true,
 }
 
-// parseLibraryVDF: Steam-Bibliotheken aus libraryfolders.vdf, je als <pfad>\steamapps\common.
+// parseLibraryVDF: Steam libraries from libraryfolders.vdf, each as <path>\steamapps\common.
 func parseLibraryVDF(content string) []string {
 	var out []string
 	for _, m := range vdfPath.FindAllStringSubmatch(content, -1) {
@@ -95,14 +95,14 @@ func parseLibraryVDF(content string) []string {
 	return out
 }
 
-// publisherFolder: ist dieser Deinstallationseintrag ein Spiel eines bekannten Verlags (kein Launcher, nicht von Steam)?
+// publisherFolder: Is this uninstall entry a game from a known publisher (not a launcher, not from Steam)?
 func publisherFolder(publisher, displayName, location string) (string, bool) {
 	loc := strings.TrimRight(strings.TrimSpace(location), `\`)
 	if loc == "" || !gamePublisher.MatchString(publisher) || gameLauncher.MatchString(displayName) {
 		return "", false
 	}
 	if strings.Contains(strings.ToLower(loc+`\`), `\steamapps\common\`) {
-		return "", false // steht schon ueber die Steam-Bibliothek im Index
+		return "", false // Already in the index via the Steam library
 	}
 	return loc, true
 }
@@ -117,7 +117,7 @@ func gameExcludedPath(p string) bool {
 	return false
 }
 
-// underFolder: liegt path (Windows-Schreibweise) in einem der Ordner? Gross/klein egal wie im Dateisystem.
+// underFolder: Is path (Windows notation) inside one of the folders? Case-insensitive like the filesystem.
 func underFolder(path string, folders []string) bool {
 	lp := strings.ToLower(path)
 	for _, f := range folders {
@@ -128,7 +128,7 @@ func underFolder(path string, folders []string) bool {
 	return false
 }
 
-// uniqueFolders: sortiert, ohne Doppelte (gross/klein egal), nur was exists bejaht.
+// uniqueFolders: Sorted, deduplicated (case-insensitive), only those where exists is true.
 func uniqueFolders(in []string, exists func(string) bool) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -144,12 +144,12 @@ func uniqueFolders(in []string, exists func(string) bool) []string {
 	return out
 }
 
-// exeIndex: Namen grosser .exe bis Tiefe gameExeDepth unter den Ordnern, ohne Ausnahmeordner und Allerweltsnamen.
+// exeIndex: Names of large .exe up to depth gameExeDepth under the folders, excluding exception folders and generic names.
 func exeIndex(folders []string) map[string]string {
 	out := map[string]string{}
 	for _, root := range folders {
 		base := strings.Count(filepath.Clean(root), string(filepath.Separator))
-		// WalkDir meldet nicht lesbare Unterordner an die Funktion; die werden uebersprungen, der Rest weiter gelesen.
+		// WalkDir reports unreadable subdirectories to the function; they are skipped, the rest is read.
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				if d != nil && d.IsDir() {
@@ -180,14 +180,14 @@ func exeIndex(folders []string) map[string]string {
 	return out
 }
 
-// gameHit: ein Prozess, der als Spiel zaehlt, und woran er erkannt wurde ("pfad" | "name").
+// gameHit: A process that counts as a game, and how it was detected ("path" | "name").
 type gameHit struct {
 	proc procInfo
 	via  string
 }
 
-// gameHits: alle Prozesse, die Spiele sind. Pfad lesbar -> nur der Pfad zaehlt; sonst der Name gegen den Index. Alle, nicht
-// nur der erste: manche Spiele zeichnen in einem eigenen Kindprozess, und der GPU-Bedarf (0.19.0) gilt fuer alle zusammen.
+// gameHits: All processes that are games. Path readable -> only path counts; otherwise name against index. All, not
+// just the first: some games render in a separate child process, and GPU demand (0.19.0) applies to all together.
 func gameHits(procs []procInfo, idx gameIndex) []gameHit {
 	var out []gameHit
 	for _, p := range procs {
@@ -205,7 +205,7 @@ func gameHits(procs []procInfo, idx gameIndex) []gameHit {
 	return out
 }
 
-// matchGame: erster Prozess, der ein Spiel ist (Name und Erkennungsweg fuer den Fakt).
+// matchGame: First process that is a game (name and detection path for the fact).
 func matchGame(procs []procInfo, idx gameIndex) (name, via string, ok bool) {
 	if h := gameHits(procs, idx); len(h) > 0 {
 		return h[0].proc.Name, h[0].via, true
@@ -213,15 +213,15 @@ func matchGame(procs []procInfo, idx gameIndex) (name, via string, ok bool) {
 	return "", "", false
 }
 
-// gpuUse: GPU-Bedarf je PID, wie ihn die Leistungsindikatoren liefern. pct fehlt fuer eine PID, wenn noch keine Rate da ist.
+// gpuUse: GPU demand per PID, as provided by Performance Counters. pct missing for a PID if no rate is available yet.
 type gpuUse struct {
 	dedicated map[uint32]uint64
 	shared    map[uint32]uint64
-	pct       map[uint32]float64 // hoechste Engine-Auslastung der PID
+	pct       map[uint32]float64 // Highest engine utilization of the PID
 }
 
-// footprint: GPU-Bedarf der Spielprozesse zusammen. Speicher summiert, Auslastung = hoechster Wert eines Prozesses (wie die
-// GPU-Spalte im Task-Manager). pctOK=false, wenn fuer keinen Spielprozess eine Auslastung vorliegt.
+// footprint: GPU demand of game processes combined. Memory summed, utilization = highest value of a process (like the
+// GPU column in Task Manager). pctOK=false if no utilization is available for any game process.
 func footprint(pids []uint32, u gpuUse) (dedMiB, sharedMiB int, pct float64, pctOK bool) {
 	var ded, sh uint64
 	for _, pid := range pids {
@@ -237,7 +237,7 @@ func footprint(pids []uint32, u gpuUse) (dedMiB, sharedMiB int, pct float64, pct
 	return int(ded >> 20), int(sh >> 20), pct, pctOK
 }
 
-// GameWatch prueft alle gamePoll, ob ein Spiel laeuft; den Index (Ordner + Programmnamen) baut es alle gameReindex neu.
+// GameWatch checks every gamePoll whether a game is running; it rebuilds the index (folder + program name) every gameReindex.
 type GameWatch struct {
 	log *Logger
 
@@ -246,13 +246,13 @@ type GameWatch struct {
 	idx   gameIndex
 	idxAt time.Time
 
-	// 0.19.0: Messung des GPU-Bedarfs, offen nur waehrend ein Spiel laeuft (die Engine-Auslastung ist eine Rate und braucht
-	// dieselbe Abfrage ueber zwei Durchlaeufe). nil = keine offen; newGPUSampler ist auf Linux ein Stub ohne Messung.
+	// 0.19.0: GPU demand measurement, open only while a game is running (engine utilization is a rate and needs
+	// the same query over two passes). nil = not open; newGPUSampler is a stub without measurement on Linux.
 	sampler    gpuSampler
-	samplerErr string // letzter Fehler, nur bei Wechsel geloggt
+	samplerErr string // last error, logged only on change
 }
 
-// gpuSampler misst den GPU-Bedarf aller Prozesse (Windows: PDH, gpufoot_windows.go).
+// gpuSampler measures GPU demand of all processes (Windows: PDH, gpufoot_windows.go).
 type gpuSampler interface {
 	sample() (gpuUse, error)
 	close()
@@ -318,8 +318,8 @@ func (g *GameWatch) poll() {
 	}
 }
 
-// measure: GPU-Bedarf der Spielprozesse; ohne Spiel wird die Messung geschlossen (kostet dann nichts). Scheitert sie, fehlen
-// die Felder im Fakt (der Router faellt dann auf "jedes Spiel ist busy" zurueck) und der Fehler steht einmal im Log.
+// measure: GPU demand of game processes; without a game, the measurement is closed (costs nothing). If it fails, fields
+// are missing in the fact (router then falls back to "every game is busy") and the error appears once in the log.
 func (g *GameWatch) measure(running bool, pids []uint32) (ded, sh *int, pct *float64) {
 	if !running {
 		if g.sampler != nil {
@@ -340,7 +340,7 @@ func (g *GameWatch) measure(running bool, pids []uint32) (ded, sh *int, pct *flo
 	if err != nil {
 		g.noteSampleErr(err)
 		g.sampler.close()
-		g.sampler = nil // naechster Durchlauf oeffnet neu
+		g.sampler = nil // next pass opens anew
 		return nil, nil, nil
 	}
 	g.noteSampleErr(nil)
@@ -367,7 +367,7 @@ func (g *GameWatch) noteSampleErr(err error) {
 	}
 }
 
-// Fact: der aktuelle Stand fuer Heartbeat und Status.
+// Fact: current state for Heartbeat and Status.
 func (g *GameWatch) Fact() GameFact {
 	if g == nil {
 		return GameFact{}
@@ -377,7 +377,7 @@ func (g *GameWatch) Fact() GameFact {
 	return g.fact
 }
 
-// probeGame: Befehl "game" - Index, Treffer und Speicher einmal ausgeben (wie spiel-waechter.ps1 -Probe).
+// probeGame: command "game" - print index, hits, and memory once (like spiel-waechter.ps1 -Probe).
 func probeGame() {
 	if !gameScanSupported {
 		fmt.Println("game detection: not supported on this platform")
@@ -419,8 +419,8 @@ func probeGame() {
 	}
 }
 
-// probeFootprint: GPU-Bedarf der Spielprozesse wie im Betrieb - zweimal gesammelt (die Auslastung ist eine Rate) und die Zeit
-// eines Sammelns, damit der Preis des 1-s-Takts sichtbar ist.
+// probeFootprint: GPU demand of game processes as in operation - collected twice (utilization is a rate) and the time
+// of one collection, so the cost of the 1s tick is visible.
 func probeFootprint(pids []uint32) {
 	s, err := newGPUSampler()
 	if err != nil {

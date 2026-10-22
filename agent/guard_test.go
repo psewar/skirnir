@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Attrappe fuer die Karte: protokolliert Set-Aufrufe, kann verweigern, "Reboot" setzt das Limit zurueck.
+// Mock for the card: logs Set calls, can deny, "Reboot" resets the limit.
 type fakeCard struct {
 	lim   guardLimits
 	sets  []float64
@@ -52,16 +52,16 @@ func TestGuardSetsSustainedLimitAndNeverHigher(t *testing.T) {
 	if *st.TargetW != 460 || *st.LimitW != 460 || st.Problem {
 		t.Fatalf("Status: %+v", st)
 	}
-	// Fremdtool stellt tiefer: bleibt (nie erhoehen), kein Set-Aufruf
+	// Foreign tool sets lower: stays (never increase), no Set call
 	c.lim.Cur = 400
 	g.step(guardIn(t0.Add(40*time.Second), c, 30))
 	if c.calls != 1 {
 		t.Fatalf("tieferes Fremdlimit wurde angehoben: %d Aufrufe", c.calls)
 	}
-	// Absolutes Limit ueber dem Standard wird auf den Standard geklemmt, unter dem Minimum auf das Minimum
+	// Absolute limit above default is clamped to default, below minimum to minimum
 	g2 := newGuardEngine(GuardCfg{PowerLimitW: fptr(900)}, nil)
 	d, s2 := g2.targets(c.lim)
-	if d != 575 || s2 != 403 { // Stufe 2 = 70 % von 575 = 402.5 -> 403, ueber Min 400
+	if d != 575 || s2 != 403 { // Stage 2 = 70 % of 575 = 402.5 -> 403, above Min 400
 		t.Fatalf("Klemmung: dauer=%v stufe2=%v", d, s2)
 	}
 	g3 := newGuardEngine(GuardCfg{PowerLimitW: fptr(100)}, nil)
@@ -75,8 +75,8 @@ func TestGuardRebootReappliesExactlyOnce(t *testing.T) {
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Now()
 	g.step(guardIn(t0, c, 30))
-	c.lim.Cur = 575           // "Treiber-Reset": das Limit steht wieder auf dem Standard
-	for i := 1; i <= 5; i++ { // vor Ablauf von reapply_s (30 s) kein Nachsetzen ...
+	c.lim.Cur = 575           // "Driver-Reset": the limit is back to default
+	for i := 1; i <= 5; i++ { // before reapply_s (30 s) expires, no re-setting ...
 		g.step(guardIn(t0.Add(time.Duration(i*2)*time.Second), c, 30))
 	}
 	if c.calls != 1 {
@@ -107,7 +107,7 @@ func TestGuardRefusedBecomesUnavailable(t *testing.T) {
 	if c.calls != 2 {
 		t.Fatalf("nach reapply_s kein neuer Versuch: %d", c.calls)
 	}
-	// Jemand anders setzt das Limit richtig: nach reapply_s kein Problem mehr
+	// Someone else sets the limit correctly: no problem after reapply_s
 	c.lim.Cur = 460
 	st, _ = g.step(guardIn(t0.Add(70*time.Second), c, 30))
 	if st.State != guardNormal || st.Problem {
@@ -120,26 +120,26 @@ func TestGuardHighLoadStage2Recovery(t *testing.T) {
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Now()
 	g.step(guardIn(t0, c, 30)) // 460 W gesetzt
-	// knapp unter 90 % von 460 (414): bleibt normal
+	// just under 90 % of 460 (414): stays normal
 	st, _ := g.step(guardIn(t0.Add(100*time.Second), c, 410))
 	st, _ = g.step(guardIn(t0.Add(800*time.Second), c, 410))
 	if st.State != guardNormal || st.HighLoadS != 0 {
 		t.Fatalf("unter Schwelle: %+v", st)
 	}
-	// Vollast: nach 300 s Vorwarnung, nach 600 s Stufe 2
+	// Full load: after 300 s warning, after 600 s Stage 2
 	base := t0.Add(1000 * time.Second)
 	st, _ = g.step(guardIn(base, c, 450))
 	st, evs := g.step(guardIn(base.Add(301*time.Second), c, 450))
 	if st.State != guardHighLoad || !hasEvent(evs, guardEvHighLoad) || st.HighLoadS < 300 {
 		t.Fatalf("Hochlast: %+v %v", st, evs)
 	}
-	// kurze Luecke (unter high_load_gap_s 15 s, z. B. Warteschlange zwischen zwei Anfragen) zaehlt nicht als Unterbrechung
+	// short gap (under high_load_gap_s 15 s, e.g. queue between two requests) does not count as interruption
 	st, _ = g.step(guardIn(base.Add(310*time.Second), c, 100))
 	st, _ = g.step(guardIn(base.Add(320*time.Second), c, 450))
 	if st.State != guardHighLoad || st.HighLoadS < 319 {
 		t.Fatalf("kurze Luecke hat den Zaehler zurueckgesetzt: %+v", st)
 	}
-	// lange Unterbrechung setzt den Zaehler zurueck
+	// long interruption resets the counter
 	st, _ = g.step(guardIn(base.Add(330*time.Second), c, 100))
 	st, _ = g.step(guardIn(base.Add(350*time.Second), c, 100))
 	if st.State != guardNormal || st.HighLoadS != 0 {
@@ -151,7 +151,7 @@ func TestGuardHighLoadStage2Recovery(t *testing.T) {
 	if st.State != guardThrottled || !hasEvent(evs, guardEvThrottled) || c.lim.Cur != 403 {
 		t.Fatalf("Stufe 2: %+v %v limit=%v", st, evs, c.lim.Cur)
 	}
-	// waehrend der Erholungszeit bleibt es bei Stufe 2, danach zurueck auf 460 und 60 s "erholung"
+	// during recovery time it stays at Stage 2, then back to 460 and 60 s "recovery"
 	st, _ = g.step(guardIn(base.Add(801*time.Second), c, 380))
 	if st.State != guardThrottled {
 		t.Fatalf("zu frueh raus: %+v", st)
@@ -191,7 +191,7 @@ func TestGuardVoltageWarningAfterBaseline(t *testing.T) {
 	c := newFakeCard()
 	g := newGuardEngine(GuardCfg{}, c.set)
 	t0 := time.Now()
-	// Referenz lernen: 10 Leerlaufproben je eine Minute auseinander bei 12.1 V
+	// Learn reference: 10 idle samples one minute apart at 12.1 V
 	for i := 0; i < 10; i++ {
 		in := guardIn(t0.Add(time.Duration(i)*time.Minute), c, 25)
 		in.Pin16W, in.Pin16V = fptr(22), fptr(12.1)
@@ -203,13 +203,13 @@ func TestGuardVoltageWarningAfterBaseline(t *testing.T) {
 		in.Pin16W, in.Pin16V, in.GPUZ = fptr(430), fptr(v), true
 		return g.step(in)
 	}
-	// gesunder Abfall (11.9 V, -0.2 V): keine Warnung
+	// healthy drop (11.9 V, -0.2 V): no warning
 	st, _ := load(base, 11.9)
 	st, _ = load(base.Add(40*time.Second), 11.9)
 	if len(st.Warnings) != 0 || st.Pin16RefV == nil || *st.Pin16RefV != 12.1 || st.Source != "nvml+gpuz" {
 		t.Fatalf("gesund: %+v", st)
 	}
-	// Abfall 0.5 V gegen Referenz: erst nach 30 s Bestand
+	// Drop 0.5 V against reference: only after 30 s persistence
 	st, evs := load(base.Add(60*time.Second), 11.6)
 	if len(st.Warnings) != 0 || hasEvent(evs, guardEvVoltageLow) {
 		t.Fatalf("zu frueh gewarnt: %+v", st)
@@ -218,11 +218,11 @@ func TestGuardVoltageWarningAfterBaseline(t *testing.T) {
 	if len(st.Warnings) != 1 || st.Warnings[0] != guardEvVoltageLow || !hasEvent(evs, guardEvVoltageLow) || !st.Problem {
 		t.Fatalf("Spannungswarnung fehlt: %+v %v", st, evs)
 	}
-	// Referenz bleibt sauber: Lastproben duerfen sie nicht veraendern
+	// Reference stays clean: load samples must not alter it
 	if *st.Pin16RefV != 12.1 {
 		t.Fatalf("Referenz durch Last verfaelscht: %v", *st.Pin16RefV)
 	}
-	// Absolutschwelle ohne Referenz: 11.5 V unter Last
+	// Absolute threshold without reference: 11.5 V under load
 	g2 := newGuardEngine(GuardCfg{}, c.set)
 	in := guardIn(base, c, 440)
 	in.Pin16W, in.Pin16V = fptr(430), fptr(11.5)
@@ -262,7 +262,7 @@ func TestGuardExternalChange(t *testing.T) {
 	g.step(guardIn(t0, c, 30))
 	var evs []guardEvent
 	var st GuardStatus
-	for i := 1; i <= 3; i++ { // dreimal hebt jemand das Limit wieder an
+	for i := 1; i <= 3; i++ { // three times someone raises the limit again
 		c.lim.Cur = 575
 		st, evs = g.step(guardIn(t0.Add(time.Duration(i*31)*time.Second), c, 30))
 	}
@@ -282,11 +282,11 @@ func TestGuardInputFromSample(t *testing.T) {
 	}
 }
 
-// Review 2026-09-25: lastSetW lebt nur im Speicher. Startet der Dienst neu, waehrend die Karte auf Stufe 2 steht, muss der
-// Guard den eigenen Zielwert erkennen und wieder auf das Dauerlimit heben - ein fremder Wert bleibt weiter unangetastet.
+// Review 2026-09-25: lastSetW lives only in memory. If the service restarts while the card is at Stage 2, the
+// Guard must recognize its own target value and raise back to the sustained limit - a foreign value remains untouched.
 func TestGuardRestartInStage2RaisesAgain(t *testing.T) {
 	c := newFakeCard()
-	c.lim.Cur = 403 // 70 % von 575: unser Stufe-2-Wert, vom Vorgaengerprozess gesetzt
+	c.lim.Cur = 403 // 70 % of 575: our Stage-2 value, set by the predecessor process
 	g := newGuardEngine(GuardCfg{}, c.set)
 	st, _ := g.step(guardIn(time.Now(), c, 30))
 	if len(c.sets) != 1 || c.sets[0] != 460 || st.State != guardNormal {
@@ -301,8 +301,8 @@ func TestGuardRestartInStage2RaisesAgain(t *testing.T) {
 	}
 }
 
-// Die 16-Pin-Leistung kommt per Relay von localhost (jeder lokale Prozess koennte sie schicken): sie darf die
-// Hochlast-Entscheidung nicht treiben, nur die Board Power aus NVML.
+// The 16-pin power comes via Relay from localhost (any local process could send it): it must not drive the
+// high-load decision, only the Board Power from NVML.
 func TestGuardHighLoadOnlyFromBoardPower(t *testing.T) {
 	c := newFakeCard()
 	g := newGuardEngine(GuardCfg{}, c.set)

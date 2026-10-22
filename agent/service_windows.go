@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 )
 
-// windowsService bindet App an den Service Control Manager.
+// windowsService binds the app to the Service Control Manager.
 type windowsService struct {
 	cfgPath string
 	name    string
@@ -69,7 +69,7 @@ func (ws *windowsService) Execute(args []string, req <-chan svc.ChangeRequest, s
 				return false, 0
 			}
 		case err := <-done:
-			// App ist von selbst zu Ende (sollte nicht passieren): als Fehler melden, damit Recovery greift
+			// App exited on its own (should not happen): report as an error so recovery kicks in
 			log.Errorf("app stopped: %v", err)
 			ev(elog.Error, fmt.Sprintf("app stopped unexpectedly: %v", err))
 			return true, 4

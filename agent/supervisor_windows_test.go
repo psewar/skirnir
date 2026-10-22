@@ -16,16 +16,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Nachgestellt wird der Vorfall vom 2026-09-23: Ollama startet sein Modell als eigenen Prozess
-// (llama-server). Der Supervisor startete Ollama neu, beendete dabei aber nur ollama.exe - der
-// Modellprozess ueberlebte als Waise mit 23,5 GiB Grafikspeicher und hielt den Knoten stundenlang "busy".
+// Reproduces the 2026-09-23 incident: Ollama starts its model as a separate process
+// (llama-server). The supervisor restarted Ollama but only terminated ollama.exe - the
+// model process survived as an orphan with 23.5 GiB of GPU memory, keeping the node "busy" for hours.
 //
-// Hier spielt die Testdatei selbst beide Rollen: ein "Elternteil" (Ollama) startet einen "Enkel"
-// (llama-server), meldet dessen PID und wartet dann.
+// Here, the test file itself plays both roles: a "parent" (Ollama) starts a "grandchild"
+// (llama-server), reports its PID, and then waits.
 
 const helperEnv = "SKIRNIR_TEST_HELFER"
 
-// TestHelferProzess ist kein Test, sondern der Rollenwechsel fuer die Kindprozesse.
+// TestHelperProcess is not a test, but the role switch for the child processes.
 func TestHelperProcess(t *testing.T) {
 	switch os.Getenv(helperEnv) {
 	case "":
@@ -34,11 +34,11 @@ func TestHelperProcess(t *testing.T) {
 		time.Sleep(2 * time.Minute)
 		os.Exit(0)
 	case "sofort":
-		bufio.NewReader(os.Stdin).ReadString('\n') // erst nach dem Einhaengen enden (kein Wettrennen)
+		bufio.NewReader(os.Stdin).ReadString('\n') // terminate only after attachment (no race condition)
 		os.Exit(0)
 	case "eltern", "eltern-kurz":
-		// Erst loslegen, wenn der Test das Elternteil in den Baum gehaengt hat - sonst liefe der Enkel
-		// ausserhalb des Jobs, und der Test wuerde etwas anderes pruefen als den Supervisor.
+		// Start only after the test has attached the parent to the tree - otherwise the grandchild
+		// runs outside the job, and the test would verify something other than the supervisor.
 		bufio.NewReader(os.Stdin).ReadString('\n')
 		grandchild := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
 		grandchild.Env = append(os.Environ(), helperEnv+"=enkel")
@@ -48,18 +48,18 @@ func TestHelperProcess(t *testing.T) {
 		}
 		fmt.Println("ENKEL", grandchild.Process.Pid)
 		if os.Getenv(helperEnv) == "eltern-kurz" {
-			os.Exit(0) // "Absturz": das Elternteil geht, der Enkel bleibt
+			os.Exit(0) // "Crash": the parent exits, the grandchild remains
 		}
 		time.Sleep(2 * time.Minute)
 		os.Exit(0)
 	}
 }
 
-// lebt prueft, ob ein Prozess noch laeuft (WaitForSingleObject mit Zeitlimit 0).
+// checks if a process is still running (WaitForSingleObject with timeout 0).
 func isAlive(pid int) bool {
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
-		return false // gibt es nicht mehr
+		return false // no longer exists
 	}
 	defer windows.CloseHandle(h)
 	ev, _ := windows.WaitForSingleObject(h, 0)
@@ -77,7 +77,7 @@ func waitDead(pid int, within time.Duration) bool {
 	return !isAlive(pid)
 }
 
-// starteFamilie startet ein Elternteil, haengt es in einen Baum und liefert die PID des Enkels.
+// startFamily starts a parent, attaches it to a tree, and returns the grandchild's PID.
 func startFamily(t *testing.T, g *childGroup, role string) (*exec.Cmd, *procTree, int) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
@@ -120,26 +120,26 @@ func newGroup(t *testing.T) *childGroup {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { windows.CloseHandle(g.job) }) // KILL_ON_JOB_CLOSE raeumt Reste weg
+	t.Cleanup(func() { windows.CloseHandle(g.job) }) // KILL_ON_JOB_CLOSE cleans up leftovers
 	return g
 }
 
-// Gegenprobe: so verhielt sich der Agent bis 0.5.1. Nur der Hauptprozess stirbt, der Enkel lebt weiter.
-// Faellt DIESER Test um, prueft die Anordnung nicht mehr, was sie soll.
+// Control case: this was the agent's behavior up to 0.5.1. Only the main process dies, the grandchild survives.
+// If THIS test fails, the arrangement no longer checks what it should.
 func TestEndingOnlyMainProcessLeavesGrandchild(t *testing.T) {
 	g := newGroup(t)
 	cmd, tree, grandchild := startFamily(t, g, "eltern")
 	defer tree.release()
 	defer tree.kill()
 
-	killChild(cmd) // der alte Weg
+	killChild(cmd) // the old way
 	cmd.Wait()
 	if waitDead(grandchild, 2*time.Second) {
 		t.Fatalf("Enkel %d ist mitgestorben - die Gegenprobe zeigt den alten Fehler nicht mehr", grandchild)
 	}
 }
 
-// Der Fehler vom 2026-09-23: ein Neustart muss den ganzen Baum beenden.
+// The 2026-09-23 bug: a restart must terminate the entire tree.
 func TestRestartAlsoEndsGrandchild(t *testing.T) {
 	g := newGroup(t)
 	cmd, tree, grandchild := startFamily(t, g, "eltern")
@@ -153,12 +153,12 @@ func TestRestartAlsoEndsGrandchild(t *testing.T) {
 	}
 }
 
-// Stuerzt das Elternteil von selbst ab, raeumt reapTree den verwaisten Enkel weg und meldet ihn.
+// If the parent crashes on its own, reapTree cleans up the orphaned grandchild and reports it.
 func TestCrashLeavesNoOrphan(t *testing.T) {
 	g := newGroup(t)
 	cmd, tree, grandchild := startFamily(t, g, "eltern-kurz")
 	defer tree.release()
-	cmd.Wait() // das Elternteil ist weg, der Enkel noch da
+	cmd.Wait() // the parent is gone, the grandchild is still there
 
 	if !isAlive(grandchild) {
 		t.Fatal("Enkel ist schon ohne Aufraeumen tot - der Test beweist so nichts")
@@ -172,7 +172,7 @@ func TestCrashLeavesNoOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { log.file.Close() }) // Windows loescht keine offene Datei
+	t.Cleanup(func() { log.file.Close() }) // Windows does not delete an open file
 	s := &Supervisor{log: log}
 	s.reapTree("ollama", tree)
 
@@ -185,7 +185,7 @@ func TestCrashLeavesNoOrphan(t *testing.T) {
 	}
 }
 
-// Ein Kind, das sauber endet und nichts zuruecklaesst, darf keine Warnung erzeugen.
+// A child that exits cleanly and leaves nothing behind must not generate a warning.
 func TestCleanEndWithoutWarning(t *testing.T) {
 	g := newGroup(t)
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")

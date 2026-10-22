@@ -11,10 +11,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// GPU-Bedarf je Prozess fuer die Spielerkennung (0.19.0): eigener und geteilter Grafikspeicher (GPU Process Memory) und die
-// Auslastung der GPU-Engines (GPU Engine, Instanzen pid_<PID>_luid_..._engtype_<Typ>). Die Engine-Auslastung ist eine Rate -
-// PDH liefert sie erst ab dem zweiten Sammeln derselben Abfrage, darum bleibt die Abfrage offen, solange ein Spiel laeuft.
-// Gemessen 2026-10-21 an einem kleinen Spiel: 735 MiB eigen, 32 MiB geteilt, 1,8 % - der Task-Manager zeigt dasselbe.
+// Per-process GPU demand for game detection (0.19.0): dedicated and shared graphics memory (GPU Process Memory) and
+// GPU engine utilization (GPU Engine, instances pid_<PID>_luid_..._engtype_<Type>). Engine utilization is a rate -
+// PDH provides it only from the second collection of the same query, so the query stays open while a game is running.
+// Measured 2026-10-21 on a small game: 735 MiB dedicated, 32 MiB shared, 1.8% - Task Manager shows the same.
 
 const (
 	pdhFmtDouble      = 0x00000200
@@ -24,7 +24,7 @@ const (
 	gpuEngineUtil     = `\GPU Engine(*)\Utilization Percentage`
 )
 
-// PDH_FMT_COUNTERVALUE_ITEM_W mit doubleValue (gleiche Lage wie pdhItemLarge, die Union ist 8 Bytes gross)
+// PDH_FMT_COUNTERVALUE_ITEM_W with doubleValue (same layout as pdhItemLarge, the union is 8 bytes)
 type pdhItemDouble struct {
 	Name    *uint16
 	CStatus uint32
@@ -83,14 +83,14 @@ func (s *pdhGPUSampler) sample() (gpuUse, error) {
 			}
 		}
 	}
-	// Auslastung: beim ersten Sammeln gibt es noch keine Rate - dann bleibt pct leer, das ist kein Fehler
+	// Utilization: no rate available on first collection - pct remains empty, this is not an error
 	if buf, n, err := pdhArray(s.util, pdhFmtDouble); err == nil {
 		for _, it := range unsafe.Slice((*pdhItemDouble)(unsafe.Pointer(&buf[0])), n) {
 			pid, ok := instancePID(it.Name)
 			if !ok || (it.CStatus != pdhCstatusValid && it.CStatus != pdhCstatusNewData) || math.IsNaN(it.Double) {
 				continue
 			}
-			if v, seen := u.pct[pid]; !seen || it.Double > v { // je PID die am staerksten ausgelastete Engine
+			if v, seen := u.pct[pid]; !seen || it.Double > v { // Most utilized engine per PID
 				u.pct[pid] = it.Double
 			}
 		}
@@ -98,7 +98,7 @@ func (s *pdhGPUSampler) sample() (gpuUse, error) {
 	return u, nil
 }
 
-// pdhArray: formatierte Werte aller Instanzen eines Zaehlers. Keine Instanz (kein Prozess nutzt die GPU) = leere Liste.
+// pdhArray: formatted values for all instances of a counter. No instances (no process using GPU) = empty list.
 func pdhArray(c windows.Handle, format uintptr) ([]byte, uint32, error) {
 	var size, n uint32
 	r, _, _ := procPdhGetFormattedCounterAr.Call(uintptr(c), format, uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&n)), 0)
@@ -116,7 +116,7 @@ func pdhArray(c windows.Handle, format uintptr) ([]byte, uint32, error) {
 	return buf, n, nil
 }
 
-// instancePID: PID aus dem Instanznamen pid_<PID>_luid_...
+// instancePID: PID extracted from instance name pid_<PID>_luid_...
 func instancePID(name *uint16) (uint32, bool) {
 	m := gpuInstPID.FindStringSubmatch(windows.UTF16PtrToString(name))
 	if m == nil {

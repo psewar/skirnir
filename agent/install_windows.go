@@ -17,11 +17,11 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-// serviceNotInstalled ist der Zustand von serviceState, wenn es den Dienst nicht gibt; setup vergleicht darauf.
+// serviceNotInstalled is the serviceState when the service does not exist; setup compares against this.
 const serviceNotInstalled = "not installed"
 
-// install legt den Dienst an: Konto, Recovery, Event-Log-Quelle, ACLs, Firewall, Steuerrecht fuer Benutzer.
-// Braucht einmal Admin. Idempotent genug, um nach einem Fehler erneut zu laufen.
+// install creates the service: account, recovery, event log source, ACLs, firewall, and user control rights.
+// Requires admin once. Idempotent enough to re-run after an error.
 func install(cfg *Config, cfgPath string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -29,7 +29,7 @@ func install(cfg *Config, cfgPath string) error {
 	}
 	exe, _ = filepath.Abs(exe)
 	if abs, err := filepath.Abs(cfgPath); err == nil {
-		cfgPath = abs // ein relativer Pfad stuende woertlich im SCM; der Dienst startet aus System32 und faende ihn nicht
+		cfgPath = abs // A relative path would be literal in the SCM; the service starts from System32 and would not find it.
 	}
 	in := cfg.Install
 	m, err := mgr.Connect()
@@ -58,7 +58,7 @@ func install(cfg *Config, cfgPath string) error {
 		Description:      in.Description,
 		StartType:        mgr.StartAutomatic,
 		DelayedAutoStart: true,
-		ServiceStartName: in.Account, // "" = LocalSystem; "NT SERVICE\<Name>" = virtuelles Konto, legt der SCM selbst an
+		ServiceStartName: in.Account, // "" = LocalSystem; "NT SERVICE\<Name>" = virtual account, created by the SCM itself.
 	}
 	s, err := m.CreateService(in.ServiceName, exe, conf, "--config", cfgPath)
 	if err != nil {
@@ -78,26 +78,26 @@ func install(cfg *Config, cfgPath string) error {
 	return applyRules(cfg, cfgPath)
 }
 
-// applyRules setzt Verzeichnis-ACLs, Firewall-Regeln und das Steuerrecht - idempotent, auch bei Updates (Verb apply-rules).
+// applyRules sets directory ACLs, firewall rules, and control rights - idempotent, even on updates (apply-rules verb).
 func applyRules(cfg *Config, cfgPath string) error {
 	in := cfg.Install
-	// Config-Verzeichnis abschotten: enthaelt Router-Token, Secret-Store-Client-Secret, den Identitaetsschluessel und die
-	// Provisionierung (MQTT-Passwort). Vererbung kappen; nur SYSTEM, Administratoren und das Dienstkonto duerfen hinein.
-	// Die steuernden Benutzer (allow_control_users) bekommen NUR das Dienst-Steuerrecht (unten), kein Verzeichnisrecht:
-	// mit Aendern-Recht koennten sie children[].cmd umschreiben und per restart als SYSTEM ausfuehren (Review 2026-09-25).
+	// Isolate the Config directory: contains router token, secret store client secret, identity key, and
+	// provisioning (MQTT password). Cut inheritance; only SYSTEM, Administrators, and the service account may access it.
+	// Controlling users (allow_control_users) get ONLY the service control right (below), no directory rights:
+	// With write access, they could rewrite children[].cmd and execute it as SYSTEM via restart (Review 2026-09-25).
 	acl := []string{filepath.Dir(cfgPath), "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"}
 	if in.Account != "" {
 		acl = append(acl, fmt.Sprintf("%s:(OI)(CI)M", in.Account))
 	}
 	for _, u := range in.AllowControlUsers {
-		runQuiet("icacls.exe", filepath.Dir(cfgPath), "/remove:g", u) // Rest aus Installationen vor 0.9.0
+		runQuiet("icacls.exe", filepath.Dir(cfgPath), "/remove:g", u) // Leftover from pre-0.9.0 installations
 	}
 	if out, err := exec.Command("icacls.exe", acl...).CombinedOutput(); err != nil {
 		fmt.Printf("  ACL %s: %v %s\n", filepath.Dir(cfgPath), err, strings.TrimSpace(string(out)))
 	} else {
 		fmt.Printf("  %s locked down (SYSTEM, Administrators, %s)\n", filepath.Dir(cfgPath), firstNonEmpty(in.Account, "-"))
 	}
-	// Dateirechte fuer das Dienstkonto
+	// File rights for the service account
 	if in.Account != "" {
 		for _, p := range in.GrantRead {
 			runQuiet("icacls.exe", p, "/grant", fmt.Sprintf("%s:(OI)(CI)RX", in.Account))
@@ -109,12 +109,12 @@ func applyRules(cfg *Config, cfgPath string) error {
 			fmt.Printf("  modify for %s: %s\n", in.Account, p)
 		}
 	}
-	// Regel der TLS-Vorschaltstelle entfernen, wenn sie abgeschaltet ist (Tunnel braucht keine eingehende Regel)
+	// Remove the TLS front-end rule if disabled (tunnel needs no inbound rule)
 	if !cfg.OllamaProxy.on() {
 		runQuiet("netsh.exe", "advfirewall", "firewall", "delete", "rule", "name=Ollama TLS-Proxy (skirnir-agent)")
 		runQuiet("netsh.exe", "advfirewall", "firewall", "delete", "rule", "name=Ollama TLS-Proxy (ollama-router-agent)")
 	}
-	// Firewall (eingehend) fuer Kinder, die im LAN lauschen
+	// Firewall (inbound) for children listening on the LAN
 	for _, f := range in.Firewall {
 		runQuiet("netsh.exe", "advfirewall", "firewall", "delete", "rule", "name="+f.Name)
 		args := []string{"advfirewall", "firewall", "add", "rule", "name=" + f.Name, "dir=in", "action=allow", "protocol=TCP",
@@ -131,7 +131,7 @@ func applyRules(cfg *Config, cfgPath string) error {
 			fmt.Printf("  firewall rule %s (TCP %d, from %s)\n", f.Name, f.Port, firstNonEmpty(strings.Join(f.Remote, ","), "anywhere"))
 		}
 	}
-	// Anzeigename und Beschreibung nachziehen (seit 0.10.0 "Skirnir Agent"; das Konto bleibt, das kann nur install setzen)
+	// Update display name and description (since 0.10.0 "Skirnir Agent"; the account remains, only install can set it)
 	if s, done, err := openServiceLimited(in.ServiceName, windows.SERVICE_QUERY_CONFIG|windows.SERVICE_CHANGE_CONFIG); err == nil {
 		if c, err := s.Config(); err == nil && (c.DisplayName != in.DisplayName || c.Description != in.Description) {
 			c.DisplayName, c.Description = in.DisplayName, in.Description
@@ -141,7 +141,7 @@ func applyRules(cfg *Config, cfgPath string) error {
 		}
 		done()
 	}
-	// Start/Stopp ohne UAC fuer die genannten Benutzer
+	// Start/Stop without UAC for the specified users
 	for _, u := range in.AllowControlUsers {
 		if err := allowServiceControl(in.ServiceName, u); err != nil {
 			fmt.Printf("  control right %s: %v\n", u, err)
@@ -152,7 +152,7 @@ func applyRules(cfg *Config, cfgPath string) error {
 	return nil
 }
 
-// allowServiceControl haengt eine ACE (Start, Stopp, Abfrage) fuer den Benutzer an die Dienst-SDDL.
+// allowServiceControl appends an ACE (Start, Stop, Query) for the user to the service SDDL.
 func allowServiceControl(service, user string) error {
 	sid, _, _, err := windows.LookupSID("", user)
 	if err != nil {
@@ -206,8 +206,8 @@ func uninstall(cfg *Config) error {
 	return nil
 }
 
-// openServiceLimited oeffnet den Dienst mit genau den Rechten, die das Verb braucht. mgr.Connect() verlangt
-// SC_MANAGER_ALL_ACCESS und scheitert ohne Admin, obwohl die Dienst-SDDL dem Benutzer Start/Stopp erlaubt.
+// openServiceLimited opens the service with exactly the rights the verb needs. mgr.Connect() requires
+// SC_MANAGER_ALL_ACCESS and fails without admin, even if the service SDDL allows the user Start/Stop.
 func openServiceLimited(name string, access uint32) (*mgr.Service, func(), error) {
 	h, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
@@ -215,7 +215,7 @@ func openServiceLimited(name string, access uint32) (*mgr.Service, func(), error
 	}
 	sh, err := windows.OpenService(h, windows.StringToUTF16Ptr(name), access)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) && name != legacyServiceName {
-		// Umbenennung 0.11.0: der Dienst heisst auf einem noch nicht umgezogenen Knoten weiter OllamaRouterAgent
+		// Rename 0.11.0: on a not-yet-migrated node, the service is still named OllamaRouterAgent
 		if sh2, err2 := windows.OpenService(h, windows.StringToUTF16Ptr(legacyServiceName), access); err2 == nil {
 			sh, err, name = sh2, nil, legacyServiceName
 		}
@@ -262,7 +262,7 @@ func controlService(name string, cmd string) error {
 	return fmt.Errorf("unknown: %s", cmd)
 }
 
-// serviceAccount: Konto laut SCM ("" oder LocalSystem = LocalSystem).
+// serviceAccount: account per SCM ("" or LocalSystem = LocalSystem).
 func serviceAccount(name string) (string, error) {
 	s, done, err := openServiceLimited(name, windows.SERVICE_QUERY_CONFIG)
 	if err != nil {
@@ -276,7 +276,7 @@ func serviceAccount(name string) (string, error) {
 	return c.ServiceStartName, nil
 }
 
-// sameAccount vergleicht Dienstkonten; leer und LocalSystem sind dasselbe.
+// sameAccount compares service accounts; empty and LocalSystem are the same.
 func sameAccount(a, b string) bool {
 	norm := func(x string) string {
 		x = strings.ToLower(strings.TrimSpace(x))

@@ -34,11 +34,11 @@ func TestPublisherFolder(t *testing.T) {
 	}{
 		{"Blizzard Entertainment", "Diablo IV", `C:\Program Files (x86)\Diablo IV\`, `C:\Program Files (x86)\Diablo IV`, true},
 		{"Blizzard Entertainment", "Battle.net", `C:\Program Files (x86)\Battle.net`, "", false}, // Launcher
-		{"GOG.com", "GOG GALAXY", `C:\Program Files\GOG Galaxy\`, "", false},                     // Launcher, Schreibweise wie in der Registry
+		{"GOG.com", "GOG GALAXY", `C:\Program Files\GOG Galaxy\`, "", false},                     // Launcher, spelling as in the registry
 		{"Electronic Arts", "EA app", `C:\Program Files\Electronic Arts\EA Desktop`, "", false},  // Launcher
-		{"Valve", "Counter-Strike 2", `D:\SteamLibrary\steamapps\common\CS2`, "", false},         // kein Verlag der Liste
-		{"Ubisoft", "Anno 1800", `D:\SteamLibrary\steamapps\common\Anno 1800`, "", false},        // schon ueber Steam
-		{"Bethesda Softworks", "Starfield", "", "", false},                                       // ohne Ort
+		{"Valve", "Counter-Strike 2", `D:\SteamLibrary\steamapps\common\CS2`, "", false},         // no list mutation
+		{"Ubisoft", "Anno 1800", `D:\SteamLibrary\steamapps\common\Anno 1800`, "", false},        // already via Steam
+		{"Bethesda Softworks", "Starfield", "", "", false},                                       // without location
 		{"Microsoft Corporation", "Office", `C:\Program Files\Microsoft Office`, "", false},
 	}
 	for _, c := range cases {
@@ -76,8 +76,8 @@ func TestMatchGame(t *testing.T) {
 	}
 }
 
-// GOG legt Spiele UNTER dem Launcher-Ordner ab (Registry-Eintraege in dieser Form). Der Launcher darf nicht in den Index,
-// seine Spiele schon - sonst galt GalaxyClient.exe als Spiel (2026-10-21) oder ein GOG-Spiel als keins.
+// GOG places games UNDER the launcher folder (registry entries in this form). The launcher must not be indexed,
+// its games already are - otherwise GalaxyClient.exe was treated as a game (2026-10-21) or a GOG game as not one.
 func TestGOGLauncherAndGame(t *testing.T) {
 	var idx gameIndex
 	for _, e := range [][3]string{
@@ -99,7 +99,7 @@ func TestGOGLauncherAndGame(t *testing.T) {
 	}
 }
 
-// 0.19.0: alle Prozesse eines Spiels zaehlen fuer den GPU-Bedarf (manche Spiele zeichnen in einem Kindprozess).
+// 0.19.0: all processes of a game count for GPU demand (some games render in a child process).
 func TestGameHitsAllProcesses(t *testing.T) {
 	idx := gameIndex{folders: []string{`D:\SteamLibrary\steamapps\common`}, exes: map[string]string{"anticheat game": `x`}}
 	hits := gameHits([]procInfo{
@@ -127,7 +127,7 @@ func TestFootprint(t *testing.T) {
 	if d != 1536 || s != 2048 || !ok || p != 41.0 {
 		t.Errorf("footprint = %d MiB eigen, %d MiB geteilt, %.1f %% (%v); want 1536, 2048, 41.0 - fremde PID 99 zaehlt nicht", d, s, p, ok)
 	}
-	// erster Durchlauf: noch keine Rate -> Speicher ja, Auslastung fehlt (Router wertet dann nur den Speicher)
+	// first pass: no rate yet -> memory yes, load missing (router then only evaluates memory)
 	_, _, _, ok = footprint([]uint32{10}, gpuUse{dedicated: u.dedicated, shared: u.shared, pct: map[uint32]float64{}})
 	if ok {
 		t.Errorf("ohne Rate darf keine Auslastung gemeldet werden")
@@ -145,7 +145,7 @@ func TestExeIndex(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := f.Truncate(size); err != nil { // duenn besetzt: belegt keinen Platz
+		if err := f.Truncate(size); err != nil { // lightly loaded: occupies no slot
 			t.Fatal(err)
 		}
 		f.Close()
@@ -155,7 +155,7 @@ func TestExeIndex(t *testing.T) {
 	mk("Spiel/a/b/c/d/ZuTief.exe", 30<<20) // Tiefe 5: draussen
 	mk("Spiel/Klein.exe", 1<<20)           // zu klein
 	mk("Spiel/Launcher.exe", 30<<20)       // Allerweltsname
-	mk("Spiel/daten.pak", 30<<20)          // keine .exe
+	mk("Spiel/daten.pak", 30<<20)          // no .exe
 	got := exeIndex([]string{root})
 	for _, n := range []string{"spiel", "tief"} {
 		if _, ok := got[n]; !ok {

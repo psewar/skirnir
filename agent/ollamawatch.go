@@ -11,13 +11,13 @@ import (
 	"time"
 )
 
-// Ollama-Zustand vom Agenten (0.14.0; Router poll.apply_ollama_push). Bis 0.13 fragte der Router Ollama alle 5 s durch den
-// Tunnel nach /api/tags und /api/ps und erschloss "offline" aus fehlgeschlagenen Abfragen. Jetzt beobachtet der Agent sein
-// lokales Ollama selbst und meldet den Zustand als Fakt: installierte Modelle, geladene Modelle, erreichbar ja/nein. Die
-// Meldung geht bei jeder Aenderung sofort durch den Tunnel (Rahmen OLLAMA) und spaetestens alle 30 s vollstaendig; solange sie
-// frisch ist, pollt der Router diesen Knoten nicht mehr.
+// Ollama state from the agent (0.14.0; Router poll.apply_ollama_push). Until 0.13, the Router polled Ollama every 5 s via the
+// tunnel for /api/tags and /api/ps and inferred "offline" from failed requests. Now the agent observes its
+// local Ollama itself and reports the state as a fact: installed models, loaded models, reachable yes/no. The
+// report goes through the tunnel (frame OLLAMA) immediately on any change and at least every 30 s in full; while it
+// is fresh, the Router no longer polls this node.
 
-// OllamaState ist die Nutzlast des Rahmens OLLAMA. tags/ps sind die Eintraege aus Ollamas Antworten, unveraendert.
+// OllamaState is the payload of the OLLAMA frame. tags/ps are the entries from Ollama's responses, unchanged.
 type OllamaState struct {
 	Up    bool              `json:"up"`
 	Error string            `json:"error,omitempty"`
@@ -27,20 +27,20 @@ type OllamaState struct {
 	PS    []json.RawMessage `json:"ps"`
 }
 
-// unsetKey: Vergleichsschluessel vor der ersten Antwort; psKey/rawKey erzeugen ihn nie (leer oder Zeilen mit Umbruch am Ende).
+// unsetKey: comparison key before the first response; psKey/rawKey never produce it (empty or lines with trailing newline).
 const unsetKey = "\x00unset"
 
 type OllamaWatcher struct {
 	upstream  string
 	log       *Logger
 	client    *http.Client
-	every     time.Duration // Takt fuer /api/ps (geladene Modelle aendern sich mit jeder Anfrage)
-	tagsEvery time.Duration // Takt fuer /api/tags (installierte Modelle aendern sich selten)
-	downAfter int           // so viele Fehlschlaege in Folge, bis "nicht erreichbar" gemeldet wird
+	every     time.Duration // Interval for /api/ps (loaded models change with every request)
+	tagsEvery time.Duration // Interval for /api/tags (installed models rarely change)
+	downAfter int           // number of consecutive failures before reporting "unreachable"
 
 	mu       sync.Mutex
 	st       OllamaState
-	have     bool // es gibt einen meldbaren Zustand (erster Erfolg oder downAfter Fehlschlaege)
+	have     bool // there is a reportable state (first success or downAfter failures)
 	haveTags bool
 	lastTags time.Time
 	fails    int
@@ -52,15 +52,15 @@ func newOllamaWatcher(upstream string, log *Logger) *OllamaWatcher {
 	if upstream == "" {
 		return nil
 	}
-	// Leere Listen statt nil (sonst geht `null` raus) und Vergleichsschluessel, die keine echte Antwort ergibt: die erste Antwort
-	// zaehlt immer als Aenderung, auch wenn nichts geladen ist. 0.14.0 schickte bei leerem /api/ps `ps: null`, der Router
-	// verwarf die Meldung und liess den Knoten offline (2026-09-30).
+	// Empty lists instead of nil (otherwise `null` is sent) and comparison keys that no real response yields: the first response
+	// always counts as a change, even if nothing is loaded. 0.14.0 sent `ps: null` for empty /api/ps, the Router
+	// discarded the report and left the node offline (2026-09-30).
 	return &OllamaWatcher{upstream: strings.TrimRight(upstream, "/"), log: log, client: &http.Client{Timeout: 3 * time.Second},
 		every: time.Second, tagsEvery: 5 * time.Second, downAfter: 3, psKey: unsetKey, tagsKey: unsetKey,
 		st: OllamaState{Tags: []json.RawMessage{}, PS: []json.RawMessage{}}}
 }
 
-// Run fragt das lokale Ollama im Takt ab, bis ctx endet.
+// Run polls the local Ollama at the interval until ctx ends.
 func (w *OllamaWatcher) Run(ctx context.Context) {
 	for {
 		w.poll(ctx, time.Now())
@@ -72,7 +72,7 @@ func (w *OllamaWatcher) Run(ctx context.Context) {
 	}
 }
 
-// Snapshot: aktueller Zustand und ob es schon einen meldbaren gibt.
+// Snapshot: current state and whether a reportable one exists yet.
 func (w *OllamaWatcher) Snapshot() (OllamaState, bool) {
 	if w == nil {
 		return OllamaState{}, false
@@ -82,7 +82,7 @@ func (w *OllamaWatcher) Snapshot() (OllamaState, bool) {
 	return w.st, w.have
 }
 
-// get liefert die Liste `models` einer Ollama-Antwort.
+// get returns the `models` list from an Ollama response.
 func (w *OllamaWatcher) get(ctx context.Context, path string) ([]json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.upstream+path, nil)
 	if err != nil {
@@ -109,8 +109,8 @@ func (w *OllamaWatcher) get(ctx context.Context, path string) ([]json.RawMessage
 	return v.Models, nil
 }
 
-// psKey: Vergleichsschluessel fuer /api/ps ohne `expires_at` - der Zeitpunkt wandert mit jeder Anfrage weiter, der Router
-// braucht ihn nicht, und sonst ginge waehrend jeder Anfrage eine Meldung raus.
+// psKey: comparison key for /api/ps without `expires_at` - the timestamp shifts with every request, the Router
+// doesn't need it, and otherwise a report would go out during every request.
 func psKey(models []json.RawMessage) string {
 	var b strings.Builder
 	for _, m := range models {
@@ -136,7 +136,7 @@ func rawKey(models []json.RawMessage) string {
 	return b.String()
 }
 
-// poll: eine Abfrage; Revision steigt nur bei einer echten Aenderung (Modelle, Erreichbarkeit).
+// poll: one request; Revision increases only on a real change (models, reachability).
 func (w *OllamaWatcher) poll(ctx context.Context, now time.Time) {
 	ps, err := w.get(ctx, "/api/ps")
 	w.mu.Lock()

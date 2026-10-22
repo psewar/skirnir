@@ -15,11 +15,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// runGPUZRelay: Verb `gpuz-relay`. Laeuft in der Anmeldesitzung des Benutzers (Aufgabe "bei Anmeldung", siehe
-// Install-Service.ps1), liest den GPU-Z-Block und schickt die Sensor-Whitelist alle 2 s an den Dienst (POST /gpuz auf
-// dem Health-Port, nur localhost). Noetig, weil GPU-Z sein Objekt mit einer DACL fuer SYSTEM, Administratoren und die
-// eigene Anmeldesitzung anlegt - das virtuelle Dienstkonto `NT SERVICE\...` darf es nicht oeffnen. Laeuft GPU-Z nicht,
-// wartet das Relay still (Versuch alle 30 s, praktisch kein CPU-Verbrauch).
+// runGPUZRelay: `gpuz-relay` verb. Runs in the user's logon session (task "at logon", see
+// Install-Service.ps1), reads the GPU-Z block, and sends the sensor whitelist to the service every 2 s (POST /gpuz on
+// the health port, localhost only). Required because GPU-Z creates its object with a DACL for SYSTEM, Administrators, and the
+// own logon session - the virtual service account `NT SERVICE\...` is not allowed to open it. If GPU-Z is not running,
+// the relay waits silently (retry every 30 s, negligible CPU usage).
 func runGPUZRelay(listen string) error {
 	r := newGPUZReader(nil)
 	cl := &http.Client{Timeout: 3 * time.Second}
@@ -63,13 +63,13 @@ func runGPUZRelay(listen string) error {
 	}
 }
 
-// gpuzReader liest den Shared-Memory-Block von GPU-Z (siehe gpuz_parse.go). Zwei Wege zum Objekt:
-//   - OpenFileMapping("GPUZShMem"): wenn wir in derselben Anmeldesitzung laufen wie GPU-Z (Verb `gpu`, Handbetrieb)
-//   - NtOpenSection("\Sessions\<n>\BaseNamedObjects\GPUZShMem"): als Dienst in Sitzung 0 - GPU-Z legt das Objekt in
-//     seiner Sitzung an, ohne Global\-Praefix; LocalSystem darf es ueber den vollen NT-Pfad oeffnen.
+// gpuzReader reads the shared memory block from GPU-Z (see gpuz_parse.go). Two ways to access the object:
+//   - OpenFileMapping("GPUZShMem"): if we run in the same logon session as GPU-Z (`gpu` verb, manual mode)
+//   - NtOpenSection("\Sessions\<n>\BaseNamedObjects\GPUZShMem"): as a service in session 0 - GPU-Z creates the object in
+//     its session without the Global\ prefix; LocalSystem can open it via the full NT path.
 //
-// Laeuft GPU-Z nicht, ist das kein Fehler des Agenten: der Block fehlt einfach, wir probieren es alle 30 s wieder.
-// Bleibt lastUpdate stehen (GPU-Z beendet oder eingefroren), gilt der Block als veraltet und wird losgelassen.
+// If GPU-Z is not running, this is not an agent error: the block is simply missing, we retry every 30 s.
+// If lastUpdate stops updating (GPU-Z exited or frozen), the block is considered stale and released.
 type gpuzReader struct {
 	log *Logger
 	mu  sync.Mutex
@@ -78,7 +78,7 @@ type gpuzReader struct {
 	size    uintptr
 	buf     []byte
 	lastTry time.Time
-	seen    bool // Log-Meldungen nur bei Wechsel
+	seen    bool // Log messages only on change
 	stale   int
 }
 
@@ -134,7 +134,7 @@ func (r *gpuzReader) logf(level string, format string, a ...any) {
 	}
 }
 
-// openSection oeffnet ein Section-Objekt ueber seinen vollen NT-Pfad.
+// openSection opens a section object via its full NT path.
 func openSection(path string) (windows.Handle, error) {
 	u, err := windows.UTF16FromString(path)
 	if err != nil {
@@ -151,14 +151,14 @@ func openSection(path string) (windows.Handle, error) {
 	return h, nil
 }
 
-// candidates: Objektnamen in der Reihenfolge, in der wir sie probieren.
+// candidates: object names in the order we try them.
 func gpuzCandidates() []string {
 	out := []string{"GPUZShMem"} // eigene Sitzung (OpenFileMapping)
 	var own uint32
 	if rc, _, _ := pProcIdToSession.Call(uintptr(windows.GetCurrentProcessId()), uintptr(unsafe.Pointer(&own))); rc == 0 {
 		own = 0xFFFFFFFF
 	}
-	if act, _, _ := pActiveConsoleSess.Call(); uint32(act) != 0xFFFFFFFF && uint32(act) != own { // DWORD: obere 32 Bit nicht definiert
+	if act, _, _ := pActiveConsoleSess.Call(); uint32(act) != 0xFFFFFFFF && uint32(act) != own { // DWORD: upper 32 bits undefined
 		out = append(out, fmt.Sprintf(`\Sessions\%d\BaseNamedObjects\GPUZShMem`, uint32(act)))
 	}
 	out = append(out, `\BaseNamedObjects\GPUZShMem`)
@@ -180,7 +180,7 @@ func (r *gpuzReader) open() error {
 			continue
 		}
 		view, _, e := pMapViewOfFile.Call(uintptr(h), fileMapRead, 0, 0, 0)
-		windows.CloseHandle(h) // die View haelt die Section am Leben
+		windows.CloseHandle(h) // the view keeps the section alive
 		if view == 0 {
 			err = fmt.Errorf("MapViewOfFile: %v", e)
 			continue
@@ -197,9 +197,9 @@ func (r *gpuzReader) open() error {
 	return err
 }
 
-// viewPtr macht aus der Adresse einer File-Mapping-View einen Pointer. Die View liegt nicht im Go-Heap, der GC bewegt
-// sie nicht; der Umweg ueber die Adresse einer Variablen haelt `go vet` (unsafeptr) von der Warnung ab, die fuer
-// Heap-Adressen berechtigt waere.
+// viewPtr converts the address of a file mapping view into a pointer. The view is not in the Go heap, the GC does not
+// move it; the indirection via a variable address prevents `go vet` (unsafeptr) from warning, which would be justified for
+// heap addresses.
 func viewPtr(u uintptr) unsafe.Pointer { return *(*unsafe.Pointer)(unsafe.Pointer(&u)) }
 
 func (r *gpuzReader) drop() {
@@ -209,7 +209,7 @@ func (r *gpuzReader) drop() {
 	}
 }
 
-// read liefert den aktuellen Block oder errGPUZAbsent / errGPUZStale.
+// read returns the current block or errGPUZAbsent / errGPUZStale.
 func (r *gpuzReader) read() (*gpuzData, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -240,10 +240,10 @@ func (r *gpuzReader) read() (*gpuzData, error) {
 		}
 	}
 	now, _, _ := pGetTickCount64.Call()
-	age := int64(int32(uint32(now) - d.LastUpdate)) // beide 32 Bit, Ueberlauf hebt sich auf; vorzeichenbehaftet
+	age := int64(int32(uint32(now) - d.LastUpdate)) // both 32 bits, overflow cancels out; signed
 	if age > gpuzStaleMs || age < -gpuzStaleMs {
 		r.stale++
-		if r.stale >= 2 { // zwei Messungen hintereinander alt: GPU-Z ist weg oder haengt
+		if r.stale >= 2 { // two consecutive measurements stale: GPU-Z is gone or hanging
 			r.drop()
 			r.stale = 0
 			if r.seen {

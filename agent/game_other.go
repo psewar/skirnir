@@ -10,19 +10,19 @@ import (
 	"strings"
 )
 
-// Linux: keine Spielerkennung (die Knoten dort spielen nicht); der Heartbeat sagt das mit supported=false.
+// Linux: no player detection (nodes there do not play); the heartbeat reports supported=false.
 const gameScanSupported = false
 
 func listProcesses() []procInfo { return nil }
 func gameFolders() []string     { return nil }
 
-// newGPUSampler: ohne Spielerkennung gibt es auch keinen GPU-Bedarf je Spiel zu messen.
+// newGPUSampler: without player detection, there is no per-game GPU demand to measure.
 func newGPUSampler() (gpuSampler, error) {
 	return nil, errors.New("GPU demand per process only on Windows")
 }
 
-// memoryFact: MemAvailable/MemTotal aus /proc/meminfo. Den Commit meldet Linux nur als Rechengroesse - bei der ueblichen
-// Ueberbuchung (overcommit_memory 0) liegt Committed_AS oft ueber CommitLimit, ohne dass etwas knapp ist. Darum fehlt er.
+// memoryFact: MemAvailable/MemTotal from /proc/meminfo. Linux only reports Commit as a calculated value - with typical
+// overcommit (overcommit_memory 0), Committed_AS often exceeds CommitLimit without anything being tight. Hence it is omitted.
 func memoryFact() (MemFact, bool) {
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {

@@ -7,14 +7,14 @@ import (
 	"unicode/utf16"
 )
 
-// GPU-Z legt, solange es laeuft, einen Shared-Memory-Block "GPUZShMem" an (Sensor-Schnittstelle fuer Fremdprogramme).
-// Aufbau (gepackt, keine Fuellbytes; gemessen 200204 Bytes, Mapping auf 200704 aufgerundet):
+// While running, GPU-Z creates a shared memory block "GPUZShMem" (sensor interface for external programs).
+// Layout (packed, no padding; measured 200204 bytes, mapped rounded up to 200704):
 //
 //	uint32 version; int32 busy; uint32 lastUpdate (GetTickCount ms)
 //	128 x { wchar key[256]; wchar value[256] }                 statische Kartendaten (Name, BIOS, Treiber, Monitor ...)
 //	128 x { wchar name[256]; wchar unit[8]; uint32 digits; double value }   Sensoren
 //
-// Wir uebernehmen nur eine Whitelist von Sensoren; die statischen Daten (darunter Monitor-Seriennummern) bleiben liegen.
+// We only adopt a whitelist of sensors; static data (including monitor serial numbers) remains.
 const (
 	gpuzRecords    = 128
 	gpuzHeaderSize = 12
@@ -33,13 +33,13 @@ type gpuzData struct {
 	Version    uint32
 	Busy       int32
 	LastUpdate uint32 // GetTickCount() beim letzten Schreiben
-	Card       string // CardName aus den statischen Daten (nur fuers Log)
+	Card       string // CardName from static data (for logging only)
 	Sensors    []gpuzSensor
 }
 
 var errGPUZShort = errors.New("GPU-Z shared memory too short")
 
-// utf16z dekodiert einen NUL-terminierten UTF-16LE-Puffer.
+// utf16z decodes a NUL-terminated UTF-16LE buffer.
 func utf16z(b []byte) string {
 	u := make([]uint16, 0, len(b)/2)
 	for i := 0; i+1 < len(b); i += 2 {
@@ -84,7 +84,7 @@ func parseGPUZ(b []byte) (*gpuzData, error) {
 	return d, nil
 }
 
-// value liefert einen Sensor nach Namen; NaN (GPU-Z zeigt "-") gilt als nicht vorhanden.
+// value returns a sensor by name; NaN (GPU-Z shows "-") is treated as missing.
 func (d *gpuzData) value(name string) (float64, bool) {
 	for _, s := range d.Sensors {
 		if s.Name == name {
@@ -97,7 +97,7 @@ func (d *gpuzData) value(name string) (float64, bool) {
 	return 0, false
 }
 
-// apply uebertraegt die Whitelist in den Sensorblock. Rueckgabe: ob mindestens ein Wert kam.
+// apply transfers the whitelist to the sensor block. Return: whether at least one value was received.
 func (d *gpuzData) apply(s *GPUSensors) bool {
 	any := false
 	set := func(name string, dst **float64) {

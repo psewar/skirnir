@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// Zeilen woertlich aus C:\ProgramData\skirnir-agent\logs\ollama*.log (2026-09-21..24), inklusive des
-// Zeitstempels, den der childWriter voranstellt.
+// Lines verbatim from C:\ProgramData\skirnir-agent\logs\ollama*.log (2026-09-21..24), including the
+// timestamp prepended by the childWriter.
 const (
 	lineInput       = `2026-09-23 21:33:12 time=2026-09-23T21:33:12.738+02:00 level=WARN source=llama_server.go:317 msg="truncating input prompt" limit=32770 prompt=65536 keep=4 new=32770`
 	lineContextFull = `2026-09-23 21:32:50 slot      release: id  0 | task 202197 | stop processing: n_tokens = 65535, truncated = 1`
@@ -51,8 +51,8 @@ func TestTruncationContextFullDetected(t *testing.T) {
 	}
 }
 
-// Die Normalzeile unterscheidet sich nur in "truncated = 0" - genau die darf nicht zaehlen, sonst meldet der
-// Agent jede Anfrage (ueber 5000 solcher Zeilen seit 2026-09-18).
+// The normal line differs only in "truncated = 0" - exactly that one must not count, otherwise the
+// agent reports every request (over 5000 such lines since 2026-09-18).
 func TestNormalLineDoesNotCount(t *testing.T) {
 	k := newTruncations()
 	for _, z := range []string{lineNormal, "", "truncated = 1", `msg="truncating input prompt"`} {
@@ -65,7 +65,7 @@ func TestNormalLineDoesNotCount(t *testing.T) {
 	}
 }
 
-// Ein voller Puffer darf den Log-Schreiber nie blockieren - der Zaehler zaehlt trotzdem weiter.
+// A full buffer must never block the log writer - the counter keeps counting.
 func TestFullBufferDoesNotBlock(t *testing.T) {
 	k := newTruncations()
 	finished := make(chan struct{})
@@ -85,7 +85,7 @@ func TestFullBufferDoesNotBlock(t *testing.T) {
 	}
 }
 
-// Der childWriter reicht jede vollstaendige Zeile weiter, auch ueber Write-Grenzen hinweg.
+// The childWriter forwards every complete line, even across Write boundaries.
 func TestChildWriterPassesLinesOn(t *testing.T) {
 	k := newTruncations()
 	w := newChildWriter(LogCfg{Dir: t.TempDir()}, "ollama")
@@ -99,8 +99,8 @@ func TestChildWriterPassesLinesOn(t *testing.T) {
 	}
 }
 
-// Gegenprobe an echten Logs (nur wenn SKIRNIR_OLLAMA_LOGS auf einen Ordner mit ollama*.log zeigt):
-// zaehlt, was der Waechter in den vorhandenen Dateien erkannt haette.
+// Counter-test on real logs (only if SKIRNIR_OLLAMA_LOGS points to a folder with ollama*.log):
+// counts what the watcher would have detected in the existing files.
 func TestRealOllamaLogs(t *testing.T) {
 	dir := os.Getenv("SKIRNIR_OLLAMA_LOGS")
 	if dir == "" {

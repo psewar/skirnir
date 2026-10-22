@@ -89,7 +89,7 @@ These texts stay German on purpose, because they end up in front of the operator
 They follow by module group, each as a pull request that changes no code token (checked against the base before merging):
 
 1. Router (`router/`): done.
-2. Agent (`agent/`).
+2. Agent (`agent/`): done.
 3. Tests, test file names and `deploy/` output.
 
 Roadmap steps from `design/roadmap.md` are "stages" (`Stufe 3` → `Stage 3`); "tier" stays reserved for the tiers of a role.

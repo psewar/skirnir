@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-// Facts: was der Agent ueber seinen Rechner weiss und dem Router beim Verbindungsaufbau mitteilt.
-// Der Router legt damit den Knoten an (Name, GPU, VRAM, MAC fuer Wake-on-LAN) - nichts davon muss von Hand
-// eingetragen werden, und es bleibt aktuell, wenn sich Hardware aendert.
+// Facts: what the agent knows about its machine and reports to the router during connection setup.
+// The router creates the node (Name, GPU, VRAM, MAC for Wake-on-LAN) - none of this needs manual
+// entry, and it stays current if hardware changes.
 type Facts struct {
 	Hostname       string `json:"hostname"`
 	OS             string `json:"os"`
@@ -28,9 +28,9 @@ type Facts struct {
 	OllamaVersion  string `json:"ollama_version,omitempty"`
 	OllamaURL      string `json:"ollama_url"`
 	AgentVersion   string `json:"agent_version"`
-	OllamaManaged  *bool  `json:"ollama_managed,omitempty"`   // Ollama ist Kind dieses Agenten (Router bietet dann Ollama-Updates an, 0.12.1)
-	OllamaPush     bool   `json:"ollama_push,omitempty"`      // Agent meldet den Ollama-Zustand selbst (Rahmen OLLAMA, 0.14.0)
-	OllamaSwapGate bool   `json:"ollama_swap_gate,omitempty"` // Ollama-Update tauscht erst nach Freigabe des Routers (0.15.0)
+	OllamaManaged  *bool  `json:"ollama_managed,omitempty"`   // Ollama is a child of this agent (router then offers Ollama updates, 0.12.1)
+	OllamaPush     bool   `json:"ollama_push,omitempty"`      // Agent reports Ollama status itself (frame OLLAMA, 0.14.0)
+	OllamaSwapGate bool   `json:"ollama_swap_gate,omitempty"` // Ollama update swaps only after router release (0.15.0)
 }
 
 func collectFacts(ctx context.Context, routerURL, upstream string, gpu *GPU) Facts {
@@ -47,8 +47,8 @@ func collectFacts(ctx context.Context, routerURL, upstream string, gpu *GPU) Fac
 	return f
 }
 
-// routeInterface: MAC und IP der Schnittstelle, ueber die der Router erreicht wird (UDP-"connect" waehlt die Route,
-// ohne ein Paket zu senden). Bei mehreren Adaptern (WLAN + Kabel) ist das die richtige fuer Wake-on-LAN.
+// routeInterface: MAC and IP of the interface used to reach the router (UDP "connect" selects the route,
+// without sending a packet). With multiple adapters (WLAN + cable), this is the correct one for Wake-on-LAN.
 func routeInterface(routerURL string) (string, string) {
 	u, err := url.Parse(routerURL)
 	if err != nil || u.Host == "" {

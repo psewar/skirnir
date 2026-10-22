@@ -11,11 +11,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Grafikspeicher je Prozess (0.13.0). nvidia-smi zeigt unter WDDM je Prozess nur "N/A"; der Leistungsindikator
-// "\GPU Process Memory(*)\Dedicated Usage" hat die Werte - je Instanz pid_<PID>_luid_<Adapter>_phys_<n>. Damit meldet der
-// Agent den Speicher seiner eigenen Kinder (STT per CUDA, 2026-09-30) als Fakt, statt dass der Router ihn als fremd
-// (Spiel) wertet: 2,6 GiB Whisper hoben den Knoten sonst ueber die foreign-Schwelle, obwohl nur Desktop + Spiel liefen.
-// Summiert wird ueber alle Adapter; die iGPU hat kaum "dedizierten" Speicher, der Fehler ist klein.
+// GPU memory per process (0.13.0). nvidia-smi shows "N/A" per process under WDDM; the performance counter
+// "\GPU Process Memory(*)\Dedicated Usage" has the values - per instance pid_<PID>_luid_<Adapter>_phys_<n>. Thus the
+// agent reports the memory of its own children (STT via CUDA, 2026-09-30) as a fact, instead of the router treating it as foreign
+// (game): 2.6 GiB of Whisper would otherwise push the node over the foreign threshold, even though only Desktop + game were running.
+// Summed over all adapters; the iGPU has little "dedicated" memory, so the error is small.
 
 var (
 	pdhDLL                       = windows.NewLazySystemDLL("pdh.dll")
@@ -62,7 +62,7 @@ func gpuProcessVRAM() (map[uint32]uint64, error) {
 	var size, n uint32
 	r, _, _ := procPdhGetFormattedCounterAr.Call(uintptr(c), pdhFmtLarge, uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&n)), 0)
 	if r != pdhMoreData {
-		if r == 0 { // keine Instanzen: kein Prozess nutzt die GPU
+		if r == 0 { // no instances: no process is using the GPU
 			return map[uint32]uint64{}, nil
 		}
 		return nil, fmt.Errorf("PdhGetFormattedCounterArray (size): 0x%x", r)
@@ -88,14 +88,14 @@ func gpuProcessVRAM() (map[uint32]uint64, error) {
 	return out, nil
 }
 
-// jobProcessIDList entspricht JOBOBJECT_BASIC_PROCESS_ID_LIST mit Platz fuer 256 Prozesse.
+// jobProcessIDList corresponds to JOBOBJECT_BASIC_PROCESS_ID_LIST with space for 256 processes.
 type jobProcessIDList struct {
 	Assigned uint32
 	InList   uint32
 	List     [256]uintptr
 }
 
-// pids: alle Prozesse im Job des Kindes - auch Enkel (der echte python.exe hinter dem venv-Starter, llama-server).
+// pids: all processes in the child's job - including grandchildren (the actual python.exe behind the venv starter, llama-server).
 func (t *procTree) pids() []uint32 {
 	if t == nil {
 		return nil

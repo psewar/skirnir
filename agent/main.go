@@ -1,5 +1,5 @@
-// skirnir-agent: Agent fuer GPU-Knoten des Skirnir-Routers (Windows-Dienst, auf Linux im Vordergrund/systemd).
-// Tunnel zum Router mit Schluessel-Identitaet, Heartbeat, MQTT-Geraet fuer Home Assistant, Aufsicht ueber lokale KI-Dienste.
+// skirnir-agent: Agent for GPU nodes of the Skirnir router (Windows service, foreground/systemd on Linux).
+// Tunnel to the router with key identity, heartbeat, MQTT device for Home Assistant, supervision of local AI services.
 // Verben: setup | install | uninstall | apply-rules | start | stop | restart | status | run | identity | check-config | mqtt-clear | gpu | gpuz-relay | version
 package main
 
@@ -70,13 +70,13 @@ func main() {
 		return
 	}
 	if verb == "" && runtime.GOOS == "windows" {
-		verb = "setup" // Doppelklick auf die Exe
+		verb = "setup" // Double-click the exe
 	}
 	if verb == "" || verb == "help" || verb == "-h" || verb == "--help" {
 		usage()
 		os.Exit(2)
 	}
-	if verb == "setup" { // braucht keine lesbare Konfiguration - legt sie bei Bedarf an
+	if verb == "setup" { // requires no readable configuration - creates it if needed
 		if err := setupInteractive(cfgPath); err != nil {
 			fmt.Fprintf(os.Stderr, "setup: %v\n", err)
 			os.Exit(1)
@@ -87,7 +87,7 @@ func main() {
 		fmt.Println(version)
 		return
 	}
-	if verb == "gpu" { // Messquelle pruefen: NVML oder nvidia-smi, Werte und Dauer je Messung
+	if verb == "gpu" { // Check measurement source: NVML or nvidia-smi, values and duration per measurement
 		g, err := newGPU()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "gpu: %v\n", err)
@@ -108,13 +108,13 @@ func main() {
 			b, _ := json.MarshalIndent(s.Sensors, "", "  ")
 			fmt.Printf("sensors (gpuz=%v):\n%s\n", s.Sensors.GPUZ, b)
 		}
-		// 0.13.0: Grafikspeicher je Prozess (Leistungsindikator) - Grundlage fuer children_vram_mib im Heartbeat
+		// 0.13.0: Graphics memory per process (performance indicator) - basis for children_vram_mib in the heartbeat
 		if procVRAM, err := gpuProcessVRAM(); err != nil {
 			fmt.Printf("graphics memory per process: %v\n", err)
 		} else {
 			printGPUProcs(procVRAM)
 		}
-		// GPU-Schutz, Trockenlauf: was der Guard mit den Standardwerten setzen WUERDE (setzt nichts)
+		// GPU guard, dry run: what the guard WOULD set with default values (sets nothing)
 		if lim := g.PowerLimits(); !lim.OK {
 			fmt.Printf("gpu-guard: limits not readable (%s) -> state unavailable\n", lim.Err)
 		} else {
@@ -124,11 +124,11 @@ func main() {
 		}
 		return
 	}
-	if verb == "game" { // 0.17.0: dieselbe Erkennung wie das Modul, einmal - ohne Konfiguration (bis 0.19: "spiel")
+	if verb == "game" { // 0.17.0: same detection as the module, once - without configuration (until 0.19: "game")
 		probeGame()
 		return
 	}
-	if verb == "gpuz-relay" { // Anmeldesitzung -> Dienst (gpuz_windows.go); Konfiguration nur fuer den Health-Port
+	if verb == "gpuz-relay" { // Login session -> service (gpuz_windows.go); configuration only for the health port
 		listen := "127.0.0.1:10398"
 		if cfg, err := loadConfig(cfgPath); err == nil {
 			listen = cfg.Health.Listen
@@ -141,8 +141,8 @@ func main() {
 	}
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
-		// Dienst steuern und Zustand zeigen geht auch ohne die Config: seit 0.9.0 duerfen die steuernden Benutzer das
-		// Config-Verzeichnis nicht mehr lesen (nur das Dienst-Steuerrecht) - Standardnamen reichen fuer diese Verben.
+		// Controlling the service and showing status works without the config: since 0.9.0, controlling users are allowed to do this
+		// No longer read the config directory (only the service control right) - default names suffice for these verbs.
 		if (os.IsPermission(err) || os.IsNotExist(err)) && (verb == "status" || verb == "start" || verb == "stop" || verb == "restart") {
 			fmt.Fprintf(os.Stderr, "(configuration not readable - defaults: service SkirnirAgent, health 127.0.0.1:10398)\n")
 			cfg = &Config{}
@@ -257,7 +257,7 @@ func printHealth(listen string) {
 	}
 }
 
-// printGPUProcs: die groessten Belegungen (ab 50 MiB) absteigend, fuer den Diagnose-Befehl `gpu`.
+// printGPUProcs: largest allocations (>= 50 MiB) descending, for the `gpu` diagnostic command.
 func printGPUProcs(procVRAM map[uint32]uint64) {
 	type e struct {
 		pid uint32

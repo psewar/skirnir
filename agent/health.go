@@ -11,9 +11,9 @@ import (
 )
 
 // HealthServer: GET /health (JSON-Gesamtbild), GET /healthz (200/503), POST /restart-child?name=stt (Header
-// X-Agent-Token = Inhalt von control.token neben der Config), POST /gpuz (GPU-Z-Sensoren vom Relay aus der
-// Anmeldesitzung, nur von localhost; die Werte gehen in Sensoren und Warnungen, nie in die Limit-Entscheidung des Guards).
-// Nur auf localhost; dient Debugging, dem status-Verb und einem etwaigen externen Watchdog.
+// X-Agent-Token = value of control.token next to the Config), POST /gpuz (GPU-Z sensors from the Relay out of the
+// login session, localhost only; values feed sensors and warnings, never the Guard's limit decision).
+// Localhost only; for debugging, the status verb, and any external watchdog.
 type HealthServer struct {
 	app *App
 }
@@ -95,7 +95,7 @@ type Snapshot struct {
 	Uptime    string                 `json:"uptime"`
 	GPU       *GPUSample             `json:"gpu"`
 	GPUError  string                 `json:"gpu_error,omitempty"`
-	GPUZRelay string                 `json:"gpuz_relay_age,omitempty"` // Alter der letzten Relay-Werte (leer = nie)
+	GPUZRelay string                 `json:"gpuz_relay_age,omitempty"` // Age of the last Relay values (empty = never)
 	Guard     GuardStatus            `json:"gpu_guard"`
 	Update    *UpdateReport          `json:"update,omitempty"`
 	Heartbeat HeartbeatStatus        `json:"heartbeat"`

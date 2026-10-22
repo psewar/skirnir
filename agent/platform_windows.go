@@ -14,9 +14,9 @@ import (
 	"golang.org/x/sys/windows/svc"
 )
 
-// Alles Windows-Spezifische liegt hier (Dienst-API, Job-Objekt, DPAPI, Fensterunterdrueckung, Registry).
-// platform_other.go liefert die Gegenstuecke fuer Linux/macOS, damit der Agent dort ebenfalls baut und im
-// Vordergrund (run) laeuft; Dienst-Installation gibt es dort noch nicht (systemd-Unit spaeter).
+// All Windows-specific logic lives here (Service API, Job Object, DPAPI, window suppression, Registry).
+// platform_other.go provides the counterparts for Linux/macOS so the agent builds and runs in the
+// foreground (run) there; service installation is not yet available (systemd unit later).
 
 func hideWindow(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} }
 
@@ -24,7 +24,7 @@ func childProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
 }
 
-// childGroup: Job-Objekt mit KILL_ON_JOB_CLOSE - stirbt der Dienst, sterben die Kinder mit.
+// childGroup: Job Object with KILL_ON_JOB_CLOSE - if the service dies, the children die with it.
 type childGroup struct{ job windows.Handle }
 
 func newKillOnCloseJob() (windows.Handle, error) {
@@ -50,22 +50,22 @@ func newChildGroup() (*childGroup, error) {
 	return &childGroup{job: job}, nil
 }
 
-// procTree ist ein eigenes Job-Objekt je Kind, verschachtelt unter dem Dienst-Job. Alles, was das Kind
-// startet, landet automatisch mit darin - auch Prozesse, die erst spaeter entstehen.
+// procTree is a separate Job Object per child, nested under the service Job. Anything the child
+// starts lands in it automatically - including processes created later.
 //
-// Warum: killChild beendete unter Windows nur den Hauptprozess. Ollama startet sein Modell aber als eigenen
-// Prozess (llama-server). Am 2026-09-23 startete der Supervisor Ollama nach gescheiterten
-// Gesundheitspruefungen neu - der Modellprozess ueberlebte als Waise mit 23,5 GiB Grafikspeicher, das neue
-// Ollama kannte ihn nicht, der Router zaehlte ihn als fremdes VRAM und hielt den Knoten stundenlang "busy".
-// Das Dienst-Job-Objekt raeumt nur auf, wenn der ganze Dienst stirbt; dieses hier bei jedem Neustart.
+// Why: killChild only terminated the main process on Windows. Ollama starts its model as a separate
+// process (llama-server). On 2026-09-23 the Supervisor restarted Ollama after failed
+// health checks - the model process survived as an orphan with 23.5 GiB of GPU memory, the new
+// Ollama did not know about it, the router counted it as foreign VRAM and kept the node "busy" for hours.
+// The service Job Object only cleans up when the whole service dies; this one does so on every restart.
 type procTree struct {
 	mu  sync.Mutex
 	job windows.Handle
 }
 
-// track haengt das Kind an das Dienst-Job-Objekt und an ein eigenes, darunter verschachteltes Job-Objekt.
-// Reihenfolge: erst der Dienst-Job, dann der leere Kind-Job - so wird er zum Unter-Job (Windows 8+).
-// Scheitert nur der Kind-Job, bleibt der alte Schutz (Dienst-Job) bestehen; der Fehler wird gemeldet.
+// track attaches the child to the service Job Object and to its own, nested Job Object below it.
+// Order: first the service Job, then the empty child Job - this makes it a sub-Job (Windows 8+).
+// If only the child Job fails, the old protection (service Job) remains; the error is reported.
 func (g *childGroup) track(pid int) (*procTree, error) {
 	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(pid))
 	if err != nil {
@@ -86,7 +86,7 @@ func (g *childGroup) track(pid int) (*procTree, error) {
 	return &procTree{job: job}, nil
 }
 
-// jobAccounting entspricht JOBOBJECT_BASIC_ACCOUNTING_INFORMATION (in x/sys/windows v0.35 nicht definiert).
+// jobAccounting corresponds to JOBOBJECT_BASIC_ACCOUNTING_INFORMATION (not defined in x/sys/windows v0.35).
 type jobAccounting struct {
 	TotalUserTime             int64
 	TotalKernelTime           int64
@@ -98,7 +98,7 @@ type jobAccounting struct {
 	TotalTerminatedProcesses  uint32
 }
 
-// alive: wie viele Prozesse im Job des Kindes noch leben (-1, wenn nicht ermittelbar).
+// alive: how many processes in the child's Job are still alive (-1 if undeterminable).
 func (t *procTree) alive() int {
 	if t == nil {
 		return -1
@@ -116,7 +116,7 @@ func (t *procTree) alive() int {
 	return int(info.ActiveProcesses)
 }
 
-// kill beendet alle Prozesse im Job des Kindes - auch Enkel, deren Eltern schon tot sind.
+// kill terminates all processes in the child's Job - including grandchildren whose parents are already dead.
 func (t *procTree) kill() {
 	if t == nil {
 		return
@@ -128,7 +128,7 @@ func (t *procTree) kill() {
 	}
 }
 
-// release gibt das Handle frei. KILL_ON_JOB_CLOSE: was dann noch lebt, stirbt dabei ebenfalls.
+// release frees the handle. KILL_ON_JOB_CLOSE: anything still alive dies with it.
 func (t *procTree) release() {
 	if t == nil {
 		return
@@ -152,8 +152,8 @@ func runService(cfgPath, name string) error {
 	return svc.Run(name, &windowsService{cfgPath: cfgPath, name: name})
 }
 
-// protectBytes/unprotectBytes: DPAPI im Maschinenkontext. Der Private Key liegt damit nie im Klartext auf der Platte;
-// die Datei-ACL (Dienstkonto, Administratoren) bleibt die zweite Huerde.
+// protectBytes/unprotectBytes: DPAPI in machine context. The Private Key is thus never stored in plaintext on disk;
+// the file ACL (service account, administrators) remains the second barrier.
 func protectBytes(b []byte) ([]byte, error) { return dpapi(b, true) }
 
 func unprotectBytes(b []byte) ([]byte, error) { return dpapi(b, false) }

@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// Supervisor startet und ueberwacht Kindprozesse (Ollama, Wyoming-STT). Windows: alle Kinder haengen an einem
-// Job-Objekt mit KILL_ON_JOB_CLOSE - stirbt der Dienst, sterben sie mit - und jedes Kind zusaetzlich an einem
-// eigenen Unter-Job (procTree), damit ein Neustart auch seine Enkel beendet. Linux: eigene Prozessgruppe.
+// Supervisor starts and monitors child processes (Ollama, Wyoming-STT). Windows: all children attach to a single
+// Job object with KILL_ON_JOB_CLOSE - if the service dies, they die with it - and each child additionally to its own
+// sub-job (procTree), so a restart also terminates its grandchildren. Linux: own process group.
 type Supervisor struct {
 	specs []ChildSpec
 	logc  LogCfg
@@ -34,8 +34,8 @@ type childState struct {
 	LastExit  string    `json:"last_exit,omitempty"`
 	NextStart time.Time `json:"next_start,omitempty"`
 	kill      func()
-	held      bool      // Hold(): angehalten, kein Neustart bis Release() (Ollama-Update, ollamaupdate.go)
-	tree      *procTree // Job-Objekt des laufenden Kindes (0.13.0: Grafikspeicher je Kind)
+	held      bool      // Hold(): paused, no restart until Release() (Ollama update, ollamaupdate.go)
+	tree      *procTree // Job object of the running child (0.13.0: VRAM per child)
 }
 
 var restartBackoff = []time.Duration{time.Second, 5 * time.Second, 30 * time.Second, 60 * time.Second}
@@ -84,7 +84,7 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 		}
 		ran := time.Since(start)
 		if ran > 5*time.Minute {
-			attempt = 0 // lief lange stabil: Backoff zuruecksetzen
+			attempt = 0 // ran stable for a long time: reset backoff
 		}
 		delay := restartBackoff[min(attempt, len(restartBackoff)-1)]
 		attempt++
@@ -98,7 +98,7 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 			st.NextStart = time.Time{}
 		}
 		s.mu.Unlock()
-		if held { // Ollama-Update: angehalten, bis Release() - dann sofort wieder starten, ohne Backoff
+		if held { // Ollama update: paused until Release() - then restart immediately, without backoff
 			s.log.Infof("supervisor: %s stopped (update), waiting for release", sp.Name)
 			for s.isHeld(sp.Name) {
 				select {
@@ -123,7 +123,7 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 	}
 }
 
-// runOnce startet das Kind, haengt es an die Gruppe, prueft die Gesundheit und wartet auf das Ende.
+// runOnce starts the child, attaches it to the group, checks health, and waits for exit.
 func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, out *childWriter) (string, error) {
 	cmd := exec.Command(sp.Cmd, sp.Args...)
 	cmd.Dir = sp.Cwd
@@ -137,7 +137,7 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 	if err != nil {
 		s.log.Warnf("supervisor: %s: process group: %v", sp.Name, err)
 	}
-	// Handle am Ende freigeben; unter Windows beendet das (KILL_ON_JOB_CLOSE) auch, was noch uebrig ist.
+	// Release handle at the end; on Windows this (KILL_ON_JOB_CLOSE) also terminates any remaining processes.
 	defer tree.release()
 	defer func() { s.mu.Lock(); st.tree = nil; s.mu.Unlock() }()
 	s.mu.Lock()
@@ -150,7 +150,7 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 
-	// Gesundheitspruefung: nach der Gnadenfrist muss der Port offen sein, sonst 3 Fehlversuche -> Neustart
+	// Health check: after the grace period, the port must be open, otherwise 3 failed attempts -> restart
 	var hc <-chan time.Time
 	if sp.HealthTCPPort > 0 {
 		t := time.NewTicker(15 * time.Second)
@@ -198,15 +198,15 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 	}
 }
 
-// stopChild beendet das Kind samt allem, was es gestartet hat (Ollama -> llama-server). Der direkte Kill
-// danach greift, falls das Kind nicht im Baum haengt (track gescheitert) - dann wie frueher nur der Hauptprozess.
+// stopChild terminates the child and everything it started (Ollama -> llama-server). The direct kill
+// afterwards applies if the child is not in the tree (tracking failed) - then only the main process, as before.
 func stopChild(cmd *exec.Cmd, t *procTree) {
 	t.kill()
 	killChild(cmd)
 }
 
-// reapTree raeumt nach einem Kind auf, das von selbst geendet hat: stuerzt Ollama ab, lebt sein
-// Modellprozess sonst weiter und haelt den Grafikspeicher fest, ohne dass ihn jemand wieder freigibt.
+// reapTree cleans up after a child that exited on its own: if Ollama crashes, its model process would otherwise
+// keep running and hold VRAM, without anyone releasing it.
 func (s *Supervisor) reapTree(name string, t *procTree) {
 	n := t.alive()
 	if n == 0 {
@@ -218,8 +218,8 @@ func (s *Supervisor) reapTree(name string, t *procTree) {
 	}
 }
 
-// childrenVRAM: Grafikspeicher (MiB) je laufendem Kind ausser Ollama - dessen Anteil kennt der Router aus /api/ps und der
-// Messung, doppelt gezaehlt waere er falsch. nil, wenn nichts zu melden ist oder die Messung nicht geht (nicht Windows).
+// childrenVRAM: VRAM (MiB) per running child except Ollama - its share is known to the router from /api/ps and the
+// measurement; double-counting would be incorrect. nil if nothing to report or measurement unavailable (not Windows).
 func (s *Supervisor) childrenVRAM() map[string]int {
 	s.mu.Lock()
 	trees := make(map[string]*procTree)
@@ -247,7 +247,7 @@ func (s *Supervisor) childrenVRAM() map[string]int {
 	return out
 }
 
-// Child liefert eine Kopie des Zustands eines Kindes (fuer MQTT und /health).
+// Child returns a copy of a child's state (for MQTT and /health).
 func (s *Supervisor) Child(name string) (childState, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -268,8 +268,8 @@ func (s *Supervisor) Status() map[string]childState {
 	return out
 }
 
-// Hold haelt ein Kind an und verhindert den Neustart, bis Release gerufen wird (Ollama-Update: Dateien tauschen, waehrend
-// nichts laeuft). Wartet bis zu wait, bis der Prozess samt Baum beendet ist; true = steht.
+// Hold pauses a child and prevents restart until Release is called (Ollama update: swap files while
+// nothing is running). Waits up to wait for the process tree to terminate; true = stopped.
 func (s *Supervisor) Hold(name string, wait time.Duration) bool {
 	s.mu.Lock()
 	c, ok := s.children[name]
@@ -296,7 +296,7 @@ func (s *Supervisor) Hold(name string, wait time.Duration) bool {
 	return false
 }
 
-// Release hebt Hold auf; die Schleife startet das Kind sofort neu.
+// Release lifts Hold; the loop restarts the child immediately.
 func (s *Supervisor) Release(name string) {
 	s.mu.Lock()
 	if c, ok := s.children[name]; ok {
@@ -312,7 +312,7 @@ func (s *Supervisor) isHeld(name string) bool {
 	return ok && c.held
 }
 
-// RestartChild beendet ein Kind; die Schleife startet es mit Backoff neu (Verb restart-child, /health POST).
+// RestartChild terminates a child; the loop restarts it with backoff (verb restart-child, /health POST).
 func (s *Supervisor) RestartChild(name string) bool {
 	s.mu.Lock()
 	c, ok := s.children[name]

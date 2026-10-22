@@ -8,16 +8,16 @@ func TestUninstallUpdate(t *testing.T) {
 		loc, name, ver, want, wantName string
 		change                         bool
 	}{
-		// der Fall vom 2026-10-01: Eintrag des Installers mit Trenner am Ende, alte Version
+		// Case from 2026-10-01: Installer entry with trailing separator, old version
 		{dir + `\`, "Ollama version 0.34.0", "0.34.0", "0.35.0", "Ollama version 0.35.0", true},
-		// andere Schreibweise des Pfads (Gross/klein, Schraegstriche) zaehlt als derselbe Ordner
+		// Different path casing (upper/lower, slashes) counts as the same folder
 		{`c:/users/U/AppData/Local/Programs/Ollama/`, "Ollama version 0.34.0", "0.34.0", "0.35.0", "Ollama version 0.35.0", true},
-		// schon aktuell: nichts schreiben
+		// Already up to date: do not write
 		{dir + `\`, "Ollama version 0.35.0", "0.35.0", "0.35.0", "Ollama version 0.35.0", false},
-		// fremder Ordner (andere Installation, anderes Programm): nicht anfassen
+		// Foreign folder (different installation, different program): do not touch
 		{`C:\Program Files\Ollama2`, "Ollama version 0.34.0", "0.34.0", "0.35.0", "", false},
 		{"", "Ollama version 0.34.0", "0.34.0", "0.35.0", "", false},
-		// Name folgt nicht dem Installer-Muster: nur die Version setzen
+		// Name does not match the installer pattern: only set the version
 		{dir, "Ollama", "0.34.0", "0.35.0", "Ollama", true},
 	}
 	for i, c := range cases {

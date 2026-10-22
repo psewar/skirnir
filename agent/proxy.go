@@ -23,15 +23,15 @@ import (
 	"time"
 )
 
-// OllamaProxy ist die TLS-Vorschaltstelle vor dem lokalen Ollama (das selbst kein TLS kann).
-// Der Router spricht https://<node>:11443 mit gepinntem Zertifikat (SHA-256, per Heartbeat gemeldet) und
-// Router-Token; ohne Token gibt es 401. Damit ist die GPU nur noch fuer den Router nutzbar, nicht fuer das LAN.
+// OllamaProxy is the TLS front-end for the local Ollama (which does not support TLS itself).
+// The router speaks https://<node>:11443 with a pinned certificate (SHA-256, reported via Heartbeat) and
+// router token; without a token, it returns 401. This restricts GPU access to the router only, not the LAN.
 type OllamaProxy struct {
 	cfg   ProxyCfg
 	token string
 	log   *Logger
 	cert  tls.Certificate
-	fp    string // SHA-256 hex des DER-Zertifikats
+	fp    string // SHA-256 hex of the DER certificate
 
 	mu       sync.Mutex
 	requests int
@@ -49,8 +49,8 @@ func newOllamaProxy(cfg ProxyCfg, token, node string, log *Logger) (*OllamaProxy
 	return &OllamaProxy{cfg: cfg, token: token, log: log, cert: cert, fp: fp}, nil
 }
 
-// loadOrCreateCert laedt ollama-proxy.crt/.key oder erzeugt ein selbstsigniertes ECDSA-P256-Zertifikat (10 Jahre).
-// Keine CA: der Router pinnt den Fingerprint, den der Agent im Heartbeat meldet.
+// loadOrCreateCert loads ollama-proxy.crt/.key or generates a self-signed ECDSA-P256 certificate (10 years).
+// No CA: the router pins the fingerprint reported by the agent in the Heartbeat.
 func loadOrCreateCert(dir, node string) (tls.Certificate, string, bool, error) {
 	crt, key := filepath.Join(dir, "ollama-proxy.crt"), filepath.Join(dir, "ollama-proxy.key")
 	if _, err := os.Stat(crt); err == nil {
@@ -121,7 +121,7 @@ func (p *OllamaProxy) Run(ctx context.Context) {
 	rp.FlushInterval = -1 // Ollama streamt ndjson: jeden Chunk sofort weiterreichen
 	rp.Transport = &http.Transport{
 		DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-		ResponseHeaderTimeout: 0, // Modell-Load kann Minuten dauern
+		ResponseHeaderTimeout: 0, // Model loading can take minutes
 		IdleConnTimeout:       90 * time.Second,
 		MaxIdleConns:          32,
 	}

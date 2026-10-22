@@ -7,26 +7,26 @@ import (
 	"time"
 )
 
-// Heartbeat: GPU-Fakten des Knotens und das Urteil des Routers (free/busy). tunnel.go schickt payload() als HB-Rahmen
-// und ruft ack(). Der alte HTTP-Weg mit Token (POST /v1/heartbeat/<node>) ist seit 0.9.1 weg.
+// Heartbeat: node GPU facts and router verdict (free/busy). tunnel.go sends payload() as the HB frame
+// and calls ack(). The old HTTP path with token (POST /v1/heartbeat/<node>) was removed in 0.9.1.
 type Heartbeat struct {
 	node     string
 	gpu      *GPU
 	log      *Logger
-	tlsFP    string         // Fingerprint der Ollama-Vorschaltstelle (leer = kein Proxy)
-	guard    *Guard         // GPU-Schutz: Status geht mit jedem Heartbeat (0.7.0)
-	updater  *Updater       // Selbst-Update: Zwischenstand geht mit dem Heartbeat (0.8.0)
+	tlsFP    string         // Fingerprint of the Ollama proxy (empty = no proxy)
+	guard    *Guard         // GPU guard: status sent with every heartbeat (0.7.0)
+	updater  *Updater       // Self-update: progress sent with the heartbeat (0.8.0)
 	ollamaUp *OllamaUpdater // Ollama-Update: Zwischenstand (0.12.0)
-	upstream string         // lokales Ollama: Version geht mit dem Heartbeat (0.12.0, alle 60 s frisch)
-	sup      *Supervisor    // 0.13.0: Grafikspeicher der eigenen Kinder (ausser Ollama) als Fakt
-	game     *GameWatch     // 0.17.0: laufendes Spiel als Fakt (game.go)
-	routes   *Routes        // tunnel.routes: Gesundheit der gerouteten Dienste (routes.go); nil = Feld fehlt
+	upstream string         // Local Ollama: version sent with the heartbeat (0.12.0, refreshed every 60 s)
+	sup      *Supervisor    // 0.13.0: VRAM of own children (except Ollama) as a fact
+	game     *GameWatch     // 0.17.0: active game as a fact (game.go)
+	routes   *Routes        // tunnel.routes: health of routed services (routes.go); nil = field missing
 
 	mu         sync.Mutex
 	ovVersion  string
 	ovAt       time.Time
-	every      time.Duration // Sendeintervall (Tunnel/HTTP); Status.OK = juengste Bestaetigung innerhalb 3 Intervallen
-	state      string        // Antwort des Routers: free | busy | pending | ""
+	every      time.Duration // Send interval (Tunnel/HTTP); Status.OK = latest ack within 3 intervals
+	state      string        // Router response: free | busy | pending | ""
 	busyReason string
 	lastOK     time.Time
 	lastErr    string
@@ -39,14 +39,14 @@ type hbResponse struct {
 	State      string `json:"state"`
 	BusyReason string `json:"busy_reason"`
 	Error      string `json:"error"`
-	GuardAck   *bool  `json:"gpu_guard_ack,omitempty"` // Router-Policy fuer den GPU-Schutz dieses Knotens (nil = Router kennt es nicht)
+	GuardAck   *bool  `json:"gpu_guard_ack,omitempty"` // Router policy for this node's GPU guard (nil = router doesn't know it)
 }
 
 func newHeartbeat(node string, gpu *GPU, log *Logger) *Heartbeat {
 	return &Heartbeat{node: node, gpu: gpu, log: log}
 }
 
-// SetInterval merkt das Sendeintervall (Provisionierung durch den Router), damit das OK-Fenster in Status() dazu passt.
+// SetInterval stores the send interval (provisioned by the router) so the OK window in Status() matches.
 func (h *Heartbeat) SetInterval(d time.Duration) {
 	if d > 0 {
 		h.mu.Lock()
@@ -55,7 +55,7 @@ func (h *Heartbeat) SetInterval(d time.Duration) {
 	}
 }
 
-// payload sammelt die GPU-Fakten fuer einen Heartbeat.
+// payload collects GPU facts for a heartbeat.
 func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	s, err := h.gpu.Sample(ctx)
 	if err != nil {
@@ -68,10 +68,10 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	if h.tlsFP != "" {
 		p["ollama_tls_sha256"] = h.tlsFP
 	}
-	if s.Sensors != nil { // 0.6.0: Temperatur, Leistung, Drosselung, GPU-Z - der Router legt den Block in den Knotenzustand
+	if s.Sensors != nil { // 0.6.0: temperature, power, throttling, GPU-Z - the router stores the block in node state
 		p["sensors"] = s.Sensors
 	}
-	if h.guard != nil { // 0.7.0: Zustand des GPU-Schutzes
+	if h.guard != nil { // 0.7.0: GPU guard status
 		p["gpu_guard"] = h.guard.Status()
 	}
 	if r := h.updater.Report(); r != nil { // 0.8.0: Stand eines Update-Auftrags
@@ -80,27 +80,27 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	if r := h.ollamaUp.Report(); r != nil { // 0.12.0: Stand eines Ollama-Update-Auftrags
 		p["ollama_update"] = r
 	}
-	if v := h.ollamaVersionCached(ctx); v != "" { // 0.12.0: der Router sieht die Ollama-Version sofort, nicht erst beim Poll
+	if v := h.ollamaVersionCached(ctx); v != "" { // 0.12.0: router sees the Ollama version immediately, not just on poll
 		p["ollama_version"] = v
 	}
-	if h.sup != nil { // 0.13.0: der Router zaehlt diesen Speicher nicht als fremd (sonst wirkt der STT-Dienst wie ein Spiel)
+	if h.sup != nil { // 0.13.0: router does not count this memory as foreign (otherwise the STT service looks like a game)
 		if m := h.sup.childrenVRAM(); len(m) > 0 {
 			p["children_vram_mib"] = m
 		}
 	}
-	if h.game != nil { // 0.17.0: Spiel und Hauptspeicher - der Router macht den Knoten busy bzw. laedt nichts kalt nach
+	if h.game != nil { // 0.17.0: game and RAM - router marks node busy or avoids cold loads
 		p["game"] = h.game.Fact()
 	}
 	if m, ok := memoryFact(); ok {
 		p["memory"] = m
 	}
-	if r := h.routes.Report(); r != nil { // Tunnel-Routen: der Router waehlt nur Knoten, deren Dienst up meldet
+	if r := h.routes.Report(); r != nil { // Tunnel routes: router only selects nodes whose service reports up
 		p["routes"] = r
 	}
 	return p, nil
 }
 
-// ollamaVersionCached: /api/version des lokalen Ollama, hoechstens alle 60 s (auch ein Fehlschlag wird 60 s gemerkt).
+// ollamaVersionCached: /api/version of local Ollama, max every 60 s (failures also cached for 60 s).
 func (h *Heartbeat) ollamaVersionCached(ctx context.Context) string {
 	if h.upstream == "" {
 		return ""
@@ -124,7 +124,7 @@ func (h *Heartbeat) markSent() {
 	h.mu.Unlock()
 }
 
-// ack verarbeitet die Antwort des Routers auf einen Heartbeat.
+// ack processes the router's response to a heartbeat.
 func (h *Heartbeat) ack(r hbResponse) {
 	h.mu.Lock()
 	changed := r.State != h.state
@@ -165,7 +165,7 @@ func (h *Heartbeat) Status() HeartbeatStatus {
 	st := HeartbeatStatus{State: h.state, BusyReason: h.busyReason, LastError: h.lastErr, Failures: h.failures, Sent: h.sent, GuardAck: h.guardAck}
 	if !h.lastOK.IsZero() {
 		st.LastOK = h.lastOK.Format(time.RFC3339)
-		window := 30 * time.Second // fest 30 s liess /healthz bei Intervallen ab 30 s dauerhaft 503 sagen (Review 2026-09-25)
+		window := 30 * time.Second // Fixed 30 s caused /healthz to return 503 persistently for intervals >= 30 s (Review 2026-09-25)
 		if 3*h.every > window {
 			window = 3 * h.every
 		}

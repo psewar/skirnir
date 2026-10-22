@@ -16,8 +16,8 @@ func writeCfg(t *testing.T, body string) string {
 	return p
 }
 
-// Review 2026-09-25: identity/logs lagen immer neben der Standard-Config, auch bei `--config X` - ein Testlauf teilte so die
-// Identitaet und Provisionierung des Dienstes.
+// Review 2026-09-25: identity/logs were always next to the standard config, even with `--config X` - a test run thus shared the
+// identity and provisioning of the service.
 func TestConfigBaseDirFromConfigPath(t *testing.T) {
 	p := writeCfg(t, "router:\n  url: https://router.example.net:11435\n")
 	c, err := loadConfig(p)
@@ -42,7 +42,7 @@ func TestConfigSecretStoreDomainRequired(t *testing.T) {
 	if _, err := loadConfig(writeCfg(t, body+"  domain: https://secrets.example.net\n")); err != nil {
 		t.Fatalf("mit domain abgelehnt: %v", err)
 	}
-	// der alte Blockname `mimir:` wird seit 0.9.1 nicht mehr gelesen: die Config muss klar scheitern, nicht still laufen
+	// the old block name `mimir:` is no longer read since 0.9.1: the config must fail clearly, not run silently
 	legacy := "router:\n  url: https://r.example.net\nmqtt:\n  host: mqtt.example.net\n  password_secret: MQTT_PASSWORD\n" +
 		"mimir:\n  domain: https://secrets.example.net\n  project_id: p\n  client_id: c\n  client_secret: s\n"
 	if _, err := loadConfig(writeCfg(t, legacy)); err == nil || !strings.Contains(err.Error(), "secret_store") {

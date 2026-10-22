@@ -2,13 +2,13 @@
 
 package main
 
-// NVML direkt aus nvml.dll (liegt bei jedem NVIDIA-Treiber in System32), ohne cgo ueber LazyDLL.
-// Grund (2026-09-11, Performance-Runde): der Heartbeat startete alle 2 s nvidia-smi.exe - 25 ms CPU je Start,
-// 43 200 Prozessstarts am Tag, ~1,2 % eines Kerns dauerhaft. Ein NVML-Aufruf kostet Mikrosekunden.
-// nvidia-smi bleibt als Rueckfallweg (gpu.go), falls die DLL fehlt oder ein Aufruf scheitert.
+// NVML directly from nvml.dll (present in System32 with every NVIDIA driver), without cgo via LazyDLL.
+// Reason (2026-09-11, performance round): the Heartbeat started nvidia-smi.exe every 2 s - 25 ms CPU per start,
+// 43,200 process starts per day, ~1.2% of a core sustained. An NVML call costs microseconds.
+// nvidia-smi remains as a fallback (gpu.go) if the DLL is missing or a call fails.
 //
-// Seit 0.6.0 zusaetzlich (jeder Aufruf optional, fehlt er im Treiber, bleibt der Wert weg): Temperatur, Leistung,
-// wirksames und Standard-Power-Limit, Luefter, Drosselgruende (Clocks-Event-Reasons-Bitmaske).
+// Since 0.6.0 additionally (each call optional, if missing in the driver the value is omitted): temperature, power,
+// effective and default power limit, fans, throttling reasons (Clocks Event Reasons bitmask).
 
 import (
 	"fmt"
@@ -22,8 +22,8 @@ import (
 type nvmlUtil struct{ GPU, Memory uint32 }
 type nvmlMem struct{ Total, Free, Used uint64 }
 
-// nvmlMemory_v2: enthaelt Reserved; nvidia-smi rechnet Reserved NICHT zu used (Treiber >= 535). Damit die Werte zu den
-// bisherigen nvidia-smi-Messungen (Baseline im Router) passen, bevorzugen wir v2 und fallen auf v1 zurueck.
+// nvmlMemory_v2: contains Reserved; nvidia-smi does NOT count Reserved as used (driver >= 535). To match the
+// previous nvidia-smi measurements (Baseline in the Router), we prefer v2 and fall back to v1.
 type nvmlMem2 struct {
 	Version  uint32
 	Total    uint64
@@ -39,7 +39,7 @@ type nvmlDev struct {
 	byIndex  *windows.LazyProc
 	util     *windows.LazyProc
 	memInfo  *windows.LazyProc
-	memInfo2 *windows.LazyProc // nvmlDeviceGetMemoryInfo_v2, kann fehlen
+	memInfo2 *windows.LazyProc // nvmlDeviceGetMemoryInfo_v2, may be missing
 	name     *windows.LazyProc
 	// optional (0.6.0)
 	temp     *windows.LazyProc
@@ -58,7 +58,7 @@ type nvmlDev struct {
 
 func nvmlErr(what string, rc uintptr) error { return fmt.Errorf("NVML %s: return code %d", what, rc) }
 
-// optProc: Prozedur, die fehlen darf (aeltere Treiber) -> nil.
+// optProc: Procedure that may be missing (older drivers) -> nil.
 func optProc(dll *windows.LazyDLL, names ...string) *windows.LazyProc {
 	for _, n := range names {
 		p := dll.NewProc(n)
@@ -69,7 +69,7 @@ func optProc(dll *windows.LazyDLL, names ...string) *windows.LazyProc {
 	return nil
 }
 
-// openNVML initialisiert NVML einmal und holt das Handle der ersten GPU. Fehler = Rueckfall auf nvidia-smi.
+// openNVML initializes NVML once and gets the handle of the first GPU. Error = fallback to nvidia-smi.
 func openNVML() (*nvmlDev, error) {
 	d := &nvmlDev{dll: windows.NewLazySystemDLL("nvml.dll")}
 	if err := d.dll.Load(); err != nil {
@@ -84,7 +84,7 @@ func openNVML() (*nvmlDev, error) {
 	d.name = d.dll.NewProc("nvmlDeviceGetName")
 	d.temp = optProc(d.dll, "nvmlDeviceGetTemperature")
 	d.power = optProc(d.dll, "nvmlDeviceGetPowerUsage")
-	d.limit = optProc(d.dll, "nvmlDeviceGetPowerManagementLimit", "nvmlDeviceGetEnforcedPowerLimit") // Management-Limit = was gesetzt ist; Enforced kann bei Power Brake tiefer liegen (Review 2026-09-25)
+	d.limit = optProc(d.dll, "nvmlDeviceGetPowerManagementLimit", "nvmlDeviceGetEnforcedPowerLimit") // Management limit = what is set; Enforced can be lower with Power Brake (Review 2026-09-25)
 	d.defLimit = optProc(d.dll, "nvmlDeviceGetPowerManagementDefaultLimit")
 	d.fan = optProc(d.dll, "nvmlDeviceGetFanSpeed")
 	d.throttle = optProc(d.dll, "nvmlDeviceGetCurrentClocksEventReasons", "nvmlDeviceGetCurrentClocksThrottleReasons")
@@ -113,7 +113,7 @@ func openNVML() (*nvmlDev, error) {
 	return d, nil
 }
 
-// sample liest Auslastung (GPU und Speichercontroller) und Speicher; Werte wie nvidia-smi --query-gpu (MiB, Prozent).
+// sample reads utilization (GPU and memory controller) and memory; values like nvidia-smi --query-gpu (MiB, percent).
 func (d *nvmlDev) sample() (util, memUtil int, totalMiB, usedMiB, freeMiB int, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -127,7 +127,7 @@ func (d *nvmlDev) sample() (util, memUtil int, totalMiB, usedMiB, freeMiB int, e
 		if rc, _, _ := d.memInfo2.Call(d.handle, uintptr(unsafe.Pointer(&m2))); rc == 0 {
 			return int(u.GPU), int(u.Memory), int(m2.Total / mib), int(m2.Used / mib), int(m2.Free / mib), nil
 		}
-		d.memInfo2 = nil // dieser Treiber kann v2 nicht -> ab jetzt v1
+		d.memInfo2 = nil // this driver cannot do v2 -> v1 from now on
 	}
 	var m nvmlMem
 	if rc, _, _ := d.memInfo.Call(d.handle, uintptr(unsafe.Pointer(&m))); rc != 0 {
@@ -138,8 +138,8 @@ func (d *nvmlDev) sample() (util, memUtil int, totalMiB, usedMiB, freeMiB int, e
 
 func mw(v uint32) *float64 { return fptr(math.Round(float64(v)/100) / 10) } // Milliwatt -> Watt, 1 Nachkommastelle
 
-// extra fuellt die optionalen Sensoren. Ein Aufruf, den der Treiber ablehnt (z. B. Luefter bei passiven Karten),
-// laesst nur seinen Wert weg; nichts davon ist ein Fehler des Samples.
+// extra fills the optional sensors. A call rejected by the driver (e.g. fans on passive cards),
+// only omits its value; none of these are sample errors.
 func (d *nvmlDev) extra(s *GPUSensors) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -177,7 +177,7 @@ func (d *nvmlDev) extra(s *GPUSensors) {
 	}
 }
 
-// limits: aktuelles, Standard-, Min-, Max-Limit in Watt (fuer den Guard).
+// limits: current, default, min, max limit in watts (for the Guard).
 func (d *nvmlDev) limits() guardLimits {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -200,7 +200,7 @@ func (d *nvmlDev) limits() guardLimits {
 	return l
 }
 
-// setLimit setzt das Power-Limit (Watt). NVML rc 4 = NVML_ERROR_NO_PERMISSION (kein Admin).
+// setLimit sets the power limit (watts). NVML rc 4 = NVML_ERROR_NO_PERMISSION (no admin).
 func (d *nvmlDev) setLimit(w float64) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
