@@ -17,13 +17,15 @@ PRIVATE_HOST = re.compile(r"\b[A-Za-z0-9][A-Za-z0-9.-]*\.(?:local|lan|home|inter
 CREDENTIAL_URL = re.compile(r"[a-z][a-z0-9+.-]*://[^\s/:@]+:[^\s/@]+@", re.I)
 USER_PATH = re.compile(r"(?:/home/(?!runner/)[A-Za-z0-9_.-]+/|[A-Za-z]:\\Users\\[^\\\s]+\\)")
 EXAMPLE_NETWORKS = tuple(ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24"))
+# Go's local time zone looks like a ".local" host to PRIVATE_HOST; only this exact spelling is exempt.
+GO_TIME_LOCAL = re.compile(r"\btime\.Local\b")
 
 
 def findings(line):
     found = []
     for label, pattern in (("possible credential", TOKEN), ("private hostname", PRIVATE_HOST),
                            ("credential in URL", CREDENTIAL_URL), ("user-specific path", USER_PATH)):
-        if pattern.search(line):
+        if pattern.search(GO_TIME_LOCAL.sub("", line) if pattern is PRIVATE_HOST else line):
             found.append(label)
     for match in EMAIL.finditer(line):
         host = match[1].lower()
