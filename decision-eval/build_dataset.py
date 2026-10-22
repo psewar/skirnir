@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Repraesentativer Skirnir-Datensatz fuer die Decision Engine: Anfragen -> Rolle (standard | gross | assist | code).
+"""Representative Skirnir dataset for the Decision Engine: requests -> role (standard | large | assist | code).
 
-Quelle sind Vorlagen aus dem echten Betrieb (HA-Sprachbefehle, Node-RED-Aufgaben, Log-Triage, Coding ueber Agenten-Frameworks,
-lange Analysen), jede mit Platzhaltern und Varianten. Jede Vorlage ist eine **Gruppe**: alle Auspraegungen einer Vorlage
-landen im selben Split (train/validation/test), sonst misst die Auswertung Auswendiglernen statt Verstehen (Abschnitt 9).
-Deutsch und Englisch gemischt, Schweizer Schreibweise (ss statt ß) wie im Haushalt ueblich.
+Source is templates from real operations (HA voice commands, Node-RED tasks, log triage, coding via agent frameworks,
+long analyses), each with placeholders and variants. Each template is a **group**: all variants of a template
+land in the same split (train/validation/test), otherwise evaluation measures memorization instead of understanding (Section 9).
+Mixed German and English, Swiss spelling (ss instead of ß) as common in households.
 
     python build_dataset.py [--out data] [--seed 7] [--val 0.15] [--test 0.15]
-Schreibt data/{train,validation,test}.jsonl im Jevlike-Format ({context, options, label}) plus group/role je Zeile und
-data/summary.json. Optional --capture <decisions.jsonl>: echte, anonymisierte Client-Labels aus dem Router dazu mischen.
+Writes data/{train,validation,test}.jsonl in Jevlike format ({context, options, label}) plus group/role per line and
+data/summary.json. Optional --capture <decisions.jsonl>: mix in real, anonymized client labels from the router.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import random
 
 OPTIONS = ["standard", "gross", "assist", "code"]
 
-# Platzhalter fuer die Vorlagen
+# Placeholders for the templates
 FILL = {
     "raum": ["Wohnzimmer", "Kueche", "Schlafzimmer", "Buero", "Bad", "Flur", "Garage", "Kinderzimmer", "Esszimmer"],
     "geraet": ["Licht", "Deckenlampe", "Stehlampe", "Steckdose", "Ventilator", "Fernseher", "Radio", "Kaffeemaschine"],
@@ -40,7 +40,7 @@ FILL = {
     "n": ["10", "25", "100", "1000"],
 }
 
-# Vorlagen je Rolle: (Vorlage, Anzahl Varianten). Platzhalter in {geschweiften Klammern}.
+# Templates per role: (template, number of variants). Placeholders in {curly braces}.
 TEMPLATES = {
     "assist": [
         ("Schalte das {geraet} im {raum} an.", 6), ("Mach das {geraet} im {raum} aus.", 6), ("{geraet} im {raum} auf {prozent} Prozent dimmen.", 6),
@@ -124,7 +124,7 @@ TEMPLATES = {
 
 
 def expand(template: str, k: int, rng: random.Random) -> list[str]:
-    """k Auspraegungen einer Vorlage: Platzhalter zufaellig (ohne Wiederholung, soweit moeglich) fuellen."""
+    """k variants of a template: fill placeholders randomly (without repetition, where possible)."""
     keys = [k_ for k_ in FILL if "{" + k_ + "}" in template]
     if not keys:
         return [template]
@@ -145,7 +145,7 @@ def build(seed: int) -> list[dict]:
     for role, templates in TEMPLATES.items():
         for tpl, k in templates:
             group = hashlib.sha1(f"{role}|{tpl}".encode()).hexdigest()[:10]
-            variants = 4 if role in ("standard", "gross") else 2   # die beiden Rollen haben weniger Vorlagen mit Platzhaltern
+            variants = 4 if role in ("standard", "gross") else 2   # the two roles have fewer templates with placeholders
             for text in expand(tpl, k * 2, rng):
                 seen = set()
                 for variant in range(variants):   # Original + Oberflaechenvarianten je Auspraegung
@@ -158,7 +158,7 @@ def build(seed: int) -> list[dict]:
 
 
 def load_capture(path: str) -> list[dict]:
-    """Echte Client-Labels aus dem Router (decision capture, anonymisiert). Pseudo-Labels der Engines bleiben draussen."""
+    """Real client labels from the router (decision capture, anonymized). Pseudo-labels from the engines are excluded."""
     out = []
     for line in open(path, encoding="utf-8"):
         if not line.strip():
@@ -171,8 +171,8 @@ def load_capture(path: str) -> list[dict]:
 
 
 def split_by_group(rows: list[dict], val: float, test: float, seed: int):
-    """Gruppen (Vorlagen) je Rolle getrennt auf die Splits verteilen, damit jede Rolle in jedem Split vorkommt und keine
-    Vorlage zwei Splits beruehrt."""
+    """Distribute groups (templates) per role across splits separately, so each role appears in every split and no
+    template touches two splits."""
     rng = random.Random(seed)
     parts = {"train": [], "validation": [], "test": []}
     for role in sorted({r["role"] for r in rows}):
@@ -193,7 +193,7 @@ SUFFIX = ["", "", "", " Danke.", " bitte", "!", " Merci.", " Thanks."]
 
 
 def augment(text: str, rng: random.Random) -> str:
-    """Kleine Oberflaechenvarianz (Anrede, Dank), wie sie im Sprach- und Chat-Alltag vorkommt; Bedeutung bleibt."""
+    """Minor surface variation (greetings, thanks), as seen in voice and chat daily life; meaning remains."""
     pre, suf = rng.choice(PREFIX), rng.choice(SUFFIX)
     if pre and text[:1].isupper() and not text.startswith(("Turn", "Set", "What", "Lock", "Dim", "Write", "Fix", "Add", "Review", "Convert",
                                                            "Implement", "Generate", "Analyze", "Prove", "Summarize", "Rewrite", "Translate")):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Fake-Cloud fuer die Tests (Stufe 5): OpenAI-kompatibel (/v1/chat/completions, /v1/embeddings) und Anthropic
-(/v1/messages), beide mit Stream. Prueft den API-Schluessel, antwortet mit festen Texten und usage.
-Aufruf: fake_cloud.py <port> <openai-key> <anthropic-key>"""
+"""Fake cloud for tests (tier 5): OpenAI-compatible (/v1/chat/completions, /v1/embeddings) and Anthropic
+(/v1/messages), both with streaming. Validates the API key, responds with fixed texts and usage.
+Usage: fake_cloud.py <port> <openai-key> <anthropic-key>"""
 import asyncio
 import json
 import sys
@@ -25,10 +25,10 @@ async def chat(req):
     log("openai", b)
     if b.get("model") == "kaputt":
         return web.json_response({"error": {"message": "The server had an error", "type": "server_error"}}, status=500)
-    if b.get("model", "").endswith("nicht"):   # wie die echte API: der Grund steht in error.code, nicht nur im Text
+    if b.get("model", "").endswith("nicht"):   # like the real API: the reason is in error.code, not just in the text
         return web.json_response({"error": {"message": f"The model `{b['model']}` does not exist or you do not have access to it.",
                                             "type": "invalid_request_error", "param": None, "code": "model_not_found"}}, status=404)
-    if b.get("model", "").endswith("falsch"):   # Client-Fehler mit 404, aber kein unbekanntes Modell: geht an den Client
+    if b.get("model", "").endswith("falsch"):   # Client error with 404, but not an unknown model: goes to the client
         return web.json_response({"error": {"message": "The model endpoint rejected the request path", "type": "invalid_request_error",
                                             "code": "unknown_url"}}, status=404)
     usage = {"prompt_tokens": 20, "completion_tokens": 30, "total_tokens": 50}

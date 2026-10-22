@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Jevlike-Checkpoints fuer Skirnir trainieren (beide Varianten des Vorschlags) und mit jevlike-eval pruefen.
+"""Train Jevlike checkpoints for Skirnir (both proposal variants) and evaluate with jevlike-eval.
 
-    ..\\decision-jevlike\\.venv\\Scripts\\python train.py tiny        # Variante A: Byte-Encoder, von null
-    ..\\decision-jevlike\\.venv\\Scripts\\python train.py hf          # Variante B: eingefrorener Qwen/Qwen2.5-0.5B + Scoring-Head
+    ..\\decision-jevlike\\.venv\\Scripts\\python train.py tiny        # Variant A: Byte-Encoder, from scratch
+    ..\\decision-jevlike\\.venv\\Scripts\\python train.py hf          # Variant B: frozen Qwen/Qwen2.5-0.5B + Scoring-Head
     ... train.py hf --hf-model Qwen/Qwen2.5-0.5B --rank 256 --epochs 6
 
-Schreibt ../decision-jevlike/models/skirnir-router-<variante>.pt. Variante B braucht den Encoder im lokalen Cache
-(decision-jevlike/prepare_encoder.py, einmal mit Netz); danach laeuft alles mit HF_HUB_OFFLINE=1.
-Kontextfenster 512 Bytes/Tokens statt Jevlikes 192: deutsche Saetze mit Umlaut-Ersatz sind laenger, und die Hinweise
-([tools=..]) stehen am Ende.
+Writes to ../decision-jevlike/models/skirnir-router-<variant>.pt. Variant B requires the encoder in the local cache
+(decision-jevlike/prepare_encoder.py, once with network); afterwards everything runs with HF_HUB_OFFLINE=1.
+Context window 512 Bytes/Tokens instead of Jevlike's 192: German sentences with umlaut replacement are longer, and the hints
+([tools=..]) are at the end.
 """
 
 import argparse

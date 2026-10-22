@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Selbsttest TCP-Keepalive auf dem API-Port: kommen die Optionen des lauschenden Sockets auf der ANGENOMMENEN Verbindung an?
-Laeuft ohne Router, nur ueber Loopback mit einer einzigen Verbindung.
+"""Self-test TCP keepalive on the API port: do the listening socket's options reach the ACCEPTED connection?
+Runs without a router, only over loopback with a single connection.
 
-Anlass 2026-10-01: eine Anfrage ohne Stream rechnete 6,6 min ohne ein Byte, der Verbindungszustand auf dem Weg zum Client
-verfiel still, die Antwort ging verloren. Der Router setzt Keepalive am lauschenden Socket und verlaesst sich darauf, dass Linux
-die Optionen an jede angenommene Verbindung vererbt - genau das prueft dieser Test, statt es anzunehmen.
+Trigger 2026-10-01: a non-stream request computed for 6.6 min without a byte, the connection state on the way to the client
+quietly expired, and the response was lost. The router sets keepalive on the listening socket and relies on Linux
+inheriting the options to every accepted connection - this test verifies that instead of assuming it.
 """
 import os
 import socket

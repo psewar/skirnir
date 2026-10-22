@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Reranker-Dienst mit TEI-Protokoll (Cross-Encoder auf OpenVINO, z. B. Intel-iGPU) - nur auf Loopback.
+"""Reranker service with TEI protocol (Cross-Encoder on OpenVINO, e.g., Intel iGPU) - loopback only.
 
     python server.py --model-dir models/mmarco-mMiniLMv2-L12 [--device GPU.0] [--port 8090]
-    POST /rerank {"query": "...", "texts": ["...", ...]}  ->  [{"index": 0, "score": 0.97}, ...] (absteigend)
-    GET  /health  ->  200 {"status": "ok", ...} erst nach Pruefsummen- und Paar-Selbstpruefung, sonst 503 {"status", "reason"}
+    POST /rerank {"query": "...", "texts": ["...", ...]}  ->  [{"index": 0, "score": 0.97}, ...] (descending)
+    GET  /health  ->  200 {"status": "ok", ...} only after checksum and pair self-check, otherwise 503 {"status", "reason"}
 
-Gedacht als Kindprozess des Skirnir-Agenten; der Router reicht /rerank ueber den Tunnel herein. Inhalte werden nicht geloggt.
+Intended as a child process of the Skirnir agent; the router forwards /rerank via the tunnel. Content is not logged.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from rerank_service import Limits, Reply, Service, error  # noqa: E402
 
-LOOPBACK = ("127.0.0.1", "::1", "localhost")  # der Dienst hat keine Anmeldung - nur lokal; der Agent reicht weiter
+LOOPBACK = ("127.0.0.1", "::1", "localhost")  # the service has no authentication - local only; the agent forwards it
 
 
 def make_handler(service: Service):
@@ -47,12 +47,12 @@ def make_handler(service: Service):
         def do_POST(self):
             length = self.headers.get("Content-Length") or ""
             if not length.isdigit():
-                self.close_connection = True  # ungelesener Body: Verbindung nicht weiterverwenden
+                self.close_connection = True  # unread body: do not reuse connection
                 return self._send(error(411, "length_required"))
             if int(length) > service.limits.max_body_bytes:
                 self.close_connection = True
                 return self._send(error(413, "body_too_large"))
-            # Body immer lesen, auch fuer die 404: sonst setzt Windows die Verbindung zurueck, waehrend der Client noch sendet
+            # always read the body, even for 404: otherwise Windows resets the connection while the client is still sending
             data = self.rfile.read(int(length))
             if self.path != "/rerank":
                 return self._send(error(404, "not_found"))
@@ -75,12 +75,12 @@ def main(argv=None) -> int:
         print(f"skirnir-rerank: --host {a.host} ist keine Loopback-Adresse - der Dienst hat keine Anmeldung und lauscht nur lokal",
               file=sys.stderr)
         return 2
-    # erst hier: die Engine braucht openvino/numpy, die HTTP-Schicht (und ihr Selbsttest in der CI) nicht
+    # only here: the engine needs openvino/numpy, the HTTP layer (and its self-test in CI) does not
     import engine_openvino
 
     service = Service(lambda: engine_openvino.build(a.model_dir, a.device, a.max_length, batch=a.batch),
                       Limits(max_texts=a.max_texts))
-    # Modell laden und pruefen im Hintergrund: /health antwortet derweil 503 "starting"
+    # load and check model in background: /health responds 503 "starting" meanwhile
     threading.Thread(target=service.start, name="rerank-start", daemon=True).start()
     print(f"skirnir-rerank: {a.model_dir} auf {a.device}, http://{a.host}:{a.port}", file=sys.stderr, flush=True)
     ThreadingHTTPServer((a.host, a.port), make_handler(service)).serve_forever()

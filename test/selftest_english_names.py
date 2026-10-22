@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Selbsttest (Router 0.9.0): englische Schnittstellennamen und der Uebergang von den deutschen (design/english-names.md).
+"""Self-test (Router 0.9.0): English interface names and the transition from German (design/english-names.md).
 
-Agenten vor 0.20.0 melden den GPU-Schutz deutsch, events.jsonl enthaelt alte Ereignis- und Grundnamen, anfragen.jsonl heisst
-jetzt requests.jsonl, und HA-Entitaeten bekommen eine englische Entity-ID bei fester unique_id. Laeuft ohne Router und Netz."""
+Agents prior to 0.20.0 report GPU guard in German, events.jsonl contains old event and base names, anfragen.jsonl is now requests.jsonl, and HA entities receive an English entity ID with a fixed unique_id. Runs without Router and network."""
 import json
 import os
 import sys
@@ -22,7 +21,7 @@ def check(name, cond, info=""):
         FAILS.append(name)
 
 
-# --- GPU-Schutz: alte Agenten deutsch, neue englisch, beides wird englisch
+# --- GPU guard: old agents German, new English, both normalized to English
 alt = nodes.guard_english({"state": "gedrosselt", "quelle": "nvml", "grund": "abgewaehlt", "warnungen": ["x"], "hochlast_s": 12,
                            "limit_w": 403})
 check("Agent < 0.20: Zustand gedrosselt -> throttled", alt["state"] == "throttled")
@@ -33,7 +32,7 @@ neu = {"state": "high_load", "source": "nvml", "reason": None, "limit_w": 460}
 check("Agent >= 0.20: unveraendert", nodes.guard_english(neu) == neu)
 check("alle Zustaende englisch", set(nodes.GUARD_STATE_BEFORE_0_20.values()) <= set(nodes.GUARD_STATES))
 
-# --- Journal: alte Eintraege beim Laden uebersetzt
+# --- Journal: old entries translated on load
 zeilen = [{"event": "kontext_gekuerzt", "t": 1, "geschaetzt": 100, "angekommen": 40, "quote": 0.4, "sicher": True},
           {"event": "prewarm", "t": 2, "reason": "spiel-leicht"},
           {"event": "gpu_guard", "t": 3, "state": "hochlast", "reason": "abgewaehlt"},
@@ -60,12 +59,12 @@ open(os.path.join(tmp, "anfragen.jsonl"), "w").write("alt\n")
 fallback_observation.adopt_file_before_0_9()
 check("vorhandenes requests.jsonl wird nicht ueberschrieben", open(os.path.join(tmp, "requests.jsonl")).read() == '{"a": 1}\n')
 
-# --- Katalogquelle: alte deutsche Werte werden englisch gemeldet
+# --- Catalog source: old German values reported in English
 check("Katalogquellen vor 0.9 -> englisch", admin.CATALOG_SOURCE_BEFORE_0_9["gemessen (nvidia-smi)"] == "measured (nvidia-smi)"
       and admin.CATALOG_SOURCE_BEFORE_0_9["geschaetzt"] == "estimated")
 
 
-# --- HA-Discovery: feste unique_id, englische Entity-ID
+# --- HA Discovery: fixed unique_id, English entity ID
 class Client:
     def __init__(self):
         self.pubs = {}

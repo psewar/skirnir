@@ -1,7 +1,7 @@
-"""Kern des Reranker-Dienstes: Anfragepruefung, Zustand (starting/ok/selftest_failed), TEI-Antwortformat.
+"""Core of the reranker service: request validation, state (starting/ok/selftest_failed), TEI response format.
 
-Unabhaengig von OpenVINO, damit die Selbsttests ohne GPU laufen: die Engine ist austauschbar
-(`OpenVinoEngine` in engine_openvino.py, im Test eine Attrappe). Erwartete Faelle sind Werte (`Reply`), keine Exceptions
+Independent of OpenVINO so self-tests run without a GPU: the engine is swappable
+(`OpenVinoEngine` in engine_openvino.py, a stub in tests). Expected cases are values (`Reply`), not exceptions
 (AGENTS.md "Explicit control flow").
 """
 
@@ -16,8 +16,8 @@ import time
 from dataclasses import dataclass, field
 
 STARTING, OK, SELFTEST_FAILED = "starting", "ok", "selftest_failed"
-# Eindeutiges Paar fuer die Selbstpruefung: ein gesundes Modell gibt dem ersten Text deutlich mehr. 2026-10-20 lieferte
-# ein beschaedigter Download (richtige Groesse, falsche Pruefsumme) genau hier Unsinn - der Dienst meldet sich erst danach gesund.
+# Unique pair for self-check: a healthy model gives significantly higher score to the first text. 2026-10-20 delivered
+# a corrupted download (correct size, wrong checksum) nonsense exactly here - the service reports healthy only afterwards.
 SELFTEST_QUERY = "Was ist die Hauptstadt von Deutschland?"
 SELFTEST_TEXTS = ("Berlin ist die Hauptstadt Deutschlands.", "Bananen sind gelb und wachsen in warmen Ländern.")
 
@@ -41,7 +41,7 @@ def error(status: int, reason: str) -> Reply:
 
 
 def sigmoid(x: float) -> float:
-    # Wie TEI ohne raw_scores: Relevanz 0..1. Grosse negative Logits ueberlaufen math.exp nicht, weil zuerst das Vorzeichen geprueft wird.
+    # Like TEI without raw_scores: relevance 0..1. Large negative Logits do not overflow math.exp because the sign is checked first.
     return 1.0 / (1.0 + math.exp(-x)) if x >= 0 else math.exp(x) / (1.0 + math.exp(x))
 
 
@@ -54,7 +54,7 @@ def sha256_file(path: str) -> str:
 
 
 def verify_manifest(model_dir: str) -> tuple[dict | None, str]:
-    """(manifest, "") wenn alle Dateien laut manifest.json vorhanden sind und ihre SHA-256 stimmt, sonst (None, grund)."""
+    """(manifest, "") if all files per manifest.json exist and their SHA-256 matches, otherwise (None, reason)."""
     path = os.path.join(model_dir, "manifest.json")
     if not os.path.isfile(path):
         return None, "manifest_missing"
@@ -76,15 +76,15 @@ _INVALID = object()
 
 
 def parse_json(data: bytes):
-    """Geparster Wert oder _INVALID. Untrusted JSON ist eine echte Grenze (AGENTS.md): hier und nur hier wird gefangen."""
+    """Parsed value or _INVALID. Untrusted JSON is a real boundary (AGENTS.md): caught here and only here."""
     try:
         return json.loads(data)
-    except (ValueError, UnicodeDecodeError):  # exception-ok: Parsen fremder Eingabe ist nicht vorab pruefbar
+    except (ValueError, UnicodeDecodeError):  # exception-ok: Parsing external input cannot be pre-validated
         return _INVALID
 
 
 def validate(body: bytes, limits: Limits) -> tuple[str, list[str]] | Reply:
-    """(query, texts) oder eine Reply mit Status 400/413. Felder ausser query/texts werden ignoriert (TEI: return_text,
+    """(query, texts) or a Reply with Status 400/413. Fields other than query/texts are ignored (TEI: return_text,
     raw_scores, truncate)."""
     if len(body) > limits.max_body_bytes:
         return error(413, "body_too_large")
@@ -109,8 +109,8 @@ def validate(body: bytes, limits: Limits) -> tuple[str, list[str]] | Reply:
 
 @dataclass
 class Service:
-    """Zustand und Ablauf. `engine_factory()` liefert (engine, grund): engine mit `.score(query, texts) -> list[float]`
-    (Logits, je Text eins) und `.describe() -> dict`, oder (None, grund), wenn sie sich nicht bauen laesst."""
+    """State and flow. `engine_factory()` returns (engine, reason): engine with `.score(query, texts) -> list[float]`
+    (Logits, one per text) and `.describe() -> dict`, or (None, reason) if it cannot be built."""
 
     engine_factory: object
     limits: Limits = field(default_factory=Limits)
@@ -148,7 +148,7 @@ class Service:
             return checked
         query, texts = checked
         t0 = time.perf_counter()
-        with self._lock:  # ein Lauf zur Zeit: die iGPU teilt sich nicht gut, und so bleibt der Speicher begrenzt
+        with self._lock:  # one run at a time: the iGPU does not share well, and memory remains limited
             logits = self.engine.score(query, texts)
         self.stats["busy_ms"] += (time.perf_counter() - t0) * 1000
         if len(logits) != len(texts) or not all(math.isfinite(x) for x in logits):

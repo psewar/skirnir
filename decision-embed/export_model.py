@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Stufe 2, Schritt 1: ein mehrsprachiges Satz-Embedding-Modell nach ONNX exportieren und dynamisch auf int8 quantisieren.
+"""Stage 2, Step 1: Export a multilingual sentence embedding model to ONNX and dynamically quantize to int8.
 
     ..\\decision-jevlike\\.venv\\Scripts\\python export_model.py [--model intfloat/multilingual-e5-small] [--out models/e5-small]
-Ergebnis in <out>/: model.onnx (fp32), model_quantized.onnx (int8, dynamisch), tokenizer.json + Konfiguration, export.json.
-Der Download passiert nur hier (Setup); Training und Dienst laufen danach offline aus diesem Ordner.
+Output in <out>/: model.onnx (fp32), model_quantized.onnx (int8, dynamic), tokenizer.json + config, export.json.
+Download happens only here (setup); training and service run offline from this folder afterwards.
 """
 
 import argparse

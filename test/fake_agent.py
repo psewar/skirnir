@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Fake-Agent fuer die Tests: meldet sich wie agent/tunnel.go mit Ed25519-Schluessel am Router an (Challenge ->
-signiertes Hello -> Status), haelt den Tunnel und reicht die Anfragen des Routers an ein (Fake-)Ollama weiter.
-Schluessel wird in <keyfile> persistiert, damit ein Neustart dieselbe Identitaet hat (wie der echte Agent).
-Aufruf: fake_agent.py <router-ws> <node> <upstream> <keyfile> [upstream-token]
-  z. B. fake_agent.py wss://127.0.0.1:21435 big https://127.0.0.1:21001 fake-agent-big.key testtoken"""
+"""Fake agent for tests: registers with the router using an Ed25519 key like agent/tunnel.go (Challenge ->
+signed Hello -> Status), maintains the tunnel, and forwards router requests to a (fake) Ollama.
+The key is persisted in <keyfile> so a restart retains the same identity (like the real agent).
+Usage: fake_agent.py <router-ws> <node> <upstream> <keyfile> [upstream-token]
+  e.g. fake_agent.py wss://127.0.0.1:21435 big https://127.0.0.1:21001 fake-agent-big.key testtoken"""
 import asyncio
 import base64
 import json
@@ -22,9 +22,9 @@ REQ, RESP, DATA, END, ERR, CANCEL, HB, HBACK, OLLAMA = 1, 2, 3, 4, 5, 6, 7, 8, 9
 FACTS = {"hostname": NODE.upper(), "os": "windows", "arch": "amd64", "manufacturer": "Fake", "model": "Testrechner",
          "gpu": "Fake RTX 5090", "vram_total_mib": 32563, "mac": "00:11:22:33:44:55", "local_ip": "127.0.0.1",
          "ollama_version": "0.11.0", "ollama_url": UPSTREAM, "agent_version": "test",
-         "ollama_managed": os.environ.get("FAKE_OLLAMA_MANAGED", "1") == "1",   # wie Agent 0.12.1: Ollama ist Kind des Agenten
-         "ollama_push": os.environ.get("FAKE_OLLAMA_PUSH", "1") == "1",         # wie Agent 0.14.0: meldet den Ollama-Zustand selbst
-         "ollama_swap_gate": os.environ.get("FAKE_OLLAMA_SWAP_GATE", "1") == "1"}   # wie Agent 0.15.0: Tausch erst nach Freigabe
+         "ollama_managed": os.environ.get("FAKE_OLLAMA_MANAGED", "1") == "1",   # like Agent 0.12.1: Ollama is a child of the agent
+         "ollama_push": os.environ.get("FAKE_OLLAMA_PUSH", "1") == "1",         # like Agent 0.14.0: reports Ollama status itself
+         "ollama_swap_gate": os.environ.get("FAKE_OLLAMA_SWAP_GATE", "1") == "1"}   # like Agent 0.15.0: swap only after release
 SWAP_GO = {}   # Version -> asyncio.Event, gesetzt von {"t":"ollama-swap"}
 
 
@@ -45,11 +45,11 @@ UPDATE_PUB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-upd
 
 
 async def do_update(ws, session, lock, m, sslctx):
-    """Wie updater.go: Signatur mit dem Betreiber-Schluessel, Datei im Manifest, Download mit Token, SHA-256, Bericht im
-    Heartbeat, dann Neuanmeldung mit der neuen Version (Tausch und Neustart werden nur simuliert)."""
+    """Like updater.go: signature with the operator key, file in manifest, download with token, SHA-256, report in
+    heartbeat, then re-register with the new version (swap and restart are only simulated)."""
     import hashlib
     hb = {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}
-    async def report(state, msg=""):   # kind wie Agent >= 0.19.1: immer dabei, hier nie app_control
+    async def report(state, msg=""):   # child like Agent >= 0.19.1: always present, never app_control here
         await send(ws, lock, HB, 0, json.dumps({**hb, "update": {"version": m.get("version"), "state": state, "message": msg, "kind": ""}}).encode())
         out(update=state, msg=msg)
     try:
@@ -69,14 +69,14 @@ async def do_update(ws, session, lock, m, sslctx):
         await report("applied", "Binary getauscht, Neustart")
         FACTS["agent_version"] = m["version"]
         await asyncio.sleep(0.3)
-        await ws.close()   # 'Neustart': die Schleife meldet sich mit der neuen Version wieder an
+        await ws.close()   # 'Restart': the loop re-registers with the new version
     except Exception as e:  # noqa: BLE001
         await report("failed", (str(e) or e.__class__.__name__.replace("InvalidSignature", "Manifest-Signatur ungueltig"))[:120])
 
 
 async def do_ollama_update(ws, session, lock, m):
-    """Wie ollamaupdate.go (vereinfacht): Archiv laden, SHA-256 gegen den Auftrag, Stand im Heartbeat; danach traegt der
-    Heartbeat die neue Ollama-Version (Anhalten, Tausch und Neustart des Kindes werden nur simuliert)."""
+    """Like ollamaupdate.go (simplified): load archive, SHA-256 against the task, status in heartbeat; then the
+    heartbeat carries the new Ollama version (stopping, swapping, and restarting the child are only simulated)."""
     import hashlib
     hb = {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}
     async def report(state, msg=""):
@@ -84,7 +84,7 @@ async def do_ollama_update(ws, session, lock, m):
                                                 "ollama_update": {"version": m.get("version"), "state": state, "message": msg}}).encode())
         out(ollama_update=state, msg=msg)
     try:
-        if not FACTS["ollama_managed"]:   # wie ollamaupdate.go auf einem Knoten mit Ollama als Tray-App
+        if not FACTS["ollama_managed"]:   # like ollamaupdate.go on a node with Ollama as a tray app
             await report("failed", "Ollama ist kein Kind dieses Agenten (children: ohne ollama.exe) - Update nur von Hand")
             return
         await report("downloading", "0 %")
@@ -92,7 +92,7 @@ async def do_ollama_update(ws, session, lock, m):
             data = await r.read()
             if r.status != 200:
                 raise ValueError(f"Download HTTP {r.status}")
-        await asyncio.sleep(1.5)   # "Download dauert": der Knoten muss in dieser Zeit im Routing bleiben
+        await asyncio.sleep(1.5)   # "Download takes time": the node must stay in routing during this period
         if hashlib.sha256(data).hexdigest() != m["sha256"]:
             raise ValueError("SHA-256 stimmt nicht")
         if FACTS["ollama_swap_gate"]:
@@ -106,14 +106,14 @@ async def do_ollama_update(ws, session, lock, m):
         await report("applied", "Dateien getauscht, Ollama startet neu")
         FACTS["ollama_version"] = m["version"]
         await asyncio.sleep(0.3)
-        await report("applied", "Dateien getauscht, Ollama startet neu")   # naechster Heartbeat traegt die neue Version
+        await report("applied", "Dateien getauscht, Ollama startet neu")   # next heartbeat carries the new version
     except Exception as e:  # noqa: BLE001
         await report("failed", (str(e) or e.__class__.__name__)[:120])
 
 
 async def ollama_watch(ws, session, lock, watch):
-    """Wie ollamawatch.go (Agent 0.14.0): lokales Ollama alle 0,5 s abfragen und den Zustand bei jeder Aenderung, nach der
-    Freigabe und alle 5 s als Rahmen OLLAMA melden; nach zwei Fehlschlaegen in Folge up=false (Agent: drei, der Test ist knapper)."""
+    """Like ollamawatch.go (Agent 0.14.0): query local Ollama every 0.5 s and report status on every change, after
+    release, and every 5 s as a frame OLLAMA; after two consecutive failures up=false (Agent: three, the test is tighter)."""
     headers = {"X-Router-Token": UP_TOKEN} if UP_TOKEN else {}
     tmo = aiohttp.ClientTimeout(total=2)
     fails, key, sent, msg = 0, None, 0.0, None
@@ -191,14 +191,14 @@ async def main():
                     tasks, lock = {}, asyncio.Lock()
                     watch = {"force": True}
                     wtask = asyncio.create_task(ollama_watch(ws, session, lock, watch)) if FACTS["ollama_push"] else None
-                    if st.get("state") == "approved":   # ein Heartbeat durch den Tunnel (Leerlaufwerte, 7 GiB = Baseline)
+                    if st.get("state") == "approved":   # one heartbeat through the tunnel (idle values, 7 GiB = baseline)
                         await send(ws, lock, HB, 0, json.dumps({"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}).encode())
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             m = json.loads(msg.data)
                             out(ctl=m.get("t"), status=m.get("state"), node=m.get("node"), config=m.get("config"))
                             if m.get("state") == "approved":
-                                watch["force"] = True   # vor der Freigabe verwirft der Router den Rahmen
+                                watch["force"] = True   # before release, the router discards the frame
                                 await send(ws, lock, HB, 0, json.dumps({"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}).encode())
                             if m.get("t") == "update":
                                 asyncio.create_task(do_update(ws, session, lock, m, sslctx))  # noqa: RUF006

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Selbsttest (Router 0.8.11): Admin, Register, Messung, Updates und Tunnel melden erwartete Faelle als Wert (Problem).
+"""Self-test (Router 0.8.11): Admin, Register, Measurement, Updates, and Tunnel report expected cases as a value (Problem).
 
-Bis 0.8.10 warfen die Pruefungen der Admin-API ValueError (KeyError/TypeError bei fehlenden Feldern endeten als 500), das
-Register und die Messung brachen per Ausnahme ab, die Agent-Anmeldung fing jede Ausnahme. Jetzt liefern sie Problem-Werte
-oder pruefen vorher. Laeuft ohne Router und Netz."""
+Up to 0.8.10, Admin-API checks raised ValueError (missing fields ended as 500 via KeyError/TypeError),
+Register and Measurement aborted via exceptions, and Agent registration caught any exception. Now they return Problem values
+or check beforehand. Runs without Router and network."""
 import asyncio
 import base64
 import json
@@ -44,7 +44,7 @@ check("values.number: Unsinn -> Problem 400", failed(p := values.number("abc", "
 check("values.ip_address: Normalform", values.ip_address(" 192.0.2.1 ", "x") == "192.0.2.1")
 check("values.ip_address: keine IP -> Problem", failed(values.ip_address("192.0.2.300", "x")))
 
-# --- admin: UI-Eingaben werden Problem 400 statt ValueError/KeyError/500
+# --- admin: UI inputs return Problem 400 instead of ValueError/KeyError/500
 ok = admin._overrides_from_request({"roles": {"standard": {"tiers": [{"model": "m:1b", "num_ctx": "8192"}]}},
                                     "models": {"m:1b": {"weights_gib": "1.5", "max_parallel": 2}}})
 check("admin: gueltige Rolle + Modell -> Overrides", not failed(ok) and ok["roles"]["standard"]["tiers"][0]["num_ctx"] == 8192
@@ -65,7 +65,7 @@ check("admin: Client mit IP-Liste", admin._client_spec("c1", {"ip": "192.0.2.1; 
 check("admin: decisions=abc -> Standard 50", admin._decisions_n(SimpleNamespace(query={"decisions": "abc"})) == 50)
 check("admin: decisions=7", admin._decisions_n(SimpleNamespace(query={"decisions": "7"})) == 7)
 
-# --- registry: Policy, Anmeldung, Datei
+# --- registry: Policy, registration, file
 check("registry: Policy gueltig", registry.node_policy({"weight": "2", "busy_gpu_util_pct": 50}) == {"weight": 2, "busy_gpu_util_pct": 50.0})
 check("registry: Policy weight keine Zahl -> Problem", failed(registry.node_policy({"weight": "schwer"})))
 check("registry: Policy ausserhalb des Bereichs -> Problem", failed(registry.node_policy({"busy_foreign_gib": 100})))
@@ -120,13 +120,13 @@ reg = registry.NodeRegistry(os.path.join(tmp, "fehlt", "nodes.json"))
 p = reg.save()
 check("registry: save in fehlendes Verzeichnis -> Problem 500, bleibt dirty", failed(p) and p.status == 500 and reg.dirty, msg(p))
 
-# --- tunnel: Antwortkopf des Agenten
+# --- tunnel: Agent response header
 check("tunnel: Antwortkopf gueltig", tunnel.response_head(b'{"status": 200, "headers": {"a": "b"}}') == (200, {"a": "b"}))
 for what, payload in (("kein JSON", b"{"), ("status fehlt", b"{}"), ("status als Text", b'{"status": "200"}'),
                       ("status bool", b'{"status": true}'), ("headers keine Mapping", b'{"status": 200, "headers": [1]}')):
     check(f"tunnel: Antwortkopf {what} -> None", tunnel.response_head(payload) is None)
 
-# --- perf: Statistik und Knotenaufruf
+# --- perf: Statistics and node call
 check("perf: Statistik mit Text statt Zahl -> None", perf.perf_stats({"eval_count": "viel", "eval_duration": 1}, None) is None)
 check("perf: Statistik kein dict -> None", perf.perf_stats([1], None) is None)
 check("perf: Statistik gueltig", perf.perf_stats({"eval_count": 10, "eval_duration": 1e9}, None)["gen_tps"] == 10.0)
@@ -163,7 +163,7 @@ async def ollama_cases():
     node = SimpleNamespace(tunnel=SimpleNamespace(request=lambda *a, **k: FakeCM(data={"models": "x"})), name="n")
     p = await perf._ps_models(node)
     check("perf: /api/ps models keine Liste -> Problem", failed(p), msg(p))
-    # E2E-Fund 2026-10-22: Laden/Entladen per /api/generate streamt NDJSON - nur Erfolg zaehlt, nicht als JSON lesen
+    # E2E finding 2026-10-22: Load/Unload via /api/generate streams NDJSON - only success counts, do not read as JSON
     node = SimpleNamespace(tunnel=SimpleNamespace(request=lambda *a, **k: FakeCM(data=None)), name="n")
     p = await perf._ollama(node, "post", "/api/generate", {"model": "m", "keep_alive": 0}, answer=False)
     check("perf: Laden/Entladen (NDJSON) -> Erfolg ohne JSON-Parse", p == {}, msg(p))
@@ -182,7 +182,7 @@ mpath = os.path.join(agentupdate.agent_dir(), "manifest.json")
 check("agentupdate: kein Manifest -> None", agentupdate.load_manifest() is None)
 for what, content in (("kaputt", "{"), ("ohne manifest", "{}"), ("ohne files", json.dumps({"manifest": {"version": "1.0.0"}}))):
     open(mpath, "w", encoding="utf-8").write(content)
-    os.utime(mpath, (len(what), len(what)))   # neue mtime: der Cache darf nicht greifen
+    os.utime(mpath, (len(what), len(what)))   # new mtime: cache must not hit
     check(f"agentupdate: Manifest {what} -> None", agentupdate.load_manifest() is None)
 priv = Ed25519PrivateKey.generate()
 manifest = {"version": "1.0.0", "files": []}
@@ -195,7 +195,7 @@ check("agentupdate: Signatur passt -> None", agentupdate.verify_with(pub, manife
 check("agentupdate: falsche Signatur -> Grund", agentupdate.verify_with(pub, {**manifest, "version": "2"}, sig) == "signature does not match")
 check("agentupdate: kaputter Schluessel -> Grund", agentupdate.verify_with("abc", manifest, sig) == "key or signature malformed")
 
-# --- Agent-Update: Wartezeit nach einem Fehlschlag aus dem Feld `kind` (Agent >= 0.19.1), nicht aus dem Meldungstext
+# --- Agent update: Wait time after a failure from the `kind` field (Agent >= 0.19.1), not from the message text
 SAC, SECHS_H = agentupdate.APP_CONTROL_RETRY_S, 6 * 3600
 blockiert = 'neue Binary meldet "" statt 1.0.0: fork/exec x.new: An Application Control policy has blocked this file.'
 check("retry_after: kind app_control -> 30 min", agentupdate.retry_after({"state": "failed", "kind": "app_control", "message": "egal"}) == SAC)
@@ -207,7 +207,7 @@ check("retry_after: ohne kind, Text deutsch -> 30 min",
 check("retry_after: ohne kind, anderer Fehler -> 6 h", agentupdate.retry_after({"state": "failed", "message": "Download: HTTP 500"}) == SECHS_H)
 check("retry_after: leerer Auftrag -> 6 h", agentupdate.retry_after({}) == SECHS_H)
 
-# note_report uebernimmt `kind` aus dem Heartbeat; ein Bericht ohne Feld (aelterer Agent) laesst keins stehen
+# note_report takes `kind` from the Heartbeat; a report without the field (older Agent) leaves none set
 _remember, state.remember = state.remember, lambda entry: None
 _reg = state.REG
 state.REG = SimpleNamespace(nodes={"fp1": {"name": "n1", "update": {"version": "1.0.0", "state": "requested", "message": ""}}}, save=lambda: None)

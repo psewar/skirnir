@@ -90,7 +90,8 @@ They follow by module group, each as a pull request that changes no code token (
 
 1. Router (`router/`): done.
 2. Agent (`agent/`): done.
-3. Tests, test file names and `deploy/` output.
+3. Tests, tools, `deploy/` (comments and output) and the German `selftest_*` file names: done.
+4. Test check labels and German identifiers in the tests.
 
 Roadmap steps from `design/roadmap.md` are "stages" (`Stufe 3` → `Stage 3`); "tier" stays reserved for the tiers of a role.
 

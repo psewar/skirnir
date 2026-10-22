@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Selbsttest Grenze je Modell (Katalog max_parallel) und Wartebudget je Prioritaetsklasse. Ohne Router, ohne Netz.
+"""Self-test for per-model limits (catalog max_parallel) and wait budgets per priority class. No router, no network.
 
-Anlass 2026-10-02: qwen3.8 (Architektur qwen35) kann in Ollama keine zwei Anfragen zugleich. Schickte der Router eine zweite,
-stellte Ollama sie in seine Schlange und lud den Runner neu, sobald die erste fertig war (zweimal um 03:02, je 5-7 s). Der
-Router muss die zweite selbst zurueckhalten - und beim Freiwerden den Wartenden wecken, der auch wirklich loslegen kann.
+Trigger 2026-10-02: qwen3.8 (architecture qwen35) cannot handle two concurrent requests in Ollama. If the router sent a second one,
+Ollama queued it and reloaded the runner once the first finished (twice at 03:02, 5-7 s each). The
+router must hold the second one itself - and wake the waiter when a slot frees up, ensuring they can actually start.
 """
 import asyncio
 import os
@@ -58,8 +58,8 @@ def t_wartebudget():
 
 
 async def t_release():
-    """Zwei Wartende auf einem Knoten: einer wartet auf das voll belegte qwen3.8, der andere auf gemma4. Wird ein Platz frei,
-    darf nur der geweckt werden, der jetzt loslegen kann - auch wenn der andere besser platziert ist."""
+    """Two waiters on one node: one waiting for the fully occupied qwen3.8, the other for gemma4. When a slot frees up,
+    only the one that can start now should be woken - even if the other is better positioned."""
     n = Knoten("gpu-desktop")
     n.inflight, n.inflight_models["qwen3.8:27b"] = 1, 1
     import time

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Selbsttest (Router 0.3.7): eine Rollen-Anfrage mit kleinerem num_ctx nimmt den Kontext, mit dem das Modell schon geladen
-ist - sofern er innerhalb der Stufe liegt. Anlass 2026-09-30: qwen3.8:27b teilt den Runner nicht ueber verschiedene num_ctx
-(anders als qwen3.6); ein Client mit 65536 neben einem mit 131072 lud bei jedem Wechsel neu (10,4 s / 7,4 s gemessen).
-Laeuft ohne Router, Netz und Ollama."""
+"""Self-test (Router 0.3.7): a role request with a smaller num_ctx reuses the context the model is already loaded
+with - provided it falls within the tier. Trigger 2026-09-30: qwen3.8:27b does not share the runner across different num_ctx
+values (unlike qwen3.6); a client with 65536 alongside one with 131072 reloaded on every switch (10.4 s / 7.4 s measured).
+Runs without Router, network, or Ollama."""
 import os
 import sys
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Setup-Schritt (einmalig, mit Netz): einen Hugging-Face-Encoder in den lokalen Cache laden, damit Training und Dienst
-danach offline laufen (HF_HUB_OFFLINE=1). Speichert nichts ausser dem Cache; gibt den Cache-Pfad aus.
+"""Setup step (one-time, requires network): load a Hugging Face encoder into the local cache so that training and the service
+can run offline afterwards (HF_HUB_OFFLINE=1). Stores nothing except the cache; prints the cache path.
 
     python prepare_encoder.py Qwen/Qwen2.5-0.5B [--cache-dir models/hf-cache]
 """

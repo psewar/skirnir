@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Prometheus + Grafana neben dem Router ausrollen (LXC-Container des Routers, Docker Compose). Nutzt die Helfer aus
-deploy/deploy.py (Ops-Ordner, SSH, Container-Push).
+"""Deploy Prometheus + Grafana next to the router (router LXC container, Docker Compose). Uses helpers from
+deploy/deploy.py (Ops folder, SSH, Container-Push).
 
     python monitoring/deploy_ct.py [--no-up] [--status]
 
-Was passiert:
-  1. Dateien nach /opt/skirnir-monitoring (compose.yaml, prometheus.yml aus der Vorlage mit dem TLS-Namen des Routers,
-     Grafana-Provisionierung + Dashboard, render-monitoring.sh, systemd-Einheiten).
-  2. .env: GRAFANA_HOST = Router-Hostname, CERT_DIR = Ordner des Router-Zertifikats (aus control_tls.cert der Produktiv-
-     konfiguration), GRAFANA_UID = Eigentuemer des Zertifikatsschluessels (damit Grafana ihn lesen darf).
-  3. render-monitoring.sh legt die Secrets ab (Metrik-Konto des Routers, Grafana-Admin) - beide kommen aus dem Secret-Store,
-     nie von hier. Timer (taeglich) und Zertifikats-Watch (Grafana-Neustart bei Renewal) werden aktiviert.
-  4. docker compose up -d; danach Gesundheit, Scrape-Ziel und ein erster Datenpunkt werden geprueft.
+What happens:
+  1. Files to /opt/skirnir-monitoring (compose.yaml, prometheus.yml from template with router TLS name,
+     Grafana provisioning + dashboard, render-monitoring.sh, systemd units).
+  2. .env: GRAFANA_HOST = router hostname, CERT_DIR = router cert folder (from control_tls.cert in production
+     config), GRAFANA_UID = owner of cert key (so Grafana can read it).
+  3. render-monitoring.sh stores secrets (router metric account, Grafana admin) - both from Secret-Store,
+     never from here. Timer (daily) and cert watch (Grafana restart on renewal) are enabled.
+  4. docker compose up -d; then health, scrape target, and first data point are checked.
 """
 
 from __future__ import annotations

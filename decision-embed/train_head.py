@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Stufe 2, Schritt 2: Klassifikationskopf auf den Embeddings trainieren und messen.
+"""Stage 2, Step 2: Train and evaluate the classification head on the embeddings.
 
     ..\\decision-jevlike\\.venv\\Scripts\\python train_head.py [--model-dir models/e5-small] [--fp32] [--threads 4]
-Zwei Koepfe auf denselben Vektoren: Softmax-Regression (numpy, wie tfidf) und kNN (Kosinus, k=7, abstandsgewichtet). Beide
-werden auf Validierung/Test gemessen; head.json enthaelt beide plus den Trainingsvektoren fuer kNN, der Dienst waehlt per
-"mode" (logreg | knn | mix). Dazu die Kosten einer Einbettung auf CPU (Median ueber den Testsatz, einzeln, N Threads) -
-das ist die Zahl, die fuer den 4-Kern-CT zaehlt.
+Two heads on the same vectors: Softmax regression (numpy, like tfidf) and kNN (cosine, k=7, distance-weighted). Both
+are evaluated on validation/test; head.json contains both plus the training vectors for kNN, and the service selects via
+"mode" (logreg | knn | mix). Also the cost of an embedding on CPU (median over the test set, single, N threads) -
+this is the number that matters for the 4-core CT.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def train_logreg(x, y, xv, yv, k, l2=1e-5, epochs=4000, lr=1.0, seed=7):
 
 
 def knn_probs(q, xtr, ytr, k, kk=7, temp=0.05):
-    """Kosinus-Aehnlichkeit zu allen Trainingsvektoren; die kk naechsten stimmen gewichtet (Softmax der Aehnlichkeit) ab."""
+    """Cosine similarity to all training vectors; the kk nearest vote weighted (Softmax of similarity)."""
     sims = q @ xtr.T
     idx = np.argsort(-sims, axis=1)[:, :kk]
     out = np.zeros((len(q), k), dtype=np.float32)
@@ -96,7 +96,7 @@ def main():
         print(f"{name:7s} test Top-1 {res[name]['test_top1']:.3f}")
     pv = softmax(xva @ w.T + b).argmax(axis=1)
     print(f"logreg val Top-1 {float((pv == yva).mean()):.3f} (beste Epoche {ep}, NLL {nll:.3f})")
-    # Latenz einer Einbettung, einzeln, wie im Dienst
+    # Latency of an embedding, single, as in the service
     lat = []
     for r in te[:60]:
         t1 = time.perf_counter()

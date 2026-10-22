@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Selbsttest des Reranker-Dienstes (rerank-server/) ohne OpenVINO: Engine-Attrappe, Zustand, Anfragepruefung, TEI-Antwort,
-Manifest-Pruefsummen und die HTTP-Schicht auf einem freien Loopback-Port.
+"""Self-test of the reranker service (rerank-server/) without OpenVINO: engine stub, state, request validation, TEI response,
+manifest checksums, and the HTTP layer on a free loopback port.
     python test/selftest_rerank_server.py
 """
 
@@ -22,7 +22,7 @@ import server  # noqa: E402
 
 
 class FakeEngine:
-    """Logit = Anzahl der Fragewoerter im Text (minus 2), damit die Rangfolge vorhersagbar ist."""
+    """Logit = number of query words in the text (minus 2), so the ranking is predictable."""
 
     def __init__(self, invert=False, nan=False):
         self.invert, self.nan = invert, nan
@@ -116,7 +116,7 @@ class TestManifest(unittest.TestCase):
             manifest, reason = rs.verify_manifest(d)
             self.assertEqual(reason, "")
             with open(os.path.join(d, "model.bin"), "wb") as fh:
-                fh.write(b"gewichtX")  # gleiche Groesse, anderer Inhalt - der Fall vom 2026-10-20
+                fh.write(b"gewichtX")  # same size, different content - the case from 2026-10-20
             self.assertEqual(rs.verify_manifest(d), (None, "checksum_mismatch:model.bin"))
 
 
@@ -136,7 +136,7 @@ class TestHttp(unittest.TestCase):
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
                 return r.status, json.loads(r.read())
-        except urllib.error.HTTPError as e:  # exception-ok: urllib meldet HTTP-Status >= 400 nur so
+        except urllib.error.HTTPError as e:  # exception-ok: urllib reports HTTP status >= 400 only this way
             return e.code, json.loads(e.read())
 
     def test_health_and_rerank(self):

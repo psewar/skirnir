@@ -1,5 +1,5 @@
-"""Gemeinsamer Embedding-Kern fuer Training (train_head.py) und Dienst (server.py): ONNX Runtime auf CPU, HF-Tokenizer,
-Mean-Pooling ueber die Aufmerksamkeitsmaske, L2-Norm. Kein torch, kein transformers zur Laufzeit."""
+"""Shared embedding core for training (train_head.py) and service (server.py): ONNX Runtime on CPU, HF-Tokenizer,
+Mean-Pooling over the attention mask, L2-Norm. No torch, no transformers at runtime."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Entwicklungsumgebung fuer die UI: Fake-Knoten, Fake-Cloud, Fake-Agent und Router wie in run_tests, aber ohne TLS und ohne
-Basic Auth auf dem Control-Port, damit http://127.0.0.1:21435/ im Browser direkt aufgeht. Laeuft bis Strg-C.
-Nutzt eine abgeleitete Konfiguration dev-config.yaml (aus test-config.yaml)."""
+"""Development environment for the UI: fake node, fake cloud, fake agent, and router as in run_tests, but without TLS and without
+Basic Auth on the control port, so http://127.0.0.1:21435/ works directly in the browser. Runs until Ctrl-C.
+Uses a derived configuration dev-config.yaml (from test-config.yaml)."""
 import os
 import subprocess
 import sys
@@ -20,7 +20,7 @@ cfg["router"]["public_url"] = "http://127.0.0.1:21435"
 cfg["router"]["client_auth"]["mode"] = "observe"
 open(os.path.join(HERE, "dev-config.yaml"), "w", encoding="utf-8").write(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
 open(os.path.join(HERE, "secrets.env"), "w", encoding="utf-8").write("CLOUD_TEST_KEY=cloud-test-key\nCLAUDE_TEST_KEY=claude-test-key\n")
-for f in ("roles.yaml", "nodes.json", "usage.json"):   # usage.json: sonst ist das Cloud-Budget aus dem Testlauf schon erschoepft
+for f in ("roles.yaml", "nodes.json", "usage.json"):   # usage.json: otherwise the cloud budget from the test run is already exhausted
     try:
         os.remove(os.path.join(HERE, f))
     except FileNotFoundError:

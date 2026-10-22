@@ -1,7 +1,8 @@
-"""Lasttest GPU-Schutz (design/gpu-guard.md, Test 6): je Power-Limit 575/500/460/400 W Tempo (Prefill, Generierung, 2 parallel),
-16-Pin-Spannung, Leistung und Throttle-Gruende messen. Laeuft ERHOEHT (nvidia-smi -pl braucht Admin); der Guard steht waehrenddessen
-auf 100 % (`guard_override.py`, Ops-Ordner: setzt gpu_guard.power_limit_pct per Config-Push). Am Ende: Limit auf den Standard, dann stellt der Guard sein Dauerlimit selbst wieder her.
-Aufruf: python guard_loadtest.py <ops-ordner> <ausgabe.json>"""
+"""Load test GPU guard (design/gpu-guard.md, Test 6): measure speed (Prefill, Generation, 2 parallel),
+16-pin voltage, power, and throttle reasons per power limit 575/500/460/400 W.
+Runs ELEVATED (nvidia-smi -pl requires Admin); the guard is set to 100% meanwhile
+(`guard_override.py`, Ops folder: sets gpu_guard.power_limit_pct via Config-Push). At the end: reset limit to default, then the guard restores its sustained limit itself.
+Usage: python guard_loadtest.py <ops-folder> <output.json>"""
 import base64, json, os, random, ssl, statistics, subprocess, sys, threading, time, urllib.request
 
 OPS, OUT = sys.argv[1], sys.argv[2]
@@ -103,9 +104,9 @@ def level_run(w):
         res["error"] = "Limit nicht gesetzt"; return res
     time.sleep(3)
     smp = Sampler(); smp.start()
-    # a) Prefill: langer Prompt (frische Kennung -> kein Prompt-Cache)
+    # a) Prefill: long prompt (fresh identifier -> no prompt cache)
     res["prefill"] = [try_req(big_prompt(14000), "prefill") for _ in range(2)]
-    # b) Generierung: 2 parallel, laengere Antwort
+    # b) Generation: 2 parallel, longer response
     gen_prompt = lambda: f"Kennung {random.randint(10**9, 10**10)}. Schreibe eine Geschichte von etwa 400 Woertern ueber einen Boten, der in ein fremdes Reich reitet."  # noqa: E731
     out = [None, None]
     ths = [threading.Thread(target=lambda i=i: out.__setitem__(i, try_req(gen_prompt(), f"gen{i}"))) for i in range(2)]
@@ -132,9 +133,9 @@ def main():
         for w in LEVELS:
             say(f"=== Limit {w} W ===")
             results["levels"].append(level_run(w))
-            time.sleep(10)   # Abkuehlen zwischen den Stufen
+            time.sleep(10)   # Cool down between stages
     finally:
-        set_limit(575)   # Standard; das Dauerlimit stellt der Guard nach dem Zuruecksetzen der Config selbst her
+        set_limit(575)   # Default; the guard restores the sustained limit itself after resetting the config
         results["log"] = LOG
         json.dump(results, open(OUT, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
         say("Ergebnis:", OUT)

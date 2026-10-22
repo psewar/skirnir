@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Selbsttest (Router 0.3.8 / Agent 0.13.0): der Agent meldet den Grafikspeicher seiner Kinder ausser Ollama
-(children_vram_mib), der Router zaehlt ihn nicht als fremd und lernt ihn nicht in die Grundlast.
+"""Self-test (Router 0.3.8 / Agent 0.13.0): the agent reports the GPU memory of its children except Ollama
+(children_vram_mib); the router does not count it as foreign and does not learn it into the baseline.
 
-Werte vom 2026-09-30 auf gpu-desktop: belegt 8,2 GiB, kein Modell geladen, Grundlast 2,0 GiB, Whisper per CUDA 2,53 GiB
-(Leistungsindikator, 2587 MiB), dazu ein Spiel. Ohne die Meldung: fremd 6,2 GiB >= 6,0 -> busy (foreign_vram), obwohl
-Desktop + Spiel nur 3,6 GiB sind. Laeuft ohne Router, Netz und Ollama (echte Config aus router/config.example.yaml)."""
+Values from 2026-09-30 on gpu-desktop: busy 8.2 GiB, no model loaded, baseline 2.0 GiB, Whisper via CUDA 2.53 GiB
+(performance indicator, 2587 MiB), plus a game. Without the report: foreign 6.2 GiB >= 6.0 -> busy (foreign_vram), even though
+Desktop + game are only 3.6 GiB. Runs without Router, network, and Ollama (real config from router/config.example.yaml)."""
 import os
 import sys
 import time
@@ -23,7 +23,7 @@ def check(name, cond, info=""):
 
 
 state.CFG = config.Config(os.path.join(HIER, "..", "router", "config.example.yaml"), use_overrides=False)
-poll.evaluate = lambda node, now: None   # der Zustandsautomat ist hier nicht Gegenstand
+poll.evaluate = lambda node, now: None   # the state machine is not the subject here
 
 
 def knoten():
@@ -52,7 +52,7 @@ check("Kind beendet (Feld fehlt wieder) -> 0", n.children_vram_gib == 0.0)
 poll.apply_heartbeat(n, dict(HB, children_vram_mib={"stt": "kaputt", "x": 100}), time.time())
 check("unsinnige Werte werden uebergangen", abs(n.children_vram_gib - 100 / 1024) < 0.001, f"{n.children_vram_gib}")
 
-# Grundlast lernen: gelernt wird belegt minus Kinder, sonst zoege foreign_vram_gib sie ein zweites Mal ab
+# Baseline learning: learned value is busy minus children, otherwise foreign_vram_gib would deduct it a second time
 n = knoten()
 gesehen = []
 n.learn_baseline = lambda now, sample: gesehen.append(sample)

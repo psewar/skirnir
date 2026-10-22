@@ -1,7 +1,7 @@
-"""Cross-Encoder auf OpenVINO (CPU, iGPU, NPU) mit dem Tokenizer aus tokenizer.json. Zur Laufzeit nur openvino, tokenizers, numpy.
+"""Cross-Encoder on OpenVINO (CPU, iGPU, NPU) using the tokenizer from tokenizer.json. Runtime dependencies: openvino, tokenizers, numpy.
 
-Laenge dynamisch, auf ein Vielfaches von `pad_multiple` aufgerundet (weniger verschiedene Formen = weniger Kernel-Kompilate
-auf der GPU), Batches zu `batch` Paaren.
+Length is dynamic, rounded up to a multiple of `pad_multiple` (fewer distinct shapes = fewer kernel compilations
+on the GPU), batches of `batch` pairs.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ class OpenVinoEngine:
 
 
 def build(model_dir: str, device: str, max_length: int = 512, pad_multiple: int = 32, batch: int = 64):
-    """(engine, "") oder (None, grund). Prueft vorher Bibliotheken, Manifest/Pruefsummen und Geraet."""
+    """(engine, "") or (None, reason). Checks libraries, manifest/checksums, and device beforehand."""
     missing = [m for m in ("openvino", "tokenizers") if importlib.util.find_spec(m) is None]
     if missing:
         return None, "missing_module:" + ",".join(missing)

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Jevlike als lokaler Dienst fuer Skirnir: ein Checkpoint, ein HTTP-Endpunkt, kein Netz nach aussen.
+"""Jevlike as a local service for Skirnir: one checkpoint, one HTTP endpoint, no external network.
 
     python server.py --checkpoint models/skirnir-router-tiny.pt --model-name skirnir-router-tiny --host 127.0.0.1 --port 8081
 
-Protokoll (decision/jevlike.py im Router spricht genau das):
+Protocol (decision/jevlike.py in the router speaks exactly this):
     POST /decide  {"context": "...", "options": ["standard", "gross", ...]}
       -> {"probabilities": {"standard": 0.1, ...}, "model": "<name>", "encoder": "tiny|hf", "latency_ms": 1.9}
     GET  /health  -> {"ok": true, "model": ..., "encoder": ..., "device": ..., "offline": true, "decisions": <n>}
 
-Offline (Abschnitt 4): HF_HUB_OFFLINE=1 und TRANSFORMERS_OFFLINE=1 werden VOR dem Import von torch/transformers gesetzt, ausser
---allow-network. Ein HF-Encoder muss also vorher im Cache liegen (setup: `python prepare_encoder.py Qwen/Qwen2.5-0.5B`).
-Nur Standardbibliothek + torch + jevlike; kein aiohttp im Container noetig. Inferenz laeuft unter einem Lock (eine GPU/CPU-
-Warteschlange), der Server nimmt Verbindungen in Threads an.
+Offline (Section 4): HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 are set BEFORE importing torch/transformers, unless
+--allow-network. An HF encoder must therefore be cached beforehand (setup: `python prepare_encoder.py Qwen/Qwen2.5-0.5B`).
+Only standard library + torch + jevlike; no aiohttp needed in the container. Inference runs under a lock (one GPU/CPU-
+queue), the server accepts connections in threads.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def parse_args():
 
 ARGS = parse_args()
 _cache = os.path.join(os.path.dirname(os.path.abspath(ARGS.checkpoint)), "hf-cache")
-if os.path.isdir(_cache):   # HF-Encoder aus dem Cache neben dem Checkpoint (prepare_encoder.py), ohne dass HF_HOME gesetzt sein muss
+if os.path.isdir(_cache):   # HF encoder from the cache next to the checkpoint (prepare_encoder.py), without requiring HF_HOME to be set
     os.environ.setdefault("HF_HOME", _cache)
 if not ARGS.allow_network:
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -62,7 +62,7 @@ STATS = {"decisions": 0, "errors": 0, "started": time.strftime("%Y-%m-%dT%H:%M:%
 
 
 def decide(context: str, options: list[str]) -> dict:
-    """Eine Auswahl: Wahrscheinlichkeit je Option (Softmax ueber die Optionen, wie jevlike-predict)."""
+    """A selection: probability per option (Softmax over the options, like jevlike-predict)."""
     example = ChoiceExample(context, tuple(options), 0)
     with LOCK, torch.no_grad():
         batch = move(COLLATOR([example]), DEVICE)
@@ -73,7 +73,7 @@ def decide(context: str, options: list[str]) -> dict:
 class Handler(BaseHTTPRequestHandler):
     server_version = "skirnir-jevlike/0.1"
 
-    def log_message(self, fmt, *args):   # kein Zugriffslog auf stderr (Kontexte sind Benutzertexte)
+    def log_message(self, fmt, *args):   # no access log to stderr (contexts are user texts)
         return
 
     def _send(self, status: int, body: dict):

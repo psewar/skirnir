@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Embedding-Dienst (Stufe 2) auf router-host (LXC) ausrollen: Modellordner + Code nach /opt/skirnir-embed, Container bauen
-und starten, Gesundheit und Latenz messen. Nutzt die Helfer aus deploy/deploy.py (Ops-Ordner, Secret-Store, Container-Push).
+"""Deploy the embedding service (tier 2) to the router host (LXC): copy model folder + code to /opt/skirnir-embed, build and start the container, and measure health and latency. Uses helpers from deploy/deploy.py (Ops folder, Secret Store, Container Push).
 
     python deploy_ct.py [--no-build] [--measure-only]
-Der Dienst bindet nur 127.0.0.1:8082 im CT; der Router erreicht ihn ueber decision_engine.embed.endpoint.
+The service binds only to 127.0.0.1:8082 inside the CT; the router reaches it via decision_engine.embed.endpoint.
 """
 
 from __future__ import annotations

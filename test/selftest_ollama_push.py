@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Selbsttest (Router 0.4.1 / Agent 0.14.x): Ollama-Zustand vom Agenten (Rahmen OLLAMA, poll.apply_ollama_push).
+"""Self-test (Router 0.4.1 / Agent 0.14.x): Ollama state from the agent (OLLAMA framework, poll.apply_ollama_push).
 
-Nachgestellt ist der Vorfall vom 2026-09-30 nach dem Update auf Agent 0.14.0: Ollama war beim Start des Agenten noch nicht
-bereit (Meldung up=false, Knoten offline), danach antwortete es ohne geladenes Modell, und der Agent schickte `ps: null`. Der
-Router verwarf das und behielt die letzte gueltige Meldung "offline", bis sie verfiel. Laeuft ohne Router, Netz und Ollama."""
+Reproduces the incident from 2026-09-30 after updating to Agent 0.14.0: Ollama was not yet ready when the agent started
+(report up=false, node offline), then responded without a loaded model, and the agent sent `ps: null`. The
+Router discarded this and kept the last valid report "offline" until it expired. Runs without Router, network, and Ollama."""
 import os
 import sys
 import time
@@ -22,9 +22,9 @@ def check(name, cond, info=""):
 
 
 state.CFG = config.Config(os.path.join(HIER, "..", "router", "config.example.yaml"), use_overrides=False)
-state.CFG.prewarm_on_online = False   # kein Vorladen anstossen (kein Event-Loop, kein Knoten dahinter)
-poll.evaluate = lambda node, now: None   # der Zustandsautomat ist hier nicht Gegenstand
-state.CAPS["qwen3.8:27b"] = ["completion", "tools"]   # Faehigkeiten bekannt: kein Nachladen (braeuchte Event-Loop und Knoten)
+state.CFG.prewarm_on_online = False   # do not trigger prewarming (no event loop, no node behind it)
+poll.evaluate = lambda node, now: None   # the state machine is not the subject here
+state.CAPS["qwen3.8:27b"] = ["completion", "tools"]   # Capabilities known: no reloading (would require event loop and node)
 QWEN_TAG = {"name": "qwen3.8:27b", "digest": "aa", "size": 17 * 2**30}
 QWEN_PS = {"name": "qwen3.8:27b", "digest": "aa", "size_vram": 20 * 2**30, "context_length": 131072, "expires_at": "2026-09-30T22:00:00Z"}
 
@@ -55,7 +55,7 @@ poll.apply_ollama_push(n, {"up": True, "rev": 6, "tags": [QWEN_TAG, {"kein": "na
 check("Eintraege ohne Namen fallen weg, Meldung gilt", n.models == {"qwen3.8:27b"} and n.loaded == {} and n.ollama_push_active(now + 5))
 check("frisch bis 45 s, danach wieder Poll", n.ollama_push_active(now + 5 + 44) and not n.ollama_push_active(now + 5 + 46))
 
-# --- Tausch erst nach Freigabe (Router 0.5.0 / Agent 0.15.0): leeren, auf laufende Anfragen warten, dann freigeben
+# --- Swap only after release (Router 0.5.0 / Agent 0.15.0): drain, wait for running requests, then release
 import asyncio  # noqa: E402
 
 from skirnir_router import ollamaupdate, registry  # noqa: E402
@@ -108,7 +108,7 @@ state.REG.nodes["fp1"]["ollama_update"]["state"] = "done"
 check("nach dem Update wieder Vorwaermen erlaubt", not ollamaupdate.update_running(k))
 check("Agent ohne Freigabe-Schritt (< 0.15.0) erkannt", not ollamaupdate.swap_gate({"facts": {}}) and ollamaupdate.swap_gate({"facts": {"ollama_swap_gate": True}}))
 
-# Update erledigt (Agent meldet die Zielversion): einmal vorwaermen, weil das Vorwaermen beim Neustart waehrend des Updates entfiel
+# Update complete (agent reports target version): prewarm once, as prewarming during restart was skipped during the update
 GEWAERMT = []
 
 
@@ -128,7 +128,7 @@ async def fertig_melden(zustand):
 
 
 poll.prewarm = prewarm_attrappe
-state.CFG.prewarm_on_online = True   # oben fuer die Push-Pruefungen abgeschaltet
+state.CFG.prewarm_on_online = True   # disabled above for push checks
 r = asyncio.run(fertig_melden("free"))
 check("Update erledigt, Knoten frei: einmal vorwaermen", r == ("done", ["after Ollama update"]), str(r))
 check("Update erledigt, Knoten belegt (Spiel): nicht vorwaermen", asyncio.run(fertig_melden("busy")) == ("done", []))

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Fake-Ollama für Router-Tests. Ein Prozess = ein Knoten.
+"""Fake-Ollama for router tests. One process = one node.
 
-python fake_ollama.py <port> <name> <modellA,modellB,...> [--delay 0.2] [--loaded modell]
-Hält /api/tags, /api/ps, /api/show, /api/chat (stream+non-stream), /api/generate (auch keep_alive:0 = unload).
-Merkt sich geladene Modelle mit num_ctx; schreibt jeden Inferenz-Request nach stdout als JSON-Zeile.
+python fake_ollama.py <port> <name> <modelA,modelB,...> [--delay 0.2] [--loaded model]
+Serves /api/tags, /api/ps, /api/show, /api/chat (stream+non-stream), /api/generate (incl. keep_alive:0 = unload).
+Tracks loaded models with num_ctx; logs every inference request to stdout as a JSON line.
 """
 import asyncio
 import json
@@ -20,9 +20,9 @@ if "--loaded" in args: loaded[args[args.index("--loaded") + 1]] = 8192
 TLS = ("--tls" in args) and (args[args.index("--tls") + 1], args[args.index("--tls") + 2])   # cert key
 TOKEN = args[args.index("--require-token") + 1] if "--require-token" in args else None
 SIZES = {"qwen3.6:35b-a3b": 20.6, "qwen3-coder:30b": 17.3, "granite4.2:8b": 4.95, "gpt-oss:20b": 11.95, "local-assist:latest": 20.6}
-ALIAS = {"local-assist:latest": "qwen3.6:35b-a3b"}   # gleicher Digest wie das Original
-KV = {"granite4.2:8b": 0.158, "qwen3-coder:30b": 0.096}   # GiB pro 1k Token Kontext (fuer /api/ps size_vram)
-# Faehigkeiten wie /api/show sie meldet (Stufe 1: der Router filtert Stufen danach); coder ohne thinking, gpt-oss ohne tools
+ALIAS = {"local-assist:latest": "qwen3.6:35b-a3b"}   # same digest as the original
+KV = {"granite4.2:8b": 0.158, "qwen3-coder:30b": 0.096}   # GiB per 1k token context (for /api/ps size_vram)
+# Capabilities as reported by /api/show (tier 1: the router filters tiers after this); coder without thinking, gpt-oss without tools
 CAPS = {"qwen3.6:35b-a3b": ["completion", "tools", "thinking"], "local-assist:latest": ["completion", "tools", "thinking"],
         "qwen3-coder:30b": ["completion", "tools", "insert"], "granite4.2:8b": ["completion", "tools", "thinking"],
         "gpt-oss:20b": ["completion", "thinking"]}
@@ -32,8 +32,8 @@ HOOK_RE = re.compile(r"\[\[(\w+)(?:=([\w.]+))?\]\]")
 
 
 def test_hooks(b):
-    """Testhilfen fuer Wege, die keine eigenen Body-Felder durchreichen (Anthropic-Uebersetzung baut den Body neu):
-    [[name=wert]] in der letzten Nachricht wirkt wie das gleichnamige Body-Feld (sleep_s, fail_status, broken_tool_call,
+    """Test helpers for paths that do not pass through their own body fields (Anthropic translation rebuilds the body):
+    [[name=value]] in the last message acts like the same-named body field (sleep_s, fail_status, broken_tool_call,
     stream_tool, stream_error)."""
     msgs = b.get("messages") or []
     last = msgs[-1].get("content") if msgs and isinstance(msgs[-1], dict) else ""
@@ -78,19 +78,19 @@ async def infer(req):
         loaded.pop(m, None)
         print(json.dumps({"node": name, "unload": m}), flush=True)
         return web.json_response({"model": m, "done": True})
-    if b.get("sleep_s"):       # Testhilfe (Stufe 3): lange Anfrage, haelt den Platz auf dem Knoten belegt
+    if b.get("sleep_s"):       # Test helper (tier 3): long request, keeps the slot on the node busy
         await asyncio.sleep(float(b["sleep_s"]))
-    if b.get("fail_status"):   # Testhilfe (Stufe 3): Backend-Fehler vor dem ersten Byte, z. B. 500 (mit sleep_s: spaet)
+    if b.get("fail_status"):   # Test helper (tier 3): backend error before the first byte, e.g. 500 (with sleep_s: late)
         return web.json_response({"error": "fake failure"}, status=int(b["fail_status"]))
-    if b.get("slow_load"):   # Testhilfe: erst nach dieser Zeit in /api/ps - wie ein echter Kaltstart,
-        # bei dem nvidia-smi das VRAM schon sieht. Wie echtes Ollama wird das alte Modell VOR dem Laden verdraengt:
-        # /api/ps zeigt waehrenddessen keins von beiden (der Fall, der 2026-09-25 zu 503 'no node' fuehrte).
+    if b.get("slow_load"):   # Test helper: only appears in /api/ps after this time - like a real cold start,
+        # where nvidia-smi already sees the VRAM. Like real Ollama, the old model is evicted BEFORE loading:
+        # /api/ps shows neither during that time (the case that led to 503 'no node' on 2026-09-25).
         while loaded and m not in loaded and sum(SIZES.get(k, 5.0) for k in loaded) + SIZES.get(m, 5.0) > 31.8:
             loaded.pop(next(iter(loaded)))
         await asyncio.sleep(float(b["slow_load"]))
     ctx = (b.get("options") or {}).get("num_ctx") or 4096   # Ollama-Default im Fake
     loaded[m] = ctx
-    while len(loaded) > 1 and sum(SIZES.get(k, 5.0) for k in loaded) > 31.8:   # VRAM-Verdrängung wie echtes Ollama
+    while len(loaded) > 1 and sum(SIZES.get(k, 5.0) for k in loaded) > 31.8:   # VRAM eviction like real Ollama
         loaded.pop(next(iter(loaded)))
     print(json.dumps({"node": name, "path": req.path, "model": m, "num_ctx": ctx, "keep_alive": b.get("keep_alive"),
                       "stream": b.get("stream", True), "tools": bool(b.get("tools")), "format": b.get("format"),
@@ -100,8 +100,8 @@ async def infer(req):
         return web.json_response({"model": m, "response": f"Hallo von {name}", "done": True, "done_reason": "stop",
                                   "eval_count": 30, "eval_duration": int(0.5e9), "prompt_eval_count": 20, "prompt_eval_duration": int(0.02e9),
                                   "load_duration": int(5e6), "total_duration": int(0.6e9)})
-    # Modell schreibt den Aufruf im falschen Dialekt: Ollama parst ihn nicht und liefert ihn
-    # als Text aus. Genau so kam qwen3-coder:30b am 2026-09-15 oberhalb ~12k Token zurueck.
+    # Model writes the call in the wrong dialect: Ollama does not parse it and returns it
+    # as text. This is how qwen3-coder:30b came back above ~12k tokens on 2026-09-15.
     if b.get("broken_tool_call"):
         kaputt = "\n".join(["<function=get_time>", "<parameter=tz>", "CET",
                             "</parameter>", "</function>", "</tool_call>"])
@@ -113,7 +113,7 @@ async def infer(req):
                                       "done": True, "done_reason": "stop", **zaehler})
         resp = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
         await resp.prepare(req)
-        for tok in [kaputt[i:i + 12] for i in range(0, len(kaputt), 12)]:   # stueckweise, wie echt
+        for tok in [kaputt[i:i + 12] for i in range(0, len(kaputt), 12)]:   # chunked, like real
             await asyncio.sleep(delay)
             await resp.write((json.dumps({"model": m, "message": {"role": "assistant", "content": tok},
                                           "done": False}) + "\n").encode())
@@ -122,7 +122,7 @@ async def infer(req):
         await resp.write_eof()
         return resp
 
-    if b.get("stream_error") and b.get("stream", True):   # Abbruch mitten im Stream, Wortlaut wie Ollama 0.35 am 2026-10-02
+    if b.get("stream_error") and b.get("stream", True):   # Abort mid-stream, wording like Ollama 0.35 on 2026-10-02
         resp = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
         await resp.prepare(req)
         for tok in ["Ich ", "rufe "]:
@@ -131,7 +131,7 @@ async def infer(req):
         await resp.write((json.dumps({"error": "XML syntax error on line 3: unexpected EOF"}) + "\n").encode())
         await resp.write_eof()
         return resp
-    if b.get("tools") and b.get("stream_tool") and b.get("stream", True):   # Text, dann der Aufruf am Stueck (wie Ollama)
+    if b.get("tools") and b.get("stream_tool") and b.get("stream", True):   # Text, then the call in one chunk (like Ollama)
         resp = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
         await resp.prepare(req)
         for msg in ({"role": "assistant", "content": "Ich schaue nach."},
@@ -143,7 +143,7 @@ async def infer(req):
                                       "prompt_eval_duration": int(0.02e9), "load_duration": int(5e6)}) + "\n").encode())
         await resp.write_eof()
         return resp
-    if b.get("tools") and not b.get("stream", True):   # Tool-Aufruf wie Ollama nativ: arguments als Objekt
+    if b.get("tools") and not b.get("stream", True):   # Tool call like native Ollama: arguments as object
         await asyncio.sleep(delay)
         return web.json_response({"model": m, "message": {"role": "assistant", "content": "",
                                                           "tool_calls": [{"function": {"name": "get_time", "arguments": {"tz": "CET"}}}]},
@@ -173,7 +173,7 @@ async def embed(req):
         return web.json_response({"error": f"model '{m}' not found"}, status=404)
     inp = b.get("input")
     inputs = inp if isinstance(inp, list) else [inp]
-    if any("kein-embedding" in str(x) for x in inputs):   # wie Ollama 0.33 fuer Chat-Modelle ohne Embedding-Runner
+    if any("kein-embedding" in str(x) for x in inputs):   # like Ollama 0.33 for chat models without an embedding runner
         return web.json_response({"error": "This server does not support embeddings. Start it with `--embeddings`"}, status=501)
     loaded.setdefault(m, (b.get("options") or {}).get("num_ctx") or 4096)
     print(json.dumps({"node": name, "path": req.path, "model": m, "inputs": len(inputs), "keep_alive": b.get("keep_alive")}), flush=True)
