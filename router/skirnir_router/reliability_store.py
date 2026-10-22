@@ -86,6 +86,14 @@ class ReliabilityStore:
             return record(row) if row else OPERATION_NOT_FOUND
 
     @database
+    async def outbox_find(self, operation):
+        """The operation whoever owns it - only for curating a shared scope (memory_gateway.curation_target checks the
+        curator's grant and the bank before the row is used)."""
+        async with self.connection() as conn:
+            row = await conn.fetchrow("SELECT * FROM skirnir_sessions.memory_outbox WHERE operation_id=$1", operation)
+            return record(row) if row else OPERATION_NOT_FOUND
+
+    @database
     async def outbox_cancel(self, owner, operation):
         async with self.transaction() as (conn, tx):
             row = await conn.fetchrow("SELECT * FROM skirnir_sessions.memory_outbox WHERE owner=$1 AND operation_id=$2 FOR UPDATE", owner, operation)

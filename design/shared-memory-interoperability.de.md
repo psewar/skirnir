@@ -144,6 +144,21 @@ Unter `/v1/skirnir/memory/operations/{uuid}`:
 | `DELETE` | Nur nie versendeten Auftrag abbrechen. Unklarer/in-flight Versand liefert 409. |
 | `POST .../delete` mit `{}` | Separater `delete`-Grant, persistente gezielte Quellenlöschung. 202 wartend, 200 gelöscht. |
 
+**Kuratoren eines gemeinsamen Bereichs.** Wer auf einem Projekt mit gemeinsamem `scope`
+sowohl `read` als auch `delete` hat, kuratiert diesen Bereich:
+- `POST /v1/skirnir/memory/list` mit `{project, type?, query?, limit?, offset?}` liefert eine
+  Seite (1-50, Standard 20) aller Gedächtniseinheiten mit `document_id` (die Operation, aus der
+  sie stammen), `source_memory_ids` und Herkunft. Was der Inhaltsfilter ablehnt, steht nur mit
+  ID unter `withheld`.
+- Status abfragen und Löschen gehen für jede Operation in der Bank dieses Bereichs, auch für
+  fremde (nur REST; nie abbrechen oder neu senden, nie eine private Bank). Für alle anderen
+  bleibt eine Operation besitzergebunden, eine fremde liefert 404.
+- Jede Kurator-Löschung wird mit Kurator, Besitzer und Bereich protokolliert und als
+  `outcome="curated"` gezählt. Der Lösch-Auftrag läuft danach unter dem Recht des Kurators;
+  wird es entzogen, stoppen offene Löschungen.
+- „Ändern“ heisst: korrigierten Fakt schreiben, alte Operation löschen. Hindsights
+  direktes Bearbeiten ist nicht freigegeben.
+
 Zustände: `pending`, `processing`, `accepted`, `completed`, `dead`, `revoked`,
 `cancelled`, `delete_pending`, `deleted`. `accepted` bestätigt den Upstream-Eingang,
 der Auftrag wird noch geprüft; `completed` heisst, Hindsight meldet die Extraktion fertig.

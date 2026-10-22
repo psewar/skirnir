@@ -148,6 +148,8 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
         server.router.add_post("/v1/default/banks/{bank}/memories", self.fake_retain)
         server.router.add_get("/v1/default/banks/{bank}/operations/{operation}", self.fake_operation)
         server.router.add_delete("/v1/default/banks/{bank}/documents/{document}", self.fake_delete)
+        server.router.add_get("/v1/default/banks/{bank}/memories/list", self.fake_list)
+        self.list_units, self.list_queries = [], []   # memories/list: units served, and (bank, query string) per call
         self.operation_state = "completed"
         self.deleted_documents = []
         self.hindsight = TestServer(server)
@@ -217,6 +219,12 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
     async def fake_delete(self, request):
         self.deleted_documents.append((request.match_info["bank"], request.match_info["document"]))
         return web.json_response({"memory_units_deleted": 1})
+
+    async def fake_list(self, request):
+        self.list_queries.append((request.match_info["bank"], dict(request.query)))
+        start, limit = int(request.query.get("offset", 0)), int(request.query.get("limit", 100))
+        return web.json_response({"items": self.list_units[start:start + limit], "total": len(self.list_units),
+                                  "limit": limit, "offset": start})
 
     async def fake_inference(self, request):
         data = await request.json()

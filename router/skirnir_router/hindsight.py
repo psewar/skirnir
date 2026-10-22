@@ -8,6 +8,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 from uuid import UUID
 
 from aiohttp import ClientError, ClientSession, ClientTimeout, DummyCookieJar, TCPConnector
@@ -174,3 +175,11 @@ class HindsightClient:
 
     async def delete_document(self, bank, document_id, *, authorize=None):
         return await self.control(bank, "/documents/" + str(UUID(document_id)), "DELETE", authorize=authorize)
+
+    async def list_memories(self, bank, *, kind=None, query=None, limit=20, offset=0, authorize=None):
+        """One page of memory units (GET memories/list) for a curator; a bank that does not exist yet is an empty page."""
+        params = {"limit": limit, "offset": offset, **({"type": kind} if kind else {}), **({"q": query} if query else {})}
+        page = await self.control(bank, "/memories/list?" + urlencode(params), authorize=authorize)
+        if failed(page):
+            return page
+        return {"items": [], "total": 0} if page.get("status") == "not_found" else page

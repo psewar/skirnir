@@ -362,7 +362,12 @@ class DurableHttpTests(MemoryHarness):
         operation = (await (await self.retain()).json())["operation_id"]
         await memory_outbox.step(self.service)
         path = memory.PREFIX + "/operations/" + operation + "/delete"
+        reader = state.CFG.client_auth["clients"]["client-b"]["memory"]["projects"][SHARED]
+        reader["delete"] = False   # a reader of the shared scope, not its curator: foreign operations stay invisible
         self.assertEqual((await self.request(path, token="client-b")).status, 404)
+        # The real store finds the operation for a curator check, whoever owns it.
+        self.assertEqual((await self.real.outbox_find(UUID(operation)))["owner"], "client-a")
+        self.assertEqual((await self.real.outbox_find(uuid4())).status, 404)
         spec = state.CFG.client_auth["clients"]["client-a"]["memory"]["projects"][SHARED]
         spec["delete"] = False
         self.assertEqual((await self.request(path)).status, 403)

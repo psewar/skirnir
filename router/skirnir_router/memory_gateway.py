@@ -16,6 +16,7 @@ from uuid import UUID
 from aiohttp import web
 
 from . import auth, memory, session_api
+from .common import log
 from .memory_outbox import upstream_id
 from .outcome import Problem, bad_gateway, denied, failed, invalid, unavailable
 from .reliability_store import OPERATION_NOT_FOUND
@@ -116,6 +117,17 @@ async def dispatch(request):
     return await gateway_retain(service, scope, principal, alias, data)
 
 
+async def curation_target(service, principal, operation):
+    """(row, curator scope) for another client's operation in a shared scope this principal curates (read and delete
+    granted), else OPERATION_NOT_FOUND - also for a private bank, so the answer does not reveal foreign operations."""
+    row = await service.outbox.outbox_find(operation)
+    if failed(row):
+        return row
+    bank = row["scope"].get("__bank")
+    scope = next((s for s in memory.curator_scopes(principal) if service.bank(s) == bank), None)
+    return OPERATION_NOT_FOUND if scope is None else (row, scope)
+
+
 async def operation_control(request, service, principal, gateway):
     if service.outbox is None:
         return session_api.fail(404, "durable operation tracking is disabled")
@@ -123,9 +135,17 @@ async def operation_control(request, service, principal, gateway):
     if operation is None:
         return invalid("invalid operation id")
     row = await service.outbox.outbox_get(principal, operation)
+    curator = None
+    # Another client's operation: only a curator of the same shared scope may see its status or delete it (REST only;
+    # never cancel or retry, never a private bank).
+    if failed(row) and row.status == 404 and not gateway and request.method in ("GET", "POST") and not request.path.endswith("/retry"):
+        target = await curation_target(service, principal, operation)
+        if failed(target):
+            return target
+        row, curator = target
     if failed(row):
         return row
-    scope = memory.scope_for_principal(principal, row["project"], explicit=True)
+    scope = curator or memory.scope_for_principal(principal, row["project"], explicit=True)
     if failed(scope):
         return scope
     if service.bank(scope) != row["scope"].get("__bank"):
@@ -164,11 +184,15 @@ async def operation_control(request, service, principal, gateway):
     if request.method == "POST":
         if not scope.delete:
             return SCOPE_DENIED
-        deleted = await service.outbox.outbox_delete(principal, operation, {**asdict(scope), "__bank": service.bank(scope)})
+        deleted = await service.outbox.outbox_delete(row["owner"], operation, {**asdict(scope), "__bank": service.bank(scope)})
         if failed(deleted):
             return deleted
+        if curator is not None:   # visible afterwards: who removed whose knowledge from the shared scope
+            log.info("memory curation: %s deletes operation %s of %s in shared scope %s", principal, operation, row["owner"],
+                     scope.shared_scope)
+            memory.count("delete", "curated")
         service.wakeup.set()
-        current = await service.outbox.outbox_get(principal, operation)
+        current = await service.outbox.outbox_get(row["owner"], operation)
         if failed(current):
             return current
         return web.json_response({"operation_id": str(operation), "state": current["state"], "durable": True},
