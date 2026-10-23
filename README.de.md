@@ -674,9 +674,15 @@ Mixture-of-Experts-Modell aus einer GPU plus Arbeitsspeicher bedient. Die Agent-
 (Standard `ollama`) richtet den Tunnel auf diesen Server: Der Agent meldet dessen Modelle aus `/v1/models` und sagt es in
 seinen Fakten. Der Router schickt Chat- und Generate-Anfragen dann als `/v1/chat/completions` durch den Tunnel, übersetzt
 wie eine Cloud-Anfrage, sodass die Antwort jedes Client-Format erreicht, und lässt weg, was nur Ollama hat: kein
-`/api/show` (Fähigkeiten kommen aus dem Katalog), kein Vorladen, kein Entladen bei busy, kein Ollama-Update. Den Server
-als Agent-Kind (`children:`) betreiben und das Ollama-Kind abschalten, denn beide brauchen die GPU. Sein Grafikspeicher
-zählt als eigener des Agents, die Busy-Erkennung behandelt ihn also wie ein geladenes Modell; ein busy Knoten wird
-übersprungen, nicht entladen. Das Modell kommt mit `weights_gib` und seinen `capabilities` in den Katalog und wie jedes
-lokale Modell in eine Rollen-Stufe. Auf einem solchen Knoten noch nicht unterstützt: Embeddings und verwaltete
-Session-Züge, die bleiben auf Ollama-Knoten. Router 0.10.0, Agent 0.21.0.
+`/api/show` (Fähigkeiten kommen aus dem Katalog), kein Ollama-Update. Den Server als Agent-Kind (`children:`) betreiben
+und das Ollama-Kind abschalten, denn beide brauchen die GPU. Sein Grafikspeicher zählt als eigener des Agents, die
+Busy-Erkennung behandelt ihn also wie ein geladenes Modell. Das Modell kommt mit `weights_gib` und seinen `capabilities` in
+den Katalog und wie jedes lokale Modell in eine Rollen-Stufe. Embeddings gehen an `/v1/embeddings` (ein Server ohne diesen
+Endpunkt wird dafür übersprungen), und verwaltete Session-Züge laufen wie auf einem Ollama-Knoten. Router 0.10.0, Agent 0.21.0.
+
+**GPU freigeben fürs Spielen** (Router 0.11.0, Agent 0.22.0): Ein solcher Server kann sein Modell nicht entladen. Nennt
+`tunnel.upstream_child` das Kind, das ihn betreibt, hält der Router den Server an, sobald der Knoten busy wird, und startet
+ihn wieder, wenn der Knoten frei ist (dort, wo Ollama-Knoten vorgeladen werden) oder eine Anfrage das Modell braucht; diese
+Anfrage wartet, bis das Modell geladen ist, höchstens drei Minuten. Der Agent meldet den Server als *angehalten* oder
+*startend* statt als nicht erreichbar, und sein Home-Assistant-Gerät nimmt geladene Modelle und Grafikspeicher aus dieser
+Meldung. Ohne `upstream_child` behält ein busy Knoten sein Modell und wird nur übersprungen.
