@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "router"))
 from aiohttp import ClientSession, web  # noqa: E402
 from aiohttp.test_utils import TestServer  # noqa: E402
 
-from skirnir_router import cloud, config, nodes, openai_node, poll, registry, state, tunnel  # noqa: E402
+from skirnir_router import proxy  # noqa: E402,F401  (load order as in the router: managed only via proxy, else a cycle)
+from skirnir_router import cloud, config, managed, nodes, openai_node, poll, registry, state, tunnel  # noqa: E402
 
 FAILS = []
 
@@ -66,6 +67,15 @@ async def chat(request):
     await resp.write(b"data: [DONE]\n\n")
     await resp.write_eof()
     return resp
+
+
+async def embeddings(request):
+    body = await request.json()
+    SEEN.append((request.path, body))
+    if body.get("model") == "no-embed":
+        return web.json_response({"error": {"message": "Not Found"}}, status=404)
+    return web.json_response({"data": [{"index": 1, "embedding": [0.3]}, {"index": 0, "embedding": [0.1, 0.2]}],
+                              "usage": {"prompt_tokens": 4}})
 
 
 async def ollama_only(request):
@@ -122,6 +132,7 @@ async def main():
     app = web.Application()
     app.router.add_get("/v1/models", models)
     app.router.add_post("/v1/chat/completions", chat)
+    app.router.add_post("/v1/embeddings", embeddings)
     for p in ("/api/tags", "/api/ps", "/api/show", "/api/version"):
         app.router.add_route("*", p, ollama_only)
     server = TestServer(app)
@@ -182,7 +193,26 @@ async def main():
         except cloud.CloudError as e:  # exception-ok: the adapter's error channel is the subject of this check
             status, unavailable = e.status, e.model_unavailable
         check("server 404 model_not_found -> CloudError 404, model unavailable (proxy: next candidate)", status == 404 and unavailable)
-        check("OpenAI paths: chat and generate only (embeddings stay on Ollama nodes)", openai_node.PATHS == ("/api/chat", "/api/generate"))
+        check("OpenAI paths: chat, generate and embeddings", set(openai_node.PATHS) == {"/api/chat", "/api/generate", "/api/embed", "/api/embeddings"})
+
+        info, j = await openai_node.run(n, "/api/embed", {"model": MODEL, "input": ["a", "b"]}, MODEL, False)
+        check("embed: /v1/embeddings, vectors back in input order, prompt tokens counted",
+              SEEN[-1][0] == "/v1/embeddings" and j.get("embeddings") == [[0.1, 0.2], [0.3]] and info["p_tok"] == 4, json.dumps(j)[:200])
+        status = unavailable = None
+        try:
+            await openai_node.run(n, "/api/embed", {"model": "no-embed", "input": "a"}, "no-embed", False)
+        except cloud.CloudError as e:  # exception-ok: the adapter's error channel is the subject of this check
+            status, unavailable = e.status, e.model_unavailable
+        check("server without /v1/embeddings: 404 without model code (proxy: next candidate, chat model stays)",
+              status == 404 and not unavailable)
+
+        # Managed turn: the translated chunks must be persistable exactly like native Ollama chunks
+        cap = managed.AssistantCapture(1 << 20)
+        _, chunks = await openai_node.run(n, "/api/chat", {**body, "stream": True}, MODEL, True)
+        problems = [cap.observe(c) async for c in chunks]
+        check("managed capture: every translated chunk accepted, message with text, thinking and a complete tool call",
+              all(p is None for p in problems) and cap.done and cap.message["content"] == "Hello" and cap.message.get("thinking") == "Hmm"
+              and cap.message["tool_calls"][0]["function"]["arguments"] == {"zone": "UTC"}, str(cap.message)[:300])
     finally:
         await state.SESSION.close()
         state.SESSION = previous

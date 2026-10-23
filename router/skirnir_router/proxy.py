@@ -758,11 +758,10 @@ class _Relay:
 
     async def _via_openai_node(self):
         """Request to a node whose agent fronts an OpenAI-compatible server: translated like a cloud request, sent
-        through the tunnel. None = next candidate (node problem before the first byte, or a request this node does not
-        serve: managed turns and embeddings stay on Ollama nodes)."""
-        if self.managed_turn is not None or self.path not in openai_node.PATHS:
-            log.info("%s: %s %s not served by an OpenAI-compatible node -> next candidate", self.node.name, self.path,
-                     "managed turn" if self.managed_turn is not None else "request")
+        through the tunnel. None = next candidate (node problem before the first byte, a request this node does not
+        serve, or a server that lacks the embeddings endpoint)."""
+        if self.path not in openai_node.PATHS:
+            log.info("%s: %s not served by an OpenAI-compatible node -> next candidate", self.node.name, self.path)
             return None
         if not self.warm and not await openai_node.ensure_loaded(self.node, self.model):
             # server stopped for the GPU and could not be started (or not in time): not a fault of the node's server
@@ -772,6 +771,8 @@ class _Relay:
             cinfo, result = await openai_node.run(self.node, self.path, self.out, self.model, self.stream)
         except cloud.CloudError as e:  # exception-ok: the server's HTTP error, same channel as the cloud adapter (CloudError)
             log.warning("%s: %s -> HTTP %s: %s", self.node.name, self.model, e.status, e)
+            if e.status == 404 and self.path in cloud.EMBED_PATHS and not e.model_unavailable:
+                return None   # the server has no /v1/embeddings: next candidate, the node keeps its chat model
             if e.status == 404 or e.model_unavailable:
                 self.node.models.discard(self.model)   # server does not have the model (anymore); not a Breaker case
                 return None
@@ -785,24 +786,38 @@ class _Relay:
         if not self.stream:
             if self.memory_capture is not None:
                 self.memory_capture.observe(result)
+            if self.managed_capture is not None:   # managed turn: persist before answering, as on an Ollama node
+                problem = self.managed_capture.observe(result)
+                if not failed(problem):
+                    problem = await self.managed_turn.commit(self.managed_capture)
+                if failed(problem):
+                    return await self._answer_problem(problem)
             self.ptoks, self.ctoks = cinfo["p_tok"], cinfo["c_tok"]
             self.outcome = "ok"
             return web.Response(status=200, body=self._finalize_json(result, force_model=True), content_type="application/json", headers=self.headers)
         return await self._cloud_stream(result, cinfo)
 
     async def _cloud_stream(self, chunks, cinfo):
-        """cinfo fills cloud.run only during the stream (usage comes at the end) - read tokens only after write_eof."""
+        """cinfo fills cloud.run only during the stream (usage comes at the end) - read tokens only after write_eof.
+        A managed turn (OpenAI-compatible nodes; cloud tiers never get one) captures every chunk and holds the final one
+        until the database commit, as _complete_stream does for Ollama."""
         resp = None
+        terminal = None
         try:
             async for j in chunks:
                 if self.memory_capture is not None:
                     self.memory_capture.observe(j)
+                if self.managed_capture is not None and failed(problem := self.managed_capture.observe(j)):
+                    return await self._answer_problem(problem)
                 if resp is None:
                     resp = await self._open_stream()
                 j["model"] = self.exposed
                 if j.get("done") and self.req.explicit:
                     j["routing"] = self.info
                 line = self.shape.chunk(j) if self.shape else (json.dumps(j) + "\n").encode()
+                if self.managed_capture is not None and self.managed_capture.done:
+                    terminal = line   # hold success until the commit
+                    continue
                 if line:
                     await resp.write(line)
         except cloud.CloudError as e:  # exception-ok: provider HTTP error raised by the stream generator (its only channel)
@@ -815,6 +830,12 @@ class _Relay:
             raise web.HTTPBadGateway(text=json.dumps({"error": f"{self.node.name} aborted: {e}"})) from e
         if resp is None:   # leerer Stream: trotzdem sauber abschliessen
             resp = await self._open_stream()
+        if self.managed_capture is not None:
+            problem = await self.managed_turn.commit(self.managed_capture)
+            if failed(problem):
+                return await self._answer_problem(problem)
+            if terminal:
+                await resp.write(terminal)
         if self.shape:
             await resp.write(self.shape.tail())
         await resp.write_eof()

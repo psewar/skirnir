@@ -15,8 +15,10 @@ What the router does differently for such a node:
   (where Ollama nodes get their prewarm) or a request needs the model, it orders a start ("release"). The agent reports
   the server's state as a fact (OLLAMA frame upstream_state: held / starting). Without the fact a busy node keeps its
   model and is merely skipped.
-- Not in this version: embeddings and managed session turns. Managed turns persist native Ollama chunks and stay on
-  Ollama nodes, like they stay off cloud tiers (managed.ManagedTurn.target).
+- Embeddings go to /v1/embeddings (cloud.openai_embed). A server without that endpoint answers 404; the request then
+  takes the next candidate and the node keeps its chat model (Strata 0.1.46 has no embeddings).
+- Managed session turns are served too (router 0.11.0): the translated chunks are native Ollama chunks, so the proxy
+  captures and commits them as on an Ollama node. Cloud tiers stay excluded from managed turns (data class, not technique).
 """
 
 import asyncio
@@ -28,8 +30,9 @@ from . import cloud, nodes, state
 from .common import log
 
 API = "openai"
-PATHS = ("/api/chat", "/api/generate")   # what an OpenAI-compatible node serves; embeddings stay on Ollama nodes
+PATHS = ("/api/chat", "/api/generate", *cloud.EMBED_PATHS)   # what an OpenAI-compatible node serves
 CHAT_PATH = "/v1/chat/completions"
+EMBED_PATH = "/v1/embeddings"
 MODELS_PATH = "/v1/models"
 HELD, STARTING = "held", "starting"      # agent report OLLAMA.upstream_state
 START_WAIT_S = 180   # how long a request waits for a released server; a large model loads in ~25-60 s (Strata, 2026-10-23)
@@ -98,7 +101,10 @@ async def run(node, path, body, model, stream):
     """One request to the node's server. Returns (info, chunks) like cloud.run; HTTP errors raise cloud.CloudError.
     The model name goes out as it is: the server knows it under the name it reported in /v1/models."""
     timeout = ClientTimeout(total=state.CFG.request_timeout_s, sock_read=state.CFG.request_timeout_s)
+    target = EMBED_PATH if path in cloud.EMBED_PATHS else CHAT_PATH
 
     def post(req):
-        return nodes.nreq(node, "post", CHAT_PATH, json=req, timeout=timeout)
+        return nodes.nreq(node, "post", target, json=req, timeout=timeout)
+    if target == EMBED_PATH:
+        return await cloud.openai_embed(post, body, model, model)
     return await cloud.openai_exchange(post, path, body, model, model, stream, local_server=True)
