@@ -154,6 +154,9 @@ func (a *App) startMQTT(cfg *MQTTCfg) {
 	}
 	ctx, cancel := context.WithCancel(a.rootCtx)
 	a.mq = newMQTT(*cfg, a.cfg.SecretStore, a.cfg.Node, a.log, a.gpu, a.hb, a.sup, a.guard)
+	if a.cfg.Tunnel.UpstreamAPI == upstreamOpenAI { // no /api/ps there: the Ollama entities come from the watcher
+		a.mq.upstream, a.mq.upstreamChild = a.ollamaW, a.cfg.Tunnel.UpstreamChild
+	}
 	a.mqCancel, a.mqCfg = cancel, cfg
 	go a.mq.Run(ctx)
 }
