@@ -512,8 +512,8 @@ class Node(Breaker):
 
     def releases_server_for(self, model):
         """0.16.2: a request for the held server's model while the standby Ollama stands in. The release stops the
-        standby with everything it has loaded before the server starts, so the request has the whole card
-        (standby_budget_gib), not what is left next to the standby's models."""
+        standby with everything it has loaded before the server starts, and the server sizes itself to the card, so
+        the scheduler checks no VRAM budget for it (0.16.3), only that the node is not busy or short of memory."""
         return self.upstream_serving == openai_node_serving_ollama and self.serves_openai(model)
 
     def offers(self, model):

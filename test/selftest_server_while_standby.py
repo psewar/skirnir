@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Self-test (router 0.16.2): the held server's model gets the whole card while the standby Ollama serves.
+"""Self-test (router 0.16.2/0.16.3): a request may release the held server while the standby Ollama serves.
 
 Trigger 2026-10-24: outside the night window the standby served with a 27b model loaded (25.7 GiB), and a request for
-the held server's model (28 GiB) was refused with "vram full": the router compared the need with what was left next to
-the standby's models. The release stops the standby with all its models before the server starts, so the budget is the
-card as for a switch. Checks the candidate list and the reason codes, that a game still blocks the release, and that a
-plain Ollama node keeps its old budget. Runs without network, agent or server."""
+the held server's model was refused, first with "vram full" (need compared with what was left next to the standby's
+models), then, with the whole card as budget, with "GPU busy" (catalog planning figure 28.8 > 28.5 GiB). The release
+stops the standby with all its models and the server sizes itself to the card as before the hold, so no budget is
+checked (0.16.3), only a game or memory pressure. Also checks that a plain Ollama node keeps its old budget. Runs
+without network, agent or server."""
 import asyncio
 import os
 import sys
@@ -18,7 +19,7 @@ from skirnir_router import config, nodes, poll, scheduler, state  # noqa: E402
 FAILS = []
 BIG = "big-moe"
 DENSE = "dense:27b"
-NEED = {BIG: 28.0, DENSE: 25.7}
+NEED = {BIG: 28.8, DENSE: 25.7}   # 28.8 = the router's planning figure for the server on 2026-10-24
 
 
 def check(name, cond, info=""):
@@ -42,7 +43,8 @@ TIER = {"model": BIG, "num_ctx": 131072, "busy_ok": False}
 
 
 def standby_node():
-    """A 31.8 GiB card: the standby serves with DENSE loaded, speech-to-text child 2.2 GiB, desktop 0.7 GiB."""
+    """The night of 2026-10-24: 31.8 GiB card, standby serves with DENSE loaded, speech-to-text child 2.2 GiB, desktop
+    baseline 2.0 GiB, another program 0.3 GiB."""
     n = nodes.Node("strata-box", {"vram_total_gib": 31.8, "upstream_api": "openai", "upstream_releasable": True,
                                   "upstream_fallback": True})
     n.tunnel = FakeTunnel()
@@ -52,8 +54,8 @@ def standby_node():
            "ps": [{"name": DENSE, "digest": "sha256:aa", "size_vram": int(25.7 * (1 << 30))}]}
     poll.apply_ollama_push(n, msg, time.time())
     n.state, n.hb_ts = "free", time.time()
-    n.children_vram_gib, n.foreign_baseline_gib = 2.2, 0.7
-    n.vram_used_gib = 25.7 + 2.2 + 0.7
+    n.children_vram_gib, n.foreign_baseline_gib = 2.2, 2.0
+    n.vram_used_gib = 25.7 + 2.2 + 2.0 + 0.3
     n.vram_free_gib = 31.8 - n.vram_used_gib
     state.NODES = {n.name: n}
     return n
@@ -61,26 +63,27 @@ def standby_node():
 
 now = time.time()
 n = standby_node()
-# The instrument first: the setup must reproduce the case (need above the left-over budget, below the whole card)
+# The instrument first: the setup must reproduce both refusals (need above the left-over budget and above the card)
 check("setup: standby serves, DENSE loaded, BIG is the held server's model",
       n.upstream_serving == "ollama" and n.is_loaded(DENSE) and n.serves_openai(BIG) and not n.serves_openai(DENSE))
-check("setup: BIG does not fit next to DENSE but fits on the card without the standby",
-      n.budget_gib(now, BIG) < NEED[BIG] <= n.standby_budget_gib(),
+check("setup: the planning figure exceeds the left-over budget and the whole card (as on 2026-10-24)",
+      n.budget_gib(now, BIG) < n.standby_budget_gib() < NEED[BIG] and n.foreign_vram_gib() > 0,
       f"left over {n.budget_gib(now, BIG):.2f}, card {n.standby_budget_gib():.2f}, need {NEED[BIG]}")
 
 check("releases_server_for: the server's model while the standby serves", n.releases_server_for(BIG))
 check("releases_server_for: not for the standby's own model", not n.releases_server_for(DENSE))
 _, _, cands = scheduler.candidates_for(TIER, None, now)
-check("the node is a candidate for the server's model (no vram_full)", cands == [n], str([c.name for c in cands]))
+check("the node is a candidate for the server's model (no vram_full, no gpu_busy)", cands == [n], str([c.name for c in cands]))
 code, info = scheduler._node_block(n, TIER, 131072, now)
 check("reason code: none (it could serve)", code is None, f"{code} {info}")
 
-# A foreign program (game window, other app) still counts: the server does not get memory it cannot have
+# Memory pressure still blocks the release (the server would fill RAM further)
 n = standby_node()
-n.vram_used_gib += 4.0
-n.vram_free_gib -= 4.0
+n.mem_pressure = True
 _, _, cands = scheduler.candidates_for(TIER, None, time.time())
-check("4 GiB foreign memory: no candidate", cands == [], f"card {n.standby_budget_gib():.2f}")
+check("memory pressure: no candidate", cands == [])
+code, _ = scheduler._node_block(n, TIER, 131072, time.time())
+check("memory pressure: reason MEMORY_PRESSURE", code == scheduler.MEMORY_PRESSURE, str(code))
 
 # A game still blocks the release (unchanged)
 n = standby_node()
