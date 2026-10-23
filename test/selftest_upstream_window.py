@@ -113,6 +113,14 @@ n.state = "busy"
 check("inside, node busy (game) -> stays held", run_check(n) == [])
 n = strata_node()
 check("inside, server already runs -> nothing", run_check(n) == [])
+# 0.16.3: after a router restart the router no longer remembers its hold; the agent's report decides
+n = strata_node(serving_standby=True)
+n.upstream_order, n.upstream_state = "", openai_node.HELD
+check("inside, after a router restart (no remembered order, agent reports held) -> release",
+      run_check(n) == [("release", "night window")])
+n = strata_node()
+n.upstream_order = "hold"   # stale memory: the server answers again (released by a request)
+check("inside, remembered hold but the server answers -> nothing", run_check(n) == [])
 
 # 3) One order at a time
 window(inside=False)

@@ -486,7 +486,10 @@ def upstream_window_check(node, now):
     idle_s = w["idle_hold_s"]
     if inside:
         standby_used = [t for m, t in node.last_used.items() if not node.serves_openai(m)]
-        if node.state == "free" and node.upstream_order == "hold" and not (standby_used and now - max(standby_used) < idle_s):
+        # 0.16.3: "held" is the agent's report, not the router's memory of its last order - that is empty after a router
+        # restart, and the window then never released the server (2026-10-24, deploy at 00:22 before a 01:00 window)
+        held = node.upstream_state == openai_node.HELD or node.upstream_serving == openai_node.SERVING_OLLAMA
+        if node.state == "free" and held and not (standby_used and now - max(standby_used) < idle_s):
             node.window_order_at = now
             state.spawn(openai_node.order(node, "release", "night window"))
         return
