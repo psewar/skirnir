@@ -147,6 +147,7 @@ class Node(Breaker):
         self.upstream_serving = ""    # agent report: "ollama" = the standby Ollama serves in place of the held server
         self.upstream_state = ""      # agent report: "held" (stopped for the GPU), "starting", "" = answering
         self.upstream_order = ""      # last order sent: "hold" / "release" (openai_node.order)
+        self.window_order_at = 0.0    # 0.16.0: last order of poll.upstream_window_check (at most one per WINDOW_ORDER_GAP_S)
         # Router 0.15.0 / agent >= 0.25.0: the standby Ollama's models from its model store (heartbeat standby_models),
         # also while it is stopped - a request for one of them may hold the server (standby_switch)
         self.standby_models = set()

@@ -271,6 +271,12 @@ modes:
     canary: ""                # Knotenname, der neue Versionen zuerst bekommt
     canary_clean_h: 24        # so lange muss er sie sauber fahren, bevor die anderen folgen
     # public_key: <base64>    # optional: Router prueft das Manifest vor dem Versand selbst
+  upstream_window:            # Router 0.16.0: OpenAI-kompatibler Server (Strata) nur im Fenster oder auf Anfrage
+    enabled: false            #   an = ausserhalb haelt der Router den ungenutzten Server an, der Standby-Ollama bedient
+    window_start: "01:00"     #   (Agent mit tunnel.upstream_fallback); eine Anfrage an das Server-Modell startet ihn trotzdem
+    window_end: "07:00"
+    timezone: ""              #   z. B. Europe/Zurich; leer = Ortszeit des Routers
+    idle_hold_s: 900          #   ausserhalb so lange ungenutzt, dann wieder anhalten
   ollama_update:              # Ollama-Update ueber den Router (Agent >= 0.12.0, Ollama als Kind des Agenten)
     enabled: true             # Versionspruefung + Rollout fuer Knoten mit Policy ollama_auto_update
     window_start: "02:00"     # Nachtfenster (Ortszeit des Routers); leer = jederzeit

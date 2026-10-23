@@ -35,6 +35,7 @@ jobs:
       - run: python test/selftest_game_prewarm.py
       - run: python test/selftest_power.py
       - run: python test/selftest_standby_switch.py
+      - run: python test/selftest_upstream_window.py
       - run: python test/selftest_cloud_errors.py
       - run: python test/selftest_config_load.py
       - run: python test/selftest_control_flow_admin.py

@@ -298,13 +298,16 @@ async def prewarm(node, delay, reason, since=None):
         # would further fill memory; only after the game ends and memory pressure subsides (no load-evict ping-pong)
         log.info("prewarm on %s skipped (%s): %s", node.name, reason, "memory pressure" if node.mem_pressure else "game running")
         return
-    if node.openai_upstream:
+    if node.openai_upstream and openai_node.server_allowed(node, time.time()):
         # The server loads its own model when it starts; "prewarming" it = starting it again if it was stopped for the GPU.
         # Also while the standby Ollama stands in: the release stops the standby; nothing is to be loaded into it.
         if node.upstream_state == openai_node.HELD or (
                 node.upstream_order == "hold" and not any(node.serves_openai(m) for m in node.loaded)):
             await openai_node.order(node, "release", f"prewarm {reason}")
         return
+    if node.openai_upstream and node.upstream_serving != openai_node.SERVING_OLLAMA:
+        return   # 0.16.0: outside the window the server stays held; prewarm waits until the standby serves
+    # From here an Ollama node - including the standby Ollama outside the window (its server's models are skipped below)
     now = time.time()
     # Budget = card minus reserve minus what is truly foreign (desktop baseline + foreign VRAM); Ollama's own
     # models are evictable and don't count. Previously this was the full card - on gpu-laptop (16 GiB) gemma4 was loaded next to
@@ -314,7 +317,7 @@ async def prewarm(node, delay, reason, since=None):
     for role in state.CFG.roles.values():
         t = role["tiers"][0]
         m = t["model"]
-        if m not in node.models or any(node.same_blob(m, p[0]) for p in planned):
+        if m not in node.models or node.serves_openai(m) or any(node.same_blob(m, p[0]) for p in planned):
             continue
         need = state.CFG.need_gib(m, t["num_ctx"], node)
         if node.is_loaded(m):
@@ -444,6 +447,8 @@ def residency_check(node, now):
     for r in cfg.roles.values():
         t = r["tiers"][0]
         if t["model"] in node.models and not any(node.same_blob(t["model"], m) for m, _ in rank1):
+            if node.serves_openai(t["model"]) and not openai_node.server_allowed(node, now):
+                continue   # 0.16.0: outside the window the server's model is no rank-1 model to bring back
             rank1.append((t["model"], t["num_ctx"]))
     if not rank1:
         return
@@ -463,6 +468,36 @@ def residency_check(node, now):
     state.spawn(prewarm(node, 0, "residency"))
 
 
+WINDOW_ORDER_GAP_S = 30   # one window order per node at most this often (the agent ignores repeats anyway)
+
+
+def upstream_window_check(node, now):
+    """Router 0.16.0 (modes.upstream_window): an OpenAI-compatible server such as Strata takes most of the card, so it runs
+    only in the window (nights) or on request. Outside the window a server idle for idle_hold_s is held and the standby
+    Ollama serves; inside it a held server is released once the node is free and the standby has been idle as long, so a
+    deliberate standby request at night does not ping-pong. A request for the server's model starts it at any time."""
+    w = state.CFG.upstream_window
+    if not w["enabled"] or not node.can_switch_to_standby or node.state == "offline" or node.inflight:
+        return
+    if now - node.window_order_at < WINDOW_ORDER_GAP_S:
+        return
+    inside = openai_node.server_allowed(node, now)
+    idle_s = w["idle_hold_s"]
+    if inside:
+        standby_used = [t for m, t in node.last_used.items() if not node.serves_openai(m)]
+        if node.state == "free" and node.upstream_order == "hold" and not (standby_used and now - max(standby_used) < idle_s):
+            node.window_order_at = now
+            state.spawn(openai_node.order(node, "release", "night window"))
+        return
+    if not node.speaks_openai or node.upstream_order == "hold" or node.upstream_state:
+        return   # the standby already serves, a hold is under way, or the server is still starting
+    server_used = [t for m, t in node.last_used.items() if node.serves_openai(m)]
+    if server_used and now - max(server_used) < idle_s:
+        return
+    node.window_order_at = now
+    state.spawn(openai_node.order(node, "hold", "outside the night window"))
+
+
 async def tick_loop():
     """Re-evaluates between polls so Sustain/Exit windows expire even without new data; saves perf.json delayed."""
     while True:
@@ -471,6 +506,7 @@ async def tick_loop():
             evaluate(n, now)
             residency_check(n, now)
             busy_unload_check(n, now)
+            upstream_window_check(n, now)
         if state.PERF_DIRTY[0] and now - state.PERF_DIRTY[0] >= 10:
             state.PERF_DIRTY[0] = 0.0
             await asyncio.to_thread(perf.perf_save)   # File writes not in the event loop
