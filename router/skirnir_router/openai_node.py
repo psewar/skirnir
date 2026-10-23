@@ -54,4 +54,4 @@ async def run(node, path, body, model, stream):
 
     def post(req):
         return nodes.nreq(node, "post", CHAT_PATH, json=req, timeout=timeout)
-    return await cloud.openai_exchange(post, path, body, model, model, stream, max_tokens_field=True)
+    return await cloud.openai_exchange(post, path, body, model, model, stream, local_server=True)

@@ -348,7 +348,7 @@ def _oa_tool_calls_to_native(tcs):
     return out
 
 
-def _native_done(model, path, content, tool_calls, finish, p_tok, c_tok, t0):
+def _native_done(model, path, content, tool_calls, finish, p_tok, c_tok, t0, thinking=""):
     now = time.time()
     dur = int((now - t0) * 1e9)
     j = {"model": model, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "done": True,
@@ -357,12 +357,24 @@ def _native_done(model, path, content, tool_calls, finish, p_tok, c_tok, t0):
          "load_duration": 0, "total_duration": dur}
     if path == "/api/generate":
         j["response"] = content or ""
+        if thinking:
+            j["thinking"] = thinking
     else:
         msg = {"role": "assistant", "content": content or ""}
+        if thinking:
+            msg["thinking"] = thinking
         if tool_calls:
             msg["tool_calls"] = tool_calls
         j["message"] = msg
     return j
+
+
+def _native_piece(model, path, content="", thinking=""):
+    """One streamed Ollama chunk with answer text and/or thinking (Ollama's own field names)."""
+    if path == "/api/generate":
+        return {"model": model, "response": content, **({"thinking": thinking} if thinking else {}), "done": False}
+    msg = {"role": "assistant", "content": content, **({"thinking": thinking} if thinking else {})}
+    return {"model": model, "message": msg, "done": False}
 
 
 # ---- Anthropic ----
@@ -552,16 +564,22 @@ async def run(target, path, body, model, stream):
     return info, gen()
 
 
-async def openai_exchange(post, path, body, model, model_id, stream, max_tokens_field=False):
+async def openai_exchange(post, path, body, model, model_id, stream, local_server=False):
     """One chat/generate exchange with an OpenAI-compatible endpoint: the native Ollama request as /chat/completions,
     the answer back in Ollama form. Shared by cloud providers (run) and OpenAI-compatible nodes (openai_node.run).
     `post(req)` sends the JSON request and returns an async context manager with the response - aiohttp's for a
     provider, the tunnel's (nodes.nreq) for a node. Returns (info, chunks) like run(); HTTP errors raise CloudError.
-    max_tokens_field: also send the older `max_tokens`, which local servers often know instead of max_completion_tokens."""
+    The server's thinking (`reasoning_content`, as llama.cpp-style servers send it) comes back as Ollama's `thinking`.
+    local_server (an OpenAI-compatible node): also send the older `max_tokens`, which local servers often know instead
+    of max_completion_tokens, and turn Ollama's `think: false` into `reasoning_effort: "none"` (measured with Strata
+    2026-10-23: without it a thinking model spent a 200-token budget on thinking and answered nothing)."""
     t0 = time.time()
     req = _oa_body(body, path, model_id, stream)
-    if max_tokens_field and req.get("max_completion_tokens"):
-        req["max_tokens"] = req["max_completion_tokens"]
+    if local_server:
+        if req.get("max_completion_tokens"):
+            req["max_tokens"] = req["max_completion_tokens"]
+        if body.get("think") is False:
+            req["reasoning_effort"] = "none"
     info = {"p_tok": 0, "c_tok": 0, "finish": "stop"}
     if not stream:
         async with post(req) as r:
@@ -572,9 +590,10 @@ async def openai_exchange(post, path, body, model, model_id, stream, max_tokens_
         ch = (j.get("choices") or [{}])[0]
         msg = ch.get("message") or {}
         content, tcs = msg.get("content") or "", _oa_tool_calls_to_native(msg.get("tool_calls"))
+        thinking = msg.get("reasoning_content") if isinstance(msg.get("reasoning_content"), str) else ""
         u = j.get("usage") or {}
         info.update(p_tok=int(u.get("prompt_tokens") or 0), c_tok=int(u.get("completion_tokens") or 0), finish=ch.get("finish_reason") or "stop")
-        return info, _native_done(model, path, content, tcs, info["finish"], info["p_tok"], info["c_tok"], t0)
+        return info, _native_done(model, path, content, tcs, info["finish"], info["p_tok"], info["c_tok"], t0, thinking)
 
     async def gen():
         async with post(req) as r:
@@ -587,8 +606,9 @@ async def openai_exchange(post, path, body, model, model_id, stream, max_tokens_
                     info["p_tok"], info["c_tok"] = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
                 for ch in ev.get("choices") or []:
                     d = ch.get("delta") or {}
-                    if d.get("content"):
-                        yield {"model": model, **({"response": d["content"]} if path == "/api/generate" else {"message": {"role": "assistant", "content": d["content"]}}), "done": False}
+                    thought = d.get("reasoning_content") if isinstance(d.get("reasoning_content"), str) else ""
+                    if d.get("content") or thought:
+                        yield _native_piece(model, path, d.get("content") or "", thought)
                     for tc in d.get("tool_calls") or []:
                         p = partial.setdefault(tc.get("index", 0), {"id": None, "name": "", "args": ""})
                         p["id"] = tc.get("id") or p["id"]

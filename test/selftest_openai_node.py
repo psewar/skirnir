@@ -48,12 +48,15 @@ async def chat(request):
         return web.json_response({"error": {"message": "no such model", "code": "model_not_found"}}, status=404)
     call = {"id": "call_1", "type": "function", "function": {"name": "get_time", "arguments": "{\"zone\": \"UTC\"}"}}
     if not body.get("stream"):
-        return web.json_response({"choices": [{"message": {"role": "assistant", "content": "Hello", "tool_calls": [call]},
+        return web.json_response({"choices": [{"message": {"role": "assistant", "content": "Hello", "tool_calls": [call],
+                                                           "reasoning_content": "Let me check."},
                                                "finish_reason": "tool_calls"}],
                                   "usage": {"prompt_tokens": 12, "completion_tokens": 3}})
     resp = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
     await resp.prepare(request)
-    events = [{"choices": [{"delta": {"content": "Hel"}}]},
+    events = [{"choices": [{"delta": {"role": "assistant", "content": ""}}]},
+              {"choices": [{"delta": {"reasoning_content": "Hmm"}}]},
+              {"choices": [{"delta": {"content": "Hel"}}]},
               {"choices": [{"delta": {"content": "lo"}}]},
               {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "get_time", "arguments": "{\"zone\""}}]}}]},
               {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": ": \"UTC\"}"}}]}, "finish_reason": "tool_calls"}]},
@@ -151,12 +154,20 @@ async def main():
         check("unary: Ollama answer with text, tool call (arguments as object) and token counts",
               j.get("done") and msg.get("content") == "Hello" and msg.get("tool_calls", [{}])[0]["function"]["arguments"] == {"zone": "UTC"}
               and j["prompt_eval_count"] == 12 and j["eval_count"] == 3 and info["finish"] == "tool_calls", json.dumps(j)[:300])
+        check("unary: the server's reasoning_content becomes Ollama's thinking", msg.get("thinking") == "Let me check.", str(msg))
+        check("think absent -> no reasoning_effort sent", "reasoning_effort" not in sent)
+
+        await openai_node.run(n, "/api/chat", {**body, "think": False}, MODEL, False)
+        check("think: false -> reasoning_effort none (else a thinking model spends the budget on thinking)",
+              SEEN[-1][1].get("reasoning_effort") == "none", str(SEEN[-1][1]))
 
         info, chunks = await openai_node.run(n, "/api/chat", {**body, "stream": True}, MODEL, True)
         got = [c async for c in chunks]
         text = "".join((c.get("message") or {}).get("content", "") for c in got if not c.get("done"))
+        thought = "".join((c.get("message") or {}).get("thinking", "") for c in got if not c.get("done"))
         last = got[-1]
-        check("stream: text chunks in Ollama form, then one done chunk", text == "Hello" and last.get("done") and len(got) == 3, f"{len(got)} {text!r}")
+        check("stream: thinking and text chunks in Ollama form, then one done chunk",
+              text == "Hello" and thought == "Hmm" and last.get("done") and len(got) == 4, f"{len(got)} {text!r} {thought!r}")
         check("stream: tool call assembled from deltas, tokens from the usage event",
               last["message"]["tool_calls"][0]["function"]["arguments"] == {"zone": "UTC"} and last["eval_count"] == 5 and info["p_tok"] == 12,
               json.dumps(last)[:300])
