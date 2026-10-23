@@ -24,7 +24,7 @@ async def poll(api):
         STATUS["session_store"] = "unavailable" if failed(await store.health()) else "available"
     service = api.get(memory.SERVICE_KEY)
     if service is not None and service.active():
-        healthy = service.client.healthy
+        healthy = await service.client.health()   # probed on every pass, not inferred from the last client call
         STATUS["hindsight"] = "unknown" if healthy is None else ("available" if healthy else "unavailable")
         if service.outbox is not None:
             counts, age = await service.outbox.outbox_counts(), await service.outbox.outbox_oldest()
