@@ -270,11 +270,20 @@ MODEL_TOO_LARGE = "model_too_large"   # does not fit on the empty card either: c
 MODEL_MISSING = "model_missing"       # no node has the model
 ATTEMPT_FAILED = "attempt_failed"     # Node was candidate, attempt failed (tried)
 MEMORY_PRESSURE = "memory_pressure"   # Agent >= 0.17.0: RAM tight, router does not load cold there
+SERVER_BUSY = "server_busy"           # 0.16.4: switching to the standby would break off answers of the OpenAI server
 NO_NODE = "no_node"
 
 # When a client should retry (Retry-After). No entry: waiting does not help.
 RETRY_AFTER_S = {GPU_BUSY: 30, NODE_DRAINING: 60, NODE_FAILING: 30, VRAM_FULL: 10, ATTEMPT_FAILED: 10, NODE_OFFLINE: 60,
-                 MEMORY_PRESSURE: 60}
+                 MEMORY_PRESSURE: 60, SERVER_BUSY: 30}
+
+
+def server_busy(node, tier, waited_s):
+    """0.16.4: verdict for a request that waited in vain for a gap on the node's OpenAI server (proxy): same shape as
+    unavailable(), so the client gets code, Retry-After and the node as with any other refusal."""
+    b = {"tier": 0, "model": tier["model"], "num_ctx": tier["num_ctx"], "node": node.name, "code": SERVER_BUSY,
+         "inflight": node.server_inflight(), "waited_s": round(waited_s)}
+    return {"code": SERVER_BUSY, "retry_after_s": RETRY_AFTER_S[SERVER_BUSY], "blockers": [b], "detail": _detail(SERVER_BUSY, [b])}
 
 
 def _node_block(n, t, ctx, now):
@@ -359,6 +368,9 @@ def _detail(code, bl):
     if code == MEMORY_PRESSURE and b is not None:
         return (f"memory pressure on {b['node']}: {b.get('ram_available_gib')} GiB RAM and {b.get('commit_free_gib')} GiB commit "
                 f"free, the router loads nothing there")
+    if code == SERVER_BUSY and b is not None:
+        return (f"{b['node']} answers {b['inflight']} request(s) on its OpenAI-compatible server; switching to the standby "
+                f"would break them off (waited {b['waited_s']} s)")
     if code == MODEL_MISSING:
         return "no node has this model"
     if b is not None:

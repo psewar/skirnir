@@ -100,6 +100,15 @@ async def _route_inner(request, path, body, shape, err):
         if failed(pick):
             return err(pick.status, pick.message, getattr(pick, "why", None))
         tier_idx, tier, ctx, node = pick
+        if not node.is_cloud and node.standby_switch(tier["model"]) and node.server_inflight():
+            # 0.16.4: the switch holds the server, which breaks off its running answers - wait for a gap between them
+            # (an agent's tool calls leave some), at most until the admission deadline
+            t_wait = time.time()
+            state.remember({"event": "wait_server_gap", "role": role["name"], "node": node.name, "model": tier["model"],
+                            "inflight": node.server_inflight(), "request_id": req.request_id})
+            if not await openai_node.wait_for_server_gap(node, acquire.deadline_at):
+                why = scheduler.server_busy(node, tier, time.time() - t_wait)
+                return err(503, f"no node available for model '{name}': {why['detail']}", why)
         result = await dispatch(request, path, body, role, tier, ctx, node, tier_idx, shape, req)
         if isinstance(result, Problem):   # managed turn could not be fitted to this tier
             return err(result.status, result.message)
