@@ -479,11 +479,14 @@ class _Relay:
         log.info("route %s %s -> tier%d %s ctx=%s node=%s(%s,%s) inflight=%d req=%s%s", self.path, self.role["name"], self.tier_idx,
                  model, self.ctx, node.name, node.state, reason, node.inflight, self.req.request_id,
                  f" skipped={len(self.req.skipped)}" if self.req.skipped else "")
-        state.remember({"event": "route", "path": self.path, "role": self.role["name"], "tier": self.tier_idx, "model": model,
-                        "ctx": self.ctx, "node": node.name, "node_state": node.state, "warm": self.warm, "via": via,
-                        "request_id": self.req.request_id, "session_id": self.req.session_id, "client": self.request.get("client"),
-                        "reason": self.req.reason, "skipped": len(self.req.skipped), "think": self.out.get("think"),
-                        "canary": bool(self.req.canary) and model == self.req.canary})
+        entry = {"event": "route", "path": self.path, "role": self.role["name"], "tier": self.tier_idx, "model": model,
+                 "ctx": self.ctx, "node": node.name, "node_state": node.state, "warm": self.warm, "via": via,
+                 "request_id": self.req.request_id, "session_id": self.req.session_id, "client": self.request.get("client"),
+                 "reason": self.req.reason, "skipped": len(self.req.skipped), "think": self.out.get("think"),
+                 "canary": bool(self.req.canary) and model == self.req.canary}
+        if self.req.memory_state:   # the automatic recall's state and how many facts it added, per request in the journal
+            entry.update(memory_state=self.req.memory_state, memory_facts=len(self.req.memory_items))
+        state.remember(entry)
 
     def _finish(self):
         if self.memory_capture is not None:
