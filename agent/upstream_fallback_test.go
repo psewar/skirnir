@@ -167,7 +167,7 @@ func TestConfigUpstreamFallback(t *testing.T) {
 		"the upstream child": base + tun + "  upstream_fallback:\n    child: strata\n",
 		"not a child":        base + tun + "  upstream_fallback:\n    child: other\n",
 		"not ollama":         base + tun + "  upstream_fallback:\n    child: stt\n",
-		"not loopback":       base + tun + "  upstream_fallback:\n    child: ollama\n    upstream: http://192.168.1.5:11434\n",
+		"not loopback":       base + tun + "  upstream_fallback:\n    child: ollama\n    upstream: http://192.0.2.5:11434\n",
 		"disabled": strings.Replace(base, "args: [serve]", "args: [serve]\n    enabled: false", 1) + tun +
 			"  upstream_fallback:\n    child: ollama\n",
 	}
