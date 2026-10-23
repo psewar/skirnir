@@ -16,7 +16,7 @@ import re
 from . import values
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES, THINK_MODES  # noqa: E402
 from .outcome import failed, invalid  # noqa: E402
-SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open")
+SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open", "switch")
 
 # typ: int | float | bool | str | choice | list | iplist | keep_alive | tristate
 # choices "data_classes" / "roles" are resolved at runtime. nullable: null = "not set" (Router-Default / Inheritance).
@@ -70,9 +70,11 @@ G = "Scheduler"
 for k, lbl, lbl_en in (("warm", "warm (Bonus)", "warm (bonus)"), ("inflight", "je laufende Anfrage (Malus)", "per running request (penalty)"),
                        ("saturated", "voller Knoten (Malus)", "full node (penalty)"), ("vram_free", "freies VRAM ×", "free VRAM ×"),
                        ("weight", "Knotengewicht ×", "node weight ×"), ("speed", "Tempo ×", "speed ×"), ("errors", "Fehlerrate (Malus)", "error rate (penalty)"),
-                       ("half_open", "Breaker-Probe (Malus)", "breaker probe (penalty)")):
+                       ("half_open", "Breaker-Probe (Malus)", "breaker probe (penalty)"),
+                       ("switch", "Umschalten auf Standby-Ollama (Malus)", "switch to the standby Ollama (penalty)")):
     _e(f"modes.score.{k}", "float", lbl, "Gewicht im Kandidaten-Score (scheduler.score)", G,
-       {"warm": 100.0, "inflight": 10.0, "saturated": 50.0, "vram_free": 2.0, "weight": 1.0, "speed": 2.0, "errors": 20.0, "half_open": 5.0}[k], min=0, max=10000,
+       {"warm": 100.0, "inflight": 10.0, "saturated": 50.0, "vram_free": 2.0, "weight": 1.0, "speed": 2.0, "errors": 20.0, "half_open": 5.0,
+        "switch": 60.0}[k], min=0, max=10000,
        label_en=lbl_en, help_en="weight in the candidate score (scheduler.score)")
 _e("modes.warm_first", "bool", "warm zuerst (global)", "ein geladenes Modell der Rangliste schlaegt einen Kaltstart; je Rolle uebersteuerbar", G, True,
    label_en="warm first (global)", help_en="a loaded model from the ranking beats a cold start; can be overridden per role")

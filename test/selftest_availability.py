@@ -46,6 +46,12 @@ class FakeNode:
     def breaker_would_allow(self, now):
         return self.breaker == "closed"
 
+    def offers(self, model):   # router 0.15.0: no standby switch on this fake node
+        return model in self.models
+
+    def standby_switch(self, model):
+        return False
+
     def is_loaded(self, model):
         return model in self.loaded
 

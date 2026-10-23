@@ -21,6 +21,7 @@ type Heartbeat struct {
 	sup      *Supervisor    // 0.13.0: VRAM of own children (except Ollama) as a fact
 	game     *GameWatch     // 0.17.0: active game as a fact (game.go)
 	routes   *Routes        // tunnel.routes: health of routed services (routes.go); nil = field missing
+	standby  *StandbyStore  // 0.25.0: models of the standby Ollama (standby.go); nil = no tunnel.upstream_fallback
 
 	mu         sync.Mutex
 	ovVersion  string
@@ -96,6 +97,9 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 	}
 	if r := h.routes.Report(); r != nil { // Tunnel routes: router only selects nodes whose service reports up
 		p["routes"] = r
+	}
+	if h.standby != nil { // 0.25.0: the router may switch to the standby Ollama for one of these (standby.go)
+		p["standby_models"] = h.standby.Models()
 	}
 	return p, nil
 }

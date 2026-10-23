@@ -427,6 +427,12 @@ class _Relay:
                     return self.shape.error(403, "memory policy changed") if self.shape else ollama_error(403, "memory policy changed")
             if self.is_cloud:   # Stage 5: Provider instead of node
                 return await self._via_cloud()
+            if self.node.standby_switch(self.model):
+                # 0.15.0: only the node's standby Ollama has this model - hold the OpenAI-compatible server and wait until
+                # the standby serves; then this is an ordinary Ollama request (Ollama loads the model as usual)
+                if not await openai_node.ensure_standby(self.node, self.model):
+                    log.info("%s: standby Ollama for %s not serving -> next candidate", self.node.name, self.model)
+                    return None
             if self.node.serves_openai(self.model):   # model of an OpenAI-compatible server (openai_node.py)
                 return await self._via_openai_node()
             return await self._via_node()
