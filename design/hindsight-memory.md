@@ -235,6 +235,11 @@ to interpret:
 | `bank_missing` | The bank does not exist yet: nothing was ever retained under this scope and namespace key. After a namespace key change every bank looks like this, which is why it is not reported as `available`. |
 | `query_filtered` | The sensitive-data filter kept the query from being sent. Explicit recall answers **403** with this state and `error.reason`; inference proceeds without recall. |
 | `unavailable` / `unavailable:<kind>` | No usable answer. `kind` is a fixed category: `timeout`, `transport`, `protocol` (malformed or above `max_response_bytes`), `upstream_auth`, `upstream_rejected`. |
+| `skipped:<reason>` | Inference only: the automatic recall did not run, because it asks with the last message's text and there was none. `reason`: `no_messages`, `last_not_user` (the last message is not the user's), `content_not_text` (the content is not a nonempty string). Inference proceeds; counted as `outcome="skipped_<reason>"`. |
+
+For inference, the router's journal (`events.jsonl`, the `route` entry of each request)
+also carries `memory_state` and `memory_facts` (facts added to the context) whenever the
+request used memory, so a single request can be traced afterwards without its content.
 
 `fail_open` applies to **inference augmentation only**. With `true`, an unavailable
 memory lets normal inference proceed without facts, and the response carries the

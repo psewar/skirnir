@@ -651,21 +651,40 @@ async def prepare(request, path, body, req):
     messages = body.get("messages") or []
     if not isinstance(messages, list) or any(not isinstance(m, dict) for m in messages):
         return invalid("memory chat messages must be a list of objects")
-    if spec["recall"] and messages and messages[-1].get("role") == "user":
-        query = messages[-1].get("content")
-        if isinstance(query, str):
-            recalled = await service.recall(scope, query)
-            if failed(recalled):
-                return recalled
-            # Reported on the response (X-Skirnir-Memory-State), also when fail_open lets inference proceed without facts.
-            req.memory_state = recalled.state
-            if not recalled.available and not service.cfg.fail_open:
-                return MEMORY_UNAVAILABLE
-            if recalled.items:
-                req.memory_items = recalled.items
-                req.memory_context = {"role": "user", "content": packed(recalled.items)}
-                body["messages"] = [*messages[:-1], req.memory_context, messages[-1]]
+    if spec["recall"]:
+        query, skipped = recall_query(messages)
+        if skipped:
+            # A recall that never ran is a state too: without it, "no facts" looked like "no knowledge" (2026-10-23, the
+            # HA log triage's analysis got no recall and nothing said why).
+            req.memory_state = "skipped:" + skipped
+            count("recall", "skipped_" + skipped)
+            return None
+        recalled = await service.recall(scope, query)
+        if failed(recalled):
+            return recalled
+        # Reported on the response (X-Skirnir-Memory-State), also when fail_open lets inference proceed without facts.
+        req.memory_state = recalled.state
+        if not recalled.available and not service.cfg.fail_open:
+            return MEMORY_UNAVAILABLE
+        if recalled.items:
+            req.memory_items = recalled.items
+            req.memory_context = {"role": "user", "content": packed(recalled.items)}
+            body["messages"] = [*messages[:-1], req.memory_context, messages[-1]]
     return None
+
+
+RECALL_SKIPPED = ("no_messages", "last_not_user", "content_not_text")
+
+
+def recall_query(messages):
+    """(query, None) when the last message is a user message with text, else (None, reason from RECALL_SKIPPED): the
+    automatic recall asks with the user's last words and nothing else."""
+    if not messages:
+        return None, "no_messages"
+    if messages[-1].get("role") != "user":
+        return None, "last_not_user"
+    query = messages[-1].get("content")
+    return (query, None) if isinstance(query, str) and query.strip() else (None, "content_not_text")
 
 
 class Capture:
