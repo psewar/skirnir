@@ -98,6 +98,24 @@ Der Heartbeat traegt zwei Bloecke, damit der Router nicht aus fremdem VRAM raten
 
 Was der Router damit macht (busy-Grund `game`, Speicherdruck): siehe README, Abschnitt Busy. Beides steht auch in `/health`.
 
+## Schlafen und Aufwachen melden (0.24.0)
+
+Der Windows-Dienst nimmt Energie-Ereignisse an (`AcceptPowerEvent`) und meldet sie dem Router sofort als Rahmen POWER
+(`{"state": "suspending"|"resumed", "at", "via"}`, `power.go`). Bisher merkte der Router einen schlafenden Rechner erst am
+Ping-Timeout gut eine Minute später, und kurzes Aufwachen im Standby sah aus wie ein flatternder Tunnel.
+
+- `PBT_APMSUSPEND`: Die Meldung geht synchron raus, höchstens 1,5 s, dann schläft der Rechner.
+- `PBT_APMRESUMEAUTOMATIC` und `PBT_APMRESUMESUSPEND`: Die Meldung „resumed“ geht einmal raus; derselbe Zustand zweimal
+  hintereinander wird nur einmal gemeldet.
+- Jede neue Tunnel-Sitzung wiederholt den letzten Zustand vor dem ersten Heartbeat, denn die Aufwach-Meldung kommt oft,
+  bevor das Netz wieder steht.
+- Linux und der Konsolenbetrieb melden nichts, der Router führt den Zustand dann als unbekannt.
+- Router vor 0.14.0 ignorieren den Rahmen.
+
+Der Router (0.14.0) nimmt den Knoten beim Einschlafen sofort aus dem Routing und führt `power` und `power_since` in
+`/admin/state` und im Journal (Ereignis `power`). Mit konfiguriertem MQTT zeigt Home Assistant zusätzlich
+`binary_sensor.skirnir_node_<knoten>_asleep` („<Knoten> schläft“). Ohne Home Assistant gilt alles andere unverändert.
+
 ## TLS-Vorschaltstelle (0.2.0, Alternative ohne Tunnel)
 
 `ollama_proxy` startet einen HTTPS-Reverse-Proxy vor dem lokalen Ollama (Standard 0.0.0.0:11443 → 127.0.0.1:11434).

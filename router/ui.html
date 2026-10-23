@@ -350,6 +350,8 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "GPU-Schutz": "GPU guard",
   "GPU-Schutz normal, Ziel {w} W": "GPU guard normal, target {w} W",
   "wartend": "waiting",
+  "schläft": "asleep",
+  "schläft seit {t} (vom Agenten gemeldet)": "asleep since {t} (reported by the agent)",
   "KEIN TLS": "NO TLS",
   "Client-Auth": "Client auth",
   "keine Cloud-Anbieter konfiguriert (router.cloud)": "no cloud providers configured (router.cloud)",
@@ -639,8 +641,10 @@ function renderNodes() {
     const grd = gg.state && gg.state !== 'normal' ? ` <span class="badge ${gg.problem ? 'open' : 'half_open'}" title="${t('GPU-Schutz')}: ${esc(tv(gg.reason) || (gg.warnings || []).join(', ') || tv(gg.state))}${gg.limit_w ? ` · Limit ${gg.limit_w} W` : ''}">${t('GPU-Schutz')} ${esc(tv(gg.state))}</span>`
       : gg.state === 'normal' && gg.limit_w ? ` <span class="muted" title="${t('GPU-Schutz normal, Ziel {w} W', { w: gg.target_w ?? '?' })}">🛡 ${gg.limit_w} W</span>` : '';
     const last = `${n.inflight} / ${n.max_inflight ?? '?'}${waiting[name] ? ` · <span class="warn">${waiting[name]} ${t('wartend')}</span>` : ''}`;
+    // Router 0.14.0: sleep as reported by the agent (power.go); nothing shown while the agent never reported it
+    const slp = n.power === 'asleep' ? ` <span class="muted" title="${t('schläft seit {t} (vom Agenten gemeldet)', { t: n.power_since ? new Date(n.power_since * 1000).toLocaleString() : '?' })}">💤 ${t('schläft')}</span>` : '';
     tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(name)}</b><div class="muted">${esc(n.gpu || '')} ${n.wol ? '· WOL' : ''}</div></td>
-      <td><span class="state ${n.state}">${n.state}</span>${brk}${grd}<div class="muted">${esc(n.busy_reason || '')}</div></td>
+      <td><span class="state ${n.state}">${n.state}</span>${slp}${brk}${grd}<div class="muted">${esc(n.busy_reason || '')}</div></td>
       <td>${gpu}</td><td>${vram}</td><td>${last}</td>
       <td>${Object.entries(n.loaded).map(([m, g]) => `<div class="loaded">${esc(m)} <span class="muted">${g} GiB</span></div>`).join('') || '<span class="muted">–</span>'}</td>
       <td>${models}</td></tr>`);

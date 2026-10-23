@@ -39,6 +39,9 @@ type App struct {
 	rootCtx  context.Context
 	crashed  string // Module that ended with a panic (Run then returns an error, the service restarts)
 	ctlToken string // Token for POST /restart-child (file control.token next to the Config; Review 2026-09-25)
+
+	powerMu    sync.Mutex
+	powerState string // last reported sleep/wake-up (power.go), "" = none yet
 }
 
 func newApp(cfg *Config, log *Logger) (*App, error) {

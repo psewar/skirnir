@@ -57,6 +57,8 @@ def ha_snapshot(now=None):
                          # Agent >= 0.17.0: game and main memory (None = agent does not report)
                          "game": (n.game or {}).get("name") if (n.game or {}).get("running") else None,
                          "game_reported": n.game is not None, "memory_pressure": n.mem_pressure,
+                         # Router 0.14.0 / Agent >= 0.24.0: sleep as a fact (None = the agent never reported it)
+                         "power": n.power, "power_since": n.power_since,
                          "ram_available_gib": (n.memory or {}).get("ram_available_gib"),
                          "commit_free_gib": (n.memory or {}).get("commit_free_gib"),
                          # Router 0.9.2, slowness watch: model partly in system RAM (fact from /api/ps) and the rates of the
@@ -263,6 +265,14 @@ class HAPublisher:
              dict(unit_of_measurement="%", icon="mdi:expansion-card", **numeric("gpu_util"))),
             ("sensor", f"node_{oid}_vram_free", f"{name} VRAM frei",
              dict(unit_of_measurement="GiB", device_class="data_size", icon="mdi:memory", **numeric("vram_free_gib"))),
+            # Router 0.14.0: sleep reported by the agent (Agent >= 0.24.0); unavailable while the agent never reported it
+            ("binary_sensor", f"node_{oid}_asleep", f"{name} schläft",
+             dict(state_topic=nt, value_template="{{ 'ON' if value_json.power == 'asleep' else 'OFF' }}", icon="mdi:sleep",
+                  json_attributes_topic=nt, json_attributes_template="{{ {'since': value_json.power_since} | tojson }}",
+                  availability=[{"topic": f"{self.base}/status"},
+                                {"topic": nt, "payload_available": "ok", "payload_not_available": "no",
+                                 "value_template": "{{ 'ok' if value_json.power is not none else 'no' }}"}],
+                  availability_mode="all")),
             # Agent >= 0.17.0: game and main memory as fact (Router 0.7.0)
             ("sensor", f"node_{oid}_game", f"{name} Spiel",
              dict(state_topic=nt, value_template="{{ value_json.game if value_json.game else 'none' }}", icon="mdi:gamepad-variant")),

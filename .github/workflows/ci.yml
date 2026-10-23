@@ -33,6 +33,7 @@ jobs:
       - run: python test/selftest_children_vram.py
       - run: python test/selftest_ollama_push.py
       - run: python test/selftest_game_prewarm.py
+      - run: python test/selftest_power.py
       - run: python test/selftest_cloud_errors.py
       - run: python test/selftest_config_load.py
       - run: python test/selftest_control_flow_admin.py

@@ -14,6 +14,7 @@ from .common import log
 # Rahmen: typ(1) | stream_id(4, big endian) | payload. Gegenstueck: agent/tunnel.go, test/fake_agent.py.
 TUN_REQ, TUN_RESP, TUN_DATA, TUN_END, TUN_ERR, TUN_CANCEL, TUN_HB, TUN_HBACK = 1, 2, 3, 4, 5, 6, 7, 8
 TUN_OLLAMA = 9   # Agent -> Router: Ollama-Zustand (installiert, geladen, erreichbar), Agent >= 0.14.0
+TUN_POWER = 10   # Agent -> Router: {"state": "suspending"|"resumed", "at", "via"}, Agent >= 0.24.0; older routers ignore it
 
 
 def tun_frame(t, sid, payload=b""):
@@ -243,6 +244,15 @@ class Tunnel:
                     log.warning("node %s: Ollama state from the agent is not JSON", self.node.name)
                     return
                 poll.apply_ollama_push(self.node, msg, time.time())
+            return
+        if t == TUN_POWER:
+            if self.approved and self.node is not None:
+                try:
+                    msg = json.loads(payload)
+                except ValueError:  # exception-ok: untrusted JSON from the agent; whether it parses shows only the parser
+                    log.warning("node %s: power notice from the agent is not JSON", self.node.name)
+                    return
+                poll.apply_power(self.node, msg, time.time())
             return
         r = self.streams.get(sid)
         if r is None:

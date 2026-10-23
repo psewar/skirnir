@@ -351,6 +351,31 @@ def _named(models):
     return [m for m in models if isinstance(m, dict) and isinstance(m.get("name"), str)]
 
 
+POWER_STATES = {"suspending": "asleep", "resumed": "awake"}
+
+
+def note_power(node, power, now, via):
+    """Record a power change as a fact (journal event `power`), only when it changes."""
+    if node.power == power:
+        return
+    node.power, node.power_since = power, now
+    log.info("node %s: %s (%s)", node.name, power, via)
+    state.remember({"event": "power", "node": node.name, "state": power, "via": via})
+
+
+def apply_power(node, msg, now):
+    """Sleep or wake-up notice from the agent (Agent >= 0.24.0, frame POWER). Before, the router only saw a ping
+    timeout about a minute after the machine went to sleep, and short standby wake-ups looked like a flapping tunnel
+    (a desktop node, 2026-10-23). A suspend takes the node out of routing at once; a wake-up waits for the next heartbeat."""
+    if not isinstance(msg, dict) or msg.get("state") not in POWER_STATES:
+        log.warning("node %s: power notice from the agent without a known state - dropped", node.name)
+        return
+    power = POWER_STATES[msg["state"]]
+    note_power(node, power, now, str(msg.get("via") or "agent")[:40])
+    if power == "asleep":
+        node.go_offline("asleep (agent reported suspend)")
+
+
 def apply_ollama_push(node, msg, now):
     """Ollama state from the agent (Agent >= 0.14.0, frame OLLAMA): immediately on change and at most every 30 s.
     While the report is fresh, the router does not poll this node. `up: false` is the agent's explicit report that its Ollama is not responding - the router no longer needs to infer this from failed requests."""
@@ -549,6 +574,8 @@ def hb_ack(node):
 def apply_heartbeat(node, b, now):
     """Adopt GPU facts from a heartbeat, run state machine, learn baseline."""
     node.hb_ts = now
+    if node.power == "asleep":   # a heartbeat is the agent running again, even if its resume notice was lost
+        note_power(node, "awake", now, "heartbeat")
     fp = b.get("ollama_tls_sha256")
     if fp and node.tls and node.tls_mode == "auto" and str(fp).lower() != node.tls_fp:
         if node.set_fingerprint(fp):
