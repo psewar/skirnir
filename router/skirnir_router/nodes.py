@@ -147,6 +147,9 @@ class Node(Breaker):
         self.upstream_serving = ""    # agent report: "ollama" = the standby Ollama serves in place of the held server
         self.upstream_state = ""      # agent report: "held" (stopped for the GPU), "starting", "" = answering
         self.upstream_order = ""      # last order sent: "hold" / "release" (openai_node.order)
+        # Router 0.15.0 / agent >= 0.25.0: the standby Ollama's models from its model store (heartbeat standby_models),
+        # also while it is stopped - a request for one of them may hold the server (standby_switch)
+        self.standby_models = set()
         # Ollama-Sicht
         self.models = set()
         self.last_known_models = set()
@@ -492,10 +495,34 @@ class Node(Breaker):
             return self.openai_upstream and (self.digest_of.get(model) or "").startswith("openai:")
         return True
 
+    @property
+    def can_switch_to_standby(self):
+        """The router may hold this node's OpenAI-compatible server so that its standby Ollama serves (router 0.15.0):
+        the agent can stop the server (upstream_release) and runs a standby (upstream_fallback)."""
+        return self.openai_upstream and self.upstream_releasable and self.upstream_fallback and self.tunnel is not None
+
+    def standby_switch(self, model):
+        """The node does not serve the model now, but its stopped standby Ollama has it (heartbeat standby_models):
+        a request for it holds the server first (openai_node.ensure_standby). While the standby already serves, the model
+        is in `models` and no switch is needed."""
+        return (self.can_switch_to_standby and self.upstream_serving != openai_node_serving_ollama
+                and model not in self.models and model in self.standby_models)
+
+    def offers(self, model):
+        """The node can serve the model now or after switching to its standby Ollama."""
+        return model in self.models or self.standby_switch(model)
+
+    def standby_budget_gib(self):
+        """VRAM the standby Ollama gets once the server has stopped: the card minus reserve, desktop baseline and
+        foreign memory (the server's own memory is freed by the hold)."""
+        return self.vram_total_gib - state.CFG.reserve.get(self.state, 1.0) - self.baseline_gib() - self.foreign_vram_gib()
+
     def snapshot(self, now):
         return {
             "state": self.state, "busy_reason": self.busy_reason,
             "power": self.power, "power_since": self.power_since,
+            # 0.15.0: models reachable by switching to the standby Ollama (UI marks them; empty = no switch possible)
+            "standby_models": sorted(self.standby_models - set(self.models)) if self.can_switch_to_standby else [],
             "models": sorted(self.models), "loaded": {k: round(v, 2) for k, v in self.loaded.items()},
             "ram_spill_gib": {k: round(v, 2) for k, v in self.ram_spill.items()},   # loaded models partly in system RAM
             "upstream": ({"api": "openai", "releasable": self.upstream_releasable, "state": self.upstream_state or "answering",

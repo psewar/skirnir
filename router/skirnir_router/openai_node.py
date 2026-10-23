@@ -80,6 +80,24 @@ async def ensure_loaded(node, model, timeout_s=START_WAIT_S):
     return False
 
 
+async def ensure_standby(node, model, timeout_s=START_WAIT_S):
+    """A request needs a model only the node's standby Ollama has (router 0.15.0, node.standby_switch): hold the server
+    and wait until the agent reports the standby serving with the model listed. The way back is the existing one: a
+    request for the server's model, or prewarm once the node is idle or free again, releases the server. False = not
+    serving in time or the hold could not be sent (next candidate)."""
+    if not await order(node, "hold", f"request {model}"):
+        return False
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if node.upstream_serving == SERVING_OLLAMA and model in node.models:
+            return True
+        if node.state == "offline":
+            return False
+        await asyncio.sleep(1)
+    log.warning("node %s: standby Ollama not serving %s %d s after the hold", node.name, model, timeout_s)
+    return False
+
+
 def models_to_ollama(data):
     """/v1/models -> (tags, ps) in the shape poll.apply_ollama_state reads. Mirrors the agent's openAIEntries: a model with
     a status other than "loaded" (Strata's extra field) is installed, not loaded; meta.n_ctx becomes context_length."""

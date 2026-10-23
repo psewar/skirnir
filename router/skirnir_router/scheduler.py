@@ -10,7 +10,7 @@ from . import state
 def known_concrete(name):
     """Specific model name held by any node (current or last seen). Returns the name with tag."""
     for cand in (name, f"{name}:latest"):
-        if any(cand in n.models or cand in n.last_known_models for n in state.NODES.values()):
+        if any(cand in n.models or cand in n.last_known_models or n.standby_switch(cand) for n in state.NODES.values()):
             return cand
     return None
 
@@ -42,7 +42,7 @@ def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
             out.append(t)
         return ctx, 0.0, out
     for n in state.NODES.values():
-        if n.name in exclude or n.state == "offline" or tier["model"] not in n.models:
+        if n.name in exclude or n.state == "offline" or not n.offers(tier["model"]):
             continue
         if now < n.draining_until:   # Agent update running: node draining, no new requests
             continue
@@ -51,6 +51,12 @@ def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
         if not allows(n):   # Stage 3: nodes with open breaker stay out (half_open: one probe)
             continue
         need = state.CFG.need_gib(tier["model"], ctx, n)
+        if n.standby_switch(tier["model"]):
+            # 0.15.0: reachable only by holding the OpenAI-compatible server for the standby Ollama - a cold candidate
+            # whose budget is the card once the server has stopped (score: modes.score.switch penalty)
+            if not n.mem_pressure and need <= n.standby_budget_gib():
+                out.append(n)
+            continue
         lc = n.loaded_context(tier["model"])
         if n.is_loaded(tier["model"]) and (lc is None or lc >= ctx):
             # Already loaded with sufficient context: needs no extra VRAM, so no budget check.
@@ -88,6 +94,8 @@ def score(node, model):
     s -= w["errors"] * perf.error_rate(model, node.name)
     if node.breaker == "half_open":
         s -= w["half_open"]
+    if not node.is_cloud and node.standby_switch(model):   # 0.15.0: the server must be held first (1-3 min both ways)
+        s -= w["switch"]
     return round(s, 3)
 
 
@@ -216,7 +224,7 @@ def wakeable_for(tiers):
 
 
 def any_online_node_with(model):
-    ns = [n for n in state.NODES.values() if n.state != "offline" and model in n.models]
+    ns = [n for n in state.NODES.values() if n.state != "offline" and n.offers(model)]
     if not ns:
         return None
     return rank(ns, model)[0]
@@ -232,7 +240,7 @@ def role_possible_when_free(role):
                 return True
             continue
         for n in state.NODES.values():
-            if n.state == "offline" or t["model"] not in n.models:
+            if n.state == "offline" or not n.offers(t["model"]):
                 continue
             if not n.vram_total_gib:
                 return True
@@ -300,7 +308,7 @@ def blockers(tiers, client_ctx, now, exclude=()):
             continue
         ctx = min(client_ctx, t["num_ctx"]) if client_ctx else t["num_ctx"]
         for n in state.NODES.values():
-            if t["model"] not in n.models:
+            if not n.offers(t["model"]):
                 continue
             code, info = _node_block(n, t, ctx, now)
             if code is None:
@@ -317,7 +325,7 @@ def unavailable(tiers, client_ctx, now, exclude=()):
     bl = blockers(tiers, client_ctx, now, exclude)
     codes = [b["code"] for b in bl]
     if not bl:
-        code = MODEL_MISSING if not any(t["model"] in n.models for t in tiers for n in state.NODES.values()) else NO_NODE
+        code = MODEL_MISSING if not any(n.offers(t["model"]) for t in tiers for n in state.NODES.values()) else NO_NODE
     elif GPU_BUSY in codes:
         code = GPU_BUSY
     elif all(c == NODE_OFFLINE for c in codes):

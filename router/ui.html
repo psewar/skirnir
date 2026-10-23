@@ -350,6 +350,8 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "GPU-Schutz": "GPU guard",
   "GPU-Schutz normal, Ziel {w} W": "GPU guard normal, target {w} W",
   "wartend": "waiting",
+  "erst nach Umschalten: der Router hält den OpenAI-Server an und der Standby-Ollama übernimmt (1–3 min)": "only after switching: the router holds the OpenAI server and the standby Ollama takes over (1–3 min)",
+  "kein Knoten kann dieses Modell gerade bedienen": "no node can serve this model right now",
   "schläft": "asleep",
   "schläft seit {t} (vom Agenten gemeldet)": "asleep since {t} (reported by the agent)",
   "KEIN TLS": "NO TLS",
@@ -625,7 +627,19 @@ function allModels() {
   if (STATE) for (const n of Object.values(STATE.nodes)) for (const m of n.models) s.add(m);
   return [...s].sort((a, b) => (isCloud(a) - isCloud(b)) || a.localeCompare(b));
 }
-const modelLabel = m => (isCloud(m) ? '☁ ' : '') + m;
+// Router 0.15.0: can a node serve the model now, only after switching to a standby Ollama (OpenAI-compatible server held),
+// or not at all? Shown in the model lists so a choice that cannot be served is visible as such.
+function modelReach(m) {
+  if (!STATE || isCloud(m)) return 'now';
+  const nodes = Object.values(STATE.nodes).filter(n => n.state !== 'offline');
+  if (nodes.some(n => n.models.includes(m))) return 'now';
+  if (nodes.some(n => (n.standby_models || []).includes(m))) return 'switch';
+  return 'none';
+}
+const REACH_MARK = { now: '', switch: ' ↻', none: ' ✕' };
+const modelLabel = m => (isCloud(m) ? '☁ ' : '') + m + REACH_MARK[modelReach(m)];
+const modelTitle = m => ({ now: '', switch: t('erst nach Umschalten: der Router hält den OpenAI-Server an und der Standby-Ollama übernimmt (1–3 min)'),
+                           none: t('kein Knoten kann dieses Modell gerade bedienen') })[modelReach(m)];
 
 function renderNodes() {
   const tb = $('#nodes tbody'); tb.innerHTML = '';
@@ -727,7 +741,7 @@ function expEditor(rname, kind, r) {
   const tip = t(kind === 'canary' ? 'Anteil der Anfragen läuft auf diesem Modell (auch kalt), Ergebnis geht an den Client - Kandidat mit echtem Verkehr messen'
     : 'Anteil der Anfragen läuft NACH der Antwort noch einmal auf diesem Modell; der Client merkt nichts, Tempo/Fehler/Usage (Client shadow) zeigen den Kandidaten');
   if (!v) return `<div class="exp"><span class="muted" title="${tip}">${label}</span><span><button class="small" onclick="CFG.roles['${esc(rname)}'].${kind}={model:allModels()[0],num_ctx:8192,percent:10};dirty=true;renderRoles()">${t('+ einrichten')}</button></span><span></span><span></span></div>`;
-  const opts = allModels().map(m => `<option value="${esc(m)}" ${m === v.model ? 'selected' : ''}>${esc(modelLabel(m))}</option>`).join('');
+  const opts = allModels().map(m => `<option value="${esc(m)}" title="${esc(modelTitle(m))}" ${m === v.model ? 'selected' : ''}>${esc(modelLabel(m))}</option>`).join('');
   return `<div class="exp"><span class="muted" title="${tip}">${label}</span>
     <select onchange="CFG.roles['${esc(rname)}'].${kind}.model=this.value;dirty=true">${opts}</select>
     <input type="number" value="${v.num_ctx}" step="1024" min="1024" title="num_ctx" onchange="CFG.roles['${esc(rname)}'].${kind}.num_ctx=+this.value;dirty=true">
@@ -737,7 +751,7 @@ function expEditor(rname, kind, r) {
 
 function renderRoles() {
   const box = $('#roles'); box.innerHTML = '';
-  const opts = sel => allModels().map(m => `<option value="${esc(m)}" ${m === sel ? 'selected' : ''}>${esc(modelLabel(m))}</option>`).join('');
+  const opts = sel => allModels().map(m => `<option value="${esc(m)}" title="${esc(modelTitle(m))}" ${m === sel ? 'selected' : ''}>${esc(modelLabel(m))}</option>`).join('');
   const capsEff = STATE.capabilities_effective || {};
   for (const [rname, r] of Object.entries(CFG.roles)) {
     const caps = r.tiers.map(t => capsEff[t.model] || STATE.capabilities[t.model]);
@@ -768,7 +782,7 @@ function renderRoles() {
   }
   $('#exposeConcrete').checked = !!CFG.expose_concrete_models;
   const sel = $('#tryModel'); const cur = sel.value;
-  sel.innerHTML = Object.keys(CFG.roles).map(r => `<option value="${esc(r)}:latest">${t('Rolle')} ${esc(r)}</option>`).join('') + allModels().filter(m => !isCloud(m)).map(m => `<option>${esc(m)}</option>`).join('');
+  sel.innerHTML = Object.keys(CFG.roles).map(r => `<option value="${esc(r)}:latest">${t('Rolle')} ${esc(r)}</option>`).join('') + allModels().filter(m => !isCloud(m)).map(m => `<option value="${esc(m)}" title="${esc(modelTitle(m))}">${esc(modelLabel(m))}</option>`).join('');
   if (cur) sel.value = cur;
   const cc = STATE.cloud_config || {}; const cls = $('#tryClass'); const curc = cls.value;
   cls.innerHTML = `<option value="">${t('Datenklasse')}: Default (${esc(cc.default_data_class || 'personal')})</option>` + (cc.data_classes || []).map(d => `<option value="${esc(d)}">${t('Datenklasse')}: ${esc(d)}</option>`).join('');

@@ -79,6 +79,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	if cfg.Tunnel.UpstreamAPI == upstreamOpenAI {
 		a.hb.upstream = "" // no Ollama version to report (heartbeat asks /api/version only with an upstream)
 	}
+	a.hb.standby = newStandbyStore(cfg) // nil without tunnel.upstream_fallback
 	if a.ollamaUp.Managed() {
 		log.Infof("ollama-update: Ollama is child %q in %s - router may trigger updates", a.ollamaUp.child, a.ollamaUp.dir)
 	}

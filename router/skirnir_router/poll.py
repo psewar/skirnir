@@ -576,6 +576,9 @@ def apply_heartbeat(node, b, now):
     node.hb_ts = now
     if node.power == "asleep":   # a heartbeat is the agent running again, even if its resume notice was lost
         note_power(node, "awake", now, "heartbeat")
+    sm = b.get("standby_models")   # Agent >= 0.25.0 with tunnel.upstream_fallback: the standby Ollama's model store
+    if isinstance(sm, list):
+        node.standby_models = {m for m in sm if isinstance(m, str) and m}
     fp = b.get("ollama_tls_sha256")
     if fp and node.tls and node.tls_mode == "auto" and str(fp).lower() != node.tls_fp:
         if node.set_fingerprint(fp):

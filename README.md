@@ -721,3 +721,12 @@ node as an Ollama node meanwhile: `busy_ok` models run during the game, anything
 the server's model, or prewarm once the node is free, releases the server; the agent lets running answers on the standby
 finish (at most two minutes), stops it, and only then starts the server, so the two never share the card. The standby is
 not updated by the router's Ollama update (it is not the agent's managed Ollama).
+
+**Switching to the standby for a request** (router 0.15.0, agent 0.25.0): the agent also reports the standby's models
+while the standby is stopped (heartbeat `standby_models`, read from its model store `OLLAMA_MODELS/manifests`). A request
+whose model only the standby has may then hold the server, as a concrete model or as a role tier: the node is a cold
+candidate with the penalty `modes.score.switch` (default 60), so any node that has the model without switching wins.
+The request waits until the standby serves, up to three minutes, and then runs as an ordinary Ollama request. Strata
+comes back the existing way: with the next request for its model, or through the residency check once the standby's
+model has been idle for `residency_idle_s`. The UI marks such models with ↻ in its model lists and models no node can
+serve with ✕.
