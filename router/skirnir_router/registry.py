@@ -148,6 +148,8 @@ def node_spec_from_entry(e):
         spec["gpu_guard"] = bool(pol["gpu_guard"])
     if facts.get("gpu"):
         spec["gpu"] = facts["gpu"]
+    if facts.get("upstream_api") == "openai":   # Agent fronts an OpenAI-compatible server (openai_node.py); else Ollama
+        spec["upstream_api"] = "openai"
     return spec
 
 

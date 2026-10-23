@@ -46,7 +46,7 @@ func TestOllamaWatcher(t *testing.T) {
 	f := &fakeOllama{}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
-	w := newOllamaWatcher(srv.URL, quietLogger())
+	w := newOllamaWatcher(srv.URL, upstreamOllama, quietLogger())
 	w.tagsEvery = 0 // each round also /api/tags
 	ctx := context.Background()
 	now := time.Now()
@@ -117,7 +117,7 @@ func TestOllamaWatcherDownFromStart(t *testing.T) {
 	f := &fakeOllama{down: true}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
-	w := newOllamaWatcher(srv.URL, quietLogger())
+	w := newOllamaWatcher(srv.URL, upstreamOllama, quietLogger())
 	for i := 0; i < 3; i++ {
 		w.poll(context.Background(), time.Now())
 	}
@@ -135,7 +135,7 @@ func TestOllamaWatcherDownFromStart(t *testing.T) {
 	if b, _ := json.Marshal(st); !st.Up || !strings.Contains(string(b), `"ps":[]`) || !strings.Contains(string(b), `"tags":[]`) {
 		t.Fatalf("nach dem Hochfahren up mit leeren Listen erwartet: %s", b)
 	}
-	if newOllamaWatcher("", quietLogger()) != nil {
+	if newOllamaWatcher("", upstreamOllama, quietLogger()) != nil {
 		t.Fatal("ohne Upstream kein Beobachter")
 	}
 }

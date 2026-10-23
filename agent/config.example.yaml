@@ -56,7 +56,11 @@ router:
 
 tunnel:                                         # ausgehende Verbindung zum Router (einziger Weg seit 0.9.1)
   upstream: http://127.0.0.1:11434              # lokales Ollama, das der Router durch den Tunnel aufruft
-  # routes:                                     # optional: weitere lokale Dienste nach Pfad; ohne routes geht alles an upstream
+  # upstream_api: openai                        # Standard ollama. openai = OpenAI-kompatibler Server statt Ollama (z. B. Strata):
+  #                                             #   upstream dann z. B. http://127.0.0.1:8080, Modelle kommen aus /v1/models,
+  #                                             #   der Router schickt Chats als /v1/chat/completions. Den Server als Kind
+  #                                             #   (children) eintragen und das Ollama-Kind abschalten: beide brauchen die GPU.
+  # routes:                                    # optional: weitere lokale Dienste nach Pfad; ohne routes geht alles an upstream
   #   - name: rerank                            #   Schluessel im Heartbeat-Feld routes: {rerank: {up, reason}}
   #     path: /rerank                           #   exakter Pfadvergleich (ohne Query)
   #     methods: [POST]                         #   andere Methoden beantwortet der Agent mit 405

@@ -34,7 +34,9 @@ def response_head(payload):
 
 class TunnelResponse:
     """Response of a tunnel stream. Provides what the router uses from aiohttp.ClientResponse:
-    status, headers, read()/text()/json(), `async for line in resp.content`, async-with."""
+    status, headers, read()/text()/json(), `async for line in resp.content`, `resp.content.iter_any()` /
+    `iter_chunked(n)`, async-with. The chunk iterators came with OpenAI-compatible nodes (cloud._sse reads with
+    iter_any); managed.lines and proxy._complete_unary read with iter_chunked."""
 
     def __init__(self, tunnel, sid, deadline):
         self.tunnel, self.sid, self.deadline = tunnel, sid, deadline
@@ -75,6 +77,21 @@ class TunnelResponse:
 
     async def text(self):
         return (await self.read()).decode("utf-8", errors="replace")
+
+    async def iter_any(self):
+        """Data as it arrives (aiohttp StreamReader.iter_any): what line iteration has buffered first, then each frame."""
+        if self.buf:
+            data, self.buf = self.buf, b""
+            yield data
+        while (c := await self._next()) is not None:
+            if c:
+                yield c
+
+    async def iter_chunked(self, n):
+        """Data in pieces of at most n bytes (aiohttp StreamReader.iter_chunked)."""
+        async for data in self.iter_any():
+            for i in range(0, len(data), n):
+                yield data[i:i + n]
 
     async def json(self, content_type=None):
         return json.loads(await self.read() or b"null")

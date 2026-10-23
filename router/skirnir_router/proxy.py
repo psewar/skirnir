@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import admission, auth, fallback_observation, cloud, decision, context_check, metrics, memory, managed, nodes, ops, perf, poll, scheduler, state, toolcall_rescue, wol
+from . import admission, auth, fallback_observation, cloud, decision, context_check, metrics, memory, managed, nodes, openai_node, ops, perf, poll, scheduler, state, toolcall_rescue, wol
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
 from .outcome import Problem, bad_gateway, failed
@@ -427,6 +427,8 @@ class _Relay:
                     return self.shape.error(403, "memory policy changed") if self.shape else ollama_error(403, "memory policy changed")
             if self.is_cloud:   # Stage 5: Provider instead of node
                 return await self._via_cloud()
+            if self.node.speaks_openai:   # node fronts an OpenAI-compatible server (openai_node.py)
+                return await self._via_openai_node()
             return await self._via_node()
         except (*UPSTREAM_ERRORS, ConnectionResetError) as e:  # exception-ok: network to the node/client mid-answer
             # Error after the first byte: nothing left to save, connection ends
@@ -752,6 +754,38 @@ class _Relay:
             return web.Response(status=200, body=self._finalize_json(result, force_model=True), content_type="application/json", headers=self.headers)
         return await self._cloud_stream(result, cinfo)
 
+    # -- OpenAI-compatible node (openai_node.py) --
+
+    async def _via_openai_node(self):
+        """Request to a node whose agent fronts an OpenAI-compatible server: translated like a cloud request, sent
+        through the tunnel. None = next candidate (node problem before the first byte, or a request this node does not
+        serve: managed turns and embeddings stay on Ollama nodes)."""
+        if self.managed_turn is not None or self.path not in openai_node.PATHS:
+            log.info("%s: %s %s not served by an OpenAI-compatible node -> next candidate", self.node.name, self.path,
+                     "managed turn" if self.managed_turn is not None else "request")
+            return None
+        try:
+            cinfo, result = await openai_node.run(self.node, self.path, self.out, self.model, self.stream)
+        except cloud.CloudError as e:  # exception-ok: the server's HTTP error, same channel as the cloud adapter (CloudError)
+            log.warning("%s: %s -> HTTP %s: %s", self.node.name, self.model, e.status, e)
+            if e.status == 404 or e.model_unavailable:
+                self.node.models.discard(self.model)   # server does not have the model (anymore); not a Breaker case
+                return None
+            if _failed_before_first_byte(e.status):
+                return self._fail("structured_error" if self.out.get("format") else "error", f"HTTP {e.status}")
+            self.outcome = "error"
+            return self._client_error(e.status, str(e))
+        except UPSTREAM_ERRORS as e:  # exception-ok: network/tunnel to the node
+            log.warning("node %s connect failed: %s", self.node.name, e)
+            return self._fail("timeout" if isinstance(e, asyncio.TimeoutError) else "error", f"connect: {type(e).__name__}")
+        if not self.stream:
+            if self.memory_capture is not None:
+                self.memory_capture.observe(result)
+            self.ptoks, self.ctoks = cinfo["p_tok"], cinfo["c_tok"]
+            self.outcome = "ok"
+            return web.Response(status=200, body=self._finalize_json(result, force_model=True), content_type="application/json", headers=self.headers)
+        return await self._cloud_stream(result, cinfo)
+
     async def _cloud_stream(self, chunks, cinfo):
         """cinfo fills cloud.run only during the stream (usage comes at the end) - read tokens only after write_eof."""
         resp = None
@@ -905,6 +939,10 @@ async def handle_show(request):
     if n is None:
         # last resort: node that last had the model, waking it is not worth it for /show
         return ollama_error(503, f"no online node holds '{model}'")
+    if n.speaks_openai:   # OpenAI-compatible server: no /api/show either - synthetic info from the catalog, as for cloud
+        return web.json_response({"capabilities": request_mod.effective_caps(model) or ["completion"],
+                                  "details": {"family": "openai-compatible", "node": n.name},
+                                  "model_info": {}, "modelfile": "", "parameters": ""})
     try:
         async with nodes.nreq(n, "post", "/api/show", json={"model": model, "verbose": bool(body.get("verbose", False))},
                               timeout=ClientTimeout(total=15)) as r:
