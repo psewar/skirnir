@@ -44,8 +44,12 @@ type TunnelCfg struct {
 	// UpstreamAPI: which API the upstream speaks. "ollama" (default) or "openai" for an OpenAI-compatible inference server
 	// (/v1/models, /v1/chat/completions) such as Strata. With "openai" the agent reports the server's models from
 	// /v1/models in the OLLAMA frame and tells the router in its facts, so the router sends chat requests in OpenAI form.
-	UpstreamAPI string     `yaml:"upstream_api"`
-	Routes      []RouteCfg `yaml:"routes"` // optional: additional local services by path (routes.go); empty = all to upstream
+	UpstreamAPI string `yaml:"upstream_api"`
+	// UpstreamChild: the child (children[].name) that runs an OpenAI-compatible upstream. With it the router may stop the
+	// server to free the GPU while the node is busy (a game) and start it again when the node is free (upstream_hold.go).
+	// An OpenAI server cannot unload its model the way Ollama does, so without this a busy node keeps the card full.
+	UpstreamChild string     `yaml:"upstream_child"`
+	Routes        []RouteCfg `yaml:"routes"` // optional: additional local services by path (routes.go); empty = all to upstream
 }
 
 // Values of tunnel.upstream_api.
@@ -337,6 +341,14 @@ func (c *Config) validate() error {
 			return fmt.Errorf("children: duplicate name %q", ch.Name)
 		}
 		seen[ch.Name] = true
+	}
+	if uc := c.Tunnel.UpstreamChild; uc != "" {
+		if c.Tunnel.UpstreamAPI != upstreamOpenAI {
+			return fmt.Errorf("tunnel.upstream_child needs tunnel.upstream_api: openai (Ollama unloads models itself)")
+		}
+		if !seen[uc] {
+			return fmt.Errorf("tunnel.upstream_child: %q is not a child (children[].name)", uc)
+		}
 	}
 	return validateRoutes(c.Tunnel.Routes)
 }

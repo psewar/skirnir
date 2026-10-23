@@ -34,6 +34,9 @@ type Facts struct {
 	// UpstreamAPI: "openai" when the upstream is an OpenAI-compatible server (tunnel.upstream_api); left out for Ollama, so
 	// a router that does not know the field sees the same facts as before.
 	UpstreamAPI string `json:"upstream_api,omitempty"`
+	// UpstreamRelease: the agent can stop and restart its OpenAI-compatible upstream on the router's order
+	// (tunnel.upstream_child, upstream_hold.go), so the router may free the GPU for a game.
+	UpstreamRelease bool `json:"upstream_release,omitempty"`
 }
 
 func collectFacts(ctx context.Context, routerURL, upstream, api string, gpu *GPU) Facts {

@@ -25,7 +25,21 @@ type OllamaState struct {
 	TS    int64             `json:"ts"`
 	Tags  []json.RawMessage `json:"tags"`
 	PS    []json.RawMessage `json:"ps"`
+	// UpstreamState (OpenAI-compatible upstream only, agent 0.22.0): "held" = stopped on the router's order to free the GPU,
+	// "starting" = started again (or at agent start) and not answering yet. Both come with up=true and nothing loaded:
+	// the node is there, its model is not. Empty = the server answers normally.
+	UpstreamState string `json:"upstream_state,omitempty"`
 }
+
+// Values of OllamaState.UpstreamState.
+const (
+	upstreamHeld     = "held"
+	upstreamStarting = "starting"
+)
+
+// upstreamStartGrace: how long a starting OpenAI-compatible server may not answer before it counts as down. A large model
+// takes about a minute to load (Strata, 2026-10-23: 25-60 s).
+const upstreamStartGrace = 3 * time.Minute
 
 // unsetKey: comparison key before the first response; psKey/rawKey never produce it (empty or lines with trailing newline).
 const unsetKey = "\x00unset"
@@ -47,6 +61,8 @@ type OllamaWatcher struct {
 	fails    int
 	psKey    string
 	tagsKey  string
+	held     bool      // upstream stopped on the router's order (SetHeld): no polling, state "held"
+	startEnd time.Time // until then a non-answering OpenAI upstream is "starting", not down
 }
 
 func newOllamaWatcher(upstream, api string, log *Logger) *OllamaWatcher {
@@ -63,8 +79,40 @@ func newOllamaWatcher(upstream, api string, log *Logger) *OllamaWatcher {
 		// An OpenAI-compatible server keeps its model loaded for as long as it runs, so its list changes rarely. A slower
 		// poll with a longer timeout keeps a server that is busy reading a long prompt from being reported unreachable.
 		w.every, w.client.Timeout = 5*time.Second, 10*time.Second
+		w.startEnd = time.Now().Add(upstreamStartGrace) // it starts with the agent and needs a while to load
 	}
 	return w
+}
+
+// SetHeld records that the OpenAI-compatible upstream was stopped (held) or started again (released) on the router's
+// order (upstream_hold.go). Held: reported at once as up with nothing loaded, state "held", and not polled. Released:
+// "starting" until the server answers, for at most upstreamStartGrace.
+func (w *OllamaWatcher) SetHeld(held bool, now time.Time) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.held = held
+	w.fails = 0
+	if held {
+		w.startEnd = time.Time{}
+		w.setUpstreamState(upstreamHeld)
+		return
+	}
+	w.startEnd = now.Add(upstreamStartGrace)
+	w.setUpstreamState(upstreamStarting)
+}
+
+// setUpstreamState: up with nothing loaded and the given state; a new revision only on a change. Caller holds w.mu.
+func (w *OllamaWatcher) setUpstreamState(s string) {
+	if w.have && w.st.Up && w.st.UpstreamState == s && len(w.st.PS) == 0 {
+		return
+	}
+	w.st.Up, w.st.Error, w.st.UpstreamState = true, "", s
+	w.st.PS, w.psKey = []json.RawMessage{}, unsetKey // the next real answer counts as a change
+	w.st.Rev++
+	w.have = true
 }
 
 // Run polls the local Ollama at the interval until ctx ends.
@@ -213,12 +261,23 @@ func rawKey(models []json.RawMessage) string {
 // poll: one request; Revision increases only on a real change (models, reachability).
 func (w *OllamaWatcher) poll(ctx context.Context, now time.Time) {
 	w.mu.Lock()
+	if w.held { // stopped on purpose (SetHeld): the state is already reported, there is nothing to ask
+		w.mu.Unlock()
+		return
+	}
 	// OpenAI-compatible: the one list carries both, so the installed models are taken on every poll.
 	needTags := !w.haveTags || now.Sub(w.lastTags) >= w.tagsEvery || w.api == upstreamOpenAI
 	w.mu.Unlock()
 	ps, tags, err := w.fetch(ctx, needTags)
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.held { // held while the request ran: keep "held"
+		return
+	}
+	if err != nil && now.Before(w.startEnd) {
+		w.setUpstreamState(upstreamStarting) // a starting server does not answer yet; that is not "down"
+		return
+	}
 	if err != nil {
 		w.fails++
 		if w.fails >= w.downAfter && (w.st.Up || !w.have) {
@@ -230,7 +289,8 @@ func (w *OllamaWatcher) poll(ctx context.Context, now time.Time) {
 		return
 	}
 	w.fails = 0
-	changed := !w.st.Up || !w.have
+	changed := !w.st.Up || !w.have || w.st.UpstreamState != ""
+	w.st.UpstreamState, w.startEnd = "", time.Time{} // answering: neither held nor starting any more
 	if k := psKey(ps); k != w.psKey {
 		w.psKey, w.st.PS, changed = k, ps, true
 	}

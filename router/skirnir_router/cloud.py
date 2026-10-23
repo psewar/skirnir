@@ -500,20 +500,13 @@ async def run(target, path, body, model, stream):
     kind = target.spec["kind"]
     t0 = time.time()
     timeout = ClientTimeout(total=float(target.spec.get("timeout_s", state.CFG.request_timeout_s)), sock_connect=10)
-    if path in ("/api/embed", "/api/embeddings"):
+    if path in EMBED_PATHS:
         if kind == "anthropic":
             raise CloudError(501, f"{target.provider}: no embeddings")  # exception-ok: same signal as a provider error (CloudError)
-        inp = body.get("input") if "input" in body else body.get("prompt")
-        req = {"model": model_id, "input": inp}
-        async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout) as r:
-            data = await r.read()
-            if r.status >= 400:
-                raise CloudError(r.status, *_err_info(data))  # exception-ok: provider HTTP error (CloudError)
-            j = json.loads(data)
-        embs = [d.get("embedding") for d in sorted(j.get("data") or [], key=lambda d: d.get("index", 0))]
-        p_tok = int((j.get("usage") or {}).get("prompt_tokens") or 0)
-        out = {"model": model, "embeddings": embs, "prompt_eval_count": p_tok, "total_duration": int((time.time() - t0) * 1e9), "load_duration": 0}
-        return {"p_tok": p_tok, "c_tok": 0, "finish": "stop"}, out
+
+        def post_embed(req):
+            return state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout)
+        return await openai_embed(post_embed, body, model, model_id)
 
     if kind != "anthropic":
         def post(req):
@@ -562,6 +555,25 @@ async def run(target, path, body, model, stream):
         yield _native_done(model, path, "", tcs, info["finish"], info["p_tok"], info["c_tok"], t0)
 
     return info, gen()
+
+
+EMBED_PATHS = ("/api/embed", "/api/embeddings")
+
+
+async def openai_embed(post, body, model, model_id):
+    """An Ollama embed request as OpenAI /embeddings, the answer in Ollama form. Shared like openai_exchange: `post(req)`
+    returns an async context manager with the response. Returns (info, answer); HTTP errors raise CloudError."""
+    t0 = time.time()
+    inp = body.get("input") if "input" in body else body.get("prompt")
+    async with post({"model": model_id, "input": inp}) as r:
+        data = await r.read()
+        if r.status >= 400:
+            raise CloudError(r.status, *_err_info(data))  # exception-ok: endpoint HTTP error (CloudError)
+        j = json.loads(data)
+    embs = [d.get("embedding") for d in sorted(j.get("data") or [], key=lambda d: d.get("index", 0))]
+    p_tok = int((j.get("usage") or {}).get("prompt_tokens") or 0)
+    out = {"model": model, "embeddings": embs, "prompt_eval_count": p_tok, "total_duration": int((time.time() - t0) * 1e9), "load_duration": 0}
+    return {"p_tok": p_tok, "c_tok": 0, "finish": "stop"}, out
 
 
 async def openai_exchange(post, path, body, model, model_id, stream, local_server=False):

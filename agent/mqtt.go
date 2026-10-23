@@ -28,6 +28,10 @@ type MQTTModule struct {
 	sup           *Supervisor
 	guard         *Guard // GPU-Schutz (guard.go), nil in Tests/Verben
 	http          *http.Client
+	// OpenAI-compatible upstream (tunnel.upstream_api: openai, 0.22.0): the Ollama entities come from the watcher's
+	// report instead of /api/ps and /api/show, which such a server does not have. nil = Ollama upstream.
+	upstream      *OllamaWatcher
+	upstreamChild string // tunnel.upstream_child: whose GPU memory the vram entity shows
 
 	mu        sync.Mutex
 	client    paho.Client
@@ -430,6 +434,54 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 	if hs.State == "busy" {
 		st["gaming_mode"] = "ON"
 	}
+	if m.upstream != nil {
+		m.openAIState(st)
+	} else {
+		m.ollamaState(ctx, st)
+	}
+	// STT exists only where an STT child process is configured; the port is the fallback if the service
+	// runs manually instead of via the supervisor. Without a child, the entity is omitted - and the port attempt too.
+	cs, hasChild := m.sup.Child(m.cfg.SttChild)
+	m.setApplies("stt", hasChild)
+	if hasChild && ((cs.Running && cs.Healthy) || portOpen(m.cfg.SttFallbackPort)) {
+		st["stt"] = "ON"
+	}
+	return st
+}
+
+// openAIState: the Ollama entities for a node whose upstream is an OpenAI-compatible server. The watcher's report
+// (from /v1/models) says what is loaded; "ollama" is ON only while the server answers (not while it is held for the
+// GPU or still starting). GPU memory is the upstream child's. The alias group does not apply: an alias is an Ollama
+// model name.
+func (m *MQTTModule) openAIState(st map[string]any) {
+	m.setApplies("alias", false)
+	snap, have := m.upstream.Snapshot()
+	if !have || !snap.Up || snap.UpstreamState != "" {
+		return
+	}
+	st["ollama"] = "ON"
+	names := make([]string, 0, len(snap.PS))
+	for _, raw := range snap.PS {
+		var e struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(raw, &e) == nil && e.Name != "" {
+			names = append(names, e.Name)
+		}
+	}
+	st["ollama_loaded"] = len(names)
+	if len(names) > 0 {
+		st["ollama_loaded_names"] = strings.Join(names, ", ")
+	}
+	if m.sup != nil && m.upstreamChild != "" {
+		if mib, ok := m.sup.childrenVRAM()[m.upstreamChild]; ok {
+			st["vram_used_mb"] = mib
+		}
+	}
+}
+
+// ollamaState: the Ollama entities from the local Ollama (/api/show for the alias, /api/ps for what is loaded).
+func (m *MQTTModule) ollamaState(ctx context.Context, st map[string]any) {
 	var show struct {
 		Details struct {
 			Family        string `json:"family"`
@@ -474,14 +526,6 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 			st["ollama_loaded_names"] = strings.Join(names, ", ")
 		}
 	}
-	// STT exists only where an STT child process is configured; the port is the fallback if the service
-	// runs manually instead of via the supervisor. Without a child, the entity is omitted - and the port attempt too.
-	cs, hasChild := m.sup.Child(m.cfg.SttChild)
-	m.setApplies("stt", hasChild)
-	if hasChild && ((cs.Running && cs.Healthy) || portOpen(m.cfg.SttFallbackPort)) {
-		st["stt"] = "ON"
-	}
-	return st
 }
 
 // sensorState: Additional sensors from the last GPU sample. The groups "gpu" and "gpuz" are created once they

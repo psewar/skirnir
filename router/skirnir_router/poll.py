@@ -96,7 +96,10 @@ def busy_unload_check(node, now):
     request that started before busy) is unloaded retroactively. Time-based (unload_on_busy_interval_s), hence also from
     tick_loop every second - ran after every poll until 0.3.8; with Ollama push, data would only arrive on change."""
     if node.state == "busy" and state.CFG.unload_on_busy and now - node.last_busy_unload >= state.CFG.unload_on_busy_interval_s:
-        big = [m for m, gib in node.loaded.items() if gib >= 0.5 and not any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models)]
+        if node.speaks_openai:   # sizes are 0 there (memory counts as agent child): every loaded model counts
+            big = openai_node.holdable(node) if node.upstream_releasable else []
+        else:
+            big = [m for m, gib in node.loaded.items() if gib >= 0.5 and not any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models)]
         if big:
             node.last_busy_unload = now
             log.info("node %s busy, but %s loaded -> unloading", node.name, ", ".join(big))
@@ -234,7 +237,11 @@ def game_needs_gpu(node):
 
 
 async def unload_big_models(node):
-    if node.speaks_openai:   # an OpenAI-compatible server cannot unload; a busy node is just not chosen
+    if node.speaks_openai:
+        # An OpenAI-compatible server cannot unload a model; the agent stops the whole server instead (openai_node.order).
+        # Not while a request runs on it: the next check (unload_on_busy_interval_s) tries again.
+        if openai_node.holdable(node) and not any(cnt > 0 for cnt in node.inflight_models.values()):
+            await openai_node.order(node, "hold", "busy")
         return
     for m, gib in list(node.loaded.items()):
         if any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models):
@@ -257,8 +264,6 @@ async def prewarm(node, delay, reason, since=None):
     Without this, 'warm first' would permanently stay on the small busy_ok model after a game phase.
     `since` = the transition to free for which this prewarm was planned. If a new transition occurred since (busy
     or offline in between), that one plans its own; this one is dropped. Previously, an old prewarm fired shortly after the next free."""
-    if node.speaks_openai:   # the server loads its model itself when it starts; there is no /api/generate to preload with
-        return
     if delay:
         await asyncio.sleep(delay)
     if since is not None and (node.free_at != since or node.state != "free"):
@@ -292,6 +297,11 @@ async def prewarm(node, delay, reason, since=None):
         # Agent >= 0.17.0: RAM is tight or a game is reported (e.g., still in game_sustain window) - no loading, as that
         # would further fill memory; only after the game ends and memory pressure subsides (no load-evict ping-pong)
         log.info("prewarm on %s skipped (%s): %s", node.name, reason, "memory pressure" if node.mem_pressure else "game running")
+        return
+    if node.speaks_openai:
+        # The server loads its own model when it starts; "prewarming" it = starting it again if it was stopped for the GPU.
+        if node.upstream_state == openai_node.HELD or (node.upstream_order == "hold" and not node.loaded):
+            await openai_node.order(node, "release", f"prewarm {reason}")
         return
     now = time.time()
     # Budget = card minus reserve minus what is truly foreign (desktop baseline + foreign VRAM); Ollama's own
@@ -360,6 +370,9 @@ def apply_ollama_push(node, msg, now):
             node.go_offline(f"Ollama not answering according to the agent: {node.ollama_push_error}")
         return
     node.ollama_push_error = None
+    # OpenAI-compatible upstream (agent >= 0.22.0): "held" = stopped to free the GPU, "starting" = loading again
+    us = msg.get("upstream_state")
+    node.upstream_state = us if us in (openai_node.HELD, openai_node.STARTING) else ""
     apply_ollama_state(node, _named(tags), _named(ps), now)
 
 

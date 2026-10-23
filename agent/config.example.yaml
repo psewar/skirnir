@@ -60,6 +60,9 @@ tunnel:                                         # ausgehende Verbindung zum Rout
   #                                             #   upstream dann z. B. http://127.0.0.1:8080, Modelle kommen aus /v1/models,
   #                                             #   der Router schickt Chats als /v1/chat/completions. Den Server als Kind
   #                                             #   (children) eintragen und das Ollama-Kind abschalten: beide brauchen die GPU.
+  # upstream_child: strata                      # nur mit upstream_api: openai - das Kind, das den Server betreibt. Dann haelt
+  #                                             #   der Router ihn an, wenn der Knoten busy wird (Spiel), und startet ihn
+  #                                             #   wieder, wenn er frei ist oder eine Anfrage das Modell braucht.
   # routes:                                    # optional: weitere lokale Dienste nach Pfad; ohne routes geht alles an upstream
   #   - name: rerank                            #   Schluessel im Heartbeat-Feld routes: {rerank: {up, reason}}
   #     path: /rerank                           #   exakter Pfadvergleich (ohne Query)

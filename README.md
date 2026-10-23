@@ -674,8 +674,15 @@ mixture-of-experts model from one GPU plus system RAM. The agent setting `tunnel
 points the tunnel at that server: the agent reports its models from `/v1/models` and says so in its facts. The router then
 sends chat and generate requests as `/v1/chat/completions` through the tunnel, translated the same way as a cloud request,
 so the answer reaches every client format, and it leaves out what only Ollama has: no `/api/show` (capabilities come from
-the catalog), no prewarm, no busy unload, no Ollama update. Run the server as an agent child (`children:`) and switch the
-Ollama child off, because both need the GPU. The server's GPU memory counts as the agent's own, so busy detection treats
-it like a loaded model; a busy node is skipped, not unloaded. The model goes into the catalog with `weights_gib` and its
-`capabilities`, and into a role tier like any local model. Not yet supported on such a node: embeddings and managed session
-turns, which stay on Ollama nodes. Router 0.10.0, agent 0.21.0.
+the catalog), no Ollama update. Run the server as an agent child (`children:`) and switch the Ollama child off, because
+both need the GPU. The server's GPU memory counts as the agent's own, so busy detection treats it like a loaded model. The
+model goes into the catalog with `weights_gib` and its `capabilities`, and into a role tier like any local model. Embeddings
+go to `/v1/embeddings` (a server without it is skipped for them), and managed session turns are served as on an Ollama
+node. Router 0.10.0, agent 0.21.0.
+
+**Freeing the GPU for a game** (router 0.11.0, agent 0.22.0): such a server cannot unload its model. With
+`tunnel.upstream_child` naming the child that runs it, the router stops the server when the node turns busy and starts it
+again when the node is free (where Ollama nodes are prewarmed) or when a request needs the model; that request waits until
+the model is loaded, up to three minutes. The agent reports the server as *held* or *starting* instead of unreachable, and
+its Home Assistant device takes loaded models and GPU memory from that report. Without `upstream_child` a busy node keeps
+its model and is only skipped.
