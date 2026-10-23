@@ -15,7 +15,7 @@ from aiohttp import ClientSession, web
 from aiohttp.test_utils import TestClient, TestServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "router"))
-from skirnir_router import app, cloud, config, memory, nodes, ops, proxy, state  # noqa: E402
+from skirnir_router import app, cloud, config, context_ops, memory, nodes, ops, proxy, state  # noqa: E402
 from skirnir_router.hindsight import endpoint_from_env  # noqa: E402
 from skirnir_router.outcome import failed  # noqa: E402
 from skirnir_router.memory_config import HindsightConfig, parse_client_memory, parse_hindsight, parse_memory_request  # noqa: E402
@@ -149,6 +149,8 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
         server.router.add_get("/v1/default/banks/{bank}/operations/{operation}", self.fake_operation)
         server.router.add_delete("/v1/default/banks/{bank}/documents/{document}", self.fake_delete)
         server.router.add_get("/v1/default/banks/{bank}/memories/list", self.fake_list)
+        server.router.add_get("/health", self.fake_health)
+        self.health_reply = (200, {"status": "healthy", "database": "connected"})
         self.list_units, self.list_queries = [], []   # memories/list: units served, and (bank, query string) per call
         self.operation_state = "completed"
         self.deleted_documents = []
@@ -225,6 +227,10 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
         start, limit = int(request.query.get("offset", 0)), int(request.query.get("limit", 100))
         return web.json_response({"items": self.list_units[start:start + limit], "total": len(self.list_units),
                                   "limit": limit, "offset": start})
+
+    async def fake_health(self, request):
+        status, body = self.health_reply
+        return web.json_response(body, status=status)
 
     async def fake_inference(self, request):
         data = await request.json()
@@ -521,6 +527,24 @@ class MemoryHttpTests(MemoryHarness):
         self.large_response, self.bad_json = False, True
         await self.assert_recall_unavailable(await self.call(), "unavailable:protocol")
         self.assertEqual(len(self.calls), 3)
+
+    async def test_status_probes_hindsight_health_without_client_traffic(self):
+        # 2026-10-23: the status stayed "unknown" for five hours after a router start because it was only inferred from client calls
+        api = self.client.server.app
+        self.assertTrue(self.service.client.healthy)   # the startup pass already probed, before any client call
+        self.assertEqual(self.calls, [])
+        await context_ops.poll(api)
+        self.assertEqual(context_ops.snapshot()["hindsight"], "available")
+        self.assertEqual(self.calls, [])   # the probe touches no bank
+        self.health_reply = (503, {"status": "unhealthy"})
+        await context_ops.poll(api)
+        self.assertEqual(context_ops.snapshot()["hindsight"], "unavailable")
+        self.health_reply = (200, {"status": "degraded"})
+        await context_ops.poll(api)
+        self.assertEqual(context_ops.snapshot()["hindsight"], "unavailable")
+        await self.hindsight.close()   # unreachable: the network boundary reports it as a state, never as an exception
+        await context_ops.poll(api)
+        self.assertEqual(context_ops.snapshot()["hindsight"], "unavailable")
 
     async def test_missing_bank_returns_empty_without_writes(self):
         self.failure_status = 404

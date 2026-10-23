@@ -87,6 +87,14 @@ class HindsightClient:
             return unavailable_as("protocol")
         return status, value
 
+    async def health(self):
+        """Ask Hindsight's own /health (no bank, no content) and record the answer in `healthy`. Without this probe
+        the status stayed "unknown" after a router start until a client happened to use the memory (2026-10-23:
+        five hours). Returns the recorded value."""
+        reply = await self._exchange("GET", self.endpoint + "/health", None, None, (200,))
+        self.healthy = not isinstance(reply, Problem) and reply[0] == 200 and reply[1].get("status") == "healthy"
+        return self.healthy
+
     async def post(self, bank, suffix, payload, *, missing_empty=False, authorize=None):
         started, outcome = time.monotonic(), "error"
         result = unavailable_as("unavailable")
