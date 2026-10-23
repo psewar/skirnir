@@ -181,6 +181,10 @@ class Node(Breaker):
         self.game_heavy = False
         self.game_heavy_why = ""      # Reason as fact for /admin/state and journal
         self.prewarm_after_game = False   # 0.8.8: Prewarm skipped due to game -> catch up when light/done
+        # 0.14.0: sleep as a fact from the agent (frame POWER, Agent >= 0.24.0). None = never reported (older agent,
+        # Linux, console mode); "asleep" from the suspend notice until the next resume notice or heartbeat.
+        self.power = None             # "asleep" | "awake" | None
+        self.power_since = None       # epoch seconds of the last change
         self.memory = None            # {"ram_available_gib", "commit_free_gib", ...} from agent
         self.routes = {}              # Agent tunnel routes besides Ollama: {"rerank": {"up": bool, "reason": str}}; empty = not reported
         self.mem_low_count = 0        # so many consecutive heartbeats below threshold
@@ -491,6 +495,7 @@ class Node(Breaker):
     def snapshot(self, now):
         return {
             "state": self.state, "busy_reason": self.busy_reason,
+            "power": self.power, "power_since": self.power_since,
             "models": sorted(self.models), "loaded": {k: round(v, 2) for k, v in self.loaded.items()},
             "ram_spill_gib": {k: round(v, 2) for k, v in self.ram_spill.items()},   # loaded models partly in system RAM
             "upstream": ({"api": "openai", "releasable": self.upstream_releasable, "state": self.upstream_state or "answering",

@@ -47,6 +47,7 @@ const (
 	tunHB     byte = 7
 	tunHBAck  byte = 8
 	tunOllama byte = 9
+	tunPower  byte = 10 // Agent -> Router: sleep/wake-up (power.go, 0.24.0); routers before 0.14.0 ignore it
 )
 
 // ollamaResync: how often the Ollama state is sent fully even without changes (Router keeps it fresh for 45 s).
@@ -79,6 +80,7 @@ type Tunnel struct {
 	requests  int
 	lastErr   string
 	hbEvery   time.Duration
+	lastPower *PowerEvent // latest sleep/wake-up, repeated at the start of each session (power.go)
 
 	wmu     sync.Mutex // gorilla allows only one writer at a time
 	smu     sync.Mutex
@@ -213,6 +215,7 @@ func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 	// Heartbeat through the Tunnel
 	hbCtx, hbCancel := context.WithCancel(ctx)
 	defer hbCancel()
+	t.replayPower(conn) // before the first heartbeat: the router then sees resume and the running agent in order
 	go t.heartbeatLoop(hbCtx, conn)
 	go t.ollamaLoop(hbCtx, conn)
 
@@ -479,13 +482,17 @@ func (t *Tunnel) methodNotAllowed(conn *websocket.Conn, sid uint32, rc RouteCfg)
 }
 
 func (t *Tunnel) write(conn *websocket.Conn, typ byte, sid uint32, payload []byte) error {
+	return t.writeWithin(conn, typ, sid, payload, 30*time.Second)
+}
+
+func (t *Tunnel) writeWithin(conn *websocket.Conn, typ byte, sid uint32, payload []byte, within time.Duration) error {
 	frame := make([]byte, 5+len(payload))
 	frame[0] = typ
 	binary.BigEndian.PutUint32(frame[1:5], sid)
 	copy(frame[5:], payload)
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
-	_ = conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(within))
 	return conn.WriteMessage(websocket.BinaryMessage, frame)
 }
 

@@ -411,6 +411,10 @@ TLS and login at `http://127.0.0.1:21435/`.
 
 ## Home Assistant
 
+Home Assistant is optional. Without an `mqtt:` section, or without `paho-mqtt` installed, the router publishes nothing. Routing,
+the UI, `/admin/*`, `/metrics` and every fact the agents report work the same way: GPU, game, memory, sleep. The agent's own MQTT
+device is optional as well (`mqtt:` in the agent configuration).
+
 The router registers via MQTT discovery as the device **Skirnir**: sensors for nodes online/busy, available models, ready roles
 (attribute: which node and model would be chosen right now), requests and tokens today, cloud costs this month, last assignment,
 per node state / GPU utilisation / free VRAM, a `binary_sensor` **Problem** with attribute `problems` (no node online, role not
