@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import admission, auth, fallback_observation, cloud, decision, context_check, metrics, memory, managed, nodes, openai_node, ops, perf, poll, scheduler, state, toolcall_rescue, wol
+from . import admission, auth, fallback_observation, cloud, decision, context_check, metrics, memory, managed, nodes, openai_node, ops, perf, poll, privacy, scheduler, state, toolcall_rescue, wol
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
 from .outcome import Problem, bad_gateway, failed
@@ -735,8 +735,19 @@ class _Relay:
     async def _via_cloud(self):
         """Request to a cloud provider (cloud.run), response in Ollama format to the client. None = next candidate
         (provider error before first byte, Breaker counts it)."""
+        out = self.out
+        if self.req.cloud_privacy:   # personal data, the client opted into the content check (privacy.py)
+            if self.path in cloud.EMBED_PATHS:
+                return None   # embeddings have no user turn to judge and no answer to refuse with: stay local
+            verdict = await privacy.check(self.out, state.CFG.cloud["privacy_check"])
+            state.remember({"event": "privacy_check", "node": self.node.name, "model": self.model,
+                            "request_id": self.req.request_id, **verdict.journal()})
+            log.info("privacy check before %s: %s (%s)", self.node.name, verdict.result, verdict.by or "-")
+            if not verdict.allowed:
+                return await self._privacy_refusal()
+            out = verdict.body   # house context redacted
         try:
-            cinfo, result = await cloud.run(self.node, self.path, self.out, self.model, self.stream)
+            cinfo, result = await cloud.run(self.node, self.path, out, self.model, self.stream)
         except cloud.CloudError as e:  # exception-ok: provider HTTP error (raised in the stream generator too, see CloudError)
             log.warning("%s: %s -> HTTP %s: %s", self.node.name, self.model, e.status, e)
             self._fail("timeout" if e.status == 408 else "error", f"HTTP {e.status}")
@@ -753,6 +764,24 @@ class _Relay:
             self.outcome = "ok"
             return web.Response(status=200, body=self._finalize_json(result, force_model=True), content_type="application/json", headers=self.headers)
         return await self._cloud_stream(result, cinfo)
+
+    async def _privacy_refusal(self):
+        """The content check keeps the request local, and no local node can answer: the configured sentence becomes the
+        answer (a voice assistant speaks it) instead of an error. Nothing went to the provider."""
+        text = state.CFG.cloud["privacy_check"].refusal
+        j = {"model": self.exposed, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "done": True,
+             "done_reason": "stop", "prompt_eval_count": 0, "eval_count": 0}
+        if self.path == "/api/generate":
+            j["response"] = text
+        else:
+            j["message"] = {"role": "assistant", "content": text}
+        if not self.stream:
+            self.outcome = "ok"
+            return web.Response(status=200, body=self._finalize_json(j, force_model=True), content_type="application/json", headers=self.headers)
+
+        async def one():
+            yield j
+        return await self._cloud_stream(one(), {"p_tok": 0, "c_tok": 0})
 
     # -- OpenAI-compatible node (openai_node.py) --
 

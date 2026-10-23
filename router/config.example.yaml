@@ -107,6 +107,11 @@ router:
                                  #   default). Cloud nur bis einschliesslich dieser Klasse: mit den Vorgaben also nur, wenn der
                                  #   Client 'internal' oder 'public' deklariert (siehe README).
     credential_scan: block       # Prompts mit erkennbaren Schluesseln/Passwoertern gehen nie in die Cloud
+    privacy_check:               # Router 0.13.0 (privacy.py): Inhaltspruefung fuer Clients mit privacy_check: true
+      enabled: false             #   (deren Klasse sonst 'personal' ist). Regeln + Klassifikator (decision-embed POST /privacy),
+      endpoint: http://127.0.0.1:8082   # fail closed; erlaubt -> Werkzeugergebnisse geschwaerzt, sonst lokal + refusal als Antwort
+      terms: []                  #   eigene Begriffe (Namen der Familie, Orte), ganze Woerter
+      # redact_domains / redact_device_classes / redact_names / redact_tools / threshold / refusal: Vorgaben in privacy.py
     providers:
       openai:                    # Schluessel als OPENAI_API_KEY in secrets.env
         kind: openai

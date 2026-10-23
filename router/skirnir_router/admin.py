@@ -56,6 +56,15 @@ CLIENT_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 CLIENT_FIELDS = ("ip", "roles", "models", "requests_per_minute", "max_priority", "cloud", "data_class", "note")
 
 
+def _privacy_view(pc):
+    """router.cloud.privacy_check for /admin/state: settings and list sizes, not the operator's terms themselves."""
+    if pc is None:
+        return None
+    return {"enabled": pc.enabled, "endpoint": pc.endpoint, "threshold": pc.threshold, "terms": len(pc.terms),
+            "keywords": pc.keywords, "redact_domains": list(pc.redact_domains), "redact_device_classes": list(pc.redact_device_classes),
+            "redact_names": len(pc.redact_names), "redact_tools": list(pc.redact_tools)}
+
+
 def base_clients():
     return set(((state.CFG.base().get("router") or {}).get("client_auth") or {}).get("clients") or {})
 
@@ -74,7 +83,8 @@ def clients_view():
                      "token_rotated": (ov.get(name) or {}).get("token_rotated") or c.get("token_rotated"), "created": c.get("created"),
                      "ip": c.get("ip") or [], "roles": c.get("roles") or ["*"], "models": c.get("models", True),
                      "requests_per_minute": c.get("requests_per_minute"), "max_priority": c.get("max_priority"),
-                     "cloud": c.get("cloud", True), "data_class": c.get("data_class"), "note": c.get("note")}
+                     "cloud": c.get("cloud", True), "data_class": c.get("data_class"), "note": c.get("note"),
+                     "privacy_check": c.get("privacy_check") is True}   # config.yaml only (privacy.py), shown read-only
     return out
 
 
@@ -585,7 +595,8 @@ async def handle_state(request):
         "admission": admission.view(),
         "idempotency": ops.idem_view(),
         "cloud": cloud.view(),
-        "cloud_config": {k: v for k, v in state.CFG.cloud.items() if k != "providers"},
+        "cloud_config": {**{k: v for k, v in state.CFG.cloud.items() if k not in ("providers", "privacy_check")},
+                         "privacy_check": _privacy_view(state.CFG.cloud.get("privacy_check"))},
         "build": ops.build_info(),
         "supply_chain": ops.supply_chain(),
         "scheduler": {"score": state.CFG.score, "breaker": state.CFG.breaker, "admission": state.CFG.admission},

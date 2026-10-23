@@ -14,6 +14,7 @@ from .shared_config import parse_scopes
 from .context_config import ContextConfig, parse_context_config
 from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
+from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES, log, tls_fingerprint
 from .outcome import Problem, failed, invalid
@@ -70,9 +71,9 @@ SCHEMA = {
         "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
-                                          "cloud": None, "data_class": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
+                                          "cloud": None, "data_class": None, "privacy_check": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
-                  "egress_allow": None,
+                  "egress_allow": None, "privacy_check": dict.fromkeys(PRIVACY_FIELDS),
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
                                       "warn_at_percent": None, "region": None, "timeout_s": None, "max_inflight": None, "max_data_class": None}}},
         "openai": {"enabled": None, "default_think": None},
@@ -427,13 +428,20 @@ class Config:
                 return invalid(f"router.cloud.providers.{pname}.max_data_class must be one of the data classes {classes}")
             spec["enabled"] = bool(spec.get("enabled", True))
             providers[str(pname)] = spec
+        privacy = parse_privacy_config(cl.get("privacy_check"))
+        if failed(privacy):
+            return privacy
         self.cloud = {"enabled": bool(cl.get("enabled", _d("router.cloud.enabled"))), "data_classes": classes,
                       "default_data_class": cl.get("default_data_class", _d("router.cloud.default_data_class")),
                       "max_cloud_data_class": cl.get("max_cloud_data_class", _d("router.cloud.max_cloud_data_class")),
-                      "credential_scan": scan, "egress_allow": sorted(allow), "providers": providers}
+                      "credential_scan": scan, "egress_allow": sorted(allow), "providers": providers, "privacy_check": privacy}
         for cname, cspec in self.client_auth["clients"].items():
             if cspec.get("data_class") is not None and cspec["data_class"] not in classes:
                 return invalid(f"client_auth.clients.{cname}.data_class must be one of the data classes {classes}")
+            if cspec.get("privacy_check") is not None and type(cspec["privacy_check"]) is not bool:
+                return invalid(f"client_auth.clients.{cname}.privacy_check must be boolean")
+            if cspec.get("privacy_check") is True and not privacy.enabled:
+                return invalid(f"client_auth.clients.{cname}.privacy_check needs router.cloud.privacy_check.enabled: true")
 
     def _parse_wol(self, w):
         self.wol_wait_s = float(w.get("wait_up_s", _d("router.wol.wait_up_s")))

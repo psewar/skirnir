@@ -133,6 +133,7 @@ class Routing:
         self.data_class = None
         self.data_class_effective = None
         self.cloud_block = None    # Reason why this request cannot go to the cloud (applies to all cloud tiers)
+        self.cloud_privacy = False   # personal data class, client opted into the content check (privacy.py) before a cloud tier
         self.session = None
         self.memory_context = None
         self.memory_items = []

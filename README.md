@@ -341,6 +341,17 @@ Limits (`router.cloud`):
 - **Data classes as a declaration**, not a content classifier: `routing.data_class`, else `clients.<c>.data_class`, else
   `default_data_class` (**personal**). Cloud only up to `max_cloud_data_class` (**internal**). Consequence: whoever declares nothing
   never goes to the cloud.
+- **Content check instead of a blanket block** (router 0.13.0, opt-in per client: `clients.<c>.privacy_check: true` and
+  `router.cloud.privacy_check.enabled: true`): for a client whose class is `personal` by default (not declared), the cloud tier
+  stays a candidate, and when it is actually chosen the request is checked: rules on what the user wrote (operator `terms`
+  such as family names, e-mail, phone, IBAN, AHV, street address, built-in keyword groups for health, finances, credentials,
+  relationships, law), then a classifier on the router host (decision-embed `POST /privacy`, e5-small plus a trained head,
+  a few ms). Above its threshold, on a rule hit, or when the classifier does not answer (fail closed) the request stays
+  local and gets the configured `refusal` sentence as its answer. Before an allowed request leaves, tool results are redacted:
+  Home Assistant live-context entries of `redact_domains` (person, device_tracker, todo, lock, camera, ...),
+  `redact_device_classes` (motion, presence, door, window, ...) and `redact_names`, and the whole result of `redact_tools`.
+  The journal records `privacy_check` with outcome, rule or probability and the number of redacted entries, never the text.
+  A declared `routing.data_class` is never overruled.
 - **Credential scan** (`block`): prompts with recognisable keys (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
   do not go to the cloud; locally they run normally.
 - **Budget** per provider and month in CHF; exhausted = the provider drops out as a tier, from `warn_at_percent` on a Home
