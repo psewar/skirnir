@@ -510,6 +510,11 @@ class Node(Breaker):
         return (self.can_switch_to_standby and self.upstream_serving != openai_node_serving_ollama
                 and model not in self.models and model in self.standby_models)
 
+    def server_inflight(self):
+        """0.16.4: requests running on the OpenAI-compatible server itself - not those waiting to switch to the standby
+        (their models are standby_switch models), which would otherwise wait for each other."""
+        return sum(c for m, c in self.inflight_models.items() if c > 0 and not self.standby_switch(m))
+
     def releases_server_for(self, model):
         """0.16.2: a request for the held server's model while the standby Ollama stands in. The release stops the
         standby with everything it has loaded before the server starts, and the server sizes itself to the card, so

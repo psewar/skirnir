@@ -730,6 +730,9 @@ The request waits until the standby serves, up to three minutes, and then runs a
 comes back the existing way: with the next request for its model, or through the residency check once the standby's
 model has been idle for `residency_idle_s`. The UI marks such models with ↻ in its model lists and models no node can
 serve with ✕.
+The hold stops the server at once, so since router 0.16.4 a switching request first waits until no answer is running on
+the server (an agent's tool calls leave such gaps), at most for its priority's wait budget (`modes.admission`). If no gap
+comes, it gets 503 with the reason code `server_busy` and `Retry-After` 30 s.
 
 **Only in a window or on request** (router 0.16.0, `modes.upstream_window`, off by default): such a server takes most of
 the card. With the window on, the router keeps it for the hours you set, for example 01:00 to 07:00 for unattended jobs at

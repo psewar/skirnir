@@ -91,11 +91,27 @@ async def ensure_loaded(node, model, timeout_s=START_WAIT_S):
     return False
 
 
+async def wait_for_server_gap(node, deadline):
+    """Router 0.16.4: wait until no request runs on the node's server (node.server_inflight) before holding it for the
+    standby. The hold stops the server at once and broke off running answers: on 2026-10-24 a memory write's request for
+    an Ollama model cut an overnight agent's stream after 5.8 s. True = gap, False = deadline or offline."""
+    while node.server_inflight():
+        if time.time() >= deadline or node.state == "offline":
+            return False
+        await asyncio.sleep(0.5)
+    return True
+
+
 async def ensure_standby(node, model, timeout_s=START_WAIT_S):
     """A request needs a model only the node's standby Ollama has (router 0.15.0, node.standby_switch): hold the server
     and wait until the agent reports the standby serving with the model listed. The way back is the existing one: a
     request for the server's model, or prewarm once the node is idle or free again, releases the server. False = not
     serving in time or the hold could not be sent (next candidate)."""
+    # 0.16.4: the hold stops the server at once; a request that started on it after the proxy found the gap would be
+    # broken off.
+    if not await wait_for_server_gap(node, time.time() + timeout_s):
+        log.info("node %s: server still answering %d request(s) - no hold for %s", node.name, node.server_inflight(), model)
+        return False
     if not await order(node, "hold", f"request {model}"):
         return False
     deadline = time.time() + timeout_s
