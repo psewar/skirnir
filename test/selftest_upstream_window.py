@@ -146,5 +146,44 @@ plain = nodes.Node("gpu-laptop", {"vram_total_gib": 16.0})
 window(inside=False)
 check("an Ollama-only node is never affected", openai_node.server_allowed(plain, time.time()))
 
+# 6) 0.16.1: after a window hold the standby is prewarmed once (it starts empty; prewarm on free/online and residency
+#    do not fire then, so the first request of the day loaded cold)
+PREWARMS = []
+real_prewarm = poll.prewarm
+
+
+async def fake_prewarm(node, delay, reason, since=None):
+    PREWARMS.append(reason)
+
+
+poll.prewarm = fake_prewarm
+window(inside=False)
+n = strata_node(serving_standby=True)
+PREWARMS.clear()
+run_check(n)
+run_check(n)
+check("outside, standby serves empty -> prewarm once, not every tick", PREWARMS == ["standby"], str(PREWARMS))
+n = strata_node(serving_standby=True)
+n.loaded = {OLLAMA_MODEL: 0.0}
+PREWARMS.clear()
+run_check(n)
+check("outside, a standby model is already loaded -> no prewarm", PREWARMS == [], str(PREWARMS))
+n = strata_node(serving_standby=True)
+n.loading = {OLLAMA_MODEL: (18.0, time.time() + 300)}
+PREWARMS.clear()
+run_check(n)
+check("outside, a request is loading a model (switch on request) -> no prewarm", PREWARMS == [], str(PREWARMS))
+n = strata_node(serving_standby=True)
+n.state = "busy"
+PREWARMS.clear()
+run_check(n)
+check("outside, node busy (game hold) -> no prewarm", PREWARMS == [], str(PREWARMS))
+window(inside=False, enabled=False)
+n = strata_node(serving_standby=True)
+PREWARMS.clear()
+run_check(n)
+check("window disabled -> no standby prewarm from the window check", PREWARMS == [], str(PREWARMS))
+poll.prewarm = real_prewarm
+
 print(f"\n{len(FAILS)} failures: {FAILS}")
 sys.exit(1 if FAILS else 0)
