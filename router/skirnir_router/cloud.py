@@ -169,7 +169,12 @@ def request_block_reason(req, body, client_name):
     dc = req.data_class or cc.get("data_class") or cfg.get("default_data_class", "personal")
     req.data_class_effective = dc
     if class_index(dc) > class_index(cfg.get("max_cloud_data_class", "internal")):
-        return f"data class {dc} > {cfg.get('max_cloud_data_class', 'internal')} (not cleared for the cloud)"
+        if dc == "personal" and not req.data_class and cc.get("privacy_check") is True:
+            # The client opted into the content check (privacy.py): the cloud tier stays a candidate, and the check
+            # decides when it is actually chosen. Never for a declared class or one above personal.
+            req.cloud_privacy = True
+        else:
+            return f"data class {dc} > {cfg.get('max_cloud_data_class', 'internal')} (not cleared for the cloud)"
     if cfg.get("credential_scan", "block") == "block":
         hit = scan_secrets(body)
         if hit:

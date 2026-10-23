@@ -3,6 +3,7 @@
 
     python server.py --model-dir models/e5-small [--mode mix|logreg|knn] [--port 8082] [--threads 4]
     POST /decide {"context": "...", "options": [...]}  ->  {"probabilities": {...}, "model": ..., "encoder": ..., "latency_ms": ...}
+    POST /privacy {"text": "..."}  ->  {"personal": p, "threshold": t, "model": ..., "latency_ms": ...}   (privacy.json, optional)
     GET  /health
 Runtime dependencies: numpy, onnxruntime, tokenizers only - no torch, no transformers, no network (model and head are in the folder).
 """
@@ -41,6 +42,13 @@ B = np.array(HEAD["logreg"]["bias"], dtype=np.float32)
 KV = np.array(HEAD["knn"]["vectors"], dtype=np.float32)
 KL = np.array(HEAD["knn"]["labels"])
 KK, KT = int(HEAD["knn"]["k"]), float(HEAD["knn"]["temperature"])
+PRIVACY_FILE = os.path.join(ARGS.model_dir, "privacy.json")
+PRIVACY = json.load(open(PRIVACY_FILE, encoding="utf-8")) if os.path.exists(PRIVACY_FILE) else None   # router privacy.py
+if PRIVACY is not None:
+    PW = np.array(PRIVACY["logreg"]["weights"], dtype=np.float32)
+    PB = np.array(PRIVACY["logreg"]["bias"], dtype=np.float32)
+    PV = np.array(PRIVACY["knn"]["vectors"], dtype=np.float32)
+    PL = np.array(PRIVACY["knn"]["labels"])
 LOCK = threading.Lock()
 STATS = {"decisions": 0, "errors": 0, "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
 
@@ -63,6 +71,18 @@ def head_probs(vec: np.ndarray) -> np.ndarray:
         p_knn[KL[j]] += wj
     p_knn /= p_knn.sum()
     return p_knn if MODE == "knn" else (p_lr + p_knn) / 2
+
+
+def privacy_probability(text: str) -> float:
+    """Probability that the text is personal: logistic regression and kNN on the same vector, mixed (train_privacy.py)."""
+    with LOCK:
+        vec = EMB.encode([text])[0]
+    p_lr = softmax(PW @ vec + PB)[1]
+    sims = PV @ vec
+    idx = np.argsort(-sims)[: int(PRIVACY["knn"]["k"])]
+    wgt = np.exp((sims[idx] - sims[idx].max()) / float(PRIVACY["knn"]["temperature"]))
+    p_knn = float(wgt[PL[idx] == 1].sum() / wgt.sum())
+    return float((p_lr + p_knn) / 2)
 
 
 def decide(context: str, options: list[str]) -> dict:
@@ -90,10 +110,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/health"):
             return self._send(200, {"ok": True, "model": HEAD["name"], "encoder": EMB.name, "onnx": EMB.file, "mode": MODE,
-                                    "classes": CLASSES, "n_train": HEAD.get("n_train"), "offline": True, **STATS})
+                                    "classes": CLASSES, "n_train": HEAD.get("n_train"), "offline": True,
+                                    "privacy": None if PRIVACY is None else {"model": PRIVACY["name"], "threshold": PRIVACY["threshold"],
+                                                                             "n_train": PRIVACY.get("n_train")}, **STATS})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path == "/privacy":
+            return self._privacy()
         if self.path != "/decide":
             return self._send(404, {"error": "not found"})
         try:
@@ -111,6 +135,24 @@ class Handler(BaseHTTPRequestHandler):
             STATS["errors"] += 1
             self._send(500, {"error": f"{type(e).__name__}: {e}"})
 
+
+    def _privacy(self):
+        if PRIVACY is None:
+            return self._send(404, {"error": "no privacy head (privacy.json) in the model folder"})
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) or b"{}")
+            text = str(body.get("text") or "") if isinstance(body, dict) else ""
+            if not text.strip():
+                return self._send(400, {"error": "text erwartet"})
+            t0 = time.perf_counter()
+            p = privacy_probability(text[:4000])
+            STATS["privacy"] = STATS.get("privacy", 0) + 1
+            self._send(200, {"personal": round(p, 4), "threshold": PRIVACY["threshold"], "model": PRIVACY["name"],
+                             "latency_ms": round((time.perf_counter() - t0) * 1000, 2)})
+        except Exception as e:  # noqa: BLE001 - der Dienst darf an einer Anfrage nicht sterben
+            STATS["errors"] += 1
+            self._send(500, {"error": f"{type(e).__name__}: {e}"})
 
 if __name__ == "__main__":
     print(f"skirnir-embed: {HEAD['name']} ({EMB.file}, mode {MODE}) auf http://{ARGS.host}:{ARGS.port}", file=sys.stderr, flush=True)

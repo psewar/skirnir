@@ -329,6 +329,18 @@ Schranken (`router.cloud`):
 - **Datenklassen als Deklaration**, kein Inhaltsklassifikator: `routing.data_class`, sonst `clients.<c>.data_class`, sonst
   `default_data_class` (**personal**). Cloud nur bis `max_cloud_data_class` (**internal**). Folge: wer nichts deklariert, geht nie
   in die Cloud.
+- **Inhaltsprüfung statt Pauschalsperre** (Router 0.13.0, Opt-in je Client: `clients.<c>.privacy_check: true` und
+  `router.cloud.privacy_check.enabled: true`): Für einen Client, dessen Klasse ohne Deklaration `personal` ist, bleibt die
+  Cloud-Stufe Kandidat, und wenn sie wirklich gewählt wird, wird die Anfrage geprüft: Regeln auf dem, was der Nutzer
+  geschrieben hat (eigene `terms` wie Namen der Familie, E-Mail, Telefon, IBAN, AHV, Strassenadresse, eingebaute
+  Stichwortgruppen für Gesundheit, Finanzen, Zugangsdaten, Beziehungen, Recht), danach ein Klassifikator auf dem Router-Host
+  (decision-embed `POST /privacy`, e5-small mit trainiertem Kopf, wenige ms). Über seiner Schwelle, bei einem Regeltreffer
+  oder wenn der Klassifikator nicht antwortet (fail closed), bleibt die Anfrage lokal und bekommt den eingestellten Satz
+  `refusal` als Antwort. Bevor eine erlaubte Anfrage hinausgeht, werden Werkzeugergebnisse geschwärzt: Einträge des
+  Home-Assistant-Live-Kontexts aus `redact_domains` (person, device_tracker, todo, lock, camera, …),
+  `redact_device_classes` (motion, presence, door, window, …) und `redact_names`, und das ganze Ergebnis der `redact_tools`.
+  Das Journal hält `privacy_check` mit Ergebnis, Regel oder Wahrscheinlichkeit und Anzahl geschwärzter Einträge fest, nie
+  den Text. Eine deklarierte `routing.data_class` wird nie übergangen.
 - **Credential-Scan** (`block`): Prompts mit erkennbaren Schlüsseln (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
   gehen nicht in die Cloud; lokal laufen sie normal.
 - **Budget** je Anbieter und Monat in CHF; erschöpft = Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem.

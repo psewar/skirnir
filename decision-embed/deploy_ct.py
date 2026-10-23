@@ -20,7 +20,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 from deploy import connect, ct_exec, ct_push, run  # noqa: E402
 
 MODEL_DIR = os.path.join(HERE, "models", "e5-small")
-MODEL_FILES = ["model_quantized.onnx", "tokenizer.json", "config.json", "export.json", "head.json", "tokenizer_config.json", "special_tokens_map.json"]
+MODEL_FILES = ["model_quantized.onnx", "tokenizer.json", "config.json", "export.json", "head.json", "privacy.json", "tokenizer_config.json", "special_tokens_map.json"]
 CODE_FILES = ["server.py", "embedder.py", "Dockerfile", "compose.yaml"]
 REMOTE = "/opt/skirnir-embed"
 
