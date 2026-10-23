@@ -37,6 +37,9 @@ type Facts struct {
 	// UpstreamRelease: the agent can stop and restart its OpenAI-compatible upstream on the router's order
 	// (tunnel.upstream_child, upstream_hold.go), so the router may free the GPU for a game.
 	UpstreamRelease bool `json:"upstream_release,omitempty"`
+	// UpstreamFallback (0.23.0): while the upstream is held, a standby Ollama serves in its place (tunnel.upstream_fallback);
+	// the OLLAMA frame then says serving "ollama".
+	UpstreamFallback bool `json:"upstream_fallback,omitempty"`
 }
 
 func collectFacts(ctx context.Context, routerURL, upstream, api string, gpu *GPU) Facts {

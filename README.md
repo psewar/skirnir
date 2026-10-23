@@ -686,3 +686,23 @@ again when the node is free (where Ollama nodes are prewarmed) or when a request
 the model is loaded, up to three minutes. The agent reports the server as *held* or *starting* instead of unreachable, and
 its Home Assistant device takes loaded models and GPU memory from that report. Without `upstream_child` a busy node keeps
 its model and is only skipped.
+
+**Standby Ollama during a game** (router 0.12.0, agent 0.23.0): while the server is held, the node has nothing to serve,
+not even a small `busy_ok` model such as the voice assistant's. With `tunnel.upstream_fallback` the agent starts an Ollama
+child in its place once the server has stopped and sends the tunnel's requests there:
+
+```yaml
+tunnel:
+  upstream: http://127.0.0.1:8080
+  upstream_api: openai
+  upstream_child: strata
+  upstream_fallback:
+    child: ollama                      # an enabled Ollama child; the agent keeps it stopped until a hold
+    upstream: http://127.0.0.1:11434   # default
+```
+
+The agent reports Ollama's models (OLLAMA `serving: "ollama"`) together with the held server's, and the router treats the
+node as an Ollama node meanwhile: `busy_ok` models run during the game, anything else is unloaded as usual. A request for
+the server's model, or prewarm once the node is free, releases the server; the agent lets running answers on the standby
+finish (at most two minutes), stops it, and only then starts the server, so the two never share the card. The standby is
+not updated by the router's Ollama update (it is not the agent's managed Ollama).

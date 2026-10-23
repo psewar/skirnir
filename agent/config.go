@@ -48,8 +48,18 @@ type TunnelCfg struct {
 	// UpstreamChild: the child (children[].name) that runs an OpenAI-compatible upstream. With it the router may stop the
 	// server to free the GPU while the node is busy (a game) and start it again when the node is free (upstream_hold.go).
 	// An OpenAI server cannot unload its model the way Ollama does, so without this a busy node keeps the card full.
-	UpstreamChild string     `yaml:"upstream_child"`
-	Routes        []RouteCfg `yaml:"routes"` // optional: additional local services by path (routes.go); empty = all to upstream
+	UpstreamChild string `yaml:"upstream_child"`
+	// UpstreamFallback (agent 0.23.0): an Ollama child that serves while the upstream is held for a game. Without it the
+	// node has nothing to offer during a game; with it the small busy_ok models (voice assistant) keep running.
+	UpstreamFallback *FallbackCfg `yaml:"upstream_fallback"`
+	Routes           []RouteCfg   `yaml:"routes"` // optional: additional local services by path (routes.go); empty = all to upstream
+}
+
+// FallbackCfg: tunnel.upstream_fallback (upstream_hold.go). The child is stopped while the OpenAI-compatible upstream
+// runs and started while it is held, so the two never share the card.
+type FallbackCfg struct {
+	Child    string `yaml:"child"`    // children[].name of an Ollama child
+	Upstream string `yaml:"upstream"` // loopback URL of that Ollama, default http://127.0.0.1:11434
 }
 
 // Values of tunnel.upstream_api.
@@ -257,6 +267,12 @@ func (c *Config) applyDefaults() {
 	if c.Tunnel.UpstreamAPI == "" {
 		c.Tunnel.UpstreamAPI = upstreamOllama
 	}
+	if fb := c.Tunnel.UpstreamFallback; fb != nil {
+		if fb.Upstream == "" {
+			fb.Upstream = "http://127.0.0.1:11434"
+		}
+		fb.Upstream = strings.TrimRight(fb.Upstream, "/")
+	}
 	for i := range c.Tunnel.Routes {
 		r := &c.Tunnel.Routes[i]
 		r.Upstream = strings.TrimRight(r.Upstream, "/")
@@ -350,7 +366,44 @@ func (c *Config) validate() error {
 			return fmt.Errorf("tunnel.upstream_child: %q is not a child (children[].name)", uc)
 		}
 	}
+	if err := c.validateFallback(); err != nil {
+		return err
+	}
 	return validateRoutes(c.Tunnel.Routes)
+}
+
+// validateFallback: tunnel.upstream_fallback needs a held upstream to stand in for, an enabled Ollama child of its own
+// and a loopback URL.
+func (c *Config) validateFallback() error {
+	fb := c.Tunnel.UpstreamFallback
+	if fb == nil {
+		return nil
+	}
+	if c.Tunnel.UpstreamChild == "" {
+		return fmt.Errorf("tunnel.upstream_fallback needs tunnel.upstream_child (it serves while that child is held)")
+	}
+	if fb.Child == c.Tunnel.UpstreamChild {
+		return fmt.Errorf("tunnel.upstream_fallback.child: %q is the upstream child itself", fb.Child)
+	}
+	var spec *ChildSpec
+	for i := range c.Children {
+		if c.Children[i].Name == fb.Child {
+			spec = &c.Children[i]
+		}
+	}
+	if spec == nil {
+		return fmt.Errorf("tunnel.upstream_fallback.child: %q is not a child (children[].name)", fb.Child)
+	}
+	if !spec.on() {
+		return fmt.Errorf("tunnel.upstream_fallback.child: %q is disabled (enabled: false); the agent starts it only while the upstream is held", fb.Child)
+	}
+	if !isOllamaExe(spec.Cmd) {
+		return fmt.Errorf("tunnel.upstream_fallback.child: %q does not run ollama (cmd %q)", fb.Child, spec.Cmd)
+	}
+	if !loopbackUpstream(fb.Upstream) {
+		return fmt.Errorf("tunnel.upstream_fallback.upstream: %q is not a loopback URL (only http://127.0.0.1:<port> or http://[::1]:<port>)", fb.Upstream)
+	}
+	return nil
 }
 
 var (

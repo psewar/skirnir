@@ -83,7 +83,7 @@ def apply_ollama_state(node, tag_models, ps_models, now):
         if state.CFG.prewarm_on_online:
             state.spawn(prewarm(node, state.CFG.prewarm_online_delay, "online", since=node.free_at))
     for m in node.models:
-        if m not in state.CAPS and not node.speaks_openai:   # an OpenAI server has no /api/show: catalog capabilities apply
+        if m not in state.CAPS and not node.serves_openai(m):   # an OpenAI server has no /api/show: catalog capabilities apply
             state.CAPS[m] = None   # in progress, no double fetch
             state.spawn(fetch_caps(node, m))
     node.note_loaded_changed(now)
@@ -298,9 +298,11 @@ async def prewarm(node, delay, reason, since=None):
         # would further fill memory; only after the game ends and memory pressure subsides (no load-evict ping-pong)
         log.info("prewarm on %s skipped (%s): %s", node.name, reason, "memory pressure" if node.mem_pressure else "game running")
         return
-    if node.speaks_openai:
+    if node.openai_upstream:
         # The server loads its own model when it starts; "prewarming" it = starting it again if it was stopped for the GPU.
-        if node.upstream_state == openai_node.HELD or (node.upstream_order == "hold" and not node.loaded):
+        # Also while the standby Ollama stands in: the release stops the standby; nothing is to be loaded into it.
+        if node.upstream_state == openai_node.HELD or (
+                node.upstream_order == "hold" and not any(node.serves_openai(m) for m in node.loaded)):
             await openai_node.order(node, "release", f"prewarm {reason}")
         return
     now = time.time()
@@ -373,6 +375,14 @@ def apply_ollama_push(node, msg, now):
     # OpenAI-compatible upstream (agent >= 0.22.0): "held" = stopped to free the GPU, "starting" = loading again
     us = msg.get("upstream_state")
     node.upstream_state = us if us in (openai_node.HELD, openai_node.STARTING) else ""
+    # Standby Ollama in place of the held server (agent >= 0.23.0): until the release the node is an Ollama node
+    serving = openai_node.SERVING_OLLAMA if msg.get("serving") == openai_node.SERVING_OLLAMA else ""
+    if serving != node.upstream_serving:
+        log.info("node %s: %s", node.name, "standby Ollama serves while the server is held" if serving
+                 else "standby Ollama no longer serves")
+        state.remember({"event": "upstream_standby", "node": node.name, "serving": serving or None})
+        state.MQTT_DIRTY.append(True)
+    node.upstream_serving = serving
     apply_ollama_state(node, _named(tags), _named(ps), now)
 
 

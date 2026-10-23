@@ -19,6 +19,11 @@ What the router does differently for such a node:
   takes the next candidate and the node keeps its chat model (Strata 0.1.46 has no embeddings).
 - Managed session turns are served too (router 0.11.0): the translated chunks are native Ollama chunks, so the proxy
   captures and commits them as on an Ollama node. Cloud tiers stay excluded from managed turns (data class, not technique).
+- Standby Ollama (router 0.12.0, agent 0.23.0, agent fact upstream_fallback): while the server is held, the agent can run
+  an Ollama in its place. The OLLAMA frame then says serving "ollama" and lists Ollama's models plus the held server's
+  (digest "openai:<id>"). The node is an Ollama node meanwhile (`speaks_openai` false: poll, unload and busy_ok models as
+  usual); only a request for the server's model goes the OpenAI way (`serves_openai`) and releases it, and prewarm
+  releases it instead of loading anything into the standby. The agent stops the standby before the server starts.
 """
 
 import asyncio
@@ -35,6 +40,7 @@ CHAT_PATH = "/v1/chat/completions"
 EMBED_PATH = "/v1/embeddings"
 MODELS_PATH = "/v1/models"
 HELD, STARTING = "held", "starting"      # agent report OLLAMA.upstream_state
+SERVING_OLLAMA = nodes.openai_node_serving_ollama   # agent report OLLAMA.serving: the standby Ollama stands in (agent 0.23.0)
 START_WAIT_S = 180   # how long a request waits for a released server; a large model loads in ~25-60 s (Strata, 2026-10-23)
 
 

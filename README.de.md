@@ -686,3 +686,25 @@ ihn wieder, wenn der Knoten frei ist (dort, wo Ollama-Knoten vorgeladen werden) 
 Anfrage wartet, bis das Modell geladen ist, höchstens drei Minuten. Der Agent meldet den Server als *angehalten* oder
 *startend* statt als nicht erreichbar, und sein Home-Assistant-Gerät nimmt geladene Modelle und Grafikspeicher aus dieser
 Meldung. Ohne `upstream_child` behält ein busy Knoten sein Modell und wird nur übersprungen.
+
+**Ersatz-Ollama während eines Spiels** (Router 0.12.0, Agent 0.23.0): Solange der Server angehalten ist, hat der Knoten
+nichts anzubieten, nicht einmal ein kleines `busy_ok`-Modell wie das des Sprachassistenten. Mit `tunnel.upstream_fallback`
+startet der Agent an seiner Stelle ein Ollama-Kind, sobald der Server gestoppt ist, und schickt die Anfragen des Tunnels
+dorthin:
+
+```yaml
+tunnel:
+  upstream: http://127.0.0.1:8080
+  upstream_api: openai
+  upstream_child: strata
+  upstream_fallback:
+    child: ollama                      # ein eingeschaltetes Ollama-Kind; der Agent hält es bis zum Anhalten gestoppt
+    upstream: http://127.0.0.1:11434   # Standard
+```
+
+Der Agent meldet die Modelle von Ollama (OLLAMA `serving: "ollama"`) zusammen mit denen des angehaltenen Servers, und der
+Router behandelt den Knoten so lange als Ollama-Knoten: `busy_ok`-Modelle laufen während des Spiels, alles andere wird wie
+üblich entladen. Eine Anfrage für das Modell des Servers oder das Vorladen, sobald der Knoten frei ist, gibt den Server
+wieder frei; der Agent lässt laufende Antworten auf dem Ersatz fertig laufen (höchstens zwei Minuten), stoppt ihn und
+startet erst dann den Server, sodass sich beide nie die Karte teilen. Das Ollama-Update des Routers lässt den Ersatz aus
+(er ist nicht das vom Agent verwaltete Ollama).

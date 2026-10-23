@@ -95,6 +95,9 @@ class Breaker:
         self.breaker, self.breaker_fails, self.breaker_until = "closed", [], 0.0
 
 
+openai_node_serving_ollama = "ollama"   # OLLAMA frame serving (agent tunnel.upstream_fallback); openai_node.SERVING_OLLAMA
+
+
 class Node(Breaker):
     is_cloud = False   # CloudTarget (cloud.py) returns True; Proxy/Ops distinguish by this, no getattr needed
 
@@ -136,9 +139,12 @@ class Node(Breaker):
         self.reg = None     # Eintrag im Knotenregister (nodes.json)
         self.gpu = spec.get("gpu", "")
         # The agent fronts an OpenAI-compatible server instead of Ollama (agent fact upstream_api, openai_node.py)
-        self.speaks_openai = spec.get("upstream_api") == "openai"
+        self.openai_upstream = spec.get("upstream_api") == "openai"
         # ... and can stop/start it on order to free the GPU (agent fact upstream_release, agent >= 0.22.0)
         self.upstream_releasable = spec.get("upstream_releasable") is True
+        # ... and runs a standby Ollama while it is held (agent fact upstream_fallback, agent >= 0.23.0)
+        self.upstream_fallback = spec.get("upstream_fallback") is True
+        self.upstream_serving = ""    # agent report: "ollama" = the standby Ollama serves in place of the held server
         self.upstream_state = ""      # agent report: "held" (stopped for the GPU), "starting", "" = answering
         self.upstream_order = ""      # last order sent: "hold" / "release" (openai_node.order)
         # Ollama-Sicht
@@ -384,8 +390,9 @@ class Node(Breaker):
         self.weight = int(spec.get("weight", self.weight))
         if spec.get("gpu"):
             self.gpu = spec["gpu"]
-        self.speaks_openai = spec.get("upstream_api") == "openai"   # agent may switch between Ollama and an OpenAI server
+        self.openai_upstream = spec.get("upstream_api") == "openai"   # agent may switch between Ollama and an OpenAI server
         self.upstream_releasable = spec.get("upstream_releasable") is True
+        self.upstream_fallback = spec.get("upstream_fallback") is True
         if spec.get("foreign_vram_baseline_gib") is not None:
             self.foreign_baseline_gib = float(spec["foreign_vram_baseline_gib"])
         self.max_inflight = int(spec["max_inflight"]) if spec.get("max_inflight") else None
@@ -467,13 +474,28 @@ class Node(Breaker):
             return self.vram_free_gib + self.ollama_vram_gib() - reserve
         return self.vram_total_gib - reserve
 
+    @property
+    def speaks_openai(self):
+        """The tunnel reaches an OpenAI-compatible server now - not while the standby Ollama stands in for it (then the
+        node is an Ollama node until the router releases the server, openai_node.py)."""
+        return self.openai_upstream and self.upstream_serving != openai_node_serving_ollama
+
+    def serves_openai(self, model):
+        """Requests for this model go out in OpenAI form: the node's upstream is an OpenAI-compatible server and the model
+        is that server's. While the standby Ollama stands in, the server's models stay listed (digest "openai:<id>", so a
+        request can release it) and every other model is the standby's."""
+        if not self.speaks_openai:
+            return self.openai_upstream and (self.digest_of.get(model) or "").startswith("openai:")
+        return True
+
     def snapshot(self, now):
         return {
             "state": self.state, "busy_reason": self.busy_reason,
             "models": sorted(self.models), "loaded": {k: round(v, 2) for k, v in self.loaded.items()},
             "ram_spill_gib": {k: round(v, 2) for k, v in self.ram_spill.items()},   # loaded models partly in system RAM
             "upstream": ({"api": "openai", "releasable": self.upstream_releasable, "state": self.upstream_state or "answering",
-                          "last_order": self.upstream_order} if self.speaks_openai else None),
+                          "last_order": self.upstream_order, "fallback": self.upstream_fallback,
+                          "serving": self.upstream_serving or None} if self.openai_upstream else None),
             "last_gen": self.last_gen, "last_prompt": self.last_prompt,
             "inflight": self.inflight, "gpu_known": bool(self.gpu_known(now)),
             "gpu_util": self.gpu_util, "vram_free_gib": self.vram_free_gib,

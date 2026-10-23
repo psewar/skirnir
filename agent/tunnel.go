@@ -68,6 +68,7 @@ type Tunnel struct {
 	ollama         *OllamaWatcher          // lokaler Ollama-Zustand, geht als Rahmen OLLAMA raus (0.14.0); nil = Router pollt
 	ollamaKick     chan struct{}           // send fully immediately (Release: Router discards the frame beforehand)
 	routes         *Routes                 // tunnel.routes: Paths for other local services (routes.go); nil = everything to upstream
+	upSwitch       *upstreamSwitch         // tunnel.upstream_fallback: upstream or standby Ollama (upstream_hold.go, 0.23.0); nil = upstream
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -405,13 +406,17 @@ func (t *Tunnel) handle(ctx context.Context, conn *websocket.Conn, sid uint32, p
 		delete(t.streams, sid)
 		t.smu.Unlock()
 	}()
-	target := t.upstream
+	var target string
 	if rc, ok := t.routes.Lookup(head.Path); ok {
 		if !rc.allows(head.Method) {
 			t.methodNotAllowed(conn, sid, rc)
 			return
 		}
 		target = rc.Upstream
+	} else {
+		var done func()
+		target, done = t.upSwitch.acquire(t.upstream)
+		defer done()
 	}
 	req, err := http.NewRequestWithContext(rctx, head.Method, target+head.Path, bytes.NewReader(body))
 	if err != nil {

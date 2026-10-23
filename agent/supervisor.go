@@ -77,6 +77,9 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 	}
 	attempt := 0
 	for {
+		if !s.waitWhileHeld(ctx, sp.Name) { // held before it ever ran (Park: standby fallback, upstream_hold.go)
+			return
+		}
 		start := time.Now()
 		exitMsg, err := s.runOnce(ctx, sp, st, out)
 		if ctx.Err() != nil {
@@ -98,17 +101,10 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 			st.NextStart = time.Time{}
 		}
 		s.mu.Unlock()
-		if held { // Ollama update: paused until Release() - then restart immediately, without backoff
-			s.log.Infof("supervisor: %s stopped (update), waiting for release", sp.Name)
-			for s.isHeld(sp.Name) {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(300 * time.Millisecond):
-				}
-			}
+		if held { // Ollama update or upstream hold: paused until Release() - then restart immediately, without backoff
+			s.log.Infof("supervisor: %s stopped (held), waiting for release", sp.Name)
 			attempt = 0
-			continue
+			continue // waitWhileHeld at the top of the loop
 		}
 		if err != nil {
 			s.log.Warnf("supervisor: %s: %s, restart in %s", sp.Name, exitMsg, delay)
@@ -303,6 +299,39 @@ func (s *Supervisor) Release(name string) {
 		c.held = false
 	}
 	s.mu.Unlock()
+}
+
+// Park marks a child held before the supervisor starts it: it does not run until Release (the standby Ollama of
+// tunnel.upstream_fallback, which runs only while the upstream is held). Call before Run.
+func (s *Supervisor) Park(name string) {
+	s.mu.Lock()
+	if c, ok := s.children[name]; ok {
+		c.held = true
+	}
+	s.mu.Unlock()
+}
+
+// withoutChild: the specs except the named child.
+func withoutChild(specs []ChildSpec, name string) []ChildSpec {
+	out := make([]ChildSpec, 0, len(specs))
+	for _, sp := range specs {
+		if sp.Name != name {
+			out = append(out, sp)
+		}
+	}
+	return out
+}
+
+// waitWhileHeld blocks while the child is held; false = ctx ended.
+func (s *Supervisor) waitWhileHeld(ctx context.Context, name string) bool {
+	for s.isHeld(name) {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	return true
 }
 
 func (s *Supervisor) isHeld(name string) bool {
