@@ -33,6 +33,7 @@ type App struct {
 	updater  *Updater       // Selbst-Update (updater.go)
 	ollamaUp *OllamaUpdater // Ollama update via the router (ollamaupdate.go, 0.12.0)
 	ollamaW  *OllamaWatcher // Monitor and report Ollama status (ollamawatch.go, 0.14.0)
+	upHold   *upstreamHold  // Stop/start an OpenAI-compatible upstream on router order (upstream_hold.go, 0.22.0); nil = not configured
 	game     *GameWatch     // Spielerkennung (game.go, 0.17.0)
 	routes   *Routes        // Tunnel routes to other local services (routes.go); nil without tunnel.routes
 	rootCtx  context.Context
@@ -89,6 +90,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 		f.OllamaManaged = &m
 		f.OllamaPush = a.ollamaW != nil
 		f.OllamaSwapGate = a.ollamaUp.SwapGate()
+		f.UpstreamRelease = a.upHold != nil
 		return f
 	}
 	a.tunnel = newTunnel(cfg.Router.URL, cfg.Tunnel.Upstream, a.id, a.hb, facts, log)
@@ -98,6 +100,8 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.tunnel.onOllamaSwap = a.ollamaUp.Swap
 	a.ollamaW = newOllamaWatcher(cfg.Tunnel.Upstream, cfg.Tunnel.UpstreamAPI, log)
 	a.tunnel.ollama = a.ollamaW
+	a.upHold = newUpstreamHold(sup, cfg.Tunnel.UpstreamChild, a.ollamaW, log)
+	a.tunnel.onUpstream = a.upHold.Handle
 	a.routes = newRoutes(cfg.Tunnel.Routes, log)
 	a.tunnel.routes, a.hb.routes = a.routes, a.routes
 	if a.prov != nil && a.prov.HeartbeatIntervalS > 0 {

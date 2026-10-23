@@ -764,6 +764,10 @@ class _Relay:
             log.info("%s: %s %s not served by an OpenAI-compatible node -> next candidate", self.node.name, self.path,
                      "managed turn" if self.managed_turn is not None else "request")
             return None
+        if not self.warm and not await openai_node.ensure_loaded(self.node, self.model):
+            # server stopped for the GPU and could not be started (or not in time): not a fault of the node's server
+            log.info("%s: %s not loaded -> next candidate", self.node.name, self.model)
+            return None
         try:
             cinfo, result = await openai_node.run(self.node, self.path, self.out, self.model, self.stream)
         except cloud.CloudError as e:  # exception-ok: the server's HTTP error, same channel as the cloud adapter (CloudError)

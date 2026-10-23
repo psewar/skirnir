@@ -64,6 +64,7 @@ type Tunnel struct {
 	onUpdate       func(UpdateOrder)       // Task {"t":"update"} from Router
 	onOllamaUpdate func(OllamaUpdateOrder) // Task {"t":"ollama-update"} from Router (0.12.0)
 	onOllamaSwap   func(version string)    // Release {"t":"ollama-swap"} from Router (0.15.0)
+	onUpstream     func(hold bool)         // {"t":"upstream-hold"} / {"t":"upstream-release"} from Router (0.22.0, upstream_hold.go)
 	ollama         *OllamaWatcher          // lokaler Ollama-Zustand, geht als Rahmen OLLAMA raus (0.14.0); nil = Router pollt
 	ollamaKick     chan struct{}           // send fully immediately (Release: Router discards the frame beforehand)
 	routes         *Routes                 // tunnel.routes: Paths for other local services (routes.go); nil = everything to upstream
@@ -274,6 +275,12 @@ func (t *Tunnel) applyStatus(m ctlMsg) {
 	if m.T == "ollama-swap" {
 		if t.onOllamaSwap != nil {
 			t.onOllamaSwap(m.Version)
+		}
+		return
+	}
+	if m.T == "upstream-hold" || m.T == "upstream-release" {
+		if t.onUpstream != nil {
+			t.onUpstream(m.T == "upstream-hold")
 		}
 		return
 	}

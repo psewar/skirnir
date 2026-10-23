@@ -8,20 +8,67 @@ What the router does differently for such a node:
 - Chat and generate requests go to /v1/chat/completions through the tunnel, translated by the cloud adapter's OpenAI path
   (cloud.openai_exchange) - the answer reaches every client format (Ollama, /v1, Anthropic) as Ollama chunks, like a
   cloud answer does.
-- No Ollama-only calls: no /api/show (capabilities come from the catalog: models.<name>.capabilities), no prewarm and no
-  busy unload (the server holds its model for as long as it runs; a busy node is simply not chosen), no /api/version.
-- Not in this first version: embeddings and managed session turns. Managed turns persist native Ollama chunks and stay on
+- No Ollama-only calls: no /api/show (capabilities come from the catalog: models.<name>.capabilities), no /api/version,
+  no preloading or unloading through /api/generate.
+- Freeing the GPU (router 0.11.0, agent 0.22.0, agent fact upstream_release): the server cannot unload its model, so
+  when the node turns busy (a game) the router orders the agent to stop it ("hold"), and when the node is free again
+  (where Ollama nodes get their prewarm) or a request needs the model, it orders a start ("release"). The agent reports
+  the server's state as a fact (OLLAMA frame upstream_state: held / starting). Without the fact a busy node keeps its
+  model and is merely skipped.
+- Not in this version: embeddings and managed session turns. Managed turns persist native Ollama chunks and stay on
   Ollama nodes, like they stay off cloud tiers (managed.ManagedTurn.target).
 """
+
+import asyncio
+import time
 
 from aiohttp import ClientTimeout
 
 from . import cloud, nodes, state
+from .common import log
 
 API = "openai"
 PATHS = ("/api/chat", "/api/generate")   # what an OpenAI-compatible node serves; embeddings stay on Ollama nodes
 CHAT_PATH = "/v1/chat/completions"
 MODELS_PATH = "/v1/models"
+HELD, STARTING = "held", "starting"      # agent report OLLAMA.upstream_state
+START_WAIT_S = 180   # how long a request waits for a released server; a large model loads in ~25-60 s (Strata, 2026-10-23)
+
+
+async def order(node, what, reason):
+    """Send "hold" or "release" to the node's agent. False if this node cannot (no tunnel, agent without the fact
+    upstream_release). The agent ignores a repeated order, so sending again while its report lags is harmless."""
+    if not node.upstream_releasable or node.tunnel is None:
+        return False
+    from .registry import send_ctl   # registry imports poll, which imports this module
+    await send_ctl(node.tunnel, {"t": f"upstream-{what}"})
+    node.upstream_order = what
+    log.info("node %s: upstream-%s (%s)", node.name, what, reason)
+    state.remember({"event": f"upstream_{what}", "node": node.name, "reason": reason})
+    return True
+
+
+def holdable(node):
+    """Loaded models the busy node should give up: everything except busy_ok models (those may stay during a game)."""
+    return [m for m in node.loaded if not any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models)]
+
+
+async def ensure_loaded(node, model, timeout_s=START_WAIT_S):
+    """A request needs the model of a held or starting server: release it if needed and wait until the agent reports the
+    model loaded - the way Ollama loads a model on the first request. False = not loaded in time (next candidate)."""
+    if node.is_loaded(model):
+        return True
+    if node.upstream_state != STARTING and not await order(node, "release", "request"):
+        return False   # cannot be started by the router: nothing to wait for
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if node.is_loaded(model):
+            return True
+        if node.state == "offline":
+            return False
+        await asyncio.sleep(1)
+    log.warning("node %s: %s not loaded %d s after release", node.name, model, timeout_s)
+    return False
 
 
 def models_to_ollama(data):

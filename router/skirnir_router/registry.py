@@ -150,6 +150,8 @@ def node_spec_from_entry(e):
         spec["gpu"] = facts["gpu"]
     if facts.get("upstream_api") == "openai":   # Agent fronts an OpenAI-compatible server (openai_node.py); else Ollama
         spec["upstream_api"] = "openai"
+        if facts.get("upstream_release") is True:   # ... and can stop/start it on order (agent >= 0.22.0)
+            spec["upstream_releasable"] = True
     return spec
 
 

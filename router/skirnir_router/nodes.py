@@ -137,6 +137,10 @@ class Node(Breaker):
         self.gpu = spec.get("gpu", "")
         # The agent fronts an OpenAI-compatible server instead of Ollama (agent fact upstream_api, openai_node.py)
         self.speaks_openai = spec.get("upstream_api") == "openai"
+        # ... and can stop/start it on order to free the GPU (agent fact upstream_release, agent >= 0.22.0)
+        self.upstream_releasable = spec.get("upstream_releasable") is True
+        self.upstream_state = ""      # agent report: "held" (stopped for the GPU), "starting", "" = answering
+        self.upstream_order = ""      # last order sent: "hold" / "release" (openai_node.order)
         # Ollama-Sicht
         self.models = set()
         self.last_known_models = set()
@@ -381,6 +385,7 @@ class Node(Breaker):
         if spec.get("gpu"):
             self.gpu = spec["gpu"]
         self.speaks_openai = spec.get("upstream_api") == "openai"   # agent may switch between Ollama and an OpenAI server
+        self.upstream_releasable = spec.get("upstream_releasable") is True
         if spec.get("foreign_vram_baseline_gib") is not None:
             self.foreign_baseline_gib = float(spec["foreign_vram_baseline_gib"])
         self.max_inflight = int(spec["max_inflight"]) if spec.get("max_inflight") else None
@@ -467,6 +472,8 @@ class Node(Breaker):
             "state": self.state, "busy_reason": self.busy_reason,
             "models": sorted(self.models), "loaded": {k: round(v, 2) for k, v in self.loaded.items()},
             "ram_spill_gib": {k: round(v, 2) for k, v in self.ram_spill.items()},   # loaded models partly in system RAM
+            "upstream": ({"api": "openai", "releasable": self.upstream_releasable, "state": self.upstream_state or "answering",
+                          "last_order": self.upstream_order} if self.speaks_openai else None),
             "last_gen": self.last_gen, "last_prompt": self.last_prompt,
             "inflight": self.inflight, "gpu_known": bool(self.gpu_known(now)),
             "gpu_util": self.gpu_util, "vram_free_gib": self.vram_free_gib,
