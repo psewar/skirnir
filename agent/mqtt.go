@@ -452,26 +452,35 @@ func (m *MQTTModule) collect(ctx context.Context) map[string]any {
 // openAIState: the Ollama entities for a node whose upstream is an OpenAI-compatible server. The watcher's report
 // (from /v1/models) says what is loaded; "ollama" is ON only while the server answers (not while it is held for the
 // GPU or still starting). GPU memory is the upstream child's. The alias group does not apply: an alias is an Ollama
-// model name.
+// model name. While the standby Ollama stands in for the held server (serving "ollama", 0.23.0), the entities show the
+// standby: ON, its loaded models, and its GPU memory as Ollama reports it (size_vram).
 func (m *MQTTModule) openAIState(st map[string]any) {
 	m.setApplies("alias", false)
 	snap, have := m.upstream.Snapshot()
-	if !have || !snap.Up || snap.UpstreamState != "" {
+	standby := snap.Serving == servingOllama
+	if !have || !snap.Up || (snap.UpstreamState != "" && !standby) {
 		return
 	}
 	st["ollama"] = "ON"
 	names := make([]string, 0, len(snap.PS))
+	var vram int64
 	for _, raw := range snap.PS {
 		var e struct {
-			Name string `json:"name"`
+			Name     string `json:"name"`
+			SizeVRAM int64  `json:"size_vram"`
 		}
 		if json.Unmarshal(raw, &e) == nil && e.Name != "" {
 			names = append(names, e.Name)
+			vram += e.SizeVRAM
 		}
 	}
 	st["ollama_loaded"] = len(names)
 	if len(names) > 0 {
 		st["ollama_loaded_names"] = strings.Join(names, ", ")
+	}
+	if standby {
+		st["vram_used_mb"] = vram >> 20
+		return
 	}
 	if m.sup != nil && m.upstreamChild != "" {
 		if mib, ok := m.sup.childrenVRAM()[m.upstreamChild]; ok {

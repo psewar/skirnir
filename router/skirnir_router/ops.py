@@ -143,7 +143,7 @@ async def run_shadow(role, s, body, primary_node, request_id):
         if node.is_cloud:   # Shadow runs cost money in the cloud - intentionally not
             state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": node.name, "status": "cloud_skipped", "request_id": request_id})
             return
-        if node.speaks_openai:   # shadow runs post native Ollama requests; an OpenAI-compatible node does not take them
+        if node.serves_openai(s["model"]):   # shadow runs post native Ollama requests; an OpenAI-compatible server does not take them
             state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": node.name, "status": "openai_node_skipped", "request_id": request_id})
             return
         out = dict(body)

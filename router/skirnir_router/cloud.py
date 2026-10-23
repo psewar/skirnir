@@ -48,6 +48,9 @@ class CloudTarget(Breaker):
 
     is_cloud = True
     speaks_openai = False  # a node attribute (openai_node.py); the cloud path is chosen by is_cloud first
+
+    def serves_openai(self, model):   # node method (nodes.Node.serves_openai); a cloud target is never an OpenAI node
+        return False
     guard_policy = False   # no GPU guard in the cloud (scheduler.score does not check further)
 
     def __init__(self, provider, spec):

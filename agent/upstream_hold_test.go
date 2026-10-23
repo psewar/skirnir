@@ -66,7 +66,7 @@ func TestWatcherHeldAndStarting(t *testing.T) {
 func TestUpstreamHoldOrders(t *testing.T) {
 	sup := &Supervisor{children: map[string]*childState{}} // no child running: Hold reports "not stopped"
 	w := newOllamaWatcher("http://127.0.0.1:9", upstreamOpenAI, quietLogger())
-	u := newUpstreamHold(sup, "strata", w, quietLogger())
+	u := newUpstreamHold(sup, "strata", nil, nil, w, quietLogger())
 	now := time.Now()
 	u.apply(true, now)
 	st, _ := w.Snapshot()
@@ -82,7 +82,7 @@ func TestUpstreamHoldOrders(t *testing.T) {
 	if st, _ = w.Snapshot(); u.held || st.UpstreamState != upstreamStarting {
 		t.Fatalf("release: %v %+v", u.held, st)
 	}
-	if newUpstreamHold(sup, "", w, quietLogger()) != nil {
+	if newUpstreamHold(sup, "", nil, nil, w, quietLogger()) != nil {
 		t.Fatal("no child configured -> no hold handler (fact upstream_release stays false)")
 	}
 }

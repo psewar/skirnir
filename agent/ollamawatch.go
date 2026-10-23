@@ -29,6 +29,10 @@ type OllamaState struct {
 	// "starting" = started again (or at agent start) and not answering yet. Both come with up=true and nothing loaded:
 	// the node is there, its model is not. Empty = the server answers normally.
 	UpstreamState string `json:"upstream_state,omitempty"`
+	// Serving (agent 0.23.0, tunnel.upstream_fallback): "ollama" while the upstream is held and the standby Ollama answers
+	// in its place. Then tags/ps are Ollama's (sizes as Ollama reports them) plus the held upstream's models in tags, so
+	// the router can still release it for a request. Empty = the upstream serves (or nothing does while held).
+	Serving string `json:"serving,omitempty"`
 }
 
 // Values of OllamaState.UpstreamState.
@@ -36,6 +40,13 @@ const (
 	upstreamHeld     = "held"
 	upstreamStarting = "starting"
 )
+
+// servingOllama: value of OllamaState.Serving while the standby Ollama stands in for the held upstream.
+const servingOllama = "ollama"
+
+// fallbackStartGrace: how long a freshly started standby Ollama may not answer before the watcher counts failures.
+// Ollama answers within seconds; it loads models only on request.
+const fallbackStartGrace = time.Minute
 
 // upstreamStartGrace: how long a starting OpenAI-compatible server may not answer before it counts as down. A large model
 // takes about a minute to load (Strata, 2026-10-23: 25-60 s).
@@ -63,6 +74,14 @@ type OllamaWatcher struct {
 	tagsKey  string
 	held     bool      // upstream stopped on the router's order (SetHeld): no polling, state "held"
 	startEnd time.Time // until then a non-answering OpenAI upstream is "starting", not down
+
+	fallback  string            // standby Ollama (tunnel.upstream_fallback.upstream) while it stands in
+	fbOn      bool              // standby Ollama started (SetFallback): polled instead of the held upstream
+	fbEnd     time.Time         // until then a non-answering standby Ollama is still starting
+	fbFails   int               // consecutive failures of the standby Ollama
+	heldTags  []json.RawMessage // the upstream's models at the hold, reported with the standby's so the router can release it
+	fbPSKey   string
+	fbTagsKey string
 }
 
 func newOllamaWatcher(upstream, api string, log *Logger) *OllamaWatcher {
@@ -97,17 +116,36 @@ func (w *OllamaWatcher) SetHeld(held bool, now time.Time) {
 	w.fails = 0
 	if held {
 		w.startEnd = time.Time{}
+		if w.st.Serving == "" {
+			w.heldTags = w.st.Tags
+		}
 		w.setUpstreamState(upstreamHeld)
 		return
 	}
+	w.fbOn = false
 	w.startEnd = now.Add(upstreamStartGrace)
 	w.setUpstreamState(upstreamStarting)
 }
 
+// SetFallback records that the standby Ollama at base was started in place of the held upstream: from now on the
+// watcher polls it and reports its models (state "held", serving "ollama" once it answers). Call after SetHeld(true).
+func (w *OllamaWatcher) SetFallback(base string, now time.Time) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.fallback, w.fbOn, w.fbEnd, w.fbFails = strings.TrimRight(base, "/"), true, now.Add(fallbackStartGrace), 0
+	w.fbPSKey, w.fbTagsKey = unsetKey, unsetKey
+}
+
 // setUpstreamState: up with nothing loaded and the given state; a new revision only on a change. Caller holds w.mu.
 func (w *OllamaWatcher) setUpstreamState(s string) {
-	if w.have && w.st.Up && w.st.UpstreamState == s && len(w.st.PS) == 0 {
+	if w.have && w.st.Up && w.st.UpstreamState == s && len(w.st.PS) == 0 && w.st.Serving == "" {
 		return
+	}
+	if w.st.Serving != "" { // the standby's models leave with it; the upstream's stay known
+		w.st.Tags, w.st.Serving, w.tagsKey = w.heldTags, "", unsetKey
 	}
 	w.st.Up, w.st.Error, w.st.UpstreamState = true, "", s
 	w.st.PS, w.psKey = []json.RawMessage{}, unsetKey // the next real answer counts as a change
@@ -137,9 +175,9 @@ func (w *OllamaWatcher) Snapshot() (OllamaState, bool) {
 	return w.st, w.have
 }
 
-// getJSON decodes the JSON answer of a GET on the upstream into v.
-func (w *OllamaWatcher) getJSON(ctx context.Context, path string, v any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.upstream+path, nil)
+// getJSON decodes the JSON answer of a GET on base (the upstream or the standby Ollama) into v.
+func (w *OllamaWatcher) getJSON(ctx context.Context, base, path string, v any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
 		return err
 	}
@@ -159,11 +197,11 @@ func (w *OllamaWatcher) getJSON(ctx context.Context, path string, v any) error {
 }
 
 // get returns the `models` list from an Ollama response.
-func (w *OllamaWatcher) get(ctx context.Context, path string) ([]json.RawMessage, error) {
+func (w *OllamaWatcher) get(ctx context.Context, base, path string) ([]json.RawMessage, error) {
 	var v struct {
 		Models []json.RawMessage `json:"models"`
 	}
-	if err := w.getJSON(ctx, path, &v); err != nil {
+	if err := w.getJSON(ctx, base, path, &v); err != nil {
 		return nil, err
 	}
 	if v.Models == nil {
@@ -218,15 +256,20 @@ func (w *OllamaWatcher) fetch(ctx context.Context, needTags bool) (ps, tags []js
 		var v struct {
 			Data []openAIModel `json:"data"`
 		}
-		if err := w.getJSON(ctx, "/v1/models", &v); err != nil {
+		if err := w.getJSON(ctx, w.upstream, "/v1/models", &v); err != nil {
 			return nil, nil, err
 		}
 		tags, ps = openAIEntries(v.Data)
 		return ps, tags, nil
 	}
-	ps, err = w.get(ctx, "/api/ps")
+	return w.fetchOllama(ctx, w.upstream, needTags)
+}
+
+// fetchOllama: /api/ps and, with needTags, /api/tags of the Ollama at base.
+func (w *OllamaWatcher) fetchOllama(ctx context.Context, base string, needTags bool) (ps, tags []json.RawMessage, err error) {
+	ps, err = w.get(ctx, base, "/api/ps")
 	if err == nil && needTags {
-		tags, err = w.get(ctx, "/api/tags")
+		tags, err = w.get(ctx, base, "/api/tags")
 	}
 	return ps, tags, err
 }
@@ -261,6 +304,11 @@ func rawKey(models []json.RawMessage) string {
 // poll: one request; Revision increases only on a real change (models, reachability).
 func (w *OllamaWatcher) poll(ctx context.Context, now time.Time) {
 	w.mu.Lock()
+	if w.held && w.fbOn { // the standby Ollama stands in: it is what there is to ask
+		w.mu.Unlock()
+		w.pollFallback(ctx, now)
+		return
+	}
 	if w.held { // stopped on purpose (SetHeld): the state is already reported, there is nothing to ask
 		w.mu.Unlock()
 		return
@@ -308,4 +356,55 @@ func (w *OllamaWatcher) poll(ctx context.Context, now time.Time) {
 		w.st.Rev++
 		w.have = true
 	}
+}
+
+// pollFallback: the upstream is held and the standby Ollama runs in its place. Its models are reported with state
+// "held" and serving "ollama"; the held upstream's models stay in tags. A standby that does not answer is never
+// reported as down: the node is still there, only without a stand-in (serving empty), as with a plain hold.
+func (w *OllamaWatcher) pollFallback(ctx context.Context, now time.Time) {
+	w.mu.Lock()
+	base := w.fallback
+	w.mu.Unlock()
+	ps, tags, err := w.fetchOllama(ctx, base, true)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.held || !w.fbOn || w.fallback != base { // released while the request ran
+		return
+	}
+	if err != nil {
+		if now.Before(w.fbEnd) {
+			return // still starting
+		}
+		w.fbFails++
+		if w.fbFails < w.downAfter {
+			return
+		}
+		if w.st.Serving != "" {
+			w.st.Serving, w.st.Tags, w.st.PS = "", w.heldTags, []json.RawMessage{}
+			w.fbPSKey, w.fbTagsKey = unsetKey, unsetKey
+			w.st.Rev++
+		}
+		if w.fbFails == w.downAfter {
+			w.log.Warnf("ollama-watch: standby Ollama not answering (%v); node held without a stand-in", err)
+		}
+		return
+	}
+	w.fbFails = 0
+	changed := w.st.Serving != servingOllama
+	if k := psKey(ps); k != w.fbPSKey {
+		w.fbPSKey, w.st.PS, changed = k, ps, true
+	}
+	if k := rawKey(tags); k != w.fbTagsKey {
+		w.fbTagsKey, changed = k, true
+	}
+	if !changed {
+		return
+	}
+	if w.st.Serving != servingOllama {
+		w.log.Infof("ollama-watch: standby Ollama answering in place of the held upstream")
+	}
+	w.st.Tags = append(append([]json.RawMessage{}, tags...), w.heldTags...)
+	w.st.Up, w.st.Error, w.st.UpstreamState, w.st.Serving = true, "", upstreamHeld, servingOllama
+	w.st.Rev++
+	w.have = true
 }

@@ -152,6 +152,8 @@ def node_spec_from_entry(e):
         spec["upstream_api"] = "openai"
         if facts.get("upstream_release") is True:   # ... and can stop/start it on order (agent >= 0.22.0)
             spec["upstream_releasable"] = True
+            if facts.get("upstream_fallback") is True:   # ... with a standby Ollama while it is held (agent >= 0.23.0)
+                spec["upstream_fallback"] = True
     return spec
 
 

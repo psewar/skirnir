@@ -427,7 +427,7 @@ class _Relay:
                     return self.shape.error(403, "memory policy changed") if self.shape else ollama_error(403, "memory policy changed")
             if self.is_cloud:   # Stage 5: Provider instead of node
                 return await self._via_cloud()
-            if self.node.speaks_openai:   # node fronts an OpenAI-compatible server (openai_node.py)
+            if self.node.serves_openai(self.model):   # model of an OpenAI-compatible server (openai_node.py)
                 return await self._via_openai_node()
             return await self._via_node()
         except (*UPSTREAM_ERRORS, ConnectionResetError) as e:  # exception-ok: network to the node/client mid-answer
@@ -964,7 +964,7 @@ async def handle_show(request):
     if n is None:
         # last resort: node that last had the model, waking it is not worth it for /show
         return ollama_error(503, f"no online node holds '{model}'")
-    if n.speaks_openai:   # OpenAI-compatible server: no /api/show either - synthetic info from the catalog, as for cloud
+    if n.serves_openai(model):   # OpenAI-compatible server: no /api/show either - synthetic info from the catalog, as for cloud
         return web.json_response({"capabilities": request_mod.effective_caps(model) or ["completion"],
                                   "details": {"family": "openai-compatible", "node": n.name},
                                   "model_info": {}, "modelfile": "", "parameters": ""})

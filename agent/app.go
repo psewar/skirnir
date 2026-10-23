@@ -64,7 +64,14 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.updater = newUpdater(cfg.Update, cfg.path, log)
 	a.hb.updater = a.updater
 	a.updater.Cleanup()
-	a.ollamaUp = newOllamaUpdater(cfg.OllamaUpdate, cfg.Children, sup, cfg.Tunnel.Upstream, log)
+	updSpecs := cfg.Children
+	if fb := cfg.Tunnel.UpstreamFallback; fb != nil {
+		// The standby Ollama runs only while the upstream is held: parked from the start, and not the updater's to stop
+		// and start (an update would start it next to the upstream and then check a version it cannot get).
+		sup.Park(fb.Child)
+		updSpecs = withoutChild(cfg.Children, fb.Child)
+	}
+	a.ollamaUp = newOllamaUpdater(cfg.OllamaUpdate, updSpecs, sup, cfg.Tunnel.Upstream, log)
 	a.hb.ollamaUp, a.hb.upstream = a.ollamaUp, cfg.Tunnel.Upstream
 	if cfg.Tunnel.UpstreamAPI == upstreamOpenAI {
 		a.hb.upstream = "" // no Ollama version to report (heartbeat asks /api/version only with an upstream)
@@ -91,6 +98,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 		f.OllamaPush = a.ollamaW != nil
 		f.OllamaSwapGate = a.ollamaUp.SwapGate()
 		f.UpstreamRelease = a.upHold != nil
+		f.UpstreamFallback = a.upHold != nil && a.upHold.fbChild != ""
 		return f
 	}
 	a.tunnel = newTunnel(cfg.Router.URL, cfg.Tunnel.Upstream, a.id, a.hb, facts, log)
@@ -100,7 +108,8 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.tunnel.onOllamaSwap = a.ollamaUp.Swap
 	a.ollamaW = newOllamaWatcher(cfg.Tunnel.Upstream, cfg.Tunnel.UpstreamAPI, log)
 	a.tunnel.ollama = a.ollamaW
-	a.upHold = newUpstreamHold(sup, cfg.Tunnel.UpstreamChild, a.ollamaW, log)
+	a.tunnel.upSwitch = newUpstreamSwitch(cfg.Tunnel.UpstreamFallback)
+	a.upHold = newUpstreamHold(sup, cfg.Tunnel.UpstreamChild, cfg.Tunnel.UpstreamFallback, a.tunnel.upSwitch, a.ollamaW, log)
 	a.tunnel.onUpstream = a.upHold.Handle
 	a.routes = newRoutes(cfg.Tunnel.Routes, log)
 	a.tunnel.routes, a.hb.routes = a.routes, a.routes

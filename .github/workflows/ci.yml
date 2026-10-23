@@ -53,6 +53,7 @@ jobs:
       - run: python test/selftest_slowness_signals.py
       - run: python test/selftest_openai_node.py
       - run: python test/selftest_openai_node_release.py
+      - run: python test/selftest_openai_node_standby.py
       - run: python test/integration_live_memory.py
       - run: python test/benchmark_context.py
       - name: Check added lines for common public-data leaks
