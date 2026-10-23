@@ -96,6 +96,7 @@ SCHEMA = {
         "agent_update": {"enabled": None, "canary": None, "canary_clean_h": None, "public_key": None},
         "ollama_update": {"enabled": None, "canary": None, "canary_clean_h": None, "window_start": None, "window_end": None,
                           "timezone": None, "check_interval_h": None, "release_url": None},
+        "upstream_window": {"enabled": None, "window_start": None, "window_end": None, "timezone": None, "idle_hold_s": None},
     },
     "models": {"*": {"weights_gib": None, "kv_gib_per_1k": None, "capabilities": None, "source": None, "note": None, "measured_at": None,
                      "measured_on": None, "vram_gib_8k": None, "vram_gib_32k": None, "partial_offload": None,
@@ -543,6 +544,21 @@ class Config:
             v = self.ollama_update[k]
             if v and not re.match(r"^\d{2}:\d{2}$", v):
                 return invalid(f"modes.ollama_update.{k}: HH:MM expected, not {v!r}")
+        # Router 0.16.0: OpenAI-compatible servers (Strata) only in a window or on request (poll.upstream_window_check)
+        uw = m.get("upstream_window") or {}
+        self.upstream_window = {"enabled": bool(uw.get("enabled", _d("modes.upstream_window.enabled"))),
+                                "window_start": str(uw.get("window_start", _d("modes.upstream_window.window_start")) or ""),
+                                "window_end": str(uw.get("window_end", _d("modes.upstream_window.window_end")) or ""),
+                                "timezone": str(uw.get("timezone", _d("modes.upstream_window.timezone")) or ""),
+                                "idle_hold_s": float(uw.get("idle_hold_s", _d("modes.upstream_window.idle_hold_s")))}
+        if self.upstream_window["timezone"]:
+            import zoneinfo
+            if zoneinfo.available_timezones() and self.upstream_window["timezone"] not in zoneinfo.available_timezones():
+                return invalid(f"modes.upstream_window.timezone: unknown time zone {self.upstream_window['timezone']!r}")
+        for k in ("window_start", "window_end"):
+            v = self.upstream_window[k]
+            if not re.match(r"^\d{2}:\d{2}$", v):
+                return invalid(f"modes.upstream_window.{k}: HH:MM expected, not {v!r}")
 
     def _parse_models(self, models):
         self.models = models

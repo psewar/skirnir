@@ -138,6 +138,21 @@ _e("modes.ollama_update.check_interval_h", "float", "Pruefung alle h", "wie oft 
 _e("modes.ollama_update.release_url", "str", "Release-Quelle", "GitHub-API des neuesten Releases (tag_name, assets, sha256sum.txt); der Agent laedt von seiner eigenen festen Quelle", G, "https://api.github.com/repos/ollama/ollama/releases/latest",
    label_en="Release source", help_en="GitHub API of the latest release (tag_name, assets, sha256sum.txt); the agent downloads from its own fixed source")
 
+G = "OpenAI-Server"   # Router 0.16.0: an OpenAI-compatible server (Strata) only in a window or on request
+_e("modes.upstream_window.enabled", "bool", "Nur im Fenster oder auf Anfrage",
+   "an = ausserhalb des Fensters haelt der Router einen ungenutzten OpenAI-Server an, der Standby-Ollama bedient; eine Anfrage an das Modell des Servers startet ihn trotzdem. Nur fuer Knoten mit upstream_fallback",
+   G, False, label_en="Only in the window or on request",
+   help_en="on = outside the window the router holds an unused OpenAI server and the standby Ollama serves; a request for the server's model still starts it. Only for nodes with upstream_fallback")
+_e("modes.upstream_window.window_start", "str", "Fenster von (HH:MM)", "darf ueber Mitternacht gehen", G, "01:00",
+   label_en="Window from (HH:MM)", help_en="may cross midnight")
+_e("modes.upstream_window.window_end", "str", "Fenster bis (HH:MM)", "z. B. 01:00 bis 07:00", G, "07:00",
+   label_en="Window to (HH:MM)", help_en="e.g. 01:00 to 07:00")
+_e("modes.upstream_window.timezone", "str", "Zeitzone des Fensters", "IANA-Name, z. B. Europe/Zurich; leer = Ortszeit des Routers", G, "",
+   label_en="Time zone of the window", help_en="IANA name, e.g. Europe/Zurich; empty = router local time")
+_e("modes.upstream_window.idle_hold_s", "float", "ausserhalb anhalten nach Leerlauf (s)",
+   "so lange muss das Modell des Servers ausserhalb des Fensters ungenutzt sein, bevor der Router ihn wieder anhaelt", G, 900, min=60, max=86400,
+   label_en="hold outside after idle (s)", help_en="the server's model must be unused this long outside the window before the router holds it again")
+
 G = "Busy-Erkennung"
 _e("modes.busy_enter.gpu_util_pct", "float", "GPU-Auslastung %", "ab hier gilt der Rechner als beschaeftigt (Spiel) ...", G, 40, min=0, max=100,
    label_en="GPU utilisation %", help_en="from here the machine counts as busy (game) ...")
@@ -250,12 +265,12 @@ _e(C + "data_class", "choice", "Datenklasse", "Deklaration fuer Anfragen ohne ro
 # Order in the Settings-Tab. Review 2026-09-25: Decision Engine, GPU guard and Agent-Update were missing here, their entries
 # were never visible in the UI (saving via API worked).
 GROUPS = ["Cloud", "Cloud-Anbieter", "Clients", "Scheduler", "Decision Engine", "Admission", "Circuit Breaker", "Busy-Erkennung", "Vorwaermen", "Anfragen & Limits",
-          "Knoten-Ueberwachung", "GPU-Schutz", "Agent-Update", "Ollama-Update", "Wake-on-LAN", "Client-Auth"]
+          "Knoten-Ueberwachung", "GPU-Schutz", "Agent-Update", "Ollama-Update", "OpenAI-Server", "Wake-on-LAN", "Client-Auth"]
 # English group names (view(lang="en")); covers GROUPS and all group-strings of the _e calls.
 GROUPS_EN = {"Cloud": "Cloud", "Cloud-Anbieter": "Cloud providers", "Clients": "Clients", "Decision Engine": "Decision engine", "Scheduler": "Scheduler",
              "Admission": "Admission", "Circuit Breaker": "Circuit breaker", "GPU-Schutz": "GPU guard", "Agent-Update": "Agent update", "Ollama-Update": "Ollama update",
              "Busy-Erkennung": "Busy detection", "Vorwaermen": "Prewarming", "Anfragen & Limits": "Requests & limits", "Knoten-Ueberwachung": "Node monitoring",
-             "Wake-on-LAN": "Wake-on-LAN", "Client-Auth": "Client auth"}
+             "Wake-on-LAN": "Wake-on-LAN", "Client-Auth": "Client auth", "OpenAI-Server": "OpenAI server"}
 
 _KEEP_ALIVE = re.compile(r"^-?\d+(\.\d+)?[smh]?$")
 

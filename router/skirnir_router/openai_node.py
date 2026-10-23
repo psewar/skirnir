@@ -57,6 +57,17 @@ async def order(node, what, reason):
     return True
 
 
+def server_allowed(node, now):
+    """Router 0.16.0: may the node's OpenAI-compatible server run on its own (prewarm, release after a game, the night
+    window)? Always without modes.upstream_window; with it only inside the window. A request for the server's model starts
+    it at any time (ensure_loaded), and upstream_window_check holds it again once it is idle outside the window."""
+    w = state.CFG.upstream_window
+    if not w["enabled"] or not node.can_switch_to_standby:
+        return True
+    from .ollamaupdate import in_window   # same window semantics as the Ollama update (HH:MM, across midnight, timezone)
+    return in_window(w, now)
+
+
 def holdable(node):
     """Loaded models the busy node should give up: everything except busy_ok models (those may stay during a game)."""
     return [m for m in node.loaded if not any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models)]

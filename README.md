@@ -730,3 +730,12 @@ The request waits until the standby serves, up to three minutes, and then runs a
 comes back the existing way: with the next request for its model, or through the residency check once the standby's
 model has been idle for `residency_idle_s`. The UI marks such models with ↻ in its model lists and models no node can
 serve with ✕.
+
+**Only in a window or on request** (router 0.16.0, `modes.upstream_window`, off by default): such a server takes most of
+the card. With the window on, the router keeps it for the hours you set, for example 01:00 to 07:00 for unattended jobs at
+night. During the day the standby Ollama serves and is prewarmed like any Ollama node.
+- Outside the window, a request for the server's model, for instance through a role of its own, still starts it.
+- Outside the window, a server that has been idle for `idle_hold_s` (default 900 s) is held again. Prewarm, residency and
+  the end of a game no longer bring it back.
+- Inside the window, a held server is released once the node is free and the standby has been idle for the same time, so a
+  deliberate standby request at night does not switch back and forth.
