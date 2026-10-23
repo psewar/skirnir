@@ -410,6 +410,7 @@ def apply_ollama_push(node, msg, now):
                  else "standby Ollama no longer serves")
         state.remember({"event": "upstream_standby", "node": node.name, "serving": serving or None})
         state.MQTT_DIRTY.append(True)
+        node.standby_prewarmed = False
     node.upstream_serving = serving
     apply_ollama_state(node, _named(tags), _named(ps), now)
 
@@ -488,6 +489,13 @@ def upstream_window_check(node, now):
         if node.state == "free" and node.upstream_order == "hold" and not (standby_used and now - max(standby_used) < idle_s):
             node.window_order_at = now
             state.spawn(openai_node.order(node, "release", "night window"))
+        return
+    if node.upstream_serving == openai_node.SERVING_OLLAMA:
+        # 0.16.1: the hold leaves the standby empty, and neither trigger fills it: prewarm runs on online/free, residency
+        # only when something is loaded. The first request of the day then loaded its model cold. Prewarm once per hold.
+        if node.state == "free" and not node.loaded and not node.loading and not node.standby_prewarmed:
+            node.standby_prewarmed = True
+            state.spawn(prewarm(node, 0, "standby", since=node.free_at))
         return
     if not node.speaks_openai or node.upstream_order == "hold" or node.upstream_state:
         return   # the standby already serves, a hold is under way, or the server is still starting
