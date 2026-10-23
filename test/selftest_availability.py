@@ -52,6 +52,9 @@ class FakeNode:
     def standby_switch(self, model):
         return False
 
+    def releases_server_for(self, model):   # router 0.16.2: no OpenAI-compatible server on this fake node
+        return False
+
     def is_loaded(self, model):
         return model in self.loaded
 

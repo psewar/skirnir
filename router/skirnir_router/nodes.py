@@ -510,13 +510,19 @@ class Node(Breaker):
         return (self.can_switch_to_standby and self.upstream_serving != openai_node_serving_ollama
                 and model not in self.models and model in self.standby_models)
 
+    def releases_server_for(self, model):
+        """0.16.2: a request for the held server's model while the standby Ollama stands in. The release stops the
+        standby with everything it has loaded before the server starts, so the request has the whole card
+        (standby_budget_gib), not what is left next to the standby's models."""
+        return self.upstream_serving == openai_node_serving_ollama and self.serves_openai(model)
+
     def offers(self, model):
         """The node can serve the model now or after switching to its standby Ollama."""
         return model in self.models or self.standby_switch(model)
 
     def standby_budget_gib(self):
-        """VRAM the standby Ollama gets once the server has stopped: the card minus reserve, desktop baseline and
-        foreign memory (the server's own memory is freed by the hold)."""
+        """VRAM one side gets once the other has stopped (standby after a hold, server after a release): the card minus
+        reserve, desktop baseline and foreign memory."""
         return self.vram_total_gib - state.CFG.reserve.get(self.state, 1.0) - self.baseline_gib() - self.foreign_vram_gib()
 
     def snapshot(self, now):

@@ -51,9 +51,11 @@ def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
         if not allows(n):   # Stage 3: nodes with open breaker stay out (half_open: one probe)
             continue
         need = state.CFG.need_gib(tier["model"], ctx, n)
-        if n.standby_switch(tier["model"]):
+        if n.standby_switch(tier["model"]) or n.releases_server_for(tier["model"]):
             # 0.15.0: reachable only by holding the OpenAI-compatible server for the standby Ollama - a cold candidate
-            # whose budget is the card once the server has stopped (score: modes.score.switch penalty)
+            # whose budget is the card once the server has stopped (score: modes.score.switch penalty).
+            # 0.16.2: the same the other way round - the server's model while the standby serves, whose release stops
+            # the standby (2026-10-24: strata got "vram full" next to the standby's 27b model)
             if not n.mem_pressure and need <= n.standby_budget_gib():
                 out.append(n)
             continue
@@ -288,7 +290,8 @@ def _node_block(n, t, ctx, now):
         return None, {}
     if n.mem_pressure:   # Like candidates_for: do not cold-load while main memory is tight
         return MEMORY_PRESSURE, {k: v for k, v in (n.memory or {}).items() if k in ("ram_available_gib", "commit_free_gib")}
-    need, budget = state.CFG.need_gib(t["model"], ctx, n), n.budget_gib(now, t["model"])
+    need = state.CFG.need_gib(t["model"], ctx, n)
+    budget = n.standby_budget_gib() if n.standby_switch(t["model"]) or n.releases_server_for(t["model"]) else n.budget_gib(now, t["model"])
     if need <= budget:
         return None, {}
     foreign = n.foreign_vram_gib()
