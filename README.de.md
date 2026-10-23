@@ -666,3 +666,17 @@ Reranker-Dienst auf einem GPU-Knoten weiter (Agent-Route `rerank`, Gesundheit im
 Client braucht das Recht `rerank: true` und darf an seiner Quelladresse erkannt werden. Kein WOL, keine Warteschlange, keine
 Wiederholung: kann kein Knoten reranken, antwortet der Router sofort mit `424 rerank_unavailable` und einem Grund, damit ein
 Aufrufer mit eigenem CPU-Reranker ohne Verzögerung zurückfällt. Siehe [Konfiguration, Drahtformat und Gründe (Englisch)](design/rerank.md).
+
+## Optionaler OpenAI-kompatibler Knoten
+
+Ein GPU-Knoten kann statt Ollama einen OpenAI-kompatiblen Inferenz-Server betreiben, zum Beispiel Strata, das ein grosses
+Mixture-of-Experts-Modell aus einer GPU plus Arbeitsspeicher bedient. Die Agent-Einstellung `tunnel.upstream_api: openai`
+(Standard `ollama`) richtet den Tunnel auf diesen Server: Der Agent meldet dessen Modelle aus `/v1/models` und sagt es in
+seinen Fakten. Der Router schickt Chat- und Generate-Anfragen dann als `/v1/chat/completions` durch den Tunnel, übersetzt
+wie eine Cloud-Anfrage, sodass die Antwort jedes Client-Format erreicht, und lässt weg, was nur Ollama hat: kein
+`/api/show` (Fähigkeiten kommen aus dem Katalog), kein Vorladen, kein Entladen bei busy, kein Ollama-Update. Den Server
+als Agent-Kind (`children:`) betreiben und das Ollama-Kind abschalten, denn beide brauchen die GPU. Sein Grafikspeicher
+zählt als eigener des Agents, die Busy-Erkennung behandelt ihn also wie ein geladenes Modell; ein busy Knoten wird
+übersprungen, nicht entladen. Das Modell kommt mit `weights_gib` und seinen `capabilities` in den Katalog und wie jedes
+lokale Modell in eine Rollen-Stufe. Auf einem solchen Knoten noch nicht unterstützt: Embeddings und verwaltete
+Session-Züge, die bleiben auf Ollama-Knoten. Router 0.10.0, Agent 0.21.0.

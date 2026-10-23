@@ -65,6 +65,9 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.updater.Cleanup()
 	a.ollamaUp = newOllamaUpdater(cfg.OllamaUpdate, cfg.Children, sup, cfg.Tunnel.Upstream, log)
 	a.hb.ollamaUp, a.hb.upstream = a.ollamaUp, cfg.Tunnel.Upstream
+	if cfg.Tunnel.UpstreamAPI == upstreamOpenAI {
+		a.hb.upstream = "" // no Ollama version to report (heartbeat asks /api/version only with an upstream)
+	}
 	if a.ollamaUp.Managed() {
 		log.Infof("ollama-update: Ollama is child %q in %s - router may trigger updates", a.ollamaUp.child, a.ollamaUp.dir)
 	}
@@ -81,7 +84,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 		a.prov = p
 	}
 	facts := func(ctx context.Context) Facts {
-		f := collectFacts(ctx, cfg.Router.URL, cfg.Tunnel.Upstream, gpu)
+		f := collectFacts(ctx, cfg.Router.URL, cfg.Tunnel.Upstream, cfg.Tunnel.UpstreamAPI, gpu)
 		m := a.ollamaUp.Managed()
 		f.OllamaManaged = &m
 		f.OllamaPush = a.ollamaW != nil
@@ -93,7 +96,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.tunnel.onUpdate = a.updater.Handle
 	a.tunnel.onOllamaUpdate = a.ollamaUp.Handle
 	a.tunnel.onOllamaSwap = a.ollamaUp.Swap
-	a.ollamaW = newOllamaWatcher(cfg.Tunnel.Upstream, log)
+	a.ollamaW = newOllamaWatcher(cfg.Tunnel.Upstream, cfg.Tunnel.UpstreamAPI, log)
 	a.tunnel.ollama = a.ollamaW
 	a.routes = newRoutes(cfg.Tunnel.Routes, log)
 	a.tunnel.routes, a.hb.routes = a.routes, a.routes

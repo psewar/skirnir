@@ -32,6 +32,7 @@ const unsetKey = "\x00unset"
 
 type OllamaWatcher struct {
 	upstream  string
+	api       string // upstreamOllama or upstreamOpenAI (tunnel.upstream_api)
 	log       *Logger
 	client    *http.Client
 	every     time.Duration // Interval for /api/ps (loaded models change with every request)
@@ -48,16 +49,22 @@ type OllamaWatcher struct {
 	tagsKey  string
 }
 
-func newOllamaWatcher(upstream string, log *Logger) *OllamaWatcher {
+func newOllamaWatcher(upstream, api string, log *Logger) *OllamaWatcher {
 	if upstream == "" {
 		return nil
 	}
 	// Empty lists instead of nil (otherwise `null` is sent) and comparison keys that no real response yields: the first response
 	// always counts as a change, even if nothing is loaded. 0.14.0 sent `ps: null` for empty /api/ps, the Router
 	// discarded the report and left the node offline (2026-09-30).
-	return &OllamaWatcher{upstream: strings.TrimRight(upstream, "/"), log: log, client: &http.Client{Timeout: 3 * time.Second},
+	w := &OllamaWatcher{upstream: strings.TrimRight(upstream, "/"), api: api, log: log, client: &http.Client{Timeout: 3 * time.Second},
 		every: time.Second, tagsEvery: 5 * time.Second, downAfter: 3, psKey: unsetKey, tagsKey: unsetKey,
 		st: OllamaState{Tags: []json.RawMessage{}, PS: []json.RawMessage{}}}
+	if api == upstreamOpenAI {
+		// An OpenAI-compatible server keeps its model loaded for as long as it runs, so its list changes rarely. A slower
+		// poll with a longer timeout keeps a server that is busy reading a long prompt from being reported unreachable.
+		w.every, w.client.Timeout = 5*time.Second, 10*time.Second
+	}
+	return w
 }
 
 // Run polls the local Ollama at the interval until ctx ends.
@@ -82,31 +89,98 @@ func (w *OllamaWatcher) Snapshot() (OllamaState, bool) {
 	return w.st, w.have
 }
 
-// get returns the `models` list from an Ollama response.
-func (w *OllamaWatcher) get(ctx context.Context, path string) ([]json.RawMessage, error) {
+// getJSON decodes the JSON answer of a GET on the upstream into v.
+func (w *OllamaWatcher) getJSON(ctx context.Context, path string, v any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.upstream+path, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	resp, err := w.client.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
-		return nil, fmt.Errorf("%s: HTTP %d %s", path, resp.StatusCode, strings.TrimSpace(string(b)))
+		return fmt.Errorf("%s: HTTP %d %s", path, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(v); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
+}
+
+// get returns the `models` list from an Ollama response.
+func (w *OllamaWatcher) get(ctx context.Context, path string) ([]json.RawMessage, error) {
 	var v struct {
 		Models []json.RawMessage `json:"models"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&v); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+	if err := w.getJSON(ctx, path, &v); err != nil {
+		return nil, err
 	}
 	if v.Models == nil {
 		v.Models = []json.RawMessage{}
 	}
 	return v.Models, nil
+}
+
+// openAIModel is one entry of an OpenAI-compatible /v1/models answer. `status` and `meta.n_ctx` are extras some servers
+// add (Strata: {"value": "loaded"} and the context length); a plain OpenAI server leaves them out.
+type openAIModel struct {
+	ID     string `json:"id"`
+	Status *struct {
+		Value string `json:"value"`
+	} `json:"status"`
+	Meta struct {
+		NCtx int `json:"n_ctx"`
+	} `json:"meta"`
+}
+
+// openAIEntries turns the models of an OpenAI-compatible server into the Ollama-shaped tags/ps entries the router reads
+// (poll.apply_ollama_state). Sizes stay 0 on purpose: the server's GPU memory is counted once, as this agent's child
+// (children_vram_mib), and a size of 0 keeps the router's busy unload (/api/generate keep_alive 0) away from a server that
+// has no such call. A model without a status counts as loaded, because the server answers for it.
+func openAIEntries(models []openAIModel) (tags, ps []json.RawMessage) {
+	tags, ps = []json.RawMessage{}, []json.RawMessage{}
+	for _, m := range models {
+		if m.ID == "" {
+			continue
+		}
+		digest := "openai:" + m.ID
+		t, _ := json.Marshal(map[string]any{"name": m.ID, "model": m.ID, "size": 0, "digest": digest,
+			"details": map[string]any{"format": "openai"}})
+		tags = append(tags, t)
+		if m.Status != nil && m.Status.Value != "loaded" {
+			continue
+		}
+		e := map[string]any{"name": m.ID, "model": m.ID, "size": 0, "size_vram": 0, "digest": digest}
+		if m.Meta.NCtx > 0 {
+			e["context_length"] = m.Meta.NCtx
+		}
+		p, _ := json.Marshal(e)
+		ps = append(ps, p)
+	}
+	return tags, ps
+}
+
+// fetch returns the loaded (ps) and, with needTags, the installed (tags) models. An OpenAI-compatible server has one list
+// for both (/v1/models): it serves what it has loaded.
+func (w *OllamaWatcher) fetch(ctx context.Context, needTags bool) (ps, tags []json.RawMessage, err error) {
+	if w.api == upstreamOpenAI {
+		var v struct {
+			Data []openAIModel `json:"data"`
+		}
+		if err := w.getJSON(ctx, "/v1/models", &v); err != nil {
+			return nil, nil, err
+		}
+		tags, ps = openAIEntries(v.Data)
+		return ps, tags, nil
+	}
+	ps, err = w.get(ctx, "/api/ps")
+	if err == nil && needTags {
+		tags, err = w.get(ctx, "/api/tags")
+	}
+	return ps, tags, err
 }
 
 // psKey: comparison key for /api/ps without `expires_at` - the timestamp shifts with every request, the Router
@@ -138,14 +212,11 @@ func rawKey(models []json.RawMessage) string {
 
 // poll: one request; Revision increases only on a real change (models, reachability).
 func (w *OllamaWatcher) poll(ctx context.Context, now time.Time) {
-	ps, err := w.get(ctx, "/api/ps")
 	w.mu.Lock()
-	needTags := !w.haveTags || now.Sub(w.lastTags) >= w.tagsEvery
+	// OpenAI-compatible: the one list carries both, so the installed models are taken on every poll.
+	needTags := !w.haveTags || now.Sub(w.lastTags) >= w.tagsEvery || w.api == upstreamOpenAI
 	w.mu.Unlock()
-	var tags []json.RawMessage
-	if err == nil && needTags {
-		tags, err = w.get(ctx, "/api/tags")
-	}
+	ps, tags, err := w.fetch(ctx, needTags)
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if err != nil {

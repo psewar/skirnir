@@ -47,6 +47,7 @@ class CloudTarget(Breaker):
     """A cloud provider in the role of a node: same methods used by Scheduler/Proxy on a Node."""
 
     is_cloud = True
+    speaks_openai = False  # a node attribute (openai_node.py); the cloud path is chosen by is_cloud first
     guard_policy = False   # no GPU guard in the cloud (scheduler.score does not check further)
 
     def __init__(self, provider, spec):
@@ -347,7 +348,7 @@ def _oa_tool_calls_to_native(tcs):
     return out
 
 
-def _native_done(model, path, content, tool_calls, finish, p_tok, c_tok, t0):
+def _native_done(model, path, content, tool_calls, finish, p_tok, c_tok, t0, thinking=""):
     now = time.time()
     dur = int((now - t0) * 1e9)
     j = {"model": model, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "done": True,
@@ -356,12 +357,24 @@ def _native_done(model, path, content, tool_calls, finish, p_tok, c_tok, t0):
          "load_duration": 0, "total_duration": dur}
     if path == "/api/generate":
         j["response"] = content or ""
+        if thinking:
+            j["thinking"] = thinking
     else:
         msg = {"role": "assistant", "content": content or ""}
+        if thinking:
+            msg["thinking"] = thinking
         if tool_calls:
             msg["tool_calls"] = tool_calls
         j["message"] = msg
     return j
+
+
+def _native_piece(model, path, content="", thinking=""):
+    """One streamed Ollama chunk with answer text and/or thinking (Ollama's own field names)."""
+    if path == "/api/generate":
+        return {"model": model, "response": content, **({"thinking": thinking} if thinking else {}), "done": False}
+    msg = {"role": "assistant", "content": content, **({"thinking": thinking} if thinking else {})}
+    return {"model": model, "message": msg, "done": False}
 
 
 # ---- Anthropic ----
@@ -502,7 +515,12 @@ async def run(target, path, body, model, stream):
         out = {"model": model, "embeddings": embs, "prompt_eval_count": p_tok, "total_duration": int((time.time() - t0) * 1e9), "load_duration": 0}
         return {"p_tok": p_tok, "c_tok": 0, "finish": "stop"}, out
 
-    req = _an_body(body, path, model_id, stream) if kind == "anthropic" else _oa_body(body, path, model_id, stream)
+    if kind != "anthropic":
+        def post(req):
+            return state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout)
+        return await openai_exchange(post, path, body, model, model_id, stream)
+
+    req = _an_body(body, path, model_id, stream)
     info = {"p_tok": 0, "c_tok": 0, "finish": "stop"}
     if not stream:
         async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout) as r:
@@ -510,67 +528,99 @@ async def run(target, path, body, model, stream):
             if r.status >= 400:
                 raise CloudError(r.status, *_err_info(data))  # exception-ok: provider HTTP error (CloudError)
             j = json.loads(data)
-        if kind == "anthropic":
-            content, tcs = _an_content_to_native(j.get("content"))
-            u = j.get("usage") or {}
-            info.update(p_tok=int(u.get("input_tokens") or 0), c_tok=int(u.get("output_tokens") or 0), finish=j.get("stop_reason") or "end_turn")
-        else:
-            ch = (j.get("choices") or [{}])[0]
-            msg = ch.get("message") or {}
-            content, tcs = msg.get("content") or "", _oa_tool_calls_to_native(msg.get("tool_calls"))
-            u = j.get("usage") or {}
-            info.update(p_tok=int(u.get("prompt_tokens") or 0), c_tok=int(u.get("completion_tokens") or 0), finish=ch.get("finish_reason") or "stop")
+        content, tcs = _an_content_to_native(j.get("content"))
+        u = j.get("usage") or {}
+        info.update(p_tok=int(u.get("input_tokens") or 0), c_tok=int(u.get("output_tokens") or 0), finish=j.get("stop_reason") or "end_turn")
         return info, _native_done(model, path, content, tcs, info["finish"], info["p_tok"], info["c_tok"], t0)
 
     async def gen():
         async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout) as r:
             if r.status >= 400:   # inside the streaming generator: raising is its only error channel (CloudError)
                 raise CloudError(r.status, *_err_info(await r.read()))  # exception-ok: provider HTTP error in the stream
-            if kind == "anthropic":
-                tool_blocks, tool_args = {}, {}
-                async for ev in _sse(r):
-                    et = ev.get("type")
-                    if et == "message_start":
-                        info["p_tok"] = int(((ev.get("message") or {}).get("usage") or {}).get("input_tokens") or 0)
-                    elif et == "content_block_start":
-                        cb = ev.get("content_block") or {}
-                        if cb.get("type") == "tool_use":
-                            tool_blocks[ev.get("index")] = {"id": cb.get("id"), "name": cb.get("name")}
-                            tool_args[ev.get("index")] = ""
-                    elif et == "content_block_delta":
-                        d = ev.get("delta") or {}
-                        if d.get("type") == "text_delta" and d.get("text"):
-                            yield {"model": model, **({"response": d["text"]} if path == "/api/generate" else {"message": {"role": "assistant", "content": d["text"]}}), "done": False}
-                        elif d.get("type") == "input_json_delta":
-                            tool_args[ev.get("index")] = tool_args.get(ev.get("index"), "") + (d.get("partial_json") or "")
-                    elif et == "message_delta":
-                        info["finish"] = (ev.get("delta") or {}).get("stop_reason") or info["finish"]
-                        info["c_tok"] = int((ev.get("usage") or {}).get("output_tokens") or info["c_tok"])
-                tcs = []
-                for idx, tb in tool_blocks.items():
-                    tcs.append({"id": tb["id"], "function": {"name": tb["name"], "arguments": parse_tool_args(tool_args.get(idx) or "{}")}})
-            else:
-                partial = {}
-                async for ev in _sse(r):
-                    if ev.get("usage"):
-                        u = ev["usage"]
-                        info["p_tok"], info["c_tok"] = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
-                    for ch in ev.get("choices") or []:
-                        d = ch.get("delta") or {}
-                        if d.get("content"):
-                            yield {"model": model, **({"response": d["content"]} if path == "/api/generate" else {"message": {"role": "assistant", "content": d["content"]}}), "done": False}
-                        for tc in d.get("tool_calls") or []:
-                            p = partial.setdefault(tc.get("index", 0), {"id": None, "name": "", "args": ""})
-                            p["id"] = tc.get("id") or p["id"]
-                            fn = tc.get("function") or {}
-                            p["name"] += fn.get("name") or ""
-                            p["args"] += fn.get("arguments") or ""
-                        if ch.get("finish_reason"):
-                            info["finish"] = ch["finish_reason"]
-                tcs = []
-                for idx in sorted(partial):
-                    p = partial[idx]
-                    tcs.append({"id": p["id"], "function": {"name": p["name"], "arguments": parse_tool_args(p["args"])}})
+            tool_blocks, tool_args = {}, {}
+            async for ev in _sse(r):
+                et = ev.get("type")
+                if et == "message_start":
+                    info["p_tok"] = int(((ev.get("message") or {}).get("usage") or {}).get("input_tokens") or 0)
+                elif et == "content_block_start":
+                    cb = ev.get("content_block") or {}
+                    if cb.get("type") == "tool_use":
+                        tool_blocks[ev.get("index")] = {"id": cb.get("id"), "name": cb.get("name")}
+                        tool_args[ev.get("index")] = ""
+                elif et == "content_block_delta":
+                    d = ev.get("delta") or {}
+                    if d.get("type") == "text_delta" and d.get("text"):
+                        yield {"model": model, **({"response": d["text"]} if path == "/api/generate" else {"message": {"role": "assistant", "content": d["text"]}}), "done": False}
+                    elif d.get("type") == "input_json_delta":
+                        tool_args[ev.get("index")] = tool_args.get(ev.get("index"), "") + (d.get("partial_json") or "")
+                elif et == "message_delta":
+                    info["finish"] = (ev.get("delta") or {}).get("stop_reason") or info["finish"]
+                    info["c_tok"] = int((ev.get("usage") or {}).get("output_tokens") or info["c_tok"])
+            tcs = []
+            for idx, tb in tool_blocks.items():
+                tcs.append({"id": tb["id"], "function": {"name": tb["name"], "arguments": parse_tool_args(tool_args.get(idx) or "{}")}})
+        yield _native_done(model, path, "", tcs, info["finish"], info["p_tok"], info["c_tok"], t0)
+
+    return info, gen()
+
+
+async def openai_exchange(post, path, body, model, model_id, stream, local_server=False):
+    """One chat/generate exchange with an OpenAI-compatible endpoint: the native Ollama request as /chat/completions,
+    the answer back in Ollama form. Shared by cloud providers (run) and OpenAI-compatible nodes (openai_node.run).
+    `post(req)` sends the JSON request and returns an async context manager with the response - aiohttp's for a
+    provider, the tunnel's (nodes.nreq) for a node. Returns (info, chunks) like run(); HTTP errors raise CloudError.
+    The server's thinking (`reasoning_content`, as llama.cpp-style servers send it) comes back as Ollama's `thinking`.
+    local_server (an OpenAI-compatible node): also send the older `max_tokens`, which local servers often know instead
+    of max_completion_tokens, and turn Ollama's `think: false` into `reasoning_effort: "none"` (measured with Strata
+    2026-10-23: without it a thinking model spent a 200-token budget on thinking and answered nothing)."""
+    t0 = time.time()
+    req = _oa_body(body, path, model_id, stream)
+    if local_server:
+        if req.get("max_completion_tokens"):
+            req["max_tokens"] = req["max_completion_tokens"]
+        if body.get("think") is False:
+            req["reasoning_effort"] = "none"
+    info = {"p_tok": 0, "c_tok": 0, "finish": "stop"}
+    if not stream:
+        async with post(req) as r:
+            data = await r.read()
+            if r.status >= 400:
+                raise CloudError(r.status, *_err_info(data))  # exception-ok: endpoint HTTP error (CloudError)
+            j = json.loads(data)
+        ch = (j.get("choices") or [{}])[0]
+        msg = ch.get("message") or {}
+        content, tcs = msg.get("content") or "", _oa_tool_calls_to_native(msg.get("tool_calls"))
+        thinking = msg.get("reasoning_content") if isinstance(msg.get("reasoning_content"), str) else ""
+        u = j.get("usage") or {}
+        info.update(p_tok=int(u.get("prompt_tokens") or 0), c_tok=int(u.get("completion_tokens") or 0), finish=ch.get("finish_reason") or "stop")
+        return info, _native_done(model, path, content, tcs, info["finish"], info["p_tok"], info["c_tok"], t0, thinking)
+
+    async def gen():
+        async with post(req) as r:
+            if r.status >= 400:   # inside the streaming generator: raising is its only error channel (CloudError)
+                raise CloudError(r.status, *_err_info(await r.read()))  # exception-ok: endpoint HTTP error in the stream
+            partial = {}
+            async for ev in _sse(r):
+                if ev.get("usage"):
+                    u = ev["usage"]
+                    info["p_tok"], info["c_tok"] = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
+                for ch in ev.get("choices") or []:
+                    d = ch.get("delta") or {}
+                    thought = d.get("reasoning_content") if isinstance(d.get("reasoning_content"), str) else ""
+                    if d.get("content") or thought:
+                        yield _native_piece(model, path, d.get("content") or "", thought)
+                    for tc in d.get("tool_calls") or []:
+                        p = partial.setdefault(tc.get("index", 0), {"id": None, "name": "", "args": ""})
+                        p["id"] = tc.get("id") or p["id"]
+                        fn = tc.get("function") or {}
+                        p["name"] += fn.get("name") or ""
+                        p["args"] += fn.get("arguments") or ""
+                    if ch.get("finish_reason"):
+                        info["finish"] = ch["finish_reason"]
+            tcs = []
+            for idx in sorted(partial):
+                p = partial[idx]
+                tcs.append({"id": p["id"], "function": {"name": p["name"], "arguments": parse_tool_args(p["args"])}})
         yield _native_done(model, path, "", tcs, info["finish"], info["p_tok"], info["c_tok"], t0)
 
     return info, gen()

@@ -666,3 +666,16 @@ reranker service on a GPU node (agent route `rerank`, health reported in the hea
 the right `rerank: true` and may be identified by source address. No Wake-on-LAN, queue or retry: if no node can rerank, the
 router answers at once with `424 rerank_unavailable` and a reason, so a caller with its own CPU reranker falls back without
 delay. See [configuration, wire format and reasons](design/rerank.md).
+
+## Optional OpenAI-compatible node
+
+A GPU node can run an OpenAI-compatible inference server instead of Ollama, for example Strata, which serves a large
+mixture-of-experts model from one GPU plus system RAM. The agent setting `tunnel.upstream_api: openai` (default `ollama`)
+points the tunnel at that server: the agent reports its models from `/v1/models` and says so in its facts. The router then
+sends chat and generate requests as `/v1/chat/completions` through the tunnel, translated the same way as a cloud request,
+so the answer reaches every client format, and it leaves out what only Ollama has: no `/api/show` (capabilities come from
+the catalog), no prewarm, no busy unload, no Ollama update. Run the server as an agent child (`children:`) and switch the
+Ollama child off, because both need the GPU. The server's GPU memory counts as the agent's own, so busy detection treats
+it like a loaded model; a busy node is skipped, not unloaded. The model goes into the catalog with `weights_gib` and its
+`capabilities`, and into a role tier like any local model. Not yet supported on such a node: embeddings and managed session
+turns, which stay on Ollama nodes. Router 0.10.0, agent 0.21.0.

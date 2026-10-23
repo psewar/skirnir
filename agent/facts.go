@@ -31,9 +31,12 @@ type Facts struct {
 	OllamaManaged  *bool  `json:"ollama_managed,omitempty"`   // Ollama is a child of this agent (router then offers Ollama updates, 0.12.1)
 	OllamaPush     bool   `json:"ollama_push,omitempty"`      // Agent reports Ollama status itself (frame OLLAMA, 0.14.0)
 	OllamaSwapGate bool   `json:"ollama_swap_gate,omitempty"` // Ollama update swaps only after router release (0.15.0)
+	// UpstreamAPI: "openai" when the upstream is an OpenAI-compatible server (tunnel.upstream_api); left out for Ollama, so
+	// a router that does not know the field sees the same facts as before.
+	UpstreamAPI string `json:"upstream_api,omitempty"`
 }
 
-func collectFacts(ctx context.Context, routerURL, upstream string, gpu *GPU) Facts {
+func collectFacts(ctx context.Context, routerURL, upstream, api string, gpu *GPU) Facts {
 	f := Facts{OS: runtime.GOOS, Arch: runtime.GOARCH, AgentVersion: version, OllamaURL: upstream}
 	f.Hostname, _ = os.Hostname()
 	f.Manufacturer, f.Model = systemModel()
@@ -43,6 +46,10 @@ func collectFacts(ctx context.Context, routerURL, upstream string, gpu *GPU) Fac
 		}
 	}
 	f.MAC, f.LocalIP = routeInterface(routerURL)
+	if api == upstreamOpenAI {
+		f.UpstreamAPI = upstreamOpenAI // no Ollama, so no /api/version to ask
+		return f
+	}
 	f.OllamaVersion = ollamaVersion(ctx, upstream)
 	return f
 }

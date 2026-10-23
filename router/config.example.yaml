@@ -305,6 +305,11 @@ models:
   granite4.2:8b:        # 6.22 @8k, 10.02 @32k -> wächst deutlich
     weights_gib: 4.95
     kv_gib_per_1k: 0.158
+  # OpenAI-kompatibler Knoten (Agent tunnel.upstream_api: openai, z. B. Strata): Name wie in /v1/models gemeldet,
+  # weights_gib = Grafikspeicher des Servers (zaehlt als Agent-Kind, nicht doppelt), Faehigkeiten von Hand (kein /api/show).
+  # big-moe-q2:
+  #   weights_gib: 31
+  #   capabilities: { tools: true, vision: false, structured: false, thinking: true }
   # Stufe 5: Cloud-Modelle (kein VRAM, Preise in CHF je 1 Mio. Tokens fuer Budget/Usage; Listenpreise USD ~ CHF, Stand 2026-09).
   # Nur ueber Rollen erreichbar, nicht als konkreter Modellname.
   "openai:gpt-5-mini":

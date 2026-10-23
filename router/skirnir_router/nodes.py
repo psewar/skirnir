@@ -135,6 +135,8 @@ class Node(Breaker):
         self.ollama_push_error = None  # Reason agent reports for "Ollama not responding"
         self.reg = None     # Eintrag im Knotenregister (nodes.json)
         self.gpu = spec.get("gpu", "")
+        # The agent fronts an OpenAI-compatible server instead of Ollama (agent fact upstream_api, openai_node.py)
+        self.speaks_openai = spec.get("upstream_api") == "openai"
         # Ollama-Sicht
         self.models = set()
         self.last_known_models = set()
@@ -378,6 +380,7 @@ class Node(Breaker):
         self.weight = int(spec.get("weight", self.weight))
         if spec.get("gpu"):
             self.gpu = spec["gpu"]
+        self.speaks_openai = spec.get("upstream_api") == "openai"   # agent may switch between Ollama and an OpenAI server
         if spec.get("foreign_vram_baseline_gib") is not None:
             self.foreign_baseline_gib = float(spec["foreign_vram_baseline_gib"])
         self.max_inflight = int(spec["max_inflight"]) if spec.get("max_inflight") else None

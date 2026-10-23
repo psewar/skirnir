@@ -5,7 +5,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import agentupdate, nodes, ollamaupdate, perf, state
+from . import agentupdate, nodes, ollamaupdate, openai_node, perf, state
 from .common import GIB, log, read_json
 
 NODE_FAULTS = (ClientError, asyncio.TimeoutError, OSError, ValueError)   # Netz, Tunnel, Ollamas JSON (ValueError)
@@ -14,18 +14,24 @@ NODE_FAULTS = (ClientError, asyncio.TimeoutError, OSError, ValueError)   # Netz,
 async def poll_node(node):
     t = ClientTimeout(total=4)
     try:
-        async with nodes.nreq(node, "get", "/api/tags", timeout=t) as r:
-            tags = await r.json()
-        async with nodes.nreq(node, "get", "/api/ps", timeout=t) as r:
-            ps = await r.json()
-    except NODE_FAULTS as e:  # exception-ok: network boundary to the node and Ollama's JSON; a miss counts toward offline
+        if node.speaks_openai:   # one list for both (openai_node.models_to_ollama)
+            async with nodes.nreq(node, "get", openai_node.MODELS_PATH, timeout=t) as r:
+                tag_models, ps_models = openai_node.models_to_ollama(await r.json())
+        else:
+            async with nodes.nreq(node, "get", "/api/tags", timeout=t) as r:
+                tag_models = (await r.json()).get("models", [])
+            async with nodes.nreq(node, "get", "/api/ps", timeout=t) as r:
+                ps_models = (await r.json()).get("models", [])
+    except NODE_FAULTS as e:  # exception-ok: network boundary to the node and its JSON; a miss counts toward offline
         node.misses += 1
         if node.misses >= state.CFG.offline_after and node.state != "offline":
             node.go_offline(type(e).__name__)
         return
     node.misses = 0
     node.polled_ok = time.time()
-    apply_ollama_state(node, tags.get("models", []), ps.get("models", []), time.time())
+    apply_ollama_state(node, tag_models, ps_models, time.time())
+    if node.speaks_openai:   # no Ollama, no /api/version
+        return
     if time.time() - node.version_ts > 300:   # on push, the version arrives with the heartbeat
         node.version_ts = time.time()
         state.spawn(fetch_version(node))
@@ -77,7 +83,7 @@ def apply_ollama_state(node, tag_models, ps_models, now):
         if state.CFG.prewarm_on_online:
             state.spawn(prewarm(node, state.CFG.prewarm_online_delay, "online", since=node.free_at))
     for m in node.models:
-        if m not in state.CAPS:
+        if m not in state.CAPS and not node.speaks_openai:   # an OpenAI server has no /api/show: catalog capabilities apply
             state.CAPS[m] = None   # in progress, no double fetch
             state.spawn(fetch_caps(node, m))
     node.note_loaded_changed(now)
@@ -228,6 +234,8 @@ def game_needs_gpu(node):
 
 
 async def unload_big_models(node):
+    if node.speaks_openai:   # an OpenAI-compatible server cannot unload; a busy node is just not chosen
+        return
     for m, gib in list(node.loaded.items()):
         if any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models):
             continue
@@ -249,6 +257,8 @@ async def prewarm(node, delay, reason, since=None):
     Without this, 'warm first' would permanently stay on the small busy_ok model after a game phase.
     `since` = the transition to free for which this prewarm was planned. If a new transition occurred since (busy
     or offline in between), that one plans its own; this one is dropped. Previously, an old prewarm fired shortly after the next free."""
+    if node.speaks_openai:   # the server loads its model itself when it starts; there is no /api/generate to preload with
+        return
     if delay:
         await asyncio.sleep(delay)
     if since is not None and (node.free_at != since or node.state != "free"):

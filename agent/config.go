@@ -40,9 +40,19 @@ type Config struct {
 // TunnelCfg: outgoing persistent connection to the Router, through which the Router calls Ollama. Since 0.9.1 the only way
 // (the HTTP-Heartbeat with token and `tunnel.enabled` are gone).
 type TunnelCfg struct {
-	Upstream string     `yaml:"upstream"`
-	Routes   []RouteCfg `yaml:"routes"` // optional: additional local services by path (routes.go); empty = all to upstream
+	Upstream string `yaml:"upstream"`
+	// UpstreamAPI: which API the upstream speaks. "ollama" (default) or "openai" for an OpenAI-compatible inference server
+	// (/v1/models, /v1/chat/completions) such as Strata. With "openai" the agent reports the server's models from
+	// /v1/models in the OLLAMA frame and tells the router in its facts, so the router sends chat requests in OpenAI form.
+	UpstreamAPI string     `yaml:"upstream_api"`
+	Routes      []RouteCfg `yaml:"routes"` // optional: additional local services by path (routes.go); empty = all to upstream
 }
+
+// Values of tunnel.upstream_api.
+const (
+	upstreamOllama = "ollama"
+	upstreamOpenAI = "openai"
+)
 
 // RouteCfg: a path that the tunnel routes to another local service instead of Ollama (e.g. the Reranker).
 type RouteCfg struct {
@@ -240,6 +250,9 @@ func (c *Config) applyDefaults() {
 	if c.Tunnel.Upstream == "" {
 		c.Tunnel.Upstream = px.Upstream
 	}
+	if c.Tunnel.UpstreamAPI == "" {
+		c.Tunnel.UpstreamAPI = upstreamOllama
+	}
 	for i := range c.Tunnel.Routes {
 		r := &c.Tunnel.Routes[i]
 		r.Upstream = strings.TrimRight(r.Upstream, "/")
@@ -311,6 +324,9 @@ func (c *Config) validate() error {
 	}
 	if c.OllamaProxy.on() && c.OllamaProxy.requireToken() && c.Router.Token == "" {
 		return fmt.Errorf("ollama_proxy.enabled needs router.token (or ollama_proxy.require_token: false) - otherwise Ollama would be open to the LAN")
+	}
+	if c.Tunnel.UpstreamAPI != upstreamOllama && c.Tunnel.UpstreamAPI != upstreamOpenAI {
+		return fmt.Errorf("tunnel.upstream_api: %q is not ollama or openai", c.Tunnel.UpstreamAPI)
 	}
 	seen := map[string]bool{}
 	for _, ch := range c.Children {
