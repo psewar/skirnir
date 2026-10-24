@@ -60,7 +60,13 @@ type TunnelCfg struct {
 type FallbackCfg struct {
 	Child    string `yaml:"child"`    // children[].name of an Ollama child
 	Upstream string `yaml:"upstream"` // loopback URL of that Ollama, default http://127.0.0.1:11434
+	// MaxRAMPercent (agent 0.26.0): the agent starts the held upstream only if the RAM in use plus the upstream's measured
+	// need stays at or below this share of the RAM; otherwise it stays held and reports upstream_blocked. Default 90,
+	// 0 = no check. Trigger 2026-10-24: Strata started at 98 % RAM, a bluescreen followed seconds later.
+	MaxRAMPercent *int `yaml:"max_ram_percent"`
 }
+
+const defaultMaxRAMPercent = 90
 
 // Values of tunnel.upstream_api.
 const (
@@ -272,6 +278,10 @@ func (c *Config) applyDefaults() {
 			fb.Upstream = "http://127.0.0.1:11434"
 		}
 		fb.Upstream = strings.TrimRight(fb.Upstream, "/")
+		if fb.MaxRAMPercent == nil {
+			p := defaultMaxRAMPercent
+			fb.MaxRAMPercent = &p
+		}
 	}
 	for i := range c.Tunnel.Routes {
 		r := &c.Tunnel.Routes[i]
@@ -402,6 +412,9 @@ func (c *Config) validateFallback() error {
 	}
 	if !loopbackUpstream(fb.Upstream) {
 		return fmt.Errorf("tunnel.upstream_fallback.upstream: %q is not a loopback URL (only http://127.0.0.1:<port> or http://[::1]:<port>)", fb.Upstream)
+	}
+	if p := *fb.MaxRAMPercent; p != 0 && (p < 50 || p > 99) {
+		return fmt.Errorf("tunnel.upstream_fallback.max_ram_percent: %d - 50 to 99, or 0 for no check", p)
 	}
 	return nil
 }

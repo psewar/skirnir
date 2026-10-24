@@ -243,6 +243,29 @@ func (s *Supervisor) childrenVRAM() map[string]int {
 	return out
 }
 
+// childPrivateBytes: committed private memory of a running child's process tree (agent 0.26.0: the RAM need of the
+// OpenAI-compatible upstream, upstream_hold.go). false = not running or not measurable (not Windows).
+func (s *Supervisor) childPrivateBytes(name string) (uint64, bool) {
+	s.mu.Lock()
+	var t *procTree
+	if c, ok := s.children[name]; ok && c.Running {
+		t = c.tree
+	}
+	s.mu.Unlock()
+	if t == nil {
+		return 0, false
+	}
+	var sum uint64
+	n := 0
+	for _, pid := range t.pids() {
+		if b, ok := procPrivateBytes(pid); ok {
+			sum += b
+			n++
+		}
+	}
+	return sum, n > 0
+}
+
 // Child returns a copy of a child's state (for MQTT and /health).
 func (s *Supervisor) Child(name string) (childState, bool) {
 	s.mu.Lock()

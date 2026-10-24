@@ -38,6 +38,7 @@ jobs:
       - run: python test/selftest_upstream_window.py
       - run: python test/selftest_server_while_standby.py
       - run: python test/selftest_switch_waits_for_gap.py
+      - run: python test/selftest_upstream_blocked.py
       - run: python test/selftest_cloud_errors.py
       - run: python test/selftest_config_load.py
       - run: python test/selftest_control_flow_admin.py

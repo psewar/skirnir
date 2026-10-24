@@ -714,6 +714,7 @@ tunnel:
   upstream_fallback:
     child: ollama                      # an enabled Ollama child; the agent keeps it stopped until a hold
     upstream: http://127.0.0.1:11434   # default
+    max_ram_percent: 90                # default; 0 = no RAM check before starting the server
 ```
 
 The agent reports Ollama's models (OLLAMA `serving: "ollama"`) together with the held server's, and the router treats the
@@ -721,6 +722,16 @@ node as an Ollama node meanwhile: `busy_ok` models run during the game, anything
 the server's model, or prewarm once the node is free, releases the server; the agent lets running answers on the standby
 finish (at most two minutes), stops it, and only then starts the server, so the two never share the card. The standby is
 not updated by the router's Ollama update (it is not the agent's managed Ollama).
+
+**Start held, RAM check before a start** (agent 0.26.0, router 0.17.0): the agent remembers the server's models and its
+RAM need (peak private bytes of its process tree in the last run) in `<identity dir>/upstream.json`. With that file it
+starts with the server held and the standby serving, so a restart does not load the server only for the router to hold
+it again; the router releases it when it wants it (a request for its model, prewarm, the window). Without the file
+(first start, new server) the server starts once as before and the agent learns both. Before every start the agent
+checks that the RAM in use plus that need stays within `max_ram_percent`; otherwise the server stays held and the
+OLLAMA frame carries `upstream_blocked` (reason `memory`, available, total, need, limit) until there is room again. The
+router then offers no release candidate and answers `memory_pressure` with these numbers; prewarm and the window send
+no release meanwhile.
 
 **Switching to the standby for a request** (router 0.15.0, agent 0.25.0): the agent also reports the standby's models
 while the standby is stopped (heartbeat `standby_models`, read from its model store `OLLAMA_MODELS/manifests`). A request

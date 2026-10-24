@@ -114,6 +114,8 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.tunnel.ollama = a.ollamaW
 	a.tunnel.upSwitch = newUpstreamSwitch(cfg.Tunnel.UpstreamFallback)
 	a.upHold = newUpstreamHold(sup, cfg.Tunnel.UpstreamChild, cfg.Tunnel.UpstreamFallback, a.tunnel.upSwitch, a.ollamaW, log)
+	a.upHold.remember(cfg.Identity.Dir) // 0.26.0: remembered models + RAM need; with them the upstream starts held
+	a.upHold.startHeld(time.Now())      // before the supervisor runs: a parked upstream does not start
 	a.tunnel.onUpstream = a.upHold.Handle
 	a.routes = newRoutes(cfg.Tunnel.Routes, log)
 	a.tunnel.routes, a.hb.routes = a.routes, a.routes
@@ -235,6 +237,9 @@ func (a *App) Run(ctx context.Context) error {
 		}()
 	}
 	run("supervisor", a.sup.Run)
+	if a.upHold != nil {
+		run("upstream", a.upHold.Run) // returns at once without a standby (nothing to remember)
+	}
 	if a.ollamaW != nil {
 		run("ollama-watch", a.ollamaW.Run)
 	}
