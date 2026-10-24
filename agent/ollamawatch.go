@@ -33,7 +33,22 @@ type OllamaState struct {
 	// in its place. Then tags/ps are Ollama's (sizes as Ollama reports them) plus the held upstream's models in tags, so
 	// the router can still release it for a request. Empty = the upstream serves (or nothing does while held).
 	Serving string `json:"serving,omitempty"`
+	// UpstreamBlocked (agent 0.26.0): the agent did not start the held upstream on a release order and keeps it held,
+	// with the reason and its numbers. Cleared once the reason is gone (upstream_hold.go). nil = nothing blocks it.
+	UpstreamBlocked *UpstreamBlocked `json:"upstream_blocked,omitempty"`
 }
+
+// UpstreamBlocked: why the agent does not start the held upstream. Reason "memory": the RAM in use plus the upstream's
+// remembered need would exceed limit_percent of the RAM.
+type UpstreamBlocked struct {
+	Reason          string  `json:"reason"`
+	RAMAvailableGiB float64 `json:"ram_available_gib"`
+	RAMTotalGiB     float64 `json:"ram_total_gib"`
+	NeedGiB         float64 `json:"need_gib"`
+	LimitPercent    int     `json:"limit_percent"`
+}
+
+const blockedMemory = "memory"
 
 // Values of OllamaState.UpstreamState.
 const (
@@ -125,6 +140,49 @@ func (w *OllamaWatcher) SetHeld(held bool, now time.Time) {
 	w.fbOn = false
 	w.startEnd = now.Add(upstreamStartGrace)
 	w.setUpstreamState(upstreamStarting)
+}
+
+// StartHeld: the agent starts with the upstream held (agent 0.26.0, upstreamHold.startHeld). Reported at once as held,
+// with the remembered models of the upstream, which stay listed next to the standby's so the router can release it.
+func (w *OllamaWatcher) StartHeld(tags []json.RawMessage, now time.Time) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.held, w.fails, w.startEnd = true, 0, time.Time{}
+	w.heldTags = append([]json.RawMessage{}, tags...)
+	w.st.Tags = w.heldTags
+	w.setUpstreamState(upstreamHeld)
+}
+
+// UpstreamTags: the upstream's models while it answers itself (not held, no standby), for upstream.json. false = not now.
+func (w *OllamaWatcher) UpstreamTags() ([]json.RawMessage, bool) {
+	if w == nil {
+		return nil, false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.held || !w.have || !w.st.Up || w.st.UpstreamState != "" || w.st.Serving != "" || len(w.st.Tags) == 0 {
+		return nil, false
+	}
+	return append([]json.RawMessage{}, w.st.Tags...), true
+}
+
+// SetBlocked reports (b != nil) or clears that the agent keeps the held upstream from starting. A new revision only on
+// a real change, so a repeated check does not flood the tunnel.
+func (w *OllamaWatcher) SetBlocked(b *UpstreamBlocked) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	cur := w.st.UpstreamBlocked
+	if (cur == nil && b == nil) || (cur != nil && b != nil && *cur == *b) {
+		return
+	}
+	w.st.UpstreamBlocked = b
+	w.st.Rev++
 }
 
 // SetFallback records that the standby Ollama at base was started in place of the held upstream: from now on the

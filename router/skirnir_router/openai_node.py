@@ -86,6 +86,9 @@ async def ensure_loaded(node, model, timeout_s=START_WAIT_S):
             return True
         if node.state == "offline":
             return False
+        if node.upstream_blocked:   # 0.17.0: the agent refused the release (RAM) and said so - nothing to wait for
+            log.info("node %s: agent keeps %s held (%s)", node.name, model, node.upstream_blocked.get("reason"))
+            return False
         await asyncio.sleep(1)
     log.warning("node %s: %s not loaded %d s after release", node.name, model, timeout_s)
     return False

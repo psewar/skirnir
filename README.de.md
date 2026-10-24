@@ -716,6 +716,7 @@ tunnel:
   upstream_fallback:
     child: ollama                      # ein eingeschaltetes Ollama-Kind; der Agent hält es bis zum Anhalten gestoppt
     upstream: http://127.0.0.1:11434   # Standard
+    max_ram_percent: 90                # Standard; 0 = keine RAM-Prüfung vor dem Start des Servers
 ```
 
 Der Agent meldet die Modelle von Ollama (OLLAMA `serving: "ollama"`) zusammen mit denen des angehaltenen Servers, und der
@@ -724,3 +725,13 @@ Router behandelt den Knoten so lange als Ollama-Knoten: `busy_ok`-Modelle laufen
 wieder frei; der Agent lässt laufende Antworten auf dem Ersatz fertig laufen (höchstens zwei Minuten), stoppt ihn und
 startet erst dann den Server, sodass sich beide nie die Karte teilen. Das Ollama-Update des Routers lässt den Ersatz aus
 (er ist nicht das vom Agent verwaltete Ollama).
+
+**Angehalten starten, RAM-Prüfung vor dem Start** (Agent 0.26.0, Router 0.17.0): Der Agent merkt sich die Modelle des
+Servers und seinen RAM-Bedarf (höchster privater Speicher seines Prozessbaums im letzten Lauf) in
+`<identity-Ordner>/upstream.json`. Mit dieser Datei startet er mit angehaltenem Server und laufendem Ersatz – ein Neustart
+lädt den Server also nicht, nur damit der Router ihn wieder anhält; der Router gibt ihn frei, wenn er ihn will (Anfrage
+für sein Modell, Vorladen, Fenster). Ohne die Datei (erster Start, neuer Server) startet der Server einmal wie bisher und
+der Agent lernt beides. Vor jedem Start prüft der Agent, dass belegter RAM plus dieser Bedarf `max_ram_percent` nicht
+übersteigt; sonst bleibt der Server angehalten und der OLLAMA-Frame trägt `upstream_blocked` (Grund `memory`, verfügbar,
+gesamt, Bedarf, Grenze), bis wieder Platz ist. Der Router bietet dann keinen Freigabe-Kandidaten an und antwortet mit
+`memory_pressure` samt diesen Zahlen; Vorladen und Fenster senden so lange keine Freigabe.

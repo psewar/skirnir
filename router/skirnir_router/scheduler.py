@@ -55,7 +55,8 @@ def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
             # 0.16.3: the release stops the standby with all its models, and the server sizes itself to the card (its
             # own reserve) as it did before the hold - no budget to check, only a game (busy, above) or memory pressure.
             # 2026-10-24: with a budget the catalog's planning figure refused the release (28.8 > 28.5 GiB).
-            if not n.mem_pressure:
+            # 0.17.0: the agent judges the RAM itself and reports a block; then no candidate (no 180-s wait for nothing)
+            if not n.mem_pressure and not n.upstream_blocked:
                 out.append(n)
             continue
         if n.standby_switch(tier["model"]):
@@ -305,6 +306,10 @@ def _node_block(n, t, ctx, now):
     if n.mem_pressure:   # Like candidates_for: do not cold-load while main memory is tight
         return MEMORY_PRESSURE, {k: v for k, v in (n.memory or {}).items() if k in ("ram_available_gib", "commit_free_gib")}
     if n.releases_server_for(t["model"]):   # 0.16.3: like candidates_for - the release needs no budget
+        b = n.upstream_blocked or {}
+        if b:   # 0.17.0: the agent keeps the server held for want of RAM
+            return MEMORY_PRESSURE, {"ram_available_gib": b.get("ram_available_gib"), "ram_total_gib": b.get("ram_total_gib"),
+                                     "need_gib": b.get("need_gib"), "limit_percent": b.get("limit_percent"), "agent": True}
         return None, {}
     need = state.CFG.need_gib(t["model"], ctx, n)
     budget = n.standby_budget_gib() if n.standby_switch(t["model"]) else n.budget_gib(now, t["model"])
@@ -365,6 +370,10 @@ def _detail(code, bl):
         if b.get("busy_reason") == "game":
             return f"GPU busy on {b['node']}: a game is running" + (f" ({b['game']})" if b.get("game") else "")
         return f"GPU busy on {b['node']} ({b.get('busy_reason') or 'busy'}, util {b.get('gpu_util')} %)"
+    if code == MEMORY_PRESSURE and b is not None and b.get("agent"):
+        return (f"not enough RAM on {b['node']} to start {b['model']}: it needs {b.get('need_gib')} GiB, "
+                f"{b.get('ram_available_gib')} of {b.get('ram_total_gib')} GiB are available, limit {b.get('limit_percent')} %; "
+                f"the agent keeps it held")
     if code == MEMORY_PRESSURE and b is not None:
         return (f"memory pressure on {b['node']}: {b.get('ram_available_gib')} GiB RAM and {b.get('commit_free_gib')} GiB commit "
                 f"free, the router loads nothing there")

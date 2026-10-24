@@ -145,6 +145,7 @@ class Node(Breaker):
         # ... and runs a standby Ollama while it is held (agent fact upstream_fallback, agent >= 0.23.0)
         self.upstream_fallback = spec.get("upstream_fallback") is True
         self.upstream_serving = ""    # agent report: "ollama" = the standby Ollama serves in place of the held server
+        self.upstream_blocked = None  # agent report (>= 0.26.0): why it keeps the held server from starting, e.g. RAM
         self.upstream_state = ""      # agent report: "held" (stopped for the GPU), "starting", "" = answering
         self.upstream_order = ""      # last order sent: "hold" / "release" (openai_node.order)
         self.window_order_at = 0.0    # 0.16.0: last order of poll.upstream_window_check (at most one per WINDOW_ORDER_GAP_S)
@@ -540,7 +541,8 @@ class Node(Breaker):
             "ram_spill_gib": {k: round(v, 2) for k, v in self.ram_spill.items()},   # loaded models partly in system RAM
             "upstream": ({"api": "openai", "releasable": self.upstream_releasable, "state": self.upstream_state or "answering",
                           "last_order": self.upstream_order, "fallback": self.upstream_fallback,
-                          "serving": self.upstream_serving or None} if self.openai_upstream else None),
+                          "serving": self.upstream_serving or None, "blocked": self.upstream_blocked}
+                         if self.openai_upstream else None),
             "last_gen": self.last_gen, "last_prompt": self.last_prompt,
             "inflight": self.inflight, "gpu_known": bool(self.gpu_known(now)),
             "gpu_util": self.gpu_util, "vram_free_gib": self.vram_free_gib,

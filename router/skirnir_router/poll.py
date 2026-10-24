@@ -301,7 +301,9 @@ async def prewarm(node, delay, reason, since=None):
     if node.openai_upstream and openai_node.server_allowed(node, time.time()):
         # The server loads its own model when it starts; "prewarming" it = starting it again if it was stopped for the GPU.
         # Also while the standby Ollama stands in: the release stops the standby; nothing is to be loaded into it.
-        if node.upstream_state == openai_node.HELD or (
+        if node.upstream_blocked:   # 0.17.0: the agent would refuse it; it clears the block once there is room
+            log.info("prewarm on %s: server stays held (agent: %s)", node.name, node.upstream_blocked.get("reason"))
+        elif node.upstream_state == openai_node.HELD or (
                 node.upstream_order == "hold" and not any(node.serves_openai(m) for m in node.loaded)):
             await openai_node.order(node, "release", f"prewarm {reason}")
         return
@@ -412,6 +414,18 @@ def apply_ollama_push(node, msg, now):
         state.MQTT_DIRTY.append(True)
         node.standby_prewarmed = False
     node.upstream_serving = serving
+    # Agent >= 0.26.0: it keeps the held server from starting and says why (RAM in use + the server's need over its limit)
+    blocked = msg.get("upstream_blocked") if isinstance(msg.get("upstream_blocked"), dict) else None
+    if bool(blocked) != bool(node.upstream_blocked):
+        if blocked:
+            log.warning("node %s: agent keeps the server held - %s: needs %s GiB, %s of %s GiB RAM available (limit %s %%)",
+                        node.name, blocked.get("reason"), blocked.get("need_gib"), blocked.get("ram_available_gib"),
+                        blocked.get("ram_total_gib"), blocked.get("limit_percent"))
+        else:
+            log.info("node %s: the server may start again (no longer blocked)", node.name)
+        state.remember({"event": "upstream_blocked", "node": node.name, "blocked": blocked})
+        state.MQTT_DIRTY.append(True)
+    node.upstream_blocked = blocked
     apply_ollama_state(node, _named(tags), _named(ps), now)
 
 
@@ -489,7 +503,8 @@ def upstream_window_check(node, now):
         # 0.16.3: "held" is the agent's report, not the router's memory of its last order - that is empty after a router
         # restart, and the window then never released the server (2026-10-24, deploy at 00:22 before a 01:00 window)
         held = node.upstream_state == openai_node.HELD or node.upstream_serving == openai_node.SERVING_OLLAMA
-        if node.state == "free" and held and not (standby_used and now - max(standby_used) < idle_s):
+        if (node.state == "free" and held and not node.upstream_blocked
+                and not (standby_used and now - max(standby_used) < idle_s)):
             node.window_order_at = now
             state.spawn(openai_node.order(node, "release", "night window"))
         return
