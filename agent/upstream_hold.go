@@ -184,16 +184,25 @@ func (u *upstreamHold) sample() {
 	}
 }
 
-// endRun: the upstream is about to stop - its peak in this run becomes the remembered need (so a smaller setup lowers it).
+// endRun: the upstream is about to stop - its peak in this run becomes the remembered need (so a smaller setup lowers it),
+// and its models are taken once more. 0.26.1: outside its window the router holds the server as soon as it answers -
+// seconds after the start, before the 30-s sampler saw its models - so the first run learned the need but never the
+// models, and every restart would have started the server again to learn.
 func (u *upstreamHold) endRun() {
 	if u.memoPath == "" {
 		return
+	}
+	changed := false
+	if tags, ok := u.watch.UpstreamTags(); ok && !sameRaw(tags, u.memo.Tags) {
+		u.memo.Tags, changed = tags, true
 	}
 	if p, ok := u.private(); ok && p > u.runPeak {
 		u.runPeak = p
 	}
 	if u.runPeak > 0 && u.runPeak != u.memo.NeedBytes {
-		u.memo.NeedBytes = u.runPeak
+		u.memo.NeedBytes, changed = u.runPeak, true
+	}
+	if changed {
 		u.saveMemo()
 	}
 	u.runPeak = 0

@@ -200,6 +200,41 @@ func TestSampleLearnsUpstream(t *testing.T) {
 	}
 }
 
+// 0.26.1: the router holds the server seconds after it answers, before any sample - the hold itself must remember the
+// models and the need, or the next start learns again.
+func TestHoldLearnsWithoutSample(t *testing.T) {
+	up := &fakeOpenAI{}
+	up.set(`{"id":"big-moe","status":{"value":"loaded"}}`)
+	upSrv := httptest.NewServer(up)
+	defer upSrv.Close()
+
+	dir := t.TempDir()
+	sup := &Supervisor{children: map[string]*childState{"strata": {}, "ollama": {}}}
+	sup.Park("ollama")
+	pct := 90
+	fbCfg := &FallbackCfg{Child: "ollama", Upstream: "http://127.0.0.1:11434", MaxRAMPercent: &pct}
+	w := newOllamaWatcher(upSrv.URL, upstreamOpenAI, quietLogger())
+	u := newUpstreamHold(sup, "strata", fbCfg, newUpstreamSwitch(fbCfg), w, quietLogger())
+	u.remember(dir)
+	if u.startHeld(time.Now()) {
+		t.Fatal("setup: nothing remembered, the server starts")
+	}
+	u.private = func() (uint64, bool) { return 41 * giB, true }
+	w.poll(context.Background(), time.Now()) // the server answers; no sample has run
+	u.apply(true, time.Now())                // the router holds it at once
+	m, err := loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile))
+	if err != nil || !m.known() || m.NeedBytes != 41*giB {
+		t.Fatalf("the hold remembered models and need: %+v %v", m, err)
+	}
+	sup2 := &Supervisor{children: map[string]*childState{"strata": {}, "ollama": {}}}
+	sup2.Park("ollama")
+	u2 := newUpstreamHold(sup2, "strata", fbCfg, newUpstreamSwitch(fbCfg), newOllamaWatcher(upSrv.URL, upstreamOpenAI, quietLogger()), quietLogger())
+	u2.remember(dir)
+	if !u2.startHeld(time.Now()) || !sup2.isHeld("strata") {
+		t.Fatal("next start: held")
+	}
+}
+
 func TestConfigMaxRAMPercent(t *testing.T) {
 	base := "router:\n  url: https://r.example.net\nchildren:\n  - name: strata\n    cmd: strata.exe\n" +
 		"  - name: ollama\n    cmd: C:/Users/x/AppData/Local/Programs/Ollama/ollama.exe\n    args: [serve]\n" +
