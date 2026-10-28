@@ -21,7 +21,7 @@ from skirnir_router.session_config import SessionConfig
 from skirnir_router.outcome import Problem
 from skirnir_router.reliability_store import OPERATION_NOT_FOUND
 from skirnir_router.session_store import PostgresSessionStore
-from skirnir_router.session_types import UNAVAILABLE
+from skirnir_router.session_types import NOT_FOUND, UNAVAILABLE
 
 DSN = os.environ.get("SKIRNIR_TEST_SESSION_DSN")
 
@@ -506,11 +506,8 @@ def outbox_count(outcome):
     return series.get(tuple(sorted({"operation": "outbox", "outcome": outcome}.items())), 0)
 
 
-@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
-class OrderedShutdownTests(unittest.IsolatedAsyncioTestCase):
-    """Stopping the router must not cut a transaction off. A task cancelled while its BEGIN was on the way left asyncpg's
-    transaction marker on the connection, and returning it to the pool logged 'Resetting connection with an active
-    transaction' (router 0.8.1, deploy 2026-10-19). The background tasks stop first and the pool closes after them."""
+class RelayedStoreCase(unittest.IsolatedAsyncioTestCase):
+    """A store whose connections run through a HoldingRelay; the loop's exception reports are collected."""
     async def asyncSetUp(self):
         self.previous = state.CFG
         target = urlsplit(DSN)
@@ -534,6 +531,64 @@ class OrderedShutdownTests(unittest.IsolatedAsyncioTestCase):
         """The pool's reports about a connection returned in a transaction (asyncpg appends the connection's repr)."""
         return [message for message in self.reports if message.startswith(RESET)]
 
+
+@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
+class InterruptedBeginTests(RelayedStoreCase):
+    """A store call interrupted while its BEGIN is on the way must not return the connection to the pool with asyncpg's
+    transaction marker on it. Stopping the router no longer does that (OrderedShutdownTests); two causes remain: aiohttp
+    3.8 cancels a handler whose client disconnected, and the store's own timeout can fire during BEGIN."""
+    async def interrupted_read(self, interrupt, hold_s=1.0):
+        """Start a read whose BEGIN the relay holds, `interrupt` it, and release the BEGIN after hold_s. Returns the call
+        and whether it was over before the release. hold_s stays well below the pool's command_timeout (5 s): asyncpg
+        waits that long for the answer to a cancelled query and then drops the connection itself, hiding the fault."""
+        self.relay.armed = True
+        call = asyncio.ensure_future(self.store.read("test-" + uuid4().hex, uuid4(), "message", 0, 10))
+        await asyncio.wait_for(self.relay.held.wait(), 5)
+        interrupt(call)
+        over, _ = await asyncio.wait({call}, timeout=hold_s)
+        self.relay.released.set()
+        await asyncio.wait({call}, timeout=10)
+        return call, bool(over)
+
+    async def assert_store_usable(self):
+        """The store answers again, and the interrupted connection went back to the pool once: each of the pool's
+        connections is handed out once, and no further one."""
+        self.assertEqual(await self.store.read("test-" + uuid4().hex, uuid4(), "message", 0, 10), NOT_FOUND)
+        pool = self.store.pool
+        held = [await pool.acquire(timeout=5) for _ in range(pool.get_max_size())]
+        extra = asyncio.ensure_future(pool.acquire())
+        over, _ = await asyncio.wait({extra}, timeout=0.3)
+        pids = {conn.get_server_pid() for conn in held}
+        for conn in held:
+            await pool.release(conn)
+        await pool.release(await extra)
+        self.assertEqual(len(pids), len(held))
+        self.assertEqual(over, set())
+
+    async def test_cancelled_call_during_begin_does_not_return_an_open_transaction(self):
+        call, over_while_held = await self.interrupted_read(lambda call: call.cancel())   # the handler's client left
+        self.assertEqual(self.resets(), [])
+        self.assertEqual(self.reports, [])
+        self.assertTrue(over_while_held)   # the cancelled caller does not wait for the held BEGIN
+        self.assertTrue(call.cancelled())
+        await self.assert_store_usable()
+
+    async def test_timeout_during_begin_does_not_return_an_open_transaction(self):
+        self.store.timeout_s = 0.3   # fires while the relay holds the BEGIN
+        call, over_while_held = await self.interrupted_read(lambda call: None)
+        self.store.timeout_s = SessionConfig().timeout_s
+        self.assertEqual(self.resets(), [])
+        self.assertEqual(self.reports, [])
+        self.assertTrue(over_while_held)   # the timeout bounds the call, not the server's answer to the BEGIN
+        self.assertEqual(call.result(), UNAVAILABLE)
+        await self.assert_store_usable()
+
+
+@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
+class OrderedShutdownTests(RelayedStoreCase):
+    """Stopping the router must not cut a transaction off. A task cancelled while its BEGIN was on the way left asyncpg's
+    transaction marker on the connection, and returning it to the pool logged 'Resetting connection with an active
+    transaction' (router 0.8.1, deploy 2026-10-19). The background tasks stop first and the pool closes after them."""
     def outbox_service(self, **settings):
         cfg = HindsightConfig(enabled=True, allow_http_loopback=True, retention_enabled=True, outbox_enabled=True, **settings)
         state.CFG = SimpleNamespace(hindsight=cfg)

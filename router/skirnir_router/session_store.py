@@ -99,7 +99,14 @@ class PostgresSessionStore(ManagedStore, ReliabilityStore, ExchangeStore):
         """Connection plus transaction. Commits unless the method returned `tx.reject(problem)`."""
         async with self.connection() as conn:
             native = conn.transaction()
-            await native.start()
+            try:
+                await native.start()
+            except BaseException:  # exception-ok: cancellation (client gone, own timeout) or driver fault during BEGIN
+                # asyncpg keeps an interrupted start as the connection's transaction; returned to the pool, the reset would
+                # log 'Resetting connection with an active transaction'. Drop the connection instead: the server rolls
+                # back what the BEGIN opened, the pool takes the connection back once and replaces it on the next acquire.
+                conn.terminate()
+                raise  # exception-ok: re-raised unchanged after dropping the connection
             tx = Transaction(conn)
             try:
                 yield conn, tx
