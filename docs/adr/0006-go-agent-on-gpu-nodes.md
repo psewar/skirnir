@@ -6,7 +6,7 @@ decision-makers: operator
 
 # A Go agent runs on every GPU node
 
-> Recorded retroactively on 2026-10-30; decided by 2026-09-07 (agent 0.2.0/0.3.0), replacing a PowerShell task from
+> Backfilled on 2026-10-30, decided by 2026-09-07 (agent 0.2.0/0.3.0), replacing a PowerShell task from
 > 2026-09-04. Source: `design/routing-algorithm.md` section 6 ("entschieden: Go-Agent … der PowerShell-Task ist
 > entfernt"), `agent/README.md`.
 

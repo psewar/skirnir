@@ -6,7 +6,7 @@ decision-makers: operator
 
 # A refused request carries a reason code and Retry-After
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-30 (v0.9.4 "Why no node"); codes added since (for example
+> Backfilled on 2026-10-30, decided on 2026-09-30 (v0.9.4 "Why no node"); codes added since (for example
 > `memory_pressure` v0.13.0, `server_busy` v0.23.4). Source: CHANGELOG, `router/skirnir_router/scheduler.py`.
 
 ## Context and Problem Statement

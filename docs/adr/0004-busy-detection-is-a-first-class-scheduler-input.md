@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Busy detection is a first-class input of the scheduler
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-04, thresholds settled on 2026-09-08, games as a fact since
+> Backfilled on 2026-10-30, decided on 2026-09-04, thresholds settled on 2026-09-08, games as a fact since
 > 2026-10-05 (v0.13.0), only games that need the GPU since 2026-10-21 (v0.15.0). Source: `design/routing-algorithm.md`,
 > `design/roadmap.md` ("Sie kennt das Kernproblem nicht"), CHANGELOG.
 

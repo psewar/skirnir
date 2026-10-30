@@ -6,7 +6,7 @@ decision-makers: operator
 
 # An auto role picks a role through a chain of local decision engines
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-16, productive since 2026-09-17. Source:
+> Backfilled on 2026-10-30, decided on 2026-09-16, productive since 2026-09-17. Source:
 > `design/decision-engine.md`.
 
 ## Context and Problem Statement

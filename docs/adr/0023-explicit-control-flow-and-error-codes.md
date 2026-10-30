@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Explicit control flow: no exceptions as control flow, no parsing of error texts
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-27 as a general principle of the operator; the router's code
+> Backfilled on 2026-10-30, decided on 2026-09-27 as a general principle of the operator; the router's code
 > was converted in four parts until 2026-10-22 (v0.15.4), error codes instead of texts in v0.15.5. Source: CHANGELOG
 > v0.15.4, v0.15.5.
 

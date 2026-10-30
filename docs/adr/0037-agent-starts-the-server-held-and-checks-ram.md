@@ -6,7 +6,7 @@ decision-makers: operator
 
 # The agent starts the server held and checks RAM before every start
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-24 (v0.24.0: router 0.17.0, agent 0.26.0; v0.24.1: agent
+> Backfilled on 2026-10-30, decided on 2026-10-24 (v0.24.0: router 0.17.0, agent 0.26.0; v0.24.1: agent
 > 0.26.1). Source: CHANGELOG, README "Start held, RAM check before a start", PR #66, #67.
 
 ## Context and Problem Statement

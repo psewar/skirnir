@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Configuration is checked against a schema before it goes live; canary and shadow per role
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-10 (roadmap stage 6). Source: `design/roadmap.md`, README
+> Backfilled on 2026-10-30, decided on 2026-09-10 (roadmap stage 6). Source: `design/roadmap.md`, README
 > "Operations-ready".
 
 ## Context and Problem Statement

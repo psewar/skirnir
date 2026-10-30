@@ -6,8 +6,8 @@ decision-makers: operator
 
 # OpenAI and Anthropic APIs are translated to Ollama's chat inside the router
 
-> Recorded retroactively on 2026-10-30; the OpenAI-compatible `/v1` existed before the first public release (2026-09-18),
-> the Anthropic Messages API was added on 2026-10-01 (v0.12.0). Source: README "Interfaces", "Anthropic clients",
+> Backfilled on 2026-10-30, decided before the first public release (2026-09-18) for the OpenAI-compatible `/v1`, and on
+> 2026-10-01 for the Anthropic Messages API (v0.12.0). Source: README "Interfaces", "Anthropic clients",
 > CHANGELOG v0.12.0.
 
 ## Context and Problem Statement

@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Shared memory scopes and agent handoff are off by default and keep private banks unchanged
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-19 (v0.14.0), shared scopes readable next to a private bank
+> Backfilled on 2026-10-30, decided on 2026-10-19 (v0.14.0), shared scopes readable next to a private bank
 > since 2026-10-21 (v0.15.2), scope curation since 2026-10-22 (v0.15.6). Source:
 > `design/shared-memory-interoperability.md`, `design/memory-reliability.md`.
 

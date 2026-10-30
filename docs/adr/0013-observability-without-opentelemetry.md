@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Observability through a Prometheus endpoint, a journal and MQTT discovery; no OpenTelemetry
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-10 (roadmap stage 4). Source: `design/roadmap.md`, README
+> Backfilled on 2026-10-30, decided on 2026-09-10 (roadmap stage 4). Source: `design/roadmap.md`, README
 > "Observability", "Home Assistant".
 
 ## Context and Problem Statement

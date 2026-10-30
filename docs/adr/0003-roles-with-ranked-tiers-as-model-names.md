@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Roles with ranked tiers are the model names clients use
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-04, confirmed in the roadmap of 2026-09-09. Source:
+> Backfilled on 2026-10-30, decided on 2026-09-04, confirmed in the roadmap of 2026-09-09. Source:
 > `design/routing-algorithm.md`, `design/roadmap.md` ("Modellnamen sind Schnittstelle", "Tiers tragen Kontext und
 > `busy_ok`"), README "Roles and tiers".
 

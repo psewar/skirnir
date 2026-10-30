@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Reranking runs on a node through the tunnel and fails fast with 424
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-20 (v0.14.5, router 0.8.5, agent 0.18.0). Source:
+> Backfilled on 2026-10-30, decided on 2026-10-20 (v0.14.5, router 0.8.5, agent 0.18.0). Source:
 > `design/rerank.md`.
 
 ## Context and Problem Statement

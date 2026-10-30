@@ -6,7 +6,7 @@ decision-makers: operator
 
 # A central router in front of all GPU nodes
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-04. Source: `design/routing-algorithm.md` (draft v0.1),
+> Backfilled on 2026-10-30, decided on 2026-09-04. Source: `design/routing-algorithm.md` (draft v0.1),
 > README "What Skirnir does".
 
 ## Context and Problem Statement

@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Ollama runs as a child of the agent and is updated through the router
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-26 (v0.9.0: router 0.3.0, agent 0.12.0), swap only after the
+> Backfilled on 2026-10-30, decided on 2026-09-26 (v0.9.0: router 0.3.0, agent 0.12.0), swap only after the
 > router's release since 2026-10-01 (v0.11.0). Source: README "Updating Ollama", CHANGELOG.
 
 ## Context and Problem Statement

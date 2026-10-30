@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Components report their state as facts; nobody infers it from errors
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-27 as a general principle of the operator; applied in many
+> Backfilled on 2026-10-30, decided on 2026-09-27 as a general principle of the operator; applied in many
 > releases since. Source: CHANGELOG v0.9.3 (`ollama_managed`), v0.10.0 (Ollama state from the agent), v0.13.0 (game and
 > memory pressure), v0.20.1 (Hindsight health probed), v0.21.0 (sleep and wake-up), v0.16.2 (slowness), v0.24.0
 > (`upstream_blocked`).

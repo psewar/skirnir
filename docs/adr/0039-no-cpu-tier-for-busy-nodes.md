@@ -6,7 +6,7 @@ decision-makers: operator
 
 # No CPU tier for busy nodes
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-07 after a measurement during a game. Source: operator's
+> Backfilled on 2026-10-30, decided on 2026-09-07 after a measurement during a game. Source: operator's
 > measurement notes (`test/cpu_tier_bench.py`).
 
 ## Context and Problem Statement

@@ -6,7 +6,7 @@ decision-makers: operator
 
 # An optional session store in PostgreSQL keeps only explicit client events
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-19 (v0.14.0, router 0.8.0). Source:
+> Backfilled on 2026-10-30, decided on 2026-10-19 (v0.14.0, router 0.8.0). Source:
 > `design/session-store.md`.
 
 ## Context and Problem Statement

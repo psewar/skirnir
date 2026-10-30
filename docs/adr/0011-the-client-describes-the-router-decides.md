@@ -6,7 +6,7 @@ decision-makers: operator
 
 # The client describes, the router decides
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-09/10 (roadmap stage 1). Source: `design/roadmap.md`,
+> Backfilled on 2026-10-30, decided on 2026-09-09/10 (roadmap stage 1). Source: `design/roadmap.md`,
 > README "The client describes, the router decides".
 
 ## Context and Problem Statement

@@ -6,7 +6,7 @@ decision-makers: operator
 
 # An OpenAI-compatible inference server can be a node's backend; the router holds and releases it
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-23 (v0.17.0: router 0.10.0, agent 0.21.0; v0.18.0: router
+> Backfilled on 2026-10-30, decided on 2026-10-23 (v0.17.0: router 0.10.0, agent 0.21.0; v0.18.0: router
 > 0.11.0, agent 0.22.0). Source: CHANGELOG, README "Optional OpenAI-compatible node", `router/skirnir_router/openai_node.py`.
 
 ## Context and Problem Statement

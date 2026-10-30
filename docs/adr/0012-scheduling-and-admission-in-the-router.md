@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Scheduling, circuit breaker and admission control live in the router
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-10 (roadmap stage 3), extended on 2026-10-02 (models without
+> Backfilled on 2026-10-30, decided on 2026-09-10 (roadmap stage 3), extended on 2026-10-02 (models without
 > parallel requests wait in the router, v0.12.5). Source: `design/roadmap.md`, README "Scheduler, circuit breaker,
 > admission", CHANGELOG.
 

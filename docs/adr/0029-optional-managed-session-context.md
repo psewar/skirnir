@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Managed session context is a separate, explicit opt-in
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-19 (v0.14.0). Source: `design/managed-context.md`.
+> Backfilled on 2026-10-30, decided on 2026-10-19 (v0.14.0). Source: `design/managed-context.md`.
 
 ## Context and Problem Statement
 

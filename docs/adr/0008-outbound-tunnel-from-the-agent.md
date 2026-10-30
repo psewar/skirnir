@@ -6,7 +6,7 @@ decision-makers: operator
 
 # The agent keeps an outbound tunnel; the router reaches Ollama only through it
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-07 (agent 0.3.0), legacy token tunnel removed on 2026-09-25
+> Backfilled on 2026-10-30, decided on 2026-09-07 (agent 0.3.0), legacy token tunnel removed on 2026-09-25
 > (v0.5.1). Source: README "Architecture", "Interfaces", CHANGELOG v0.5.1.
 
 ## Context and Problem Statement

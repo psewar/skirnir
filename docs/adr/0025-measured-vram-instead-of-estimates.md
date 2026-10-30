@@ -6,7 +6,7 @@ decision-makers: operator
 
 # VRAM planning uses measured values per model and context
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-30 (v0.9.4, v0.9.5). Source: CHANGELOG ("real VRAM numbers"),
+> Backfilled on 2026-10-30, decided on 2026-09-30 (v0.9.4, v0.9.5). Source: CHANGELOG ("real VRAM numbers"),
 > README "Measurements as a reference".
 
 ## Context and Problem Statement

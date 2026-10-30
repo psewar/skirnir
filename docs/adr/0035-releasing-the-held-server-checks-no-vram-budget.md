@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Releasing a held server checks no VRAM budget
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-24 (v0.23.3, router 0.16.3), after an intermediate step the
+> Backfilled on 2026-10-30, decided on 2026-10-24 (v0.23.3, router 0.16.3), after an intermediate step the
 > same night (v0.23.2, whole card as budget). Source: CHANGELOG v0.23.2, v0.23.3, PR #62, #63.
 
 ## Context and Problem Statement

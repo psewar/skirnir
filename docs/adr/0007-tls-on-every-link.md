@@ -6,7 +6,7 @@ decision-makers: operator
 
 # TLS on every link; Ollama listens on localhost only
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-07. Source: README "Security model, in short".
+> Backfilled on 2026-10-30, decided on 2026-09-07. Source: README "Security model, in short".
 
 ## Context and Problem Statement
 

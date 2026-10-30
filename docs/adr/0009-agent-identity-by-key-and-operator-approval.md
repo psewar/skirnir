@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Agents identify with an Ed25519 key and need the operator's approval
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-07 (agent 0.4.0); shared heartbeat token removed. Source:
+> Backfilled on 2026-10-30, decided on 2026-09-07 (agent 0.4.0); shared heartbeat token removed. Source:
 > README "GPU nodes: the agent", "Security model".
 
 ## Context and Problem Statement

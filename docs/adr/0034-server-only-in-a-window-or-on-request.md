@@ -6,7 +6,7 @@ decision-makers: operator
 
 # An OpenAI-compatible server runs only in a time window or on request
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-23 (v0.23.0, router 0.16.0); the window check uses the agent's
+> Backfilled on 2026-10-30, decided on 2026-10-23 (v0.23.0, router 0.16.0); the window check uses the agent's
 > report since v0.23.3. Source: CHANGELOG, README "Only in a window or on request", PR #60, #63.
 
 ## Context and Problem Statement

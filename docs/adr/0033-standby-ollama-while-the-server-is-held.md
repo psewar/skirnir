@@ -6,7 +6,7 @@ decision-makers: operator
 
 # A standby Ollama serves while the OpenAI-compatible server is held
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-23 (v0.19.0: router 0.12.0, agent 0.23.0); switching to the
+> Backfilled on 2026-10-30, decided on 2026-10-23 (v0.19.0: router 0.12.0, agent 0.23.0); switching to the
 > standby for a request added the same day (v0.22.0: router 0.15.0, agent 0.25.0). Source: CHANGELOG, README "Standby
 > Ollama during a game", "Switching to the standby for a request".
 

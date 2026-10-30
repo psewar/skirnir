@@ -6,7 +6,7 @@ decision-makers: operator
 
 # An opt-in content check lets undeclared clients reach a cloud tier
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-23 (v0.20.0, router 0.13.0). Source: CHANGELOG v0.20.0.
+> Backfilled on 2026-10-30, decided on 2026-10-23 (v0.20.0, router 0.13.0). Source: CHANGELOG v0.20.0.
 > Extends ADR-0014 without superseding it.
 
 ## Context and Problem Statement

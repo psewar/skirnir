@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Long-term memory is an optional Hindsight adapter with server-side grants
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-19 (v0.14.0); failures reported as a state since v0.14.1;
+> Backfilled on 2026-10-30, decided on 2026-10-19 (v0.14.0); failures reported as a state since v0.14.1;
 > health probed since v0.20.1. Source: `design/hindsight-memory.md`, CHANGELOG.
 
 ## Context and Problem Statement

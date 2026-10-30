@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Cloud is a tier in roles; data classes are a client's declaration
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-09, changed the same day from opt-in per client to roles plus
+> Backfilled on 2026-10-30, decided on 2026-09-09, changed the same day from opt-in per client to roles plus
 > client opt-out on 2026-09-10. Source: `design/roadmap.md` (decisions table, "Wo die Spezifikation reibt" 4 and 5),
 > README "Cloud as a tier in roles".
 

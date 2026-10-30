@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Switching to the standby waits for a gap on the server
 
-> Recorded retroactively on 2026-10-30; decided on 2026-10-24 (v0.23.4, router 0.16.4). Source: CHANGELOG v0.23.4,
+> Backfilled on 2026-10-30, decided on 2026-10-24 (v0.23.4, router 0.16.4). Source: CHANGELOG v0.23.4,
 > PR #64, README "Switching to the standby for a request".
 
 ## Context and Problem Statement

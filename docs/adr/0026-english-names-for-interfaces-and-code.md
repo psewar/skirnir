@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Every interface and the code use English names
 
-> Recorded retroactively on 2026-10-30; decided before 2026-10-22, carried out on 2026-10-22 (v0.16.0 interfaces, v0.16.1
+> Backfilled on 2026-10-30, decided before 2026-10-22, carried out on 2026-10-22 (v0.16.0 interfaces, v0.16.1
 > code identifiers and messages, comments afterwards). Source: `design/english-names.md`.
 
 ## Context and Problem Statement

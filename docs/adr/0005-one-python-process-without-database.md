@@ -6,7 +6,7 @@ decision-makers: operator
 
 # The router is one Python process without a database
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-04 (first deployment), split into a package on 2026-09-09.
+> Backfilled on 2026-10-30, decided on 2026-09-04 (first deployment), split into a package on 2026-09-09.
 > Source: README ("TLS everywhere, one process, one event loop, no database", "Limits and non-goals"),
 > `design/roadmap.md` ("Paketschnitt jetzt? Ja, als Stufe 0").
 

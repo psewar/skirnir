@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Settings that shift the trust base change only in the configuration file
 
-> Recorded retroactively on 2026-10-30; decided with the build-out of UI settings on 2026-09-10 and tightened after a
+> Backfilled on 2026-10-30, decided with the build-out of UI settings on 2026-09-10 and tightened after a
 > security review on 2026-09-16 (`client_auth.locked`). Source: README "Security model, in short", `settings.py` allowlist.
 
 ## Context and Problem Statement

@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Agents update themselves through the router from operator-signed releases, canary first
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-25 (v0.4.0: router 0.1.5, agent 0.8.4). Source: README
+> Backfilled on 2026-10-30, decided on 2026-09-25 (v0.4.0: router 0.1.5, agent 0.8.4). Source: README
 > "Updating agents", CHANGELOG v0.4.0.
 
 ## Context and Problem Statement

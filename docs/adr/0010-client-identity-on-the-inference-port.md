@@ -6,7 +6,7 @@ decision-makers: operator
 
 # Client identity on the inference port comes first
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-09 (order of the build-out), enforced since 2026-09-10.
+> Backfilled on 2026-10-30, decided on 2026-09-09 (order of the build-out), enforced since 2026-09-10.
 > Source: `design/roadmap.md` (decisions table, stage 2, deviation from the specification), README "Client identities on
 > the inference port".
 

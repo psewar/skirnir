@@ -40,7 +40,7 @@ Rules:
 * Accepted ADRs are not rewritten. A changed decision gets a new ADR that supersedes the old one; the old one only
   changes its status, and both link to each other. Typos and links may be fixed.
 * A PR that makes or changes a decision brings its ADR (or a proposed ADR before it) and names it in its description.
-* Earlier decisions are recorded retroactively and marked as such ("recorded retroactively on …, decided on …") with
+* Earlier decisions are backfilled and marked as such ("Backfilled on …, decided on …") with
   their source.
 * Design documents describe *how*; they link to the ADRs instead of repeating the reasons.
 
@@ -57,5 +57,5 @@ mode of operation names an ADR. `docs/adr/README.md` lists every ADR.
 
 ## More Information
 
-Format: [MADR 4.0](https://adr.github.io/madr/), after Michael Nygard's original idea. ADR-0002 to ADR-0039 were recorded
-retroactively on 2026-10-30 from the changelog, the release notes, `design/` and the PR history.
+Format: [MADR 4.0](https://adr.github.io/madr/), after Michael Nygard's original idea. ADR-0002 to ADR-0039 were backfilled
+on 2026-10-30 from the changelog, the release notes, `design/` and the PR history.

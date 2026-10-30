@@ -6,7 +6,7 @@ decision-makers: operator
 
 # The agent caps the GPU's power by default to protect the 12V-2x6 connector
 
-> Recorded retroactively on 2026-10-30; decided on 2026-09-24 (agent 0.7.0, router 0.1.2). Source:
+> Backfilled on 2026-10-30, decided on 2026-09-24 (agent 0.7.0, router 0.1.2). Source:
 > `design/gpu-guard.md` sections 3 and 4 and the operator's decisions in its header.
 
 ## Context and Problem Statement
