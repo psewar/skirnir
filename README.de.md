@@ -541,6 +541,7 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 | `rerank-server/` | Optionaler Cross-Encoder-Reranker mit TEI-Protokoll `/rerank` auf OpenVINO (Intel-iGPU, CPU, NPU), als Kind des Agenten fuer einen Gedaechtnisdienst wie Hindsight; eigene README |
 | `deploy/` | `deploy.py`, `ops_env.py` |
 | `design/` | Entwürfe: `routing-algorithm.md`, `roadmap.md` (Ausbaustufen und Entscheidungen), `decision-engine.md`; Logos (mit einem Bildmodell erzeugt, Metadaten entfernt) |
+| `docs/adr/` | Architecture Decision Records: warum Skirnir so gebaut ist (MADR 4.0, englisch, Verzeichnis in `docs/adr/README.md`) |
 | `test/` | Testsuite, Fakes, Dev-Umgebung, Messstand |
 | `tools/` | Messskripte für den GPU-Schutz (Lasttest, Nachtlauf Stufe 2) |
 | `monitoring/` | Prometheus + Grafana neben dem Router (Compose, Scrape-Konfiguration, provisioniertes Dashboard, Secret-Renderer, `deploy_ct.py`), eigene README |

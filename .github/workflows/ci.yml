@@ -22,6 +22,8 @@ jobs:
       - run: pip install -r requirements-dev.txt -r test/requirements-hindsight.txt
       - run: ruff check .
       - run: python router/router.py --check router/config.example.yaml --pure
+      - name: ADR index (docs/adr, ADR-0001)
+        run: python test/check_adr_index.py
       - name: Explicit control flow (AGENTS.md)
         run: python test/selftest_control_flow.py && python test/check_control_flow.py
       - run: python test/selftest_context_check.py

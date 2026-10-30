@@ -546,6 +546,7 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 | `rerank-server/` | Optional cross-encoder reranker with the TEI `/rerank` protocol on OpenVINO (Intel iGPU, CPU, NPU), run as an agent child for a memory service such as Hindsight; own README |
 | `deploy/` | `deploy.py`, `ops_env.py` |
 | `design/` | Design notes: `routing-algorithm.md`, `roadmap.md` (stages and decisions), `decision-engine.md`; logos (generated with an image model, metadata removed) |
+| `docs/adr/` | Architecture Decision Records: why Skirnir is built this way (MADR 4.0, index in `docs/adr/README.md`) |
 | `test/` | Test suite, fakes, dev environment, test bench |
 | `tools/` | measurement scripts for the GPU guard (load test, stage-2 night run) |
 | `monitoring/` | Prometheus + Grafana next to the router (compose, scrape config, provisioned dashboard, secret renderer, `deploy_ct.py`), own README |

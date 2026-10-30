@@ -1,5 +1,7 @@
 # Decision Engine (2026-09-16) - Entwurf und Abweichungen vom Vorschlag
 
+> Entscheidungen (warum): [ADR-0017](../docs/adr/0017-auto-role-through-a-chain-of-local-decision-engines.md)
+
 Vorschlag des Betreibers: eine generische Decision-Engine-Abstraktion, zuerst mit Jevlike (lokal, nicht generativ) als Provider, um
 die semantische Routing-Frage "welche Rolle passt zu dieser Anfrage?" schnell zu beantworten und ein LLM nur noch fuer
 schwierige Faelle zu brauchen. Dieser Text haelt fest, was umgesetzt ist und wo ich bewusst abweiche.
