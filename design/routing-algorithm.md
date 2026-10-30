@@ -1,5 +1,7 @@
 # Routing-Algorithmus – Entwurf v0.1 (2026-09-04)
 
+> Entscheidungen (warum): [ADR-0002](../docs/adr/0002-central-router-in-front-of-gpu-nodes.md), [ADR-0003](../docs/adr/0003-roles-with-ranked-tiers-as-model-names.md), [ADR-0004](../docs/adr/0004-busy-detection-is-a-first-class-scheduler-input.md), [ADR-0006](../docs/adr/0006-go-agent-on-gpu-nodes.md), [ADR-0012](../docs/adr/0012-scheduling-and-admission-in-the-router.md), [ADR-0025](../docs/adr/0025-measured-vram-instead-of-estimates.md)
+
 > **Stand 2026-09-25:** Entwurf vor dem ersten Produktivbetrieb. Umgesetzt und seither erweitert (Score mit Gewichten,
 > Breaker-Zustände, Admission, Residenz, Tunnel statt Direktzugriff); die Messvorschrift in Abschnitt 5 ist das Verfahren
 > hinter dem Knopf „Messen“ im Modellkatalog. Abschnitt 6 ist entschieden: Go-Agent (seit 0.3.0 mit NVML), der

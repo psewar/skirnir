@@ -1,5 +1,7 @@
 # Memory: Betriebsfestigkeit und Qualität
 
+> Entscheidungen (warum): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md)
+
 [English reference](memory-reliability.md). Ergänzt die
 [Shared-Memory-Anleitung](shared-memory-interoperability.de.md).
 

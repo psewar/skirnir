@@ -1,5 +1,7 @@
 # Ausbau zur Inference- und Scheduling-Schicht – Fahrplan (2026-09-09)
 
+> Entscheidungen (warum): [ADR-0005](../docs/adr/0005-one-python-process-without-database.md), [ADR-0010](../docs/adr/0010-client-identity-on-the-inference-port.md), [ADR-0011](../docs/adr/0011-the-client-describes-the-router-decides.md), [ADR-0012](../docs/adr/0012-scheduling-and-admission-in-the-router.md), [ADR-0013](../docs/adr/0013-observability-without-opentelemetry.md), [ADR-0014](../docs/adr/0014-cloud-as-a-role-tier-with-declared-data-classes.md), [ADR-0015](../docs/adr/0015-operations-schema-check-idempotency-canary-shadow.md)
+
 > **Stand 2026-09-25: historisch.** Alle sechs Stufen sind seit 2026-09-10 gebaut und live; die Testzahlen im Text sind
 > die von damals (heute rund 250). Was seither dazukam, steht in `CHANGELOG.md` und in den Releases; die Entscheidungen
 > (Cloud-Opt-out, Reihenfolge, Paketschnitt) und der Abschnitt „Wo die Spezifikation an diesem Router reibt“ gelten weiter.

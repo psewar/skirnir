@@ -1,5 +1,7 @@
 # Optional managed session context (PR 3)
 
+> Decisions (why): [ADR-0029](../docs/adr/0029-optional-managed-session-context.md)
+
 `off` remains the inference default. `client-managed` sessions keep explicit event
 storage only; Hermes continues to own compaction and its memory provider. The new
 `skirnir-managed` mode is an additional, explicit opt-in. Affinity's

@@ -1,5 +1,7 @@
 # Optional Hindsight memory (PR 2)
 
+> Decisions (why): [ADR-0028](../docs/adr/0028-optional-hindsight-long-term-memory.md)
+
 This adapter keeps long-term knowledge separate from raw session history and task
 checkpoints. It does not copy sessions, configure Hindsight models, install a Hermes
 plugin, or perform compaction. All existing clients stay stateless unless they
