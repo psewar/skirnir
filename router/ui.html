@@ -615,6 +615,10 @@ let rolesDirty = false;
 window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
 
 async function api(path, opts) {
+  // Same-origin administrative requests opt into the CSRF guard.
+  if (opts && opts.method && !['GET', 'HEAD', 'OPTIONS'].includes(opts.method.toUpperCase()) && path.startsWith('/admin/')) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), 'X-Skirnir-UI': '1' } };
+  }
   const r = await fetch(path, opts);
   const t = await r.text();
   let j; try { j = JSON.parse(t); } catch { j = { error: t }; }

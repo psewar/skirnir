@@ -34,6 +34,7 @@ def http(url, body=None, headers=None, method=None, timeout=30, auth=True):
     hdrs = {"Content-Type": "application/json"}
     if auth and url.startswith(C) and "/v1/" not in url:
         hdrs.update(AUTH)
+        hdrs["X-Skirnir-UI"] = "1"   # router 0.18.0 (ADR-0042): writes to /admin need it, as the web UI sends it
     hdrs.update(headers or {})
     req = urllib.request.Request(url, data=data, method=method or ("POST" if data else "GET"), headers=hdrs)
     try:
@@ -1522,6 +1523,14 @@ def main():
         http(C + "/admin/config", {"expose_concrete_models": False}, method="PUT")
         codes = [http(R + "/api/tags", headers=hdr("limited-token"))[0] for _ in range(4)]
         check("Rate Limit 3/min: fourth request gets 429", codes == [200, 200, 200, 429], str(codes))
+        # ADR-0042: a write to /admin without X-Skirnir-UI, or marked cross-site, is refused even with valid credentials
+        st, raw = http(C + "/admin/config", {"expose_concrete_models": False}, method="PUT", headers={"X-Skirnir-UI": "0"})
+        check("admin write without X-Skirnir-UI -> 403", st == 403 and b"X-Skirnir-UI" in raw, f"{st} {raw[:80]}")
+        st, raw = http(C + "/admin/config", {"expose_concrete_models": False}, method="PUT",
+                       headers={"Sec-Fetch-Site": "cross-site"})
+        check("admin write marked cross-site -> 403", st == 403, f"{st} {raw[:80]}")
+        st, _ = http(C + "/admin/state")
+        check("admin read needs no X-Skirnir-UI (GET)", st == 200, str(st))
         # client_auth.locked (Audit 2026-09-16): locked mode is not changeable via Settings, config carries the flag
         sys.path.insert(0, os.path.join(HERE, "..", "router"))
         from skirnir_router import settings as _smod   # noqa: E402

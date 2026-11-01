@@ -112,7 +112,8 @@ async def client_auth_middleware(request, handler):
     if request.path in EXEMPT_PATHS:
         return await handler(request)
     cfg = client_auth_cfg()
-    if not cfg.get("clients"):          # no block configured -> port open as before stage 2
+    if not cfg.get("clients") and client_auth_mode() != "enforce":
+        # Only explicit observation mode remains permissive for migration/diagnostics.
         return await handler(request)
     now = time.time()
     name, via = resolve_client(request)
@@ -286,8 +287,15 @@ def _basic_fail_src(remote, note):
 @web.middleware
 async def basic_auth_middleware(request, handler):
     """UI and /admin/* require Basic Auth; the agent heartbeat (/v1/...) stays on the token."""
-    if request.path.startswith("/v1/") or not state.CFG.control_users:
+    if request.path.startswith("/v1/"):
         return await handler(request)
+    if not state.CFG.control_users:
+        # Development without credentials is allowed only on an explicit loopback listener.
+        listen = getattr(state.CFG, "control_listen", "")
+        host = listen.rpartition(":")[0].strip("[]")
+        if host in ("127.0.0.1", "::1") and (request.remote or "") in ("127.0.0.1", "::1"):
+            return await handler(request)
+        return web.json_response({"error": "control authentication is not configured"}, status=503)
     auth = request.headers.get("Authorization", "")
     remote = request.remote or "?"
     ok = False
@@ -308,4 +316,8 @@ async def basic_auth_middleware(request, handler):
     if not ok:
         return web.json_response({"error": "authentication required"}, status=401,
                                  headers={"WWW-Authenticate": 'Basic realm="skirnir-router", charset="UTF-8"'})
+    # Cross-origin HTML forms cannot set this non-simple request header.
+    if request.path.startswith("/admin/") and request.method not in ("GET", "HEAD", "OPTIONS"):
+        if request.headers.get("X-Skirnir-UI") != "1" or request.headers.get("Sec-Fetch-Site") == "cross-site":
+            return web.json_response({"error": "CSRF protection: X-Skirnir-UI required"}, status=403)
     return await handler(request)

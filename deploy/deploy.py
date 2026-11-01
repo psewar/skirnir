@@ -129,8 +129,10 @@ def connect():
 
 
 def curl_auth(url_and_args):
-    """curl with Basic Auth from stdin (`-K -`), so the UI password doesn't appear in the process list of host and container."""
-    return "curl -s -m 8 -K - " + url_and_args, 'user = "%s:%s"\n' % (OPS["UI_USER"], os.environ.get(OPS["UI_PASS_ENV"], ""))
+    """curl with Basic Auth from stdin (`-K -`), so the UI password doesn't appear in the process list of host and container.
+    Also sends X-Skirnir-UI, which the router requires on mutating /admin/* calls (ADR-0042), so callers need not add it."""
+    return "curl -s -m 8 -K - " + url_and_args, 'user = "%s:%s"\nheader = "X-Skirnir-UI: 1"\n' % (
+        OPS["UI_USER"], os.environ.get(OPS["UI_PASS_ENV"], ""))
 
 
 AGENT_BINARIES = [  # (filename in dist/, os, arch) - names as in the GitHub release

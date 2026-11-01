@@ -166,7 +166,11 @@ def request_block_reason(req, body, client_name):
     cc = ((state.CFG.client_auth.get("clients") or {}).get(client_name or "") or {})
     if cc.get("cloud") is False:
         return f"client {client_name}: cloud: false (opt-out)"
-    dc = req.data_class or cc.get("data_class") or cfg.get("default_data_class", "personal")
+    # ADR-0043: a class configured for the client is a floor its requests cannot go below (they may raise it). Without
+    # one the client declares its class per request, as ADR-0014 intends; undeclared falls back to default_data_class.
+    floor = cc.get("data_class")
+    declared = req.data_class or floor or cfg.get("default_data_class", "personal")
+    dc = max((floor, declared), key=class_index) if floor else declared
     req.data_class_effective = dc
     if class_index(dc) > class_index(cfg.get("max_cloud_data_class", "internal")):
         if dc == "personal" and not req.data_class and cc.get("privacy_check") is True:

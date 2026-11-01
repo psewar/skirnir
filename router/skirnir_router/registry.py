@@ -21,6 +21,33 @@ from . import agentupdate, nodes, ollamaupdate, state, tunnel, values
 from .common import BASE64, VERSION, log, normalize_mac, read_env_value, read_json, safe_node_name
 from .outcome import Problem, failed, invalid, unauthenticated
 
+# Unapproved identities are untrusted, even when they sign their own key.
+MAX_HELLO_BYTES = 32 * 1024
+MAX_PENDING_NODES = 32
+ENROLL_WINDOW_S = 300
+MAX_ENROLL_PER_IP = 6
+_ENROLL = {}  # source IP -> recent successful new registrations, pruned each attempt
+
+
+def enrollment_denial(fp, remote, now=None):
+    """Reject new identities before inserting into the persistent registry."""
+    if fp in state.REG.nodes:
+        return None  # Existing identities/reconnects don't consume admission slots.
+    if sum(e.get("state") == "pending" for e in state.REG.nodes.values()) >= MAX_PENDING_NODES:
+        return "pending enrollment capacity reached"
+    now = time.monotonic() if now is None else now
+    for key, attempts in list(_ENROLL.items()):
+        live = [t for t in attempts if now - t < ENROLL_WINDOW_S]
+        if live:
+            _ENROLL[key] = live
+        else:
+            del _ENROLL[key]
+    attempts = _ENROLL.setdefault(remote or "unknown", [])
+    if len(attempts) >= MAX_ENROLL_PER_IP:
+        return "enrollment rate limited"
+    attempts.append(now)
+    return None
+
 
 class NodeRegistry:
     def __init__(self, path):
@@ -265,12 +292,16 @@ async def receive_hello(ws, nonce, timeout=15):
     msg = recv.result()
     if msg.type != web.WSMsgType.TEXT:
         return unauthenticated("not a text frame")
+    if len(msg.data.encode("utf-8")) > MAX_HELLO_BYTES:
+        return unauthenticated("hello frame too large")
     try:
         hello = json.loads(msg.data)
     except ValueError:  # exception-ok: untrusted JSON from the agent
         return unauthenticated("not JSON")
     if not isinstance(hello, dict) or hello.get("t") != "hello":
         return unauthenticated("not a hello")
+    if not isinstance(hello.get("facts", {}), dict):
+        return unauthenticated("facts must be an object")
     if not all(isinstance(hello.get(k), str) and BASE64.fullmatch(hello[k]) for k in ("pubkey", "sig")):
         return unauthenticated("pubkey/sig are not base64")
     pub, sig = base64.b64decode(hello["pubkey"]), base64.b64decode(hello["sig"])
@@ -288,7 +319,7 @@ async def handle_tunnel_v2(request):
     """WebSocket endpoint for agents with key identity: Challenge -> signed Hello -> Status."""
     if Ed25519PublicKey is None:
         return web.json_response({"error": "python3-cryptography is missing on the router"}, status=503)
-    ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024 * 1024)
+    ws = web.WebSocketResponse(heartbeat=20, max_msg_size=2 * 1024 * 1024)
     await ws.prepare(request)
     nonce = secrets.token_bytes(32)
     await ws.send_json({"t": "challenge", "nonce": base64.b64encode(nonce).decode(), "router": VERSION})
@@ -299,7 +330,12 @@ async def handle_tunnel_v2(request):
         return ws
     pub, name, hello = hello
     fp = hashlib.sha256(pub).hexdigest()
-    facts = hello.get("facts") if isinstance(hello.get("facts"), dict) else {}
+    refusal = enrollment_denial(fp, request.remote)
+    if refusal:
+        await ws.send_json({"t": "status", "state": "pending", "message": refusal})
+        await ws.close(code=1008, message=b"enrollment refused")
+        return ws
+    facts = hello.get("facts") or {}
     e = state.REG.upsert_hello(fp, name or facts.get("hostname") or fp[:12], base64.b64encode(pub).decode(), facts, request.remote)
     if e["state"] == "revoked":
         await ws.send_json({"t": "status", "state": "revoked", "node": e["name"], "message": "revoked in the router UI"})

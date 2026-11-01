@@ -314,7 +314,7 @@ class Config:
 
     def _parse_router(self, r):
         self.listen = r.get("listen", "0.0.0.0:11434")
-        self.control_listen = r.get("control_listen", "0.0.0.0:11435")
+        self.control_listen = r.get("control_listen", "127.0.0.1:11435")
         self.poll_s = float(r.get("ollama_poll_s", _d("router.ollama_poll_s")))
         self.offline_after = int(r.get("offline_after_misses", _d("router.offline_after_misses")))
         self.hb_interval_s = float(r.get("heartbeat_interval_s", _d("router.heartbeat_interval_s")))   # Agent tick (provisioned)
