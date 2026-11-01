@@ -15,6 +15,14 @@ Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/skirnir-router/secrets.env
 User=root
 NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+SystemCallArchitectures=native
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/opt/skirnir-router

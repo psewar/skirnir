@@ -166,7 +166,9 @@ def request_block_reason(req, body, client_name):
     cc = ((state.CFG.client_auth.get("clients") or {}).get(client_name or "") or {})
     if cc.get("cloud") is False:
         return f"client {client_name}: cloud: false (opt-out)"
-    dc = req.data_class or cc.get("data_class") or cfg.get("default_data_class", "personal")
+    # A caller may raise classification, never lower the server/client minimum.
+    minimum = cc.get("data_class") or cfg.get("default_data_class", "personal")
+    dc = max((minimum, req.data_class or minimum), key=class_index)
     req.data_class_effective = dc
     if class_index(dc) > class_index(cfg.get("max_cloud_data_class", "internal")):
         if dc == "personal" and not req.data_class and cc.get("privacy_check") is True:

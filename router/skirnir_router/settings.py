@@ -253,7 +253,7 @@ C = "router.client_auth.clients.*."
 _e(C + "ip", "iplist", "Quell-IPs", "Identitaet ueber die Absenderadresse fuer Clients, die keinen Header schicken koennen (Komma-getrennt); leer = nur Secret", "Clients", [], nullable=True,
    label_en="Source IPs", help_en="identity via the sender address for clients that cannot send a header (comma-separated); empty = secret only")
 _e(C + "roles", "list", "Rollen", "erlaubte Rollen, * = alle", "Clients", ["*"], choices="roles", label_en="Roles", help_en="allowed roles, * = all")
-_e(C + "models", "bool", "konkrete Modelle", "darf konkrete Modellnamen rufen", "Clients", True, label_en="concrete models", help_en="may call concrete model names")
+_e(C + "models", "bool", "konkrete Modelle", "darf konkrete Modellnamen rufen", "Clients", False, label_en="concrete models", help_en="may call concrete model names")
 _e(C + "requests_per_minute", "int", "Anfragen/min", "leer = unbegrenzt", "Clients", None, min=1, max=100000, nullable=True, label_en="Requests/min", help_en="empty = unlimited")
 _e(C + "max_priority", "choice", "hoechste Prioritaet", "leer = keine Kappung", "Clients", None, choices=list(PRIORITIES), nullable=True,
    label_en="highest priority", help_en="empty = no cap")

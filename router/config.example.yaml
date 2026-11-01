@@ -133,8 +133,8 @@ router:
         region: us
   control_auth:                  # Basic Auth fuer UI + /admin/*; Klartext im Secret-Store
     users:
-      admin: "pbkdf2:200000:5c942b7d89c730d5ab088b5196767550:39f5b53d41e18fe3e854f4487f84150b96cbf928b797eba07b965980840a04b0"   # Passwort "changeme" - ersetzen: python3 router.py --hash '<passwort>'
-      deploy: "pbkdf2:200000:5c942b7d89c730d5ab088b5196767550:39f5b53d41e18fe3e854f4487f84150b96cbf928b797eba07b965980840a04b0"   # Passwort "changeme" - ersetzen: python3 router.py --hash '<passwort>'
+      admin: "pbkdf2:200000:54e400a7b83f03e36564355c2953bd2a:dec3e7feefd0cf085a3aebfa2f8f3b7e9482a950e8ebc6806d8430df64f5d8d9"   # Disabled example hash (no known password). Replace with: python3 router.py --hash '<passwort>'
+      deploy: "pbkdf2:200000:54e400a7b83f03e36564355c2953bd2a:dec3e7feefd0cf085a3aebfa2f8f3b7e9482a950e8ebc6806d8430df64f5d8d9"   # Disabled example hash (no known password). Replace with: python3 router.py --hash '<passwort>'
   client_auth:                   # Stufe 2 (design/roadmap.md): wer darf den API-Port 11434 rufen.
     locked: true                 # Modus nur per config.yaml + Deploy aenderbar (UI/POST /admin/client_auth -> 403)
     mode: enforce                # observe = alles bedienen, Unbekannte zaehlen (UI/State) und ins Audit-Log;

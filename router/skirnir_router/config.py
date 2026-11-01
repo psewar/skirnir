@@ -314,7 +314,7 @@ class Config:
 
     def _parse_router(self, r):
         self.listen = r.get("listen", "0.0.0.0:11434")
-        self.control_listen = r.get("control_listen", "0.0.0.0:11435")
+        self.control_listen = r.get("control_listen", "127.0.0.1:11435")
         self.poll_s = float(r.get("ollama_poll_s", _d("router.ollama_poll_s")))
         self.offline_after = int(r.get("offline_after_misses", _d("router.offline_after_misses")))
         self.hb_interval_s = float(r.get("heartbeat_interval_s", _d("router.heartbeat_interval_s")))   # Agent tick (provisioned)
@@ -380,7 +380,7 @@ class Config:
             spec["token_sha256"] = th
             spec["ip"] = [str(x) for x in (spec.get("ip") or [])]
             spec["roles"] = [str(x) for x in (spec.get("roles") or ["*"])]
-            spec["models"] = bool(spec.get("models", True))
+            spec["models"] = bool(spec.get("models", False))
             # Permission for POST /rerank (rerank.py), default no. Detection also via ip: Hindsight TEI client sends no header.
             if type(spec.get("rerank", False)) is not bool:
                 return invalid(f"client_auth.clients.{name}.rerank must be true or false")

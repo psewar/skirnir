@@ -175,7 +175,7 @@ def client_allows(request, role, concrete):
         return None
     c = (client_auth_cfg().get("clients") or {}).get(name) or {}
     if concrete:
-        if c.get("models", True):
+        if c.get("models", False):
             return None
         reason = f"client {name}: concrete model names not allowed (roles only)"
     else:

@@ -18,6 +18,12 @@ ProtectSystem=full
 # /usr/local/bin: das Selbst-Update (updater.go) legt <binary>.new daneben und tauscht - unter ProtectSystem=full sonst read-only
 ReadWritePaths=/var/lib/skirnir-agent /var/log/skirnir-agent /usr/local/bin
 NoNewPrivileges=true
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
