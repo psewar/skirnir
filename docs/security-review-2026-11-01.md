@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | SK-SEC-01 | High | API `enforce` with empty client list allowed unauthenticated inference; empty control user map allowed administrative access | Deny API when `enforce` is set regardless of client count; deny missing control auth on network bindings, retain loopback-only developer exception |
 | SK-SEC-02 | High | Unapproved Ed25519 enrollment lacked an admission cap; excessive handshake/body sizes and pending keys exhausted memory/disk | 32 KiB handshake, 2 MiB subsequent frames, max 32 pending, per-IP enrollment admission bound |
-| SK-SEC-03 | High when cloud enabled | Request `routing.data_class` could override a stricter server-side client class | Effective classification is at least the configured client/server minimum |
+| SK-SEC-03 | High when cloud enabled | Request `routing.data_class` could override a stricter server-side client class | Effective classification is at least the class configured for the client; `default_data_class` applies only to requests that declare none (ADR-0043) |
 | SK-SEC-04 | Medium | State-changing Control endpoints accepted browser Basic Auth without explicit anti-CSRF controls | Non-simple UI header on mutating admin requests and Fetch Metadata cross-site rejection |
 | SK-SEC-05 | Medium | Default client access to concrete models bypassed role-only grants | **Open:** the permissive historical default is preserved for compatibility; a staged transition to role-only access is still needed |
 | SK-SEC-06 | Medium | Example credentials were publicly known | Replace fixed example admin password hashes with a non-known random hash; operators must configure their own |
