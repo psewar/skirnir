@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "router"))
-from skirnir_router import auth, cloud, config, registry, state  # noqa: E402
+from skirnir_router import auth, cloud, registry, state  # noqa: E402
 
 def check(ok, label):
     if not ok:
