@@ -1,5 +1,7 @@
 # Gemeinsames Gedächtnis, Agent-Übergaben und Zuverlässigkeit
 
+> Entscheidungen (warum): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md)
+
 [Englische Referenz mit vollständigem Konfigurationsbeispiel](shared-memory-interoperability.md).
 Die Erweiterung nutzt den bestehenden Session Store, den Hindsight-Adapter und die
 extraktive Context Engine. Ein neues Agent-Framework oder zusätzliche Modellaufrufe

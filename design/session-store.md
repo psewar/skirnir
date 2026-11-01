@@ -1,5 +1,7 @@
 # Optional persistent sessions (PR 1)
 
+> Decisions (why): [ADR-0027](../docs/adr/0027-optional-session-store-in-postgresql.md)
+
 Skirnir can store **explicit client events** in PostgreSQL. It never records ordinary
 inference requests automatically. For separately enabled, explicit `skirnir-managed`
 inference, see [managed context](managed-context.md). Default: off, no database or `asyncpg` dependency.

@@ -1,5 +1,7 @@
 # Shared memory, agent exchange and reliability
 
+> Decisions (why): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md)
+
 [Deutsche Anleitung](shared-memory-interoperability.de.md). This extends the existing
 [session store](session-store.md), [memory adapter](hindsight-memory.md) and
 [context engine](managed-context.md); it does not replace them.

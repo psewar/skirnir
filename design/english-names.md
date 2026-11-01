@@ -1,5 +1,7 @@
 # English names for every interface
 
+> Decisions (why): [ADR-0026](../docs/adr/0026-english-names-for-interfaces-and-code.md)
+
 Router 0.9.0 and agent 0.20.0 rename everything that leaves the process to English: Home Assistant entities,
 event types and attributes, journal events and reasons, GPU guard states and fields, file and module names.
 The rest of the code (identifiers, log and error texts, comments) follows in later changes; this document

@@ -11,6 +11,18 @@
 - Do not test against personal infrastructure or import real memory/session content.
 - Run the relevant self-tests, lint, config validation and applicable integration tests.
 
+## Architecture decisions are recorded as ADRs
+
+Every architecture or design decision is an ADR in `docs/adr/` (MADR 4.0, rules in
+`docs/adr/0001-record-architecture-decisions.md`): technology and protocol choices, interfaces, security boundaries,
+data stores, modes of operation, and deliberately rejected options (status `rejected`).
+
+- A PR that makes or changes a decision brings its ADR (`docs/adr/NNNN-title-in-kebab-case.md`, next free number) and
+  names it in the PR description. A changed decision is a new ADR that supersedes the old one; accepted ADRs are not
+  rewritten, the old one only changes its status to `superseded by ADR-NNNN`.
+- Regenerate the index with `python test/check_adr_index.py --write`; CI checks it.
+- Design documents in `design/` describe how things work and link to the ADRs for the reasons.
+
 ## Explicit control flow: exceptions are not a control signal
 
 Applies to all code in this repository, to every agent and every contributor.

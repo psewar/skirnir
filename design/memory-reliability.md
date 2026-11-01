@@ -1,5 +1,7 @@
 # Memory reliability and quality
 
+> Decisions (why): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md)
+
 [Deutsch](memory-reliability.de.md). Extends the [shared-memory guide](shared-memory-interoperability.md).
 
 ## Optional limits and recovery
