@@ -30,7 +30,8 @@ SPY_S = 30   # py-spy writes its profile only on regular exit -> fixed duration,
 
 def http(path, body=None, timeout=300):
     req = urllib.request.Request(C + path, data=json.dumps(body).encode() if body is not None else None,
-                                 headers={"Content-Type": "application/json"}, method="POST" if body is not None else "GET")
+                                 headers={"Content-Type": "application/json", "X-Skirnir-UI": "1"},   # ADR-0042
+                                 method="POST" if body is not None else "GET")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.status, r.read()
 

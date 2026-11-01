@@ -58,6 +58,13 @@ async def main():
     req2 = SimpleNamespace(execution="auto", data_class="secret", cloud_privacy=False, data_class_effective=None)
     cloud.request_block_reason(req2, {"messages": []}, "member")
     check(req2.data_class_effective == "secret", "caller may upgrade classification")
+    # ADR-0043: without a configured class the client declares its own (ADR-0014); undeclared stays at the default
+    req3 = SimpleNamespace(execution="auto", data_class="internal", cloud_privacy=False, data_class_effective=None)
+    open_ = cloud.request_block_reason(req3, {"messages": []}, "unconfigured")
+    check(req3.data_class_effective == "internal" and open_ is None, "unconfigured client may declare internal")
+    req4 = SimpleNamespace(execution="auto", data_class=None, cloud_privacy=False, data_class_effective=None)
+    shut = cloud.request_block_reason(req4, {"messages": []}, "unconfigured")
+    check(req4.data_class_effective == "personal" and shut is not None, "undeclared request stays at the default personal")
 
     registry._ENROLL.clear()
     state.REG = SimpleNamespace(nodes={})
