@@ -36,7 +36,7 @@ not chosen: a router without clients is a valid intermediate state while setting
 ### Consequences
 
 * Good, because an incomplete configuration no longer exposes inference or administration.
-* Bad, because a new installation must set `control_listen` (for example `0.0.0.0:11435`) before remote agents can
+* Bad, because a new installation must set `control_listen` to a reachable address before remote agents can
   connect; the example configuration does.
 
 ### Confirmation
