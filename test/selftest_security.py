@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "router"))
-from skirnir_router import auth, cloud, registry, state  # noqa: E402
+from skirnir_router import auth, cloud, config, registry, state  # noqa: E402
 
 def check(ok, label):
     if not ok:
@@ -73,5 +73,14 @@ async def main():
     check(registry.enrollment_denial("overflow", "192.0.2.19", now=100) is not None, "agent rate cap")
     state.REG.nodes["approved"] = {"state": "approved"}
     check(registry.enrollment_denial("approved", "192.0.2.19", now=100) is None, "approved agent can reconnect")
+
+    # ADR-0044: the service runs without capabilities; files it cannot read are reported before loading.
+    readable, missing = os.path.abspath(__file__), os.path.join(HERE, "no-such-key.pem")
+    blocked = config.unreadable_files(SimpleNamespace(control_tls=(readable, missing)))
+    check(blocked == [("control_tls.key", missing)], "unreadable TLS key is reported, readable cert is not")
+    check(config.unreadable_files(SimpleNamespace(control_tls=None)) == [], "no TLS configured, nothing to read")
+    unit = open(os.path.join(HERE, "..", "router", "skirnir-router.service"), encoding="utf-8").read().splitlines()
+    check("CapabilityBoundingSet=" not in unit or "ProtectHome=true" not in unit,
+          "unit without capabilities does not use ProtectHome=true (EACCES on /root breaks the session store)")
 
 asyncio.run(main())

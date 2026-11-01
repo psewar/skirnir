@@ -688,6 +688,13 @@ class Config:
         return size * 1.2 + self.overhead_gib
 
 
+def unreadable_files(cfg):
+    """Configured files this process cannot read, as [(setting, path)]. The systemd unit drops all capabilities (ADR-0044),
+    so root reads only what its owner and mode allow; checked before loading instead of catching the PermissionError."""
+    files = [("control_tls.cert", cfg.control_tls[0]), ("control_tls.key", cfg.control_tls[1])] if cfg.control_tls else []
+    return [(setting, path) for setting, path in files if not os.access(path, os.R_OK)]
+
+
 def cert_fingerprint(pem_path):
     """SHA-256 (hex) over the DER certificate of a PEM file."""
     with open(pem_path, encoding="utf-8") as f:
