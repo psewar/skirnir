@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from typing import Protocol
 from uuid import UUID, uuid4
 
+from .common import log
 from .outcome import conflict, failed, invalid, unavailable
 from .session_migrations import migrate
 from .session_types import NOT_FOUND, Transaction, database, record
@@ -79,8 +80,10 @@ class PostgresSessionStore(ManagedStore, ReliabilityStore, ExchangeStore):
                                                        timeout=cfg.timeout_s, command_timeout=cfg.timeout_s, init=setup)
                 async with store.pool.acquire() as conn:
                     problem = await migrate(conn)
-        except Exception:  # noqa: BLE001  # exception-ok: startup faults (unreachable host, bad credentials, malformed DSN)
+        except Exception as exc:  # noqa: BLE001  # exception-ok: startup faults (unreachable host, bad credentials, malformed DSN)
             # cannot be checked beforehand, and driver messages may contain the DSN or its password: report a fixed problem only.
+            # The class and errno carry no secret and tell the operator where to look (2026-11-02: EACCES under the hardened unit).
+            log.warning("session database startup failed: %s errno=%s", type(exc).__name__, getattr(exc, "errno", None))
             problem = unavailable("session database startup failed")
         if failed(problem):
             if store.pool is not None:

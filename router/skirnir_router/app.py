@@ -132,6 +132,11 @@ async def main(cfg_path):
     api, ctl = build_apps()
     runners = []
     ctl_ssl = None
+    blocked = config.unreadable_files(state.CFG)
+    if blocked:
+        log.error("router does not start: %s not readable by this process (check owner and mode; the service runs without "
+                  "capabilities, ADR-0044)", ", ".join(f"{setting} {path}" for setting, path in blocked))
+        sys.exit(2)
     if state.CFG.control_tls:
         ctl_ssl = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctl_ssl.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -205,6 +210,12 @@ def cli():
         cfg = config.Config.load(sys.argv[2], use_overrides="--pure" not in sys.argv)
         if failed(cfg):
             print(f"ERROR: {cfg.message}")
+            sys.exit(2)
+        # --files: also check that the files the configuration names are readable (deploy.py runs this on the target
+        # without capabilities, as the service will run); the local check skips it, the paths belong to the target.
+        blocked = config.unreadable_files(cfg) if "--files" in sys.argv else []
+        if blocked:
+            print("ERROR: not readable by this process: " + ", ".join(f"{setting} {path}" for setting, path in blocked))
             sys.exit(2)
         print(f"configuration ok: {len(cfg.roles)} roles, {len(cfg.models)} models in the catalog, {len(cfg.nodes)} static nodes, "
               f"client_auth {cfg.client_auth['mode']}" + ("" if "--pure" in sys.argv or not os.path.exists(cfg.overrides_path) else " (with roles.yaml)"))

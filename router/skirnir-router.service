@@ -24,7 +24,9 @@ ProtectControlGroups=true
 LockPersonality=true
 SystemCallArchitectures=native
 ProtectSystem=strict
-ProtectHome=true
+# tmpfs, not true: without capabilities root gets EACCES on an inaccessible /root instead of "not found", and asyncpg's
+# lookup of ~/.postgresql client certificates then aborts the session store start. tmpfs hides the homes just as well.
+ProtectHome=tmpfs
 ReadOnlyPaths=/opt/skirnir-router
 ReadWritePaths=/etc/skirnir-router
 StateDirectory=skirnir-router

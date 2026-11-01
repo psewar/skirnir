@@ -325,7 +325,10 @@ def main():
                 print("push failed:", local, out, err)
                 sys.exit(1)
         run(c, "rm -rf /tmp/skirnir-router")
-        rc, out, err = run(c, ct_exec("python3 /opt/skirnir-router/router.py --check /etc/skirnir-router/config.yaml && "
+        # --files under setpriv: the configured files must be readable without capabilities, as the service runs (ADR-0044);
+        # 2026-11-02 a TLS key owned by another user stopped the hardened service only after the restart.
+        rc, out, err = run(c, ct_exec("P=python3; command -v setpriv >/dev/null && P='setpriv --bounding-set=-all --inh-caps=-all python3'; "
+                                  "$P /opt/skirnir-router/router.py --check /etc/skirnir-router/config.yaml --files && "
                                   "python3 -c \"import yaml; yaml.safe_load(open(\\\"/etc/skirnir-router/config.yaml\\\"))\""))
         print(out.strip(), err.strip())
         if rc != 0 or "configuration ok" not in out:
