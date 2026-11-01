@@ -12,10 +12,10 @@
 | SK-SEC-02 | High | Unapproved Ed25519 enrollment lacked an admission cap; excessive handshake/body sizes and pending keys exhausted memory/disk | 32 KiB handshake, 2 MiB subsequent frames, max 32 pending, per-IP enrollment admission bound |
 | SK-SEC-03 | High when cloud enabled | Request `routing.data_class` could override a stricter server-side client class | Effective classification is at least the configured client/server minimum |
 | SK-SEC-04 | Medium | State-changing Control endpoints accepted browser Basic Auth without explicit anti-CSRF controls | Non-simple UI header on mutating admin requests and Fetch Metadata cross-site rejection |
-| SK-SEC-05 | Medium | Default client access to concrete models bypassed role-only grants | New clients default to no concrete-model access (explicit model grants remain supported) |
+| SK-SEC-05 | Medium | Default client access to concrete models bypassed role-only grants | **Open:** the permissive historical default is preserved for compatibility; a staged transition to role-only access is still needed |
 | SK-SEC-06 | Medium | Example credentials were publicly known | Replace fixed example admin password hashes with a non-known random hash; operators must configure their own |
 | SK-SEC-07 | Medium | Router and Linux agent run as root | Add kernel/capability and privilege escalation restrictions while retaining required updater permissions; full unprivileged service transition remains follow-up |
-| SK-SEC-08 | Medium | Dependencies include older Python/Go packages and security scan gaps | Add pip-audit, govulncheck CI and Dependabot monitoring; update vulnerable Go modules in separately reproducible lockfile PR |
+| SK-SEC-08 | Medium | Dependencies include older Python/Go packages and security scan gaps | Upgrade Go Paho MQTT and x/net modules with CI-generated go.sum, add pip-audit, govulncheck CI and Dependabot monitoring |
 
 ## Review notes
 
@@ -26,7 +26,7 @@ The session API binds ownership to authenticated token clients; memory access ch
 - **Production config:** set `router.client_auth.mode: enforce`, `locked: true`, strong tokens and PBKDF2 admin passwords; use TLS and restrictive firewall rules.
 - **Control API clients:** mutating `/admin/*` requests must send `X-Skirnir-UI: 1`; legitimate browser UI adds it automatically. CLI clients must be updated.
 - **Agent enrollment:** rate limits apply only to new keys; approved identities reconnect without enrollment limits. Replace pending abandoned keys through the administrative UI.
-- **Model access:** explicitly set `models: true` only on clients which need concrete model access.
+- **Model access:** set `models: false` for role-only clients; a future stricter default requires a migration.
 - **Cloud:** configure client minimum classes and `cloud: false` where external forwarding must never happen; sensitive data checks are defense in depth, not a substitute.
 - **Dependencies:** the installed runtime may not match dependency minimums. Supply-chain CVEs require a lockfile-resolved build and `govulncheck`; until then dependency risk remains open.
 - **Systemd:** root operation is still present due to self-update/hardware requirements; dedicated service users and capability policy need staging tests.

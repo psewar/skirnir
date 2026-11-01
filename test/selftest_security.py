@@ -47,7 +47,7 @@ async def main():
     denied = await auth.basic_auth_middleware(Request("/admin/config", headers={**header, "X-Skirnir-UI": "1", "Sec-Fetch-Site": "cross-site"}), handler)
     check(denied.status == 403, "cross-site fetch with forged custom header is rejected")
     state.CFG.control_users = {}
-    state.CFG.control_listen = "0.0.0.0:11435"
+    state.CFG.control_listen = "localhost:11435"
     denied = await auth.basic_auth_middleware(Request("/admin/state"), handler)
     check(denied.status == 503, "network-facing control without users is denied")
 
