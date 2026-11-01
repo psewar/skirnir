@@ -1,5 +1,7 @@
 # GPU-Schutz (12V-2x6) – Entwurf v0.1 (2026-09-24)
 
+> Entscheidungen (warum): [ADR-0019](../docs/adr/0019-gpu-guard-power-limit-on-by-default.md)
+
 > **Seit Agent 0.20.0 / Router 0.9.0 sind Zustaende, Ereignisse und Felder englisch** (`high_load`, `throttled`,
 > `recovery`, `unavailable`, `off`; `source`, `reason`, `warnings`, `high_load_s`; Tabelle in design/english-names.md).
 > Dieser Entwurf und die Messprotokolle unten nennen die bis dahin gueltigen deutschen Namen.

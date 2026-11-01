@@ -1,5 +1,7 @@
 # Optional rerank endpoint (`POST /rerank`)
 
+> Decisions (why): [ADR-0031](../docs/adr/0031-rerank-through-the-tunnel-failing-fast-with-424.md)
+
 The router can pass reranking requests to a reranker service on a GPU node. The intended caller is a memory service
 whose own reranker runs on CPU (for example Hindsight with its TEI provider): with a node available the reranking runs on
 the node's accelerator, without one the caller falls back to its own CPU reranker at once.
