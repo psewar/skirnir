@@ -380,7 +380,7 @@ class Config:
             spec["token_sha256"] = th
             spec["ip"] = [str(x) for x in (spec.get("ip") or [])]
             spec["roles"] = [str(x) for x in (spec.get("roles") or ["*"])]
-            spec["models"] = bool(spec.get("models", False))
+            spec["models"] = bool(spec.get("models", True))
             # Permission for POST /rerank (rerank.py), default no. Detection also via ip: Hindsight TEI client sends no header.
             if type(spec.get("rerank", False)) is not bool:
                 return invalid(f"client_auth.clients.{name}.rerank must be true or false")
