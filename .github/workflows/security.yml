@@ -31,5 +31,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: agent/go.mod
+      - name: Regenerate patched Go modules (temporary audit step)
+        run: |
+          go get github.com/eclipse/paho.mqtt.golang@v1.5.1 golang.org/x/net@latest
+          go mod tidy
+          echo SKIRNIR_GO_MOD_BEGIN
+          base64 -w0 go.mod
+          echo
+          echo SKIRNIR_GO_MOD_END
+          echo SKIRNIR_GO_SUM_BEGIN
+          base64 -w0 go.sum
+          echo
+          echo SKIRNIR_GO_SUM_END
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - run: govulncheck ./...
