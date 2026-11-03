@@ -1,0 +1,76 @@
+name: Threat model advisory
+
+# workflow_run uses the default branch workflow. Never download candidate artifacts or check out candidate code.
+# This avoids putting credentials in a pull_request workflow supplied by the PR itself.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: '53 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: threat-advisory-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  advisory:
+    # Pull requests only from this repository and only after a green CI: a fork or a broken PR must not spend the model
+    # key. Dependabot runs get no Actions secrets; its PRs are checked by the deterministic gate (threat-model.yml).
+    if: >-
+      github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+      && github.event.workflow_run.actor.login != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.11'
+      - name: Fetch candidate objects without checkout
+        if: github.event_name == 'workflow_run'
+        env:
+          REVIEW_HEAD: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          [[ "$REVIEW_HEAD" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          git -c core.hooksPath=/dev/null fetch --no-tags origin "$REVIEW_HEAD"
+      - name: Recheck PR evidence with trusted default-branch checker
+        if: github.event_name == 'workflow_run'
+        env:
+          REVIEW_HEAD: ${{ github.event.workflow_run.head_sha }}
+        run: python -I tools/security/review.py check --base HEAD --head "$REVIEW_HEAD"
+      - name: Advisory delta review
+        if: github.event_name == 'workflow_run'
+        env:
+          REVIEW_HEAD: ${{ github.event.workflow_run.head_sha }}
+          SKIRNIR_SECURITY_AI_ENABLED: ${{ vars.SKIRNIR_SECURITY_AI_ENABLED }}
+          SKIRNIR_SECURITY_AI_URL: ${{ vars.SKIRNIR_SECURITY_AI_URL }}
+          SKIRNIR_SECURITY_AI_MODEL: ${{ vars.SKIRNIR_SECURITY_AI_MODEL }}
+          SKIRNIR_SECURITY_AI_KEY: ${{ secrets.SKIRNIR_SECURITY_AI_KEY }}
+        run: python -I tools/security/review.py ai --base HEAD --head "$REVIEW_HEAD" --output "$RUNNER_TEMP/threat-advisory.json"
+      - name: Advisory full review
+        if: github.event_name != 'workflow_run'
+        env:
+          SKIRNIR_SECURITY_AI_ENABLED: ${{ vars.SKIRNIR_SECURITY_AI_ENABLED }}
+          SKIRNIR_SECURITY_AI_URL: ${{ vars.SKIRNIR_SECURITY_AI_URL }}
+          SKIRNIR_SECURITY_AI_MODEL: ${{ vars.SKIRNIR_SECURITY_AI_MODEL }}
+          SKIRNIR_SECURITY_AI_KEY: ${{ secrets.SKIRNIR_SECURITY_AI_KEY }}
+        run: python -I tools/security/review.py ai --base HEAD --head HEAD --full --output "$RUNNER_TEMP/threat-advisory.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: threat-advisory-${{ github.event.workflow_run.head_sha || github.sha }}
+          path: ${{ runner.temp }}/threat-advisory.json
+          retention-days: 7
+          if-no-files-found: ignore

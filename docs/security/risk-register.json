@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "a41d7f50c324aa5d873dc37757c7b4154b03000c",
+  "risks": [
+    {
+      "id": "TM-01",
+      "title": "API observation/IP trust",
+      "boundaries": [
+        "B1"
+      ],
+      "priority": "P1",
+      "status": "open",
+      "scenario": "Network exposure with observe or shared proxy identity.",
+      "controls": "Enforce rejects unknown clients; credential identities available.",
+      "next_action": "Set enforce and locked policy; separate client tokens.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_security.py"
+      ],
+      "validation_gap": "V1: proxy/IP behavior needs deployment tests."
+    },
+    {
+      "id": "TM-02",
+      "title": "Control behind a local proxy",
+      "boundaries": [
+        "B2"
+      ],
+      "priority": "P1",
+      "status": "open",
+      "scenario": "Proxy enters the unauthenticated loopback exception.",
+      "controls": "Network bindings without users deny access.",
+      "next_action": "Require Control users even behind a local proxy.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_security.py"
+      ],
+      "validation_gap": "V2: verify actual proxy and local exception."
+    },
+    {
+      "id": "TM-03",
+      "title": "Admin browser attacks",
+      "boundaries": [
+        "B2"
+      ],
+      "priority": "P2",
+      "status": "open",
+      "scenario": "Cross-site admin request or same-origin compromise.",
+      "controls": "Non-simple header and Fetch Metadata checks.",
+      "next_action": "Test browser/CORS and UI escaping.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_security.py"
+      ],
+      "validation_gap": "V3: real browser tests still required."
+    },
+    {
+      "id": "TM-04",
+      "title": "Concrete-model authorization",
+      "boundaries": [
+        "B1"
+      ],
+      "priority": "P1",
+      "status": "open",
+      "scenario": "Role-limited client chooses a concrete model.",
+      "controls": "models:false denies concrete model requests.",
+      "next_action": "Use explicit grants; migrate defaults separately.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_security.py"
+      ],
+      "validation_gap": "V4: full catalog and protocol coverage remains."
+    },
+    {
+      "id": "TM-05",
+      "title": "Cloud classification",
+      "boundaries": [
+        "B6",
+        "B7"
+      ],
+      "priority": "P1",
+      "status": "open",
+      "scenario": "Incorrect declaration or classifier false negative forwards sensitive data.",
+      "controls": "Client class floor, cloud opt-out, secret scan.",
+      "next_action": "Test final payload and explicit privacy exception.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_security.py"
+      ],
+      "validation_gap": "V5: end-to-end no-egress and classifier quality not proven."
+    },
+    {
+      "id": "TM-06",
+      "title": "Cloud transport/destinations",
+      "boundaries": [
+        "B6"
+      ],
+      "priority": "P1",
+      "status": "open",
+      "scenario": "HTTP provider or redirect leaves approved transport/host.",
+      "controls": "Configured host allowlist.",
+      "next_action": "Enforce HTTPS and redirect destinations.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_cloud_errors.py"
+      ],
+      "validation_gap": "V6: HTTPS and redirect rejection remain unimplemented/unverified."
+    },
+    {
+      "id": "TM-07",
+      "title": "Agent enrollment and compromise",
+      "boundaries": [
+        "B3"
+      ],
+      "priority": "P2",
+      "status": "open",
+      "scenario": "Pending-slot flood or compromised approved agent.",
+      "controls": "Ed25519 approval, bounded pending and per-IP admission.",
+      "next_action": "Verify fingerprints; test active-stream revocation.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_security.py"
+      ],
+      "validation_gap": "V7: wire-level flood/revocation still required."
+    },
+    {
+      "id": "TM-08",
+      "title": "Resource and cost exhaustion",
+      "boundaries": [
+        "B1",
+        "B2",
+        "B3",
+        "B6"
+      ],
+      "priority": "P1",
+      "status": "open",
+      "scenario": "Pre-auth flood, long streams or parallel costly inference.",
+      "controls": "Client rate and enrollment limits.",
+      "next_action": "Bound pre-auth state, concurrency, time, bytes and cost.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_max_parallel.py"
+      ],
+      "validation_gap": "V12: global hostile-load budgets and unauth state still open."
+    },
+    {
+      "id": "TM-09",
+      "title": "Session and memory isolation",
+      "boundaries": [
+        "B1",
+        "B4",
+        "B5"
+      ],
+      "priority": "P1",
+      "status": "open",
+      "scenario": "Stolen token or foreign UUID/project alias access.",
+      "controls": "Credential principals and scoped authorization.",
+      "next_action": "Test every route and token/grant rotation.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_sessions.py",
+        "test/selftest_memory.py",
+        "test/selftest_interoperability.py"
+      ],
+      "validation_gap": "V8: complete endpoint and deployment coverage needed."
+    },
+    {
+      "id": "TM-10",
+      "title": "Memory poisoning and tool injection",
+      "boundaries": [
+        "B5"
+      ],
+      "priority": "P1",
+      "status": "open",
+      "scenario": "Shared writer injects false facts or tool instructions.",
+      "controls": "Grants, provenance and untrusted-context markers.",
+      "next_action": "Minimize writer rights; independently authorize tools.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_memory.py",
+        "test/selftest_context.py"
+      ],
+      "validation_gap": "V9: downstream agent/tool behavior is outside unit-test coverage."
+    },
+    {
+      "id": "TM-11",
+      "title": "Backend bypass and independent egress",
+      "boundaries": [
+        "B4",
+        "B5",
+        "B6"
+      ],
+      "priority": "P1",
+      "status": "open",
+      "scenario": "Direct backend access or its own cloud extraction.",
+      "controls": "Gateway-scoped grants on the router path only.",
+      "next_action": "Restrict backend reachability and credentials; audit backend egress.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [],
+      "validation_gap": "V5/V8: requires deployment inspection; no gateway test proves this."
+    },
+    {
+      "id": "TM-12",
+      "title": "Deletion retry and restoration",
+      "boundaries": [
+        "B4",
+        "B5",
+        "B9"
+      ],
+      "priority": "P2",
+      "status": "open",
+      "scenario": "Old outbox/backup resurrects data; session deletion leaves memory.",
+      "controls": "Outbox reauthorization, tombstones and selective deletion.",
+      "next_action": "Define lifecycle across all stores; test crash and restore.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_reliability.py",
+        "test/selftest_verified_delivery.py"
+      ],
+      "validation_gap": "V11: restore and backup policies require integration/operational tests."
+    },
+    {
+      "id": "TM-13",
+      "title": "Update trust and rollback",
+      "boundaries": [
+        "B8"
+      ],
+      "priority": "P2",
+      "status": "open",
+      "scenario": "Compromised release or old valid manifest.",
+      "controls": "Signed agent manifest and hash; separate Ollama source/checksum.",
+      "next_action": "Define anti-rollback/recovery and signing-key rotation.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "agent/updater_test.go",
+        "agent/ollamaupdate_test.go"
+      ],
+      "validation_gap": "V13: monotone version policy is not implemented."
+    },
+    {
+      "id": "TM-14",
+      "title": "Host privilege escalation impact",
+      "boundaries": [
+        "B3",
+        "B8"
+      ],
+      "priority": "P2",
+      "status": "open",
+      "scenario": "Router/agent compromise reaches privileged host operations.",
+      "controls": "Router systemd capabilities/filesystem restrictions.",
+      "next_action": "Test dedicated user and separate privileged agent operations.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/selftest_security.py"
+      ],
+      "validation_gap": "V13: unprivileged deployment and recovery still need staging."
+    },
+    {
+      "id": "TM-15",
+      "title": "Logs telemetry and backups",
+      "boundaries": [
+        "B9"
+      ],
+      "priority": "P2",
+      "status": "open",
+      "scenario": "Metadata/secrets leak or local audit is altered.",
+      "controls": "Audit intends to omit prompts and tokens.",
+      "next_action": "Test canaries, redaction, ACLs, rotation and backup controls.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        "test/check_public_changes.py"
+      ],
+      "validation_gap": "V14: source scan does not prove runtime-log hygiene."
+    },
+    {
+      "id": "TM-16",
+      "title": "Supply chain and CI",
+      "boundaries": [
+        "B8",
+        "B9"
+      ],
+      "priority": "P2",
+      "status": "open",
+      "scenario": "Mutable dependencies/actions or compromised build.",
+      "controls": "pip-audit, govulncheck and Dependabot.",
+      "next_action": "Pin/lock, scan optional dependencies and verify artifacts.",
+      "owner_role": "maintainer and operator",
+      "test_refs": [
+        ".github/workflows/security.yml"
+      ],
+      "validation_gap": "V14: full SCA/history scan and artifact provenance remain open."
+    }
+  ]
+}

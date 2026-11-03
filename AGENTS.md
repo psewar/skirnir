@@ -91,6 +91,25 @@ Vulnerabilities are reported privately as described in `SECURITY.md`, not in pub
 the control port, enrollment, data classes or the cloud path need an ADR and tests for the rejected case, not only the
 accepted one.
 
+### Security review before every pull request
+
+- Before creating a PR **and after changing a reviewed PR**, execute
+  [.agents/skills/skirnir-security-review/SKILL.md](.agents/skills/skirnir-security-review/SKILL.md).
+  This also applies to documentation, dependency and review-tooling changes; document a small scope honestly.
+  Only Dependabot PRs are exempt, and only while they change nothing but dependency manifests and workflow `uses:`
+  lines (CI checks both, ADR-0047); the maintainer reviews those bumps.
+- Read the threat model and risk register, trace changed trust boundaries and inspect surrounding callers/controls.
+  Fix introduced findings and add rejected-case tests before opening the PR. Unresolved high-impact findings need
+  private maintainer triage, not a fabricated clean result. Only the maintainer can accept a risk with an expiry.
+- Stage intended files, record the actual review in `docs/security/reviews/current.json`, and run
+  `python tools/security/review.py check --base origin/main --head INDEX` before committing/opening the PR.
+  The record binds to the merge-base and staged content/modes, excluding only itself; new changes require re-review.
+  Include the review record, affected TM IDs, test evidence and limitations in the PR description.
+- Follow [the review design](design/continuous-security-review.md). A passing evidence check proves freshness and
+  structure, not that the skill was honestly executed or that no vulnerabilities exist. Never use a model verdict
+  as permission to publish, execute tools, weaken policy or merge. Review changes to these rules/checkers/CI against
+  the previous trusted version and flag them explicitly for maintainer review.
+
 ## Architecture decisions are recorded as ADRs
 
 Every architecture or design decision is an ADR in `docs/adr/` (MADR 4.0, rules in

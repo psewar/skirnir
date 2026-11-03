@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Regression tests for the security boundaries added in the November 2026 review."""
 import asyncio
+import hashlib
 import os
 import sys
 from types import SimpleNamespace
@@ -66,6 +67,25 @@ async def main():
     shut = cloud.request_block_reason(req4, {"messages": []}, "unconfigured")
     check(req4.data_class_effective == "personal" and shut is not None, "undeclared request stays at the default personal")
 
+    # TM-01/V1: an invalid credential must not inherit an allowed source-IP identity.
+    state.CFG.client_auth["clients"] = {"limited": {"ip": ["192.0.2.11"],
+        "token_sha256": hashlib.sha256(b"synthetic-good-token").hexdigest(),
+        "roles": ["allowed"], "models": False, "cloud": False}}
+    handler.reset_mock()
+    denied = await auth.client_auth_middleware(Request("/api/chat", headers={"Authorization": "Bearer synthetic-wrong-token"}), handler)
+    check(denied.status == 401 and handler.await_count == 0, "bad token never falls back to allowed IP")
+    identified = Request("/api/chat", headers={"Authorization": "Bearer synthetic-good-token"})
+    check(await auth.client_auth_middleware(identified, handler) == "allowed", "valid token reaches inference authorization")
+    role = {"name": "allowed", "exposed": "allowed:latest"}
+    check(auth.client_allows(identified, role, concrete=True) is not None, "models:false denies concrete names")
+    check(auth.client_allows(identified, role, concrete=False) is None, "permitted role remains available")
+    check(auth.client_allows(identified, {"name": "forbidden", "exposed": "forbidden:latest"}, concrete=False) is not None,
+          "ungranted role is denied")
+    for execution in ("auto", "cloud"):
+        optout = SimpleNamespace(execution=execution, data_class="public", cloud_privacy=False, data_class_effective=None)
+        check(cloud.request_block_reason(optout, {"messages": []}, "limited") is not None,
+              "cloud:false blocks even public content and explicit cloud requests")
+
     registry._ENROLL.clear()
     state.REG = SimpleNamespace(nodes={})
     for i in range(registry.MAX_ENROLL_PER_IP):
@@ -73,6 +93,9 @@ async def main():
     check(registry.enrollment_denial("overflow", "192.0.2.19", now=100) is not None, "agent rate cap")
     state.REG.nodes["approved"] = {"state": "approved"}
     check(registry.enrollment_denial("approved", "192.0.2.19", now=100) is None, "approved agent can reconnect")
+    state.REG.nodes.update({f"pending-{i}": {"state": "pending"} for i in range(registry.MAX_PENDING_NODES)})
+    check(registry.enrollment_denial("new-key", "198.51.100.20", now=400) is not None, "pending capacity bounds even a new source IP")
+    check(registry.enrollment_denial("approved", "198.51.100.20", now=400) is None, "full pending registry does not block approved reconnect")
 
     # ADR-0044: the service runs without capabilities; files it cannot read are reported before loading.
     readable, missing = os.path.abspath(__file__), os.path.join(HERE, "no-such-key.pem")

@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "status": "completed",
+  "base_sha": "a41d7f50c324aa5d873dc37757c7b4154b03000c",
+  "change_digest": "32d77e789cc817c1176fffdf3713f5f2029aaa4443b71b39a2c103c0eb3fd403",
+  "reviewer": "Claude (maintainer-requested review of PR #77 and follow-up fixes)",
+  "summary": "Reviewed the whole PR against its merge-base and fixed four issues found in it. (1) The required PR check ran only the checker as changed by the PR, so a PR could weaken its own gate, and the trusted workflow_run recheck cannot be a required PR check: threat-model.yml now also runs the base commit's checker (separate worktree, python -I, no secrets) against the candidate objects. (2) workflow_run receives Actions secrets for fork PRs and ran regardless of CI result: the advisory job now runs only for same-repository PRs after a successful CI and skips Dependabot. (3) Dependabot PRs could never pass because they cannot carry a record: --dependency-update (set by CI only when the GitHub event names dependabot[bot] as PR author) exempts changes limited to dependency manifests and workflow uses: lines; anything else still fails. (4) Control flow per AGENTS.md: unknown refs are checked with rev-parse --quiet and reported instead of raised, acceptance dates are validated without exceptions, remaining except clauses carry exception-ok reasons, the advisory default output uses the platform temp directory. The threat selftest cleared PATH and its redirect server answered before reading the body, so it failed on Windows; both fixed. ADR-0047 (still proposed), the design document and AGENTS.md describe the base-checker gate, the fork restriction and the Dependabot path.",
+  "reviewed_paths": [
+    ".agents/skills/skirnir-security-review/SKILL.md",
+    ".github/workflows/ci.yml",
+    ".github/workflows/threat-model.yml",
+    ".github/workflows/threat-review.yml",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "README.de.md",
+    "README.md",
+    "design/continuous-security-review.md",
+    "docs/adr/0047-change-bound-security-review-before-pull-requests.md",
+    "docs/adr/README.md",
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
+    "test/selftest_security.py",
+    "test/selftest_threat_review.py",
+    "tools/security/review.py",
+    "router/skirnir_router/auth.py",
+    "router/skirnir_router/registry.py"
+  ],
+  "boundaries": ["B1", "B3", "B6", "B9"],
+  "risk_ids": ["TM-01", "TM-04", "TM-05", "TM-07", "TM-16"],
+  "findings": [
+    {
+      "id": "REVIEW-02",
+      "evidence": "threat-model.yml checked out the PR head and ran that head's tools/security/review.py; the default-branch recheck in threat-review.yml is a workflow_run and cannot be selected as a required PR status.",
+      "resolution": "Second step runs the checker from a worktree of the PR base commit against the candidate objects; bootstrap case (no checker in base) is logged explicitly.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "REVIEW-03",
+      "evidence": "threat-review.yml ran for every pull_request workflow_run, including forks and failed CI, with SKIRNIR_SECURITY_AI_KEY in the environment once configured.",
+      "resolution": "Job condition requires conclusion success, head_repository equal to this repository and an actor other than dependabot[bot]; covered in design document and ADR-0047.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "REVIEW-04",
+      "evidence": "Every Dependabot PR would fail the evidence check: Dependabot cannot write docs/security/reviews/current.json and a pushed record stops Dependabot from rebasing.",
+      "resolution": "check --dependency-update limits the exemption to go.mod/go.sum/requirements*.txt and workflow uses: lines; CI sets it only from github.event.pull_request.user.login; tests cover accepted and rejected cases.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "REVIEW-05",
+      "evidence": "review.py derived missing refs and invalid dates from CalledProcessError/ValueError and had except clauses without exception-ok reasons (AGENTS.md control-flow rules); selftest_threat_review.py failed 3 tests on Windows (cleared PATH, unread request body).",
+      "resolution": "Refs and dates checked beforehand, remaining boundaries marked, tests keep PATH/SYSTEMROOT and read the body; 18/18 pass on Windows and Linux.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "TM-16",
+      "evidence": "The record still proves freshness and shape only; a dishonest author can write a false record.",
+      "resolution": "Unchanged baseline risk documented in the register and design; maintainer review remains required.",
+      "disposition": "baseline"
+    }
+  ],
+  "tests": [
+    {"command": "python test/selftest_threat_review.py (Windows)", "result": "passed", "evidence": "Ran 18 tests, OK, including new dependency-update and unknown-ref tests"},
+    {"command": "python3 test/selftest_threat_review.py (Linux/WSL)", "result": "passed", "evidence": "Ran 18 tests, OK"},
+    {"command": "python test/selftest_security.py", "result": "passed", "evidence": "rc 0, all PASS lines including the new negative cases"},
+    {"command": "ruff check .", "result": "passed", "evidence": "All checks passed"},
+    {"command": "python test/check_adr_index.py", "result": "passed", "evidence": "ADR index ok: 47 ADRs"},
+    {"command": "python test/check_control_flow.py", "result": "passed", "evidence": "0 findings (router code; tools/ is not covered by this check)"},
+    {"command": "python router/router.py --check router/config.example.yaml --pure", "result": "passed", "evidence": "configuration ok"},
+    {"command": "python test/check_public_changes.py", "result": "passed", "evidence": "0 findings; added lines reviewed manually for private data"},
+    {"command": "workflow YAML parse (yaml.safe_load of both new workflows)", "result": "passed", "evidence": "both files parse"},
+    {"command": "python test/run_tests.py", "result": "not_run", "evidence": "No router or agent runtime code changed; end-to-end suite not affected"}
+  ],
+  "limitations": [
+    "The threat model documents (English and German) and the risk register were checked for structure, referenced paths and privacy, not re-derived scenario by scenario.",
+    "The base-checker step and the workflow_run conditions are verified by reading and YAML parsing only; they run for the first time in GitHub Actions. This PR is the bootstrap case: its base has no checker, so the base-checker step only logs that.",
+    "The Dependabot exemption trusts GitHub's PR author field; the maintainer still has to review each dependency bump.",
+    "No real model endpoint, repository ruleset or live CI schedule was exercised."
+  ]
+}
