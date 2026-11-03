@@ -2,6 +2,10 @@
 
 **Deutsch** · [English](README.md)
 
+Sichere Entwicklung: [Threat Model](docs/security/threat-model.de.md), [Risikoregister](docs/security/risk-register.json)
+und [Anleitung für PR-Review/CI](design/continuous-security-review.md). Jeder PR benötigt einen aktuellen, an die
+Änderungen gebundenen Review-Nachweis; optionale Modellreviews sind beratend und brauchen einen explizit konfigurierten Endpunkt.
+
 <img src="design/skirnir-logo.png" alt="Skirnir" width="120" align="right">
 
 Skirnir ([psewar/skirnir](https://github.com/psewar/skirnir)) ist ein selbst gehosteter LLM-Router und AI-Gateway für Ollama

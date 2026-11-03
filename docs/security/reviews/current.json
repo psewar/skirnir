@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "status": "completed",
+  "base_sha": "a41d7f50c324aa5d873dc37757c7b4154b03000c",
+  "change_digest": "28818e708a45db785a1d81d2642313b22390f13a15a9beb329039b34d19c4501",
+  "reviewer": "Codex with independent repository-skill forward validation",
+  "summary": "Reviewed the full tooling diff and surrounding authentication, cloud and enrollment controls. Candidate Git objects remain data in the trusted default-branch advisory workflow; no candidate execution, model tools, credential printing or automatic approval. Fixed the legacy function_call response rejection gap discovered during independent skill validation. Baseline runtime risks remain explicitly open.",
+  "reviewed_paths": [
+    ".agents/skills/skirnir-security-review/SKILL.md",
+    ".github/workflows/ci.yml",
+    ".github/workflows/threat-model.yml",
+    ".github/workflows/threat-review.yml",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "README.de.md",
+    "README.md",
+    "design/continuous-security-review.md",
+    "docs/adr/0047-change-bound-security-review-before-pull-requests.md",
+    "docs/adr/README.md",
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
+    "test/selftest_security.py",
+    "test/selftest_threat_review.py",
+    "tools/security/review.py",
+    "router/skirnir_router/auth.py",
+    "router/skirnir_router/cloud.py",
+    "router/skirnir_router/registry.py",
+    ".github/workflows/security.yml",
+    "SECURITY.md"
+  ],
+  "boundaries": [
+    "B1",
+    "B2",
+    "B3",
+    "B6",
+    "B8",
+    "B9"
+  ],
+  "risk_ids": [
+    "TM-01",
+    "TM-04",
+    "TM-05",
+    "TM-07",
+    "TM-16"
+  ],
+  "findings": [
+    {
+      "id": "REVIEW-01",
+      "evidence": "Synthetic legacy function_call response with valid content was accepted by the first parser implementation. No tool execution existed, but this violated the documented refusal contract.",
+      "disposition": "fixed",
+      "resolution": "Reject both tool_calls and function_call; test valid, truncated, malformed and both tool-call response forms."
+    },
+    {
+      "id": "TM-16",
+      "evidence": "A PR author can edit the PR workflow or make a dishonest attestation. Content hashes cannot prove a review was actually performed.",
+      "disposition": "baseline",
+      "resolution": "Default-branch workflow independently rechecks candidate objects; documentation explicitly requires maintainer scrutiny and branch protection. No claim of tamper-proof attestation or automatic risk acceptance."
+    }
+  ],
+  "tests": [
+    {
+      "command": "python test/selftest_threat_review.py",
+      "result": "passed",
+      "evidence": "15 tests passed after the parser correction, including freshness, modes/deletions, expiry, trust separation, disabled network, redirect refusal and model response validation."
+    },
+    {
+      "command": "python test/selftest_security.py",
+      "result": "passed",
+      "evidence": "All 29 printed PASS checks, including new wrong-token/IP, model/role, cloud opt-out and full pending-registry cases."
+    },
+    {
+      "command": "python -m ruff check .",
+      "result": "passed",
+      "evidence": "All checks passed."
+    },
+    {
+      "command": "python test/check_adr_index.py",
+      "result": "passed",
+      "evidence": "47 ADRs; index current."
+    },
+    {
+      "command": "python router/router.py --check router/config.example.yaml --pure",
+      "result": "passed",
+      "evidence": "Example configuration valid; no runtime configuration changes."
+    },
+    {
+      "command": "python test/check_control_flow.py",
+      "result": "passed",
+      "evidence": "0 legacy findings in 0 files."
+    },
+    {
+      "command": "python test/check_public_changes.py",
+      "result": "passed",
+      "evidence": "0 common public-data findings; manual added-content review also performed."
+    },
+    {
+      "command": "python test/run_tests.py",
+      "result": "not_run",
+      "evidence": "No router/agent runtime code changed; this PR adds development tooling and isolated negative tests. Full runtime E2E remains in existing CI."
+    }
+  ],
+  "limitations": [
+    "No real model endpoint or credentials configured or used; automatic AI remains skipped until explicitly enabled.",
+    "No production, private infrastructure, complete dependency scan, live GitHub schedule or repository ruleset inspection.",
+    "Full/delta model review is bounded and can be partial; JSON evidence proves shape/freshness, not review truth or absence of vulnerabilities.",
+    "The trusted workflow becomes available after merge. Maintainer must select required status checks and the intended model processing destination.",
+    "Repository skill frontmatter validated; workflow YAML parsed. No runtime behavior or risk acceptance changed."
+  ]
+}

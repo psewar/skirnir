@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — development tooling
+
+- Add the versioned threat model, risk register and repository security-review skill (ADR-0047, proposed).
+  Every PR/update requires a change-bound review record; CI rejects missing/stale evidence and expired acceptances.
+  Optional, read-only model reviews run after PR CI and weekly when explicitly configured; otherwise report skipped.
+  Added negative security regressions. Router/agent versions and runtime configuration are unchanged.
+
 Releases are tagged `vX.Y.Z` on this repository and carry the agent binaries as assets. Router and agent have their own
 version numbers; this table maps them. Details and the German summary are in each release's notes.
 

@@ -1,0 +1,36 @@
+name: Threat model gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '43 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    name: Security review evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.11'
+      - run: python test/selftest_threat_review.py
+      - name: Validate current PR evidence
+        if: github.event_name == 'pull_request'
+        env:
+          REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
+        run: python tools/security/review.py check --base "$REVIEW_BASE" --head HEAD
+      - name: Validate baseline and expired acceptances
+        if: github.event_name != 'pull_request'
+        run: python tools/security/review.py check --base HEAD --head HEAD --baseline-only
