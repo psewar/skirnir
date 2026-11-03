@@ -19,7 +19,13 @@ concurrency:
 
 jobs:
   advisory:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
+    # Pull requests only from this repository and only after a green CI: a fork or a broken PR must not spend the model
+    # key. Dependabot runs get no Actions secrets; its PRs are checked by the deterministic gate (threat-model.yml).
+    if: >-
+      github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+      && github.event.workflow_run.actor.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:

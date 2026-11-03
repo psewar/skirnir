@@ -14,7 +14,11 @@ can also be followed by human reviewers. It is checked into this repository, not
 3. Run `python tools/security/review.py snapshot --base origin/main --head INDEX`. Copy `base_sha`, `change_digest`
    and the changed-path list. No model is called by this command.
 4. Write `docs/security/reviews/current.json` with actual evidence, then stage it. Do not generate an empty passing
-   record without a review. All changes, even documentation/Dependabot changes, require a record; keep small reviews small.
+   record without a review. All changes, even documentation changes, require a record; keep small reviews small.
+   Exception: a PR whose author GitHub reports as `dependabot[bot]` cannot write a record. CI then runs the checker
+   with `--dependency-update`: the change may only touch dependency manifests (`go.mod`, `go.sum`,
+   `requirements*.txt`) and `uses:` lines in workflow files; anything else fails and needs a normal review. The
+   maintainer reviews the version bump itself. The author comes from the GitHub event, never from commit metadata.
 5. Run `python tools/security/review.py check --base origin/main --head INDEX` and `python test/check_public_changes.py`.
    Commit and open the PR with the review summary, tests, limitations and TM IDs. Further changes require re-review.
 
@@ -59,12 +63,18 @@ may conflict on this file: rerun the review on the final rebased tree, do not bl
 
 ## CI and trusted review boundary
 
-`threat-model.yml` runs on every PR, main push, weekly and manual dispatch. The PR job validates evidence; main/scheduled
-runs validate the model/register and expired acceptances, not a historical record against a new merge commit.
+`threat-model.yml` runs on every PR, main push, weekly and manual dispatch. The PR job validates evidence twice: with
+the checker as the PR changed it, and with the checker of the PR's base commit (a separate worktree of the base, run
+with `python -I` against the candidate's Git objects). The PR can weaken its own copy but not the base copy, so
+**Security review evidence** stays a trustworthy required check; the job has no secrets and only read access. The PR
+that introduces the checker has no base copy yet and says so in its log. Main/scheduled runs validate the
+model/register and expired acceptances, not a historical record against a new merge commit.
 `selftest_threat_review.py` exercises the checker, and the existing Security workflow runs the extended runtime
 negative tests, pip-audit and govulncheck. The normal CI explicitly includes the new checker tests too.
 
-`threat-review.yml` runs **from the trusted default branch** after the ordinary CI workflow completes for a PR.
+`threat-review.yml` runs **from the trusted default branch** after the ordinary CI workflow completed successfully for
+a PR from this repository. Fork PRs, failed CI runs and Dependabot runs are skipped: `workflow_run` receives Actions
+secrets even for forks, so otherwise anyone could spend the model key by opening PRs.
 It fetches only the candidate's Git objects by validated SHA; no candidate checkout, imports, tests, dependencies,
 actions, hooks or artifacts are executed/loaded. `python -I` isolates imports. The default-branch checker revalidates
 evidence and then optionally requests an advisory model review. No candidate SKILL/AGENTS file becomes an instruction.
@@ -73,9 +83,9 @@ Future changes to the checker still have to satisfy the previous trusted version
 
 All new workflows have `contents: read`, pinned Action commits, disabled persisted checkout credentials and timeouts.
 There is no PR comment/status publishing, repository write, production access, candidate cache/artifact loading or
-model tool execution. The workflow-run check appears in its own Actions run, not automatically as a head-SHA PR status.
-The maintainer should require **Security review evidence** and existing security/CI jobs in branch protection and
-inspect the independent trusted run for changes to the gate itself. Repository rulesets are not changed by this PR.
+model tool execution. The workflow-run check appears in its own Actions run, not as a PR status, so it cannot be a required check; the
+base-checker step above is the trusted gate. The maintainer should require **Security review evidence** and existing
+security/CI jobs in branch protection. Repository rulesets are not changed by this PR.
 
 ## Optional model execution
 

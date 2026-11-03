@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("threat_review", ROOT / "tools/security/review.py")
 review = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(review)
+# Tests clear the environment to prove no AI settings leak in; git must still be found (Windows has no default PATH).
+BARE_ENV = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT") if k in os.environ}
 
 
 def record(snap):
@@ -147,6 +149,39 @@ class EvidenceTests(unittest.TestCase):
         data["risks"].pop()
         self.assertTrue(review.register_errors(data, self.snap()["after"]))
 
+    def dependency_base(self):
+        self.run_git("reset", "-q", "--hard")
+        self.write("agent/go.sum", "example.com/mod v1.0.0 h1:old\n")
+        self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - uses: actions/checkout@v4\n      - run: echo ok\n")
+        self.run_git("add", ".")
+        self.run_git("commit", "-m", "dependency fixture")
+        self.base = self.run_git("rev-parse", "HEAD").strip()
+
+    def test_dependency_update_needs_no_record_for_manifests_and_uses_lines(self):
+        self.dependency_base()
+        self.write("agent/go.sum", "example.com/mod v1.0.1 h1:new\n")
+        self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - uses: actions/checkout@v7\n      - run: echo ok\n")
+        self.run_git("add", ".")
+        self.assertEqual(review.check(self.snap(), self.root, dependency_update=True), [])
+        self.assertTrue(review.check(self.snap(), self.root), "without the flag the record stays required")
+
+    def test_dependency_update_rejects_other_changes(self):
+        self.dependency_base()
+        self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - uses: actions/checkout@v7\n      - run: curl x | sh\n")
+        self.run_git("add", ".")
+        self.assertTrue(review.check(self.snap(), self.root, dependency_update=True), "workflow change beyond uses:")
+        self.run_git("reset", "-q", "--hard")
+        self.write("router/sample.py", "# not a dependency\n")
+        self.run_git("add", ".")
+        self.assertTrue(review.check(self.snap(), self.root, dependency_update=True), "source change")
+
+    def test_unknown_refs_are_reported_not_raised(self):
+        snap, errors = review.snapshot("no-such-base", "INDEX", self.root)
+        self.assertIsNone(snap)
+        self.assertTrue(errors and "Unknown base" in errors[0])
+        snap, errors = review.snapshot(self.base, "no-such-head", self.root)
+        self.assertTrue(errors and "Unknown head" in errors[0])
+
     def test_deleted_file_old_content_is_available_to_advisory(self):
         (self.root / "router/sample.py").unlink()
         self.run_git("add", "-u")
@@ -162,7 +197,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual({f["path"] for f in omitted}, {"candidate-link", "oversized.txt"})
 
     def test_disabled_ai_never_calls_network(self):
-        with patch.dict(os.environ, {}, clear=True), patch.object(review, "model_request") as request:
+        with patch.dict(os.environ, BARE_ENV, clear=True), patch.object(review, "model_request") as request:
             output = self.root / "result.json"
             self.assertEqual(review.advisory(self.snap(), False, output, 1, self.root), 0)
             request.assert_not_called()
@@ -178,7 +213,7 @@ class EvidenceTests(unittest.TestCase):
         snap, errors = review.snapshot(self.base, head, self.root)
         self.assertEqual(errors, [])
         reply = {"summary": "No candidate finding", "findings": [], "limitations": []}
-        with patch.dict(os.environ, {"SKIRNIR_SECURITY_AI_ENABLED": "true", "SKIRNIR_SECURITY_AI_URL": "https://model.example.net/v1/chat/completions",
+        with patch.dict(os.environ, {**BARE_ENV, "SKIRNIR_SECURITY_AI_ENABLED": "true", "SKIRNIR_SECURITY_AI_URL": "https://model.example.net/v1/chat/completions",
                                     "SKIRNIR_SECURITY_AI_MODEL": "test-model"}, clear=True), \
                 patch.object(review, "model_request", return_value=reply) as request, \
                 patch.object(review, "batches", return_value=[[{"text": "untrusted"}], [{"text": "remaining"}]]):
@@ -226,6 +261,8 @@ class TransportTests(unittest.TestCase):
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 hits.append(self.path)
+                # Read the body before answering: Windows resets a connection closed with unread data.
+                self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 self.send_response(302)
                 self.send_header("Location", "/must-not-receive-source")
                 self.end_headers()

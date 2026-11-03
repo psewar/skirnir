@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Change-bound security evidence and optional, non-executing model review (stdlib only)."""
 import argparse
+import calendar
 import datetime as dt
+import difflib
 import hashlib
 import json
 import os
@@ -9,6 +11,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,6 +27,12 @@ BOUNDARIES = {f"B{i}" for i in range(1, 10)}
 ANCHORS = ["router/skirnir_router/" + p + ".py" for p in
            ("app", "auth", "registry", "cloud", "config", "memory", "session_api", "session_exchange")]
 ANCHORS += ["agent/tunnel.go", "agent/updater.go", "agent/ollamaupdate.go"]
+# Dependabot PRs cannot carry a review record (ADR-0047). With --dependency-update (CI sets it only when GitHub reports
+# the PR author dependabot[bot]) a change limited to these manifests needs no record; workflow files may only change
+# `uses:` lines. Anything else still needs a full review.
+DEPENDENCY_FILES = re.compile(r"(?:.*/)?(?:go\.mod|go\.sum|requirements[^/]*\.txt)")
+WORKFLOW_FILES = re.compile(r"\.github/workflows/[^/]+\.ya?ml")
+USES_LINE = re.compile(r"\s*(?:-\s+)?uses:\s*\S+(?:\s+#.*)?")
 
 
 def git(*args, root=ROOT):
@@ -31,7 +40,10 @@ def git(*args, root=ROOT):
 
 
 def resolve(ref, kind="commit", root=ROOT):
-    return git("rev-parse", "--verify", "--end-of-options", ref + "^{" + kind + "}", root=root).decode().strip()
+    """Object id of ref, or None if the repository does not have it (checked, not caught)."""
+    found = subprocess.run(["git", "--no-pager", "rev-parse", "--verify", "--quiet", "--end-of-options", ref + "^{" + kind + "}"],
+                           cwd=root, capture_output=True)
+    return found.stdout.decode().strip() if found.returncode == 0 else None
 
 
 def tree(ref, root=ROOT):
@@ -56,12 +68,14 @@ def blob(entries, path, root=ROOT):
         return None
     try:
         return data.decode("utf-8")
-    except UnicodeDecodeError:
+    except UnicodeDecodeError:  # exception-ok: decoding untrusted candidate bytes; the decoder is the validity check
         return None
 
 
 def snapshot(base, head, root=ROOT):
-    base = resolve(base, root=root)
+    base_ref, base = base, resolve(base, root=root)
+    if base is None:
+        return None, [f"Unknown base {base_ref}; fetch it first (git fetch origin)."]
     if head == "INDEX":
         # An unstaged file would otherwise silently escape the pre-PR review.
         if git("diff", "--name-only", root=root) or git("ls-files", "--others", "--exclude-standard", root=root):
@@ -70,6 +84,8 @@ def snapshot(base, head, root=ROOT):
         target = git("write-tree", root=root).decode().strip()
     else:
         target = ancestor = resolve(head, root=root)
+    if ancestor is None:
+        return None, [f"Unknown head {head}; fetch the candidate commit first."]
     base = git("merge-base", base, ancestor, root=root).decode().strip()
     before, after = tree(base, root), tree(target, root)
     paths = sorted(p for p in before.keys() | after.keys() if p != RECORD and before.get(p) != after.get(p))
@@ -89,9 +105,29 @@ def parse_object(text):
         return None
     try:
         data = json.loads(text)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError):  # exception-ok: parsing untrusted JSON (record, register, model reply) has no pre-check
         return None
     return data if isinstance(data, dict) else None
+
+
+def dependency_errors(snap, root=ROOT):
+    """Errors if a change claimed as a Dependabot dependency update touches more than manifests and `uses:` lines."""
+    errors = []
+    for path in snap["changed_paths"]:
+        if DEPENDENCY_FILES.fullmatch(path):
+            continue
+        if not WORKFLOW_FILES.fullmatch(path):
+            errors.append(f"Dependency update changes {path}; only manifests and workflow `uses:` lines are exempt.")
+            continue
+        before, after = blob(snap["before"], path, root), blob(snap["after"], path, root)
+        if before is None or after is None:
+            errors.append(f"Dependency update adds, removes or cannot read {path}; it needs a full review.")
+            continue
+        changed = [line[1:] for line in difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=0)
+                   if line[:1] in "+-" and not line.startswith(("+++", "---"))]
+        if not all(USES_LINE.fullmatch(line) for line in changed):
+            errors.append(f"Dependency update changes {path} beyond `uses:` lines; it needs a full review.")
+    return errors
 
 
 def nonempty(value):
@@ -140,11 +176,9 @@ def register_errors(data, entries, today=None):
                 if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", expiry):
                     errors.append(f"{rid}: invalid expiry.")
                 else:
-                    try:
-                        expired = dt.date.fromisoformat(expiry) <= today
-                    except ValueError:
-                        expired = True
-                    if expired:
+                    year, month, day = (int(x) for x in expiry.split("-"))
+                    real = 1 <= year and 1 <= month <= 12 and 1 <= day <= calendar.monthrange(year, month)[1]
+                    if not real or dt.date(year, month, day) <= today:
                         errors.append(f"{rid}: acceptance expired or invalid.")
     if not {f"TM-{i:02}" for i in range(1, 17)} <= ids:
         errors.append("Baseline TM-01 through TM-16 must be retained, including mitigated risks.")
@@ -200,7 +234,14 @@ def record_errors(data, snap, register):
     return errors
 
 
-def check(snap, root=ROOT, require_record=True):
+def check(snap, root=ROOT, require_record=True, dependency_update=False):
+    """Errors of the candidate. dependency_update: the PR author is dependabot[bot] (CI decides that from the GitHub event,
+    never from commit metadata); then manifests/`uses:` changes need no record, everything else still does."""
+    if dependency_update and require_record:
+        errors = dependency_errors(snap, root)
+        if errors:
+            return errors
+        require_record = False
     entries = snap["after"]
     register = parse_object(blob(entries, REGISTER, root))
     errors = register_errors(register, entries)
@@ -226,7 +267,7 @@ def endpoint_valid(url):
     try:
         parsed = urllib.parse.urlsplit(url)
         port = parsed.port
-    except ValueError:
+    except ValueError:  # exception-ok: urllib reports a malformed port only by raising; the URL is configuration input
         return False
     del port
     return bool(parsed.hostname and not parsed.username and not parsed.password and not parsed.fragment and not parsed.query
@@ -337,7 +378,7 @@ def advisory(snap, full, output, max_batches, root=ROOT):
                 try:
                     response = model_request(url, model, os.environ.get("SKIRNIR_SECURITY_AI_KEY", ""), system,
                                              {**public, "batch": number, "total_batches": len(parts), "files": part})
-                except (OSError, ValueError, TypeError, urllib.error.URLError):
+                except (OSError, ValueError, TypeError, urllib.error.URLError):  # exception-ok: network boundary and untrusted reply
                     response = None
                 if response is None:
                     result["status"] = "unavailable"
@@ -359,8 +400,10 @@ def main():
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--baseline-only", action="store_true", help="Validate model/register, not a historical PR attestation")
     parser.add_argument("--full", action="store_true")
-    parser.add_argument("--output", type=Path, default=Path("/tmp/skirnir-security-advisory.json"))
+    parser.add_argument("--output", type=Path, default=Path(tempfile.gettempdir()) / "skirnir-security-advisory.json")
     parser.add_argument("--max-batches", type=int, default=12)
+    parser.add_argument("--dependency-update", action="store_true",
+                        help="CI only, when GitHub reports the PR author dependabot[bot]: manifests/uses: need no record")
     args = parser.parse_args()
     if not 1 <= args.max_batches <= 100:
         parser.error("max-batches must be between 1 and 100")
@@ -374,12 +417,14 @@ def main():
             return 0
         if args.command == "ai":
             return advisory(snap, args.full, args.output, args.max_batches)
-        errors = check(snap, require_record=not args.baseline_only)
+        errors = check(snap, require_record=not args.baseline_only, dependency_update=args.dependency_update)
         for error in errors:
             print("FAIL: " + error)
+        if args.dependency_update and not errors:
+            print("Dependency-only update by Dependabot: no review record required; the maintainer reviews the bump (ADR-0047).")
         print(f"Security evidence: {len(errors)} error(s). Attestation is not proof of review or absence of vulnerabilities.")
         return int(bool(errors))
-    except (OSError, ValueError, subprocess.CalledProcessError):
+    except (OSError, ValueError, subprocess.CalledProcessError):  # exception-ok: Git/file faults (missing objects, I/O) end the check
         print("Security check could not read valid Git objects/resources; fetch the base and stage intended files. No pass recorded.")
         return 1
 
