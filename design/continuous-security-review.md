@@ -143,3 +143,17 @@ No production system, real model provider, downstream tool agent, GitHub ruleset
 Operational assumptions, missing HTTPS enforcement in the runtime cloud configuration, full denial-of-service
 protection, rootless deployment and update anti-rollback remain baseline work; this tooling PR does not silently fix
 or accept them. Update the model/register and add rejected-case tests when those behaviors change.
+
+## Coverage across full reviews
+
+The weekly and manual full-review runs resume the last retained ledger from this workflow's completed
+default-branch schedule or manual runs. They serialize full reviews and retain the ledger for 45 days.
+The ledger contains file paths, blob IDs, successful chunk offsets and the last fully examined commit.
+After an invalid model reply the next run retries the outstanding chunks. A change to a blob invalidates
+its offsets. A changed model, endpoint, skill or threat-model text starts a new cycle. New/changed blobs
+come first, then security anchors. When all eligible text is covered the following run starts a new cycle.
+Binary or oversized objects remain explicitly omitted. If the ledger expires the scan starts over.
+
+For local runs, add `--full --coverage /tmp/skirnir-coverage.json` to the advisory command and reuse that
+ledger with one process at a time. The advisory artifact lists pending paths, last complete revisions and
+the cycle number. The configured per-run budget still applies.

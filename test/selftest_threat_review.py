@@ -217,6 +217,28 @@ class EvidenceTests(unittest.TestCase):
             request.assert_not_called()
             self.assertEqual(json.loads(output.read_text())["status"], "skipped")
 
+    def test_full_review_retries_a_failed_batch(self):
+        self.write("fixture.txt", "x" * 220_000)
+        self.run_git("add", ".")
+        snap = self.snap()
+        reply = {"summary": "Synthetic response", "findings": [], "limitations": []}
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {**BARE_ENV,
+                "SKIRNIR_SECURITY_AI_ENABLED": "true", "SKIRNIR_SECURITY_AI_MODEL": "fixture",
+                "SKIRNIR_SECURITY_AI_URL": "https://model.example.test/v1/chat/completions"}, clear=True):
+            out = Path(directory) / "report.json"
+            ledger = Path(directory) / "coverage.json"
+            with patch.object(review, "model_request", side_effect=[reply, None]) as first:
+                review.advisory(snap, True, out, 12, self.root, ledger)
+                failed_part = first.call_args.args[4]["files"]
+            result = json.loads(out.read_text())
+            self.assertEqual(result["status"], "unavailable")
+            self.assertEqual(result["reviewed_batches"], 1)
+            self.assertTrue(result["coverage"]["pending_paths"])
+            with patch.object(review, "model_request", return_value=reply) as retry:
+                review.advisory(snap, True, out, 12, self.root, ledger)
+                self.assertEqual(retry.call_args_list[0].args[4]["files"], failed_part)
+            self.assertEqual(json.loads(out.read_text())["coverage"]["pending_paths"], [])
+
     def test_ai_uses_trusted_instructions_and_partial_status(self):
         self.write(review.SKILL, "CANDIDATE_INSTRUCTIONS_MUST_NOT_BE_TRUSTED")
         self.run_git("add", ".")
@@ -239,6 +261,58 @@ class EvidenceTests(unittest.TestCase):
             self.assertEqual(result["status"], "partial")
             self.assertEqual(result["reviewed_batches"], 1)
             self.assertEqual(result["total_batches"], 2)
+
+
+class CoverageTests(unittest.TestCase):
+    def test_resume_prioritize_changed_blob_and_restart_cycle(self):
+        files = [{"path": name, "revision": "after", "text": "x" * size}
+                 for name, size in [("a", 160_000), ("b", 80_000), ("c", 20_000)]]
+        snap = {"head": "rev1", "after": {f["path"]: {"oid": "old"} for f in files}}
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = Path(directory) / "state.json"
+            parts = review.batches(files)
+            first = review.FullCoverage(ledger, snap, "policy", parts)
+            first.acknowledge(first.parts[0])
+            acknowledged = {(c["path"], c["offset_chars"]) for c in first.parts[0]}
+            next_run = review.FullCoverage(ledger, snap, "policy", parts)
+            remaining = {(c["path"], c["offset_chars"]) for batch in next_run.parts for c in batch}
+            self.assertTrue(acknowledged.isdisjoint(remaining))
+            snap["head"] = "rev2"
+            snap["after"]["c"]["oid"] = "new"
+            changed = review.FullCoverage(ledger, snap, "policy", parts)
+            self.assertEqual(changed.parts[0][0]["path"], "c")
+            for batch in changed.parts:
+                changed.acknowledge(batch)
+            self.assertEqual(changed.pending(), [])
+            self.assertTrue(all(e["last_complete_sha"] == "rev2" for e in changed.files.values()))
+            following = review.FullCoverage(ledger, snap, "policy", parts)
+            self.assertEqual(following.state["cycle"], 2)
+            self.assertEqual(set(following.pending()), {"a", "b", "c"})
+            reset = review.FullCoverage(ledger, snap, "different-policy", parts)
+            self.assertEqual(reset.state["cycle"], 1)
+            self.assertTrue(all(not e["done"] for e in reset.files.values()))
+
+    def test_restore_only_trusted_full_runs(self):
+        path = ROOT / "tools/security/restore_coverage.py"
+        spec = importlib.util.spec_from_file_location("restore_fixture", path)
+        restore = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(restore)
+        repo = "example/project"
+        def run(n, **changes):
+            return dict({"id": n, "head_branch": "main", "event": "schedule", "status": "completed",
+                         "head_repository": {"full_name": repo}}, **changes)
+        runs = [run(4), run(5, head_branch="feature"), run(6, event="workflow_run"),
+                run(7, head_repository={"full_name": "fork/project"}), run(8)]
+        def api(route):
+            if "/artifacts" in route:
+                self.assertIn("/4/artifacts", route)
+                return {"artifacts": [{"name": "full-review-coverage", "expired": False}]}
+            return {"workflow_runs": runs}
+        with tempfile.TemporaryDirectory() as directory, patch.object(restore, "api", side_effect=api), \
+                patch.object(restore.subprocess, "run") as download:
+            (Path(directory) / "coverage.json").write_text("{}")
+            restore.restore(repo, "main", Path(directory), 8)
+            self.assertIn("4", download.call_args.args[0])
 
 
 class TransportTests(unittest.TestCase):
