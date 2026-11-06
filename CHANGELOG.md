@@ -2,6 +2,8 @@
 
 ## Unreleased — development tooling
 
+- Weekly full security reviews resume from the previously reviewed chunks (ADR-0049).
+
 - Add the versioned threat model, risk register and repository security-review skill (ADR-0047).
   Every PR/update requires a change-bound review record; CI rejects missing/stale evidence and expired acceptances.
   Optional, read-only model reviews run after PR CI and weekly when explicitly configured; otherwise report skipped.

@@ -1,61 +1,30 @@
 {
   "schema_version": 1,
   "status": "completed",
-  "base_sha": "8509cce8879af4b2dc53e7f8015adaab0f17bb94",
-  "change_digest": "41d1aac022ef6923f4f9044eba25543ed2c5156ed80f8752e935a216a2634ae1",
+  "base_sha": "c6c7d2fb573674d43ea0fac64d629d2119558b8c",
+  "change_digest": "e7ab221f2f2449dabd27266d7b5f053b5c0e47d57f577c534be0ea763907293f",
   "reviewer": "Codex repository security review",
-  "summary": "Reviewed cloud target resolution, URL parsing, every authenticated POST, lazy streaming errors, and proxy fallback. Both adapters use a shared fixed destination and refuse 3xx before body reads. Local node forwarding remains outside the cloud adapter.",
+  "summary": "Reviewed the trusted full-review workflow, state provenance and chunk acknowledgements. PR jobs neither restore nor publish coverage. State contains paths, Git object IDs, successful offsets and reviewed revisions; only a validated model response earns progress.",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
+    ".github/workflows/threat-review.yml",
     "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "design/routing-algorithm.md",
-    "docs/adr/0048-restrict-cloud-provider-transport.md",
+    "design/continuous-security-review.md",
+    "docs/adr/0049-resume-full-security-review-coverage.md",
     "docs/adr/README.md",
-    "docs/security/risk-register.json",
-    "router/config.example.yaml",
-    "router/skirnir_router/cloud.py",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/config.py",
-    "test/selftest_cloud_transport.py",
-    "test/selftest_threat_review.py"
+    "test/selftest_threat_review.py",
+    "tools/security/restore_coverage.py",
+    "tools/security/review.py"
   ],
   "risk_ids": [
-    "TM-06"
+    "TM-16"
   ],
   "boundaries": [
-    "B6"
+    "B9"
   ],
   "findings": [],
   "tests": [
     {
-      "command": "python test/selftest_cloud_transport.py",
-      "result": "passed",
-      "evidence": "Executed successfully on the reviewed tree."
-    },
-    {
-      "command": "python test/run_tests.py",
-      "result": "passed",
-      "evidence": "Executed successfully on the reviewed tree."
-    },
-    {
-      "command": "python test/selftest_security.py",
-      "result": "passed",
-      "evidence": "Executed successfully on the reviewed tree."
-    },
-    {
-      "command": "python test/selftest_config_load.py",
-      "result": "passed",
-      "evidence": "Executed successfully on the reviewed tree."
-    },
-    {
-      "command": "python test/selftest_cloud_errors.py",
-      "result": "passed",
-      "evidence": "Executed successfully on the reviewed tree."
-    },
-    {
-      "command": "python test/check_control_flow.py",
+      "command": "python test/selftest_threat_review.py",
       "result": "passed",
       "evidence": "Executed successfully on the reviewed tree."
     },
@@ -73,14 +42,9 @@
       "command": "python test/check_public_changes.py",
       "result": "passed",
       "evidence": "Executed successfully on the reviewed tree."
-    },
-    {
-      "command": "python test/selftest_threat_review.py",
-      "result": "passed",
-      "evidence": "20 checks passed. The disposable Git fixture preserves test references for mitigated risks."
     }
   ],
   "limitations": [
-    "Synthetic isolated providers and local E2E fixtures; real provider TLS termination is operator-controlled."
+    "Model responses and GitHub artifact lookup were simulated. Scheduled artifact restore/save requires a deployed workflow. Retention expiry restarts a scan cycle."
   ]
 }
