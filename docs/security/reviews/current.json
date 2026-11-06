@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "completed",
   "base_sha": "8509cce8879af4b2dc53e7f8015adaab0f17bb94",
-  "change_digest": "311bd19d08a201fbaacb8cb6de1756d4d017241cf864c8608ba168d0e074de66",
+  "change_digest": "41d1aac022ef6923f4f9044eba25543ed2c5156ed80f8752e935a216a2634ae1",
   "reviewer": "Codex repository security review",
   "summary": "Reviewed cloud target resolution, URL parsing, every authenticated POST, lazy streaming errors, and proxy fallback. Both adapters use a shared fixed destination and refuse 3xx before body reads. Local node forwarding remains outside the cloud adapter.",
   "reviewed_paths": [
@@ -18,7 +18,8 @@
     "router/skirnir_router/cloud.py",
     "router/skirnir_router/common.py",
     "router/skirnir_router/config.py",
-    "test/selftest_cloud_transport.py"
+    "test/selftest_cloud_transport.py",
+    "test/selftest_threat_review.py"
   ],
   "risk_ids": [
     "TM-06"
@@ -72,6 +73,11 @@
       "command": "python test/check_public_changes.py",
       "result": "passed",
       "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python test/selftest_threat_review.py",
+      "result": "passed",
+      "evidence": "20 checks passed. The disposable Git fixture preserves test references for mitigated risks."
     }
   ],
   "limitations": [
