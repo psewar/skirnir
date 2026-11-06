@@ -153,7 +153,8 @@ class EvidenceTests(unittest.TestCase):
 
     def dependency_base(self):
         self.run_git("reset", "-q", "--hard")
-        self.write("agent/go.sum", "example.com/mod v1.0.0 h1:old\n")
+        self.write("agent/go.mod", "require example.com/mod v1.0.0\n")
+        self.write("agent/go.sum", "example.com/mod v1.0.0 h1:" + "A" * 43 + "=\n")
         self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - uses: actions/checkout@v4\n      - run: echo ok\n")
         self.run_git("add", ".")
         self.run_git("commit", "-m", "dependency fixture")
@@ -161,7 +162,8 @@ class EvidenceTests(unittest.TestCase):
 
     def test_dependency_update_needs_no_record_for_manifests_and_uses_lines(self):
         self.dependency_base()
-        self.write("agent/go.sum", "example.com/mod v1.0.1 h1:new\n")
+        self.write("agent/go.mod", "require example.com/mod v1.0.1\n")
+        self.write("agent/go.sum", "example.com/mod v1.0.1 h1:" + "B" * 43 + "=\n")
         self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - uses: actions/checkout@v7\n      - run: echo ok\n")
         self.run_git("add", ".")
         self.assertEqual(review.check(self.snap(), self.root, dependency_update=True), [])
@@ -176,6 +178,41 @@ class EvidenceTests(unittest.TestCase):
         self.write("router/sample.py", "# not a dependency\n")
         self.run_git("add", ".")
         self.assertTrue(review.check(self.snap(), self.root, dependency_update=True), "source change")
+
+    def test_dependency_exemption_rejects_provenance_and_shape_changes(self):
+        self.dependency_base()
+        for path, value in [
+            (".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - uses: other/checkout@v7\n      - run: echo ok\n"),
+            (".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - uses: ./local\n      - run: echo ok\n"),
+            ("agent/go.mod", "require other.example.test/mod v1.2.0\n"),
+            ("agent/go.mod", "require example.com/mod v1.1.0\nreplace example.com/mod => ./local\n"),
+            ("agent/go.sum", "example.com/mod v1.0.0 h1:" + "B" * 43 + "=\n"),
+            ("new/requirements.txt", "example==2\n"),
+        ]:
+            with self.subTest(path=path, value=value):
+                self.write(path, value)
+                self.run_git("add", ".")
+                self.assertTrue(review.dependency_errors(self.snap(), self.root))
+                self.run_git("reset", "-q", "--hard")
+        self.run_git("update-index", "--chmod=+x", "agent/go.mod")
+        self.run_git("commit", "-m", "mode only")
+        self.assertTrue(review.dependency_errors(self.snap("HEAD"), self.root))
+
+    def test_broader_dependency_change_can_supply_full_evidence(self):
+        self.dependency_base()
+        self.write("new/requirements.txt", "fixture==2\n")
+        self.run_git("add", ".")
+        self.assertTrue(review.check(self.snap(), self.root, dependency_update=True))
+        self.attest()
+        self.assertEqual(review.check(self.snap(), self.root, dependency_update=True), [])
+
+    def test_pinned_action_stays_pinned(self):
+        source = "jobs:\n  build:\n    steps:\n      - uses: org/repo/path@" + "a" * 40 + " # v1"
+        bumped = source.replace("a" * 40, "b" * 40).replace("# v1", "# v2")
+        self.assertTrue(review.action_bumps_only(source, bumped))
+        for change in (bumped.replace("b" * 40, "v2"), bumped.replace("/path@", "/other@"),
+                       bumped.replace("      - uses", "      - run: echo x\n      - uses")):
+            self.assertFalse(review.action_bumps_only(source, change))
 
     def test_unknown_refs_are_reported_not_raised(self):
         snap, errors = review.snapshot("no-such-base", "INDEX", self.root)

@@ -28,6 +28,7 @@ jobs:
         run: python test/selftest_control_flow.py && python test/check_control_flow.py
       - run: python test/selftest_context_check.py
       - run: python test/selftest_threat_review.py
+      - run: python test/selftest_trusted_gate.py
       - run: python test/selftest_english_names.py
       - run: python test/selftest_toolcall_rescue.py
       - run: python test/selftest_availability.py

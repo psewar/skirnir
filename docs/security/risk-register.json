@@ -282,13 +282,15 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Mutable dependencies/actions or compromised build.",
-      "controls": "pip-audit, govulncheck and Dependabot.",
+      "controls": "pip-audit, govulncheck and Dependabot. Default-branch PR verification on an isolated hosted runner, optional App-bound merge status and same-dependency bump checks.",
       "next_action": "Pin/lock, scan optional dependencies and verify artifacts.",
       "owner_role": "maintainer and operator",
       "test_refs": [
-        ".github/workflows/security.yml"
+        ".github/workflows/security.yml",
+        "test/selftest_trusted_gate.py",
+        "test/selftest_threat_review.py"
       ],
-      "validation_gap": "V14: full SCA/history scan and artifact provenance remain open."
+      "validation_gap": "V14: full SCA/history scan and artifact provenance remain open. Verify protected environment, expected status source and merge blocking after rollout."
     }
   ]
 }

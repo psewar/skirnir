@@ -15,10 +15,8 @@ can also be followed by human reviewers. It is checked into this repository, not
    and the changed-path list. No model is called by this command.
 4. Write `docs/security/reviews/current.json` with actual evidence, then stage it. Do not generate an empty passing
    record without a review. All changes, even documentation changes, require a record; keep small reviews small.
-   Exception: a PR whose author GitHub reports as `dependabot[bot]` cannot write a record. CI then runs the checker
-   with `--dependency-update`: the change may only touch dependency manifests (`go.mod`, `go.sum`,
-   `requirements*.txt`) and `uses:` lines in workflow files; anything else fails and needs a normal review. The
-   maintainer reviews the version bump itself. The author comes from the GitHub event, never from commit metadata.
+   For a PR authored by Dependabot, CI checks the narrow version-bump exemption described below.
+   A broader change requires the same fresh record as any other PR.
 5. Run `python tools/security/review.py check --base origin/main --head INDEX` and `python test/check_public_changes.py`.
    Commit and open the PR with the review summary, tests, limitations and TM IDs. Further changes require re-review.
 
@@ -65,9 +63,8 @@ may conflict on this file: rerun the review on the final rebased tree, do not bl
 
 `threat-model.yml` runs on every PR, main push, weekly and manual dispatch. The PR job validates evidence twice: with
 the checker as the PR changed it, and with the checker of the PR's base commit (a separate worktree of the base, run
-with `python -I` against the candidate's Git objects). The PR can weaken its own copy but not the base copy, so
-**Security review evidence** stays a trustworthy required check; the job has no secrets and only read access. The PR
-that introduces the checker has no base copy yet and says so in its log. Main/scheduled runs validate the
+with `python -I` against candidate Git objects). These steps provide early contributor feedback. Both share a
+candidate-controlled workflow and runner. Independent enforcement is described below. Main/scheduled runs validate the
 model/register and expired acceptances, not a historical record against a new merge commit.
 `selftest_threat_review.py` exercises the checker, and the existing Security workflow runs the extended runtime
 negative tests, pip-audit and govulncheck. The normal CI explicitly includes the new checker tests too.
@@ -83,11 +80,48 @@ look stale. It then optionally requests an advisory model review. No candidate S
 The introducing PR cannot use a default-branch checker that has not been merged yet; review it locally and through PR CI.
 Future changes to the checker still have to satisfy the previous trusted version or be migrated explicitly.
 
-All new workflows have `contents: read`, pinned Action commits, disabled persisted checkout credentials and timeouts.
-There is no PR comment/status publishing, repository write, production access, candidate cache/artifact loading or
-model tool execution. The workflow-run check appears in its own Actions run, not as a PR status, so it cannot be a required check; the
-base-checker step above is the trusted gate. The maintainer should require **Security review evidence** and existing
-security/CI jobs in branch protection. Repository rulesets are not changed by this PR.
+### Independent merge gate
+
+After a CI pull-request run completes, `trusted-security-gate.yml` runs its default-branch policy on a fresh hosted
+runner. It resolves open PRs targeting the default branch at the exact run head SHA through the GitHub API (including
+forks), fetches the base and PR head as Git objects, and verifies the fetched SHA before checking evidence. The workflow
+uses only the trusted checkout. A concurrent push requires a new result. Successful CI remains a separate merge condition.
+The independent check also runs when CI fails. Ordinary checks have no status-publishing credential.
+
+Verification runs automatically after the workflow lands on the default branch. Configure these steps to enforce its
+result on the **PR head commit**:
+
+1. Create a dedicated GitHub App with repository **Commit statuses: Read and write** and required Metadata read access.
+   Disable webhooks for this publisher. Install it only on the intended repository.
+2. Create the Actions environment `security-gate-publisher`. Restrict deployment branches to the exact default branch
+   and permit no tags. Put `SKIRNIR_GATE_PRIVATE_KEY` **only in this environment's secrets**. Put the App ID in its
+   variable `SKIRNIR_GATE_APP_ID`. Keep the key out of repository/organization secrets accessible to PR jobs.
+3. Set repository variable `SKIRNIR_GATE_PUBLISH=true`. Run a fresh PR against main. Inspect the status
+   `skirnir/trusted-security-review` on its head and confirm the dedicated App is the publisher.
+4. In the main branch protection rule or active ruleset, **require that status with the dedicated App as its expected
+   source**. Retain the ordinary CI/security checks and require up-to-date branches where appropriate. Limit bypass
+   privileges to the repository's intended administrators. A same-named Actions check or a contributor status must
+   not satisfy this rule. Without source binding the status alone is insufficient.
+5. Verify with a disposable PR that removes its PR-side check and lacks fresh evidence. The protected branch must
+   remain blocked. A fresh, reviewed revision must receive its own status. An absent trigger or publication error leaves
+   a new head without the required status. Missing evidence in an eligible PR publishes failure.
+
+The publisher runs in a separate job with no checkout, no artifacts and only a short-lived status token minted by
+the dedicated App. The independent gate's first hosted run is possible only after the workflow lands on main.
+Environment settings, App installation, status-source binding and the final protected-merge test require repository
+administration. Keep any existing required checks during rollout. This gate attests to review evidence freshness and
+shape; maintainers still evaluate its contents. Fork runs subject to Actions approval wait for the CI trigger.
+
+### Dependabot scope
+
+The exemption follows the two ecosystems currently configured here. For workflows, only a version or pinned SHA in
+an existing canonical step (`      - uses: owner/repo[/path]@ref`) may change. The action identity, step position,
+indentation and pin type stay fixed. Supported tag refs are numeric releases such as v2 and v2.3.4. Other workflow
+formats take the full-review path. For `agent/go.mod`, only existing require versions may change; for `agent/go.sum`,
+only corresponding old/new version checksum entries may be removed/added. Existing checksums cannot be rewritten.
+New dependencies, files, mode changes, Python requirements, replace directives, standalone checksum edits and changes
+to the review record use ordinary review. Author identity comes from GitHub. A fresh full review can satisfy broader
+bot changes. Continue reviewing upstream provenance and vulnerability scans for every dependency bump.
 
 ## Optional model execution
 
