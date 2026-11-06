@@ -1,6 +1,6 @@
 ---
-status: proposed
-date: 2026-11-03
+status: accepted
+date: 2026-11-06
 decision-makers: operator
 ---
 
@@ -27,7 +27,7 @@ privileged execution path for attacker-controlled PR content.
 
 ## Decision Outcome
 
-Proposed option: change-bound attestation plus checks and advisory AI. AGENTS.md requires the repository skill before
+Chosen option: change-bound attestation plus checks and advisory AI. AGENTS.md requires the repository skill before
 every PR/update. A fixed JSON record binds to merge-base and the whole candidate tree (paths, modes and blob IDs),
 excluding only that non-executable record to avoid a self-hash cycle. Missing/stale records fail the PR check.
 Baseline risks remain open, not retroactively accepted. Tests and risk references state their incomplete coverage.
