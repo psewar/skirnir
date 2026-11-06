@@ -1,6 +1,6 @@
 # Continuous security review
 
-Decision: [ADR-0047](../docs/adr/0047-change-bound-security-review-before-pull-requests.md) (proposed).
+Decision: [ADR-0047](../docs/adr/0047-change-bound-security-review-before-pull-requests.md) (accepted).
 The [threat model](../docs/security/threat-model.md) records boundaries and scenarios; the
 [risk register](../docs/security/risk-register.json) records open/mitigated/accepted status and incomplete test coverage.
 The repository [security-review skill](../.agents/skills/skirnir-security-review/SKILL.md) is used by coding agents and
