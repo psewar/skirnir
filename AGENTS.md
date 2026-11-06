@@ -96,8 +96,9 @@ accepted one.
 - Before creating a PR **and after changing a reviewed PR**, execute
   [.agents/skills/skirnir-security-review/SKILL.md](.agents/skills/skirnir-security-review/SKILL.md).
   This also applies to documentation, dependency and review-tooling changes; document a small scope honestly.
-  Only Dependabot PRs are exempt, and only while they change nothing but dependency manifests and workflow `uses:`
-  lines (CI checks both, ADR-0047); the maintainer reviews those bumps.
+  Dependabot's evidence exemption applies only to version changes of existing Go requirements and their
+  corresponding checksums, or an existing action's version in the same step (ADR-0050).
+  A broader bot update follows the ordinary review path. Require the independent publisher's status on protected main.
 - Read the threat model and risk register, trace changed trust boundaries and inspect surrounding callers/controls.
   Fix introduced findings and add rejected-case tests before opening the PR. Unresolved high-impact findings need
   private maintainer triage, not a fabricated clean result. Only the maintainer can accept a risk with an expiry.

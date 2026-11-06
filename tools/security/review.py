@@ -3,7 +3,6 @@
 import argparse
 import calendar
 import datetime as dt
-import difflib
 import hashlib
 import json
 import os
@@ -27,12 +26,12 @@ BOUNDARIES = {f"B{i}" for i in range(1, 10)}
 ANCHORS = ["router/skirnir_router/" + p + ".py" for p in
            ("app", "auth", "registry", "cloud", "config", "memory", "session_api", "session_exchange")]
 ANCHORS += ["agent/tunnel.go", "agent/updater.go", "agent/ollamaupdate.go"]
-# Dependabot PRs cannot carry a review record (ADR-0047). With --dependency-update (CI sets it only when GitHub reports
-# the PR author dependabot[bot]) a change limited to these manifests needs no record; workflow files may only change
-# `uses:` lines. Anything else still needs a full review.
-DEPENDENCY_FILES = re.compile(r"(?:.*/)?(?:go\.mod|go\.sum|requirements[^/]*\.txt)")
+# Only ecosystems configured in .github/dependabot.yml qualify. Unknown formats need ordinary evidence.
 WORKFLOW_FILES = re.compile(r"\.github/workflows/[^/]+\.ya?ml")
-USES_LINE = re.compile(r"\s*(?:-\s+)?uses:\s*\S+(?:\s+#.*)?")
+VERSION_REF = r"v[0-9]+(?:\.[0-9]+){0,2}"
+ACTION_STEP = re.compile(r"      - uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)@"
+                         rf"({VERSION_REF}|[0-9a-f]{{40}})(?: +# ({VERSION_REF}))?")
+GO_REQUIRE = re.compile(r"(\s*(?:require )?)([A-Za-z0-9._~/-]+)(\s+)(v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.+-]+)?)([ \t]*(?:// indirect)?)")
 
 
 def git(*args, root=ROOT):
@@ -110,24 +109,98 @@ def parse_object(text):
     return data if isinstance(data, dict) else None
 
 
+def action_bumps_only(before, after):
+    # Recognize only the canonical job/steps layout used here. Keep every other line byte-for-byte.
+    # This also distinguishes real step entries from text inside a run: | block.
+    left, right = before.split("\n"), after.split("\n")
+    if len(left) != len(right):
+        return False
+    jobs = job = steps = False
+    for old, new in zip(left, right, strict=True):
+        if old.strip() and not old.lstrip().startswith("#"):
+            indent = len(old) - len(old.lstrip(" "))
+            if indent == 0:
+                jobs, job, steps = old == "jobs:", False, False
+            elif indent <= 2:
+                job, steps = jobs and bool(re.fullmatch(r"  [\w-]+:", old)), False
+            elif indent <= 4:
+                steps = job and old == "    steps:"
+        if old == new:
+            continue
+        a, b = ACTION_STEP.fullmatch(old), ACTION_STEP.fullmatch(new)
+        if not steps or not a or not b or a[1] != b[1] or a[2] == b[2]:
+            return False
+        if bool(re.fullmatch(VERSION_REF, a[2])) != bool(re.fullmatch(VERSION_REF, b[2])):
+            return False  # a pinned hash cannot turn into a movable tag
+    return True
+
+
+def go_bumps(before, after):
+    left, right = before.split("\n"), after.split("\n")
+    if len(left) != len(right):
+        return None
+    block = False
+    bumps = {}
+    for old, new in zip(left, right, strict=True):
+        if old != new:
+            a, b = GO_REQUIRE.fullmatch(old), GO_REQUIRE.fullmatch(new)
+            if not (block or old.startswith("require ")) or not a or not b or a.groups()[:3] != b.groups()[:3] or a[5] != b[5]:
+                return None
+            bumps[a[2]] = (a[4], b[4])
+        if old == "require (":
+            block = True
+        elif old == ")":
+            block = False
+    return bumps
+
+
+def related_sums(before, after, bumps):
+    def entries(text):
+        result = {}
+        for line in text.splitlines():
+            fields = line.split()
+            if len(fields) != 3 or not re.fullmatch(r"h1:[A-Za-z0-9+/]{43}=", fields[2]):
+                return None
+            key = tuple(fields[:2])
+            if key in result:
+                return None
+            result[key] = fields[2]
+        return result
+    old, new = entries(before), entries(after)
+    if old is None or new is None:
+        return False
+    for key in old.keys() | new.keys():
+        if old.get(key) == new.get(key):
+            continue
+        module, version = key
+        if key in old and key in new or module not in bumps:
+            return False
+        if version.removesuffix("/go.mod") != bumps[module][int(key in new)]:
+            return False
+    return True
+
+
 def dependency_errors(snap, root=ROOT):
-    """Errors if a change claimed as a Dependabot dependency update touches more than manifests and `uses:` lines."""
-    errors = []
-    for path in snap["changed_paths"]:
-        if DEPENDENCY_FILES.fullmatch(path):
-            continue
-        if not WORKFLOW_FILES.fullmatch(path):
-            errors.append(f"Dependency update changes {path}; only manifests and workflow `uses:` lines are exempt.")
-            continue
-        before, after = blob(snap["before"], path, root), blob(snap["after"], path, root)
-        if before is None or after is None:
-            errors.append(f"Dependency update adds, removes or cannot read {path}; it needs a full review.")
-            continue
-        changed = [line[1:] for line in difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=0)
-                   if line[:1] in "+-" and not line.startswith(("+++", "---"))]
-        if not all(USES_LINE.fullmatch(line) for line in changed):
-            errors.append(f"Dependency update changes {path} beyond `uses:` lines; it needs a full review.")
-    return errors
+    paths = snap["changed_paths"]
+    before, after = snap["before"], snap["after"]
+    if not paths or before.get(RECORD) != after.get(RECORD):
+        return ["The exemption requires a dependency change and the original review record."]
+    texts = {}
+    for path in paths:
+        if path not in ("agent/go.mod", "agent/go.sum") and not WORKFLOW_FILES.fullmatch(path):
+            return ["Change outside the configured dependency manifests and workflows."]
+        if any(tree.get(path, {}).get("mode") != "100644" for tree in (before, after)):
+            return ["Added, removed or special-mode dependency file."]
+        pair = blob(before, path, root), blob(after, path, root)
+        if None in pair:
+            return ["Unreadable dependency file."]
+        if WORKFLOW_FILES.fullmatch(path) and not action_bumps_only(*pair):
+            return ["Workflow change exceeds a version bump in the same action step."]
+        texts[path] = pair
+    bumps = go_bumps(*texts["agent/go.mod"]) if "agent/go.mod" in texts else {}
+    if bumps is None or ("agent/go.sum" in texts and not related_sums(*texts["agent/go.sum"], bumps)):
+        return ["Go changes exceed existing module version bumps and their associated checksums."]
+    return []
 
 
 def nonempty(value):
@@ -236,12 +309,10 @@ def record_errors(data, snap, register):
 
 def check(snap, root=ROOT, require_record=True, dependency_update=False):
     """Errors of the candidate. dependency_update: the PR author is dependabot[bot] (CI decides that from the GitHub event,
-    never from commit metadata); then manifests/`uses:` changes need no record, everything else still does."""
+    never from commit metadata); then same-dependency bumps may use the narrow exemption."""
     if dependency_update and require_record:
         errors = dependency_errors(snap, root)
-        if errors:
-            return errors
-        require_record = False
+        require_record = bool(errors)  # A wider bot PR can still supply full evidence.
     entries = snap["after"]
     register = parse_object(blob(entries, REGISTER, root))
     errors = register_errors(register, entries)
@@ -467,7 +538,7 @@ def main():
     parser.add_argument("--output", type=Path, default=Path(tempfile.gettempdir()) / "skirnir-security-advisory.json")
     parser.add_argument("--max-batches", type=int, default=12)
     parser.add_argument("--dependency-update", action="store_true",
-                        help="CI only, when GitHub reports the PR author dependabot[bot]: manifests/uses: need no record")
+                        help="CI only, when GitHub reports the PR author dependabot[bot]: check the same-dependency bump exemption")
     args = parser.parse_args()
     if args.coverage and (args.command != "ai" or not args.full or args.coverage.resolve() == args.output.resolve()):
         parser.error("--coverage requires ai --full and a distinct output file")
@@ -487,7 +558,7 @@ def main():
         for error in errors:
             print("FAIL: " + error)
         if args.dependency_update and not errors:
-            print("Dependency-only update by Dependabot: no review record required; the maintainer reviews the bump (ADR-0047).")
+            print("Dependabot candidate passed the narrow exemption or supplied valid full review evidence.")
         print(f"Security evidence: {len(errors)} error(s). Attestation is not proof of review or absence of vulnerabilities.")
         return int(bool(errors))
     except (OSError, ValueError, subprocess.CalledProcessError):  # exception-ok: Git/file faults (missing objects, I/O) end the check
