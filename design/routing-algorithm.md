@@ -190,3 +190,5 @@ wenn Ollama es lädt. Deshalb Fit-Prüfung im Router, nicht Ollama entscheiden l
 - Schwellen 40 % / 10 s / 2 GB sind Startwerte; nach einer Woche `/admin/state`-Log auswerten.
 - WOL für Rechner, die jemand anderem gehören, nur mit Absprache, sonst weckt eine
   nächtliche Automation fremde Rechner.
+
+Cloud tiers send authenticated requests only to the configured final provider URL (ADR-0048). Use HTTPS, or explicitly allowlist literal loopback for local HTTP providers. A redirect is a provider error.

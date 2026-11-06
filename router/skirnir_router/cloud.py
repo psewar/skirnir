@@ -24,6 +24,7 @@ import json
 import re
 import time
 from collections import Counter
+from contextlib import asynccontextmanager
 
 from aiohttp import ClientTimeout
 
@@ -512,23 +513,26 @@ async def run(target, path, body, model, stream):
     kind = target.spec["kind"]
     t0 = time.time()
     timeout = ClientTimeout(total=float(target.spec.get("timeout_s", state.CFG.request_timeout_s)), sock_connect=10)
+    @asynccontextmanager
+    async def post(req):
+        async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target),
+                                      timeout=timeout, allow_redirects=False) as response:
+            if 300 <= response.status < 400:
+                raise CloudError(502, "provider returned a redirect", "provider_redirect")  # exception-ok: provider protocol error, including inside streams
+            yield response
+
     if path in EMBED_PATHS:
         if kind == "anthropic":
             raise CloudError(501, f"{target.provider}: no embeddings")  # exception-ok: same signal as a provider error (CloudError)
-
-        def post_embed(req):
-            return state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout)
-        return await openai_embed(post_embed, body, model, model_id)
+        return await openai_embed(post, body, model, model_id)
 
     if kind != "anthropic":
-        def post(req):
-            return state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout)
         return await openai_exchange(post, path, body, model, model_id, stream)
 
     req = _an_body(body, path, model_id, stream)
     info = {"p_tok": 0, "c_tok": 0, "finish": "stop"}
     if not stream:
-        async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout) as r:
+        async with post(req) as r:
             data = await r.read()
             if r.status >= 400:
                 raise CloudError(r.status, *_err_info(data))  # exception-ok: provider HTTP error (CloudError)
@@ -539,7 +543,7 @@ async def run(target, path, body, model, stream):
         return info, _native_done(model, path, content, tcs, info["finish"], info["p_tok"], info["c_tok"], t0)
 
     async def gen():
-        async with state.SESSION.post(_url(target, path, model), json=req, headers=_headers(target), timeout=timeout) as r:
+        async with post(req) as r:
             if r.status >= 400:   # inside the streaming generator: raising is its only error channel (CloudError)
                 raise CloudError(r.status, *_err_info(await r.read()))  # exception-ok: provider HTTP error in the stream
             tool_blocks, tool_args = {}, {}

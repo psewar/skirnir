@@ -95,15 +95,16 @@
         "B6"
       ],
       "priority": "P1",
-      "status": "open",
+      "status": "mitigated",
       "scenario": "HTTP provider or redirect leaves approved transport/host.",
-      "controls": "Configured host allowlist.",
-      "next_action": "Enforce HTTPS and redirect destinations.",
+      "controls": "Allowlisted final HTTPS URL, with HTTP limited to explicit loopback. Every provider POST refuses redirects.",
+      "next_action": "Keep transport tests in CI and verify effective provider configuration when deploying.",
       "owner_role": "maintainer and operator",
       "test_refs": [
-        "test/selftest_cloud_errors.py"
+        "test/selftest_cloud_transport.py"
       ],
-      "validation_gap": "V6: HTTPS and redirect rejection remain unimplemented/unverified."
+      "validation_gap": "Synthetic endpoints cover application dispatch. Operator TLS termination and infrastructure remain deployment-specific.",
+      "evidence": "Both provider adapters reject 3xx before parsing or streaming the response; the second origin receives zero HTTP requests."
     },
     {
       "id": "TM-07",

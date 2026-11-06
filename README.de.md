@@ -740,3 +740,5 @@ der Agent lernt beides. Vor jedem Start prüft der Agent, dass belegter RAM plus
 übersteigt; sonst bleibt der Server angehalten und der OLLAMA-Frame trägt `upstream_blocked` (Grund `memory`, verfügbar,
 gesamt, Bedarf, Grenze), bis wieder Platz ist. Der Router bietet dann keinen Freigabe-Kandidaten an und antwortet mit
 `memory_pressure` samt diesen Zahlen; Vorladen und Fenster senden so lange keine Freigabe.
+
+Cloud-Provider benötigen den endgültigen HTTPS-Endpunkt. HTTP ist für explizit erlaubte Loopback-Adressen (127.0.0.1 und ::1) möglich. Weiterleitungen führen zu einem Providerfehler.

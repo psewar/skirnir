@@ -758,3 +758,5 @@ night. During the day the standby Ollama serves and is prewarmed like any Ollama
   the end of a game no longer bring it back.
 - Inside the window, a held server is released once the node is free and the standby has been idle for the same time, so a
   deliberate standby request at night does not switch back and forth.
+
+Cloud providers require the final HTTPS endpoint. HTTP is supported for explicitly allowlisted literal loopback addresses only. Provider redirects return an upstream error.

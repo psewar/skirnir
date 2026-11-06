@@ -7,6 +7,7 @@ import re
 import ssl
 import time
 import yaml
+from yarl import URL
 
 from . import state
 from .session_config import SessionConfig, parse_session_config
@@ -406,7 +407,6 @@ class Config:
     def _parse_cloud(self, cl):
         # Stage 5: Cloud providers as tiers in roles (cloud.py). No per-client opt-in: the role allows it, the client can
         # opt out via routing.execution: local or clients.<c>.cloud: false.
-        from urllib.parse import urlparse
         classes = [str(x) for x in (cl.get("data_classes") or DATA_CLASSES_DEFAULT)]
         for key in ("default_data_class", "max_cloud_data_class"):
             if cl.get(key, _d(f"router.cloud.{key}")) not in classes:
@@ -420,9 +420,19 @@ class Config:
             spec = dict(spec or {})
             if spec.get("kind") not in ("openai", "anthropic"):
                 return invalid(f"router.cloud.providers.{pname}.kind must be openai or anthropic")
-            host = urlparse(str(spec.get("base_url") or "")).hostname
-            if not host or host not in allow:
-                return invalid(f"router.cloud.providers.{pname}.base_url: host {host!r} not in the egress allowlist {sorted(allow)}")
+            raw_url = spec.get("base_url")
+            if not isinstance(raw_url, str) or any(c in raw_url for c in ("?", "#", "\\")) or any(c.isspace() or ord(c) < 32 for c in raw_url):
+                return invalid(f"router.cloud.providers.{pname}.base_url: expected a provider URL without query or fragment")
+            try:
+                url = URL(raw_url)
+                host = url.raw_host
+                port = url.port
+            except ValueError:  # exception-ok: malformed URL authority or port at the configuration boundary
+                return invalid(f"router.cloud.providers.{pname}.base_url: invalid URL")
+            if url.raw_user is not None or url.raw_password is not None or not host or host not in allow or not port:
+                return invalid(f"router.cloud.providers.{pname}.base_url: expected an allowlisted host without credentials")
+            if url.scheme != "https" and not (url.scheme == "http" and host in ("127.0.0.1", "::1")):
+                return invalid(f"router.cloud.providers.{pname}.base_url: HTTPS required outside literal loopback")
             if not spec.get("api_key_env"):
                 return invalid(f"router.cloud.providers.{pname}.api_key_env missing")
             if spec.get("max_data_class") is not None and spec["max_data_class"] not in classes:
