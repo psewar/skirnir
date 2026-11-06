@@ -6,6 +6,8 @@
   Every PR/update requires a change-bound review record; CI rejects missing/stale evidence and expired acceptances.
   Optional, read-only model reviews run after PR CI and weekly when explicitly configured; otherwise report skipped.
   Added negative security regressions. Router/agent versions and runtime configuration are unchanged.
+- The advisory recheck after PR CI compares against the PR's base commit from the event instead of the moving
+  default-branch head; a PR merged before the recheck started showed a false "stale record" failure.
 
 Releases are tagged `vX.Y.Z` on this repository and carry the agent binaries as assets. Router and agent have their own
 version numbers; this table maps them. Details and the German summary are in each release's notes.

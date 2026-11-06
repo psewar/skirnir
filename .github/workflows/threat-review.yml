@@ -37,28 +37,34 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.11'
+      # Compare against the PR's base from the event, never the default-branch HEAD checked out above: once the PR is
+      # merged (often within a minute of its CI), that HEAD contains the PR and every record looks stale.
       - name: Fetch candidate objects without checkout
         if: github.event_name == 'workflow_run'
         env:
           REVIEW_HEAD: ${{ github.event.workflow_run.head_sha }}
+          REVIEW_BASE: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
         shell: bash
         run: |
           [[ "$REVIEW_HEAD" =~ ^[0-9a-f]{40}$ ]] || exit 1
-          git -c core.hooksPath=/dev/null fetch --no-tags origin "$REVIEW_HEAD"
+          [[ "$REVIEW_BASE" =~ ^[0-9a-f]{40}$ ]] || { echo "The workflow_run event names no PR base commit; nothing to recheck."; exit 1; }
+          git -c core.hooksPath=/dev/null fetch --no-tags origin "$REVIEW_HEAD" "$REVIEW_BASE"
       - name: Recheck PR evidence with trusted default-branch checker
         if: github.event_name == 'workflow_run'
         env:
           REVIEW_HEAD: ${{ github.event.workflow_run.head_sha }}
-        run: python -I tools/security/review.py check --base HEAD --head "$REVIEW_HEAD"
+          REVIEW_BASE: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
+        run: python -I tools/security/review.py check --base "$REVIEW_BASE" --head "$REVIEW_HEAD"
       - name: Advisory delta review
         if: github.event_name == 'workflow_run'
         env:
           REVIEW_HEAD: ${{ github.event.workflow_run.head_sha }}
+          REVIEW_BASE: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
           SKIRNIR_SECURITY_AI_ENABLED: ${{ vars.SKIRNIR_SECURITY_AI_ENABLED }}
           SKIRNIR_SECURITY_AI_URL: ${{ vars.SKIRNIR_SECURITY_AI_URL }}
           SKIRNIR_SECURITY_AI_MODEL: ${{ vars.SKIRNIR_SECURITY_AI_MODEL }}
           SKIRNIR_SECURITY_AI_KEY: ${{ secrets.SKIRNIR_SECURITY_AI_KEY }}
-        run: python -I tools/security/review.py ai --base HEAD --head "$REVIEW_HEAD" --output "$RUNNER_TEMP/threat-advisory.json"
+        run: python -I tools/security/review.py ai --base "$REVIEW_BASE" --head "$REVIEW_HEAD" --output "$RUNNER_TEMP/threat-advisory.json"
       - name: Advisory full review
         if: github.event_name != 'workflow_run'
         env:

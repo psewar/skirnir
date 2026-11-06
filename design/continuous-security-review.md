@@ -77,7 +77,9 @@ a PR from this repository. Fork PRs, failed CI runs and Dependabot runs are skip
 secrets even for forks, so otherwise anyone could spend the model key by opening PRs.
 It fetches only the candidate's Git objects by validated SHA; no candidate checkout, imports, tests, dependencies,
 actions, hooks or artifacts are executed/loaded. `python -I` isolates imports. The default-branch checker revalidates
-evidence and then optionally requests an advisory model review. No candidate SKILL/AGENTS file becomes an instruction.
+evidence against the PR's base commit named in the event (`workflow_run.pull_requests[0].base.sha`), not against the
+default-branch head it runs from: that head moves, and once the PR is merged it contains the PR, so every record would
+look stale. It then optionally requests an advisory model review. No candidate SKILL/AGENTS file becomes an instruction.
 The introducing PR cannot use a default-branch checker that has not been merged yet; review it locally and through PR CI.
 Future changes to the checker still have to satisfy the previous trusted version or be migrated explicitly.
 

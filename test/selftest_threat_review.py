@@ -182,6 +182,18 @@ class EvidenceTests(unittest.TestCase):
         snap, errors = review.snapshot(self.base, "no-such-head", self.root)
         self.assertTrue(errors and "Unknown head" in errors[0])
 
+    def test_merged_pr_is_checked_against_its_own_base(self):
+        # threat-review.yml runs after CI; by then the PR may be merged. Against the moved default branch the record
+        # looks stale, against the PR's base from the event it stays valid.
+        self.attest()
+        self.run_git("commit", "-m", "reviewed candidate")
+        head = self.run_git("rev-parse", "HEAD").strip()
+        merged, errors = review.snapshot("HEAD", head, self.root)   # default branch now contains the PR
+        self.assertEqual(errors, [])
+        self.assertTrue(review.check(merged, self.root), "moved default branch makes the record look stale")
+        own, errors = review.snapshot(self.base, head, self.root)
+        self.assertEqual(review.check(own, self.root), [])
+
     def test_deleted_file_old_content_is_available_to_advisory(self):
         (self.root / "router/sample.py").unlink()
         self.run_git("add", "-u")
@@ -292,6 +304,14 @@ class TransportTests(unittest.TestCase):
         parts = review.batches([{"path": "long.py", "revision": "after", "text": source}])
         self.assertEqual("".join(item["text"] for part in parts for item in part), source)
         self.assertGreater(len(parts), 1)
+
+
+class WorkflowTests(unittest.TestCase):
+    def test_workflow_run_compares_against_pr_base(self):
+        text = (ROOT / ".github/workflows/threat-review.yml").read_text(encoding="utf-8")
+        self.assertNotIn('--base HEAD --head "$REVIEW_HEAD"', text, "default-branch HEAD moves once the PR is merged")
+        self.assertEqual(text.count('--base "$REVIEW_BASE" --head "$REVIEW_HEAD"'), 2, "recheck and delta review")
+        self.assertIn("workflow_run.pull_requests[0].base.sha", text)
 
 
 if __name__ == "__main__":
