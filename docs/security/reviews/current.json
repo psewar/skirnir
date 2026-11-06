@@ -1,38 +1,86 @@
 {
   "schema_version": 1,
   "status": "completed",
-  "base_sha": "c96df2991da8dde72f7e53c487eaef6539f50e41",
-  "change_digest": "e218b25cf300d4bb68ef789c0a31916a4148665bc28d0fa8bd5748df0b2212aa",
-  "reviewer": "Claude (maintainer-requested fix of the advisory recheck base)",
-  "summary": "threat-review.yml rechecked PR evidence with --base HEAD, i.e. the default-branch head it checks out. That head moves; when the PR is merged before the workflow_run starts (PR #78: merged 16:08:27, run 16:09:09) it contains the PR, the merge-base becomes the PR head and the record is reported stale. The recheck and the delta advisory now use the PR base commit from the event (workflow_run.pull_requests[0].base.sha), validated as a 40-hex SHA, passed only through an environment variable (no expression interpolation into the script), fetched by SHA like the head; a missing base fails with an explicit message. The base value comes from GitHub, not from the candidate; fork and Dependabot runs remain skipped by the job condition, permissions stay contents:read. Weekly/manual full reviews still use HEAD, which is correct there. A selftest reproduces the merged case and a workflow test guards against reintroducing --base HEAD.",
+  "base_sha": "8509cce8879af4b2dc53e7f8015adaab0f17bb94",
+  "change_digest": "41d1aac022ef6923f4f9044eba25543ed2c5156ed80f8752e935a216a2634ae1",
+  "reviewer": "Codex repository security review",
+  "summary": "Reviewed cloud target resolution, URL parsing, every authenticated POST, lazy streaming errors, and proxy fallback. Both adapters use a shared fixed destination and refuse 3xx before body reads. Local node forwarding remains outside the cloud adapter.",
   "reviewed_paths": [
-    ".github/workflows/threat-review.yml",
+    ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "design/continuous-security-review.md",
-    "test/selftest_threat_review.py",
-    "tools/security/review.py"
+    "README.de.md",
+    "README.md",
+    "design/routing-algorithm.md",
+    "docs/adr/0048-restrict-cloud-provider-transport.md",
+    "docs/adr/README.md",
+    "docs/security/risk-register.json",
+    "router/config.example.yaml",
+    "router/skirnir_router/cloud.py",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/config.py",
+    "test/selftest_cloud_transport.py",
+    "test/selftest_threat_review.py"
   ],
-  "boundaries": ["B9"],
-  "risk_ids": ["TM-16"],
-  "findings": [
+  "risk_ids": [
+    "TM-06"
+  ],
+  "boundaries": [
+    "B6"
+  ],
+  "findings": [],
+  "tests": [
     {
-      "id": "REVIEW-06",
-      "evidence": "Run 42249662135 (Threat model advisory, PR #78): 'Stale base_sha' and 'Stale change_digest' because the default-branch checkout already contained the merged PR.",
-      "resolution": "Recheck and delta advisory use the PR base SHA from the workflow_run event; regression tests added.",
-      "disposition": "fixed"
+      "command": "python test/selftest_cloud_transport.py",
+      "result": "passed",
+      "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python test/run_tests.py",
+      "result": "passed",
+      "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python test/selftest_security.py",
+      "result": "passed",
+      "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python test/selftest_config_load.py",
+      "result": "passed",
+      "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python test/selftest_cloud_errors.py",
+      "result": "passed",
+      "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python test/check_control_flow.py",
+      "result": "passed",
+      "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python -m ruff check .",
+      "result": "passed",
+      "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python test/check_adr_index.py",
+      "result": "passed",
+      "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python test/check_public_changes.py",
+      "result": "passed",
+      "evidence": "Executed successfully on the reviewed tree."
+    },
+    {
+      "command": "python test/selftest_threat_review.py",
+      "result": "passed",
+      "evidence": "20 checks passed. The disposable Git fixture preserves test references for mitigated risks."
     }
   ],
-  "tests": [
-    {"command": "python test/selftest_threat_review.py (Windows)", "result": "passed", "evidence": "Ran 20 tests, OK (new: merged PR against own base, workflow uses PR base)"},
-    {"command": "python3 test/selftest_threat_review.py (Linux/WSL)", "result": "passed", "evidence": "Ran 20 tests, OK"},
-    {"command": "ruff check .", "result": "passed", "evidence": "All checks passed"},
-    {"command": "yaml.safe_load(.github/workflows/threat-review.yml)", "result": "passed", "evidence": "parses"},
-    {"command": "python test/check_public_changes.py", "result": "passed", "evidence": "0 findings"},
-    {"command": "python tools/security/review.py check --base origin/main --head INDEX", "result": "passed", "evidence": "0 errors with this record staged"},
-    {"command": "python test/run_tests.py", "result": "not_run", "evidence": "No router or agent code changed"}
-  ],
   "limitations": [
-    "The workflow_run path itself runs only in GitHub Actions after a PR's CI; it is verified by reading, YAML parsing and the static workflow test, and will first run for real on the next PR after this one is merged.",
-    "The trusted workflow comes from the default branch, so this PR's own advisory run still uses the old --base HEAD and may show the false failure once more."
+    "Synthetic isolated providers and local E2E fixtures; real provider TLS termination is operator-controlled."
   ]
 }

@@ -112,6 +112,7 @@ router:
       endpoint: http://127.0.0.1:8082   # fail closed; erlaubt -> Werkzeugergebnisse geschwaerzt, sonst lokal + refusal als Antwort
       terms: []                  #   eigene Begriffe (Namen der Familie, Orte), ganze Woerter
       # redact_domains / redact_device_classes / redact_names / redact_tools / threshold / refusal: Vorgaben in privacy.py
+    # Use final HTTPS endpoints. HTTP requires an explicitly allowed literal loopback address.
     providers:
       openai:                    # Schluessel als OPENAI_API_KEY in secrets.env
         kind: openai

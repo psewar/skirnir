@@ -41,7 +41,9 @@ class EvidenceTests(unittest.TestCase):
         self.run_git("config", "user.email", "reviewer@example.invalid")
         self.register = json.loads((ROOT / review.REGISTER).read_text())
         for risk in self.register["risks"]:
-            risk["test_refs"] = []
+            if risk["test_refs"]:
+                risk["test_refs"] = ["test/example.py"]
+        self.write("test/example.py", "# synthetic test reference\n")
         self.write(review.REGISTER, json.dumps(self.register))
         self.write(review.MODEL, "Baseline threat model")
         self.write(review.SKILL, "Trusted review instructions")
