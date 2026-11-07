@@ -1,62 +1,63 @@
 {
   "schema_version": 1,
   "status": "completed",
-  "reviewer": "Codex repository security review",
-  "base_sha": "e1d4e3323219d9cb3c642433736641505cd81cfe",
-  "change_digest": "9182c6fcf6af2197d0ac04202ffe17ebcdfe85ffb6c94ef7001378f5e89cbc3e",
+  "reviewer": "Claude Code (Opus 5.5) repository security review",
+  "base_sha": "91942a053ba9d299a98398daaf5f4650894e1ab4",
+  "change_digest": "95d54fa5fb3855bcec200223c1210be840b649f451e2518733a0494e9ebb4d76",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
-    ".github/workflows/threat-model.yml",
-    ".github/workflows/trusted-security-gate.yml",
-    "AGENTS.md",
     "CHANGELOG.md",
-    "design/continuous-security-review.md",
-    "docs/adr/0050-independent-security-evidence-and-narrow-dependency-bumps.md",
-    "docs/adr/README.md",
-    "docs/security/risk-register.json",
-    "test/selftest_threat_review.py",
-    "test/selftest_trusted_gate.py",
-    "tools/security/review.py",
-    "tools/security/trusted_gate.py"
+    "monitoring/compose.yaml",
+    "monitoring/deploy_ct.py",
+    "monitoring/README.md",
+    "monitoring/prometheus.yml.tmpl",
+    "monitoring/grafana/provisioning/datasources/prometheus.yaml",
+    "monitoring/grafana/provisioning/dashboards/skirnir.yaml",
+    "monitoring/grafana/dashboards/skirnir.json",
+    "docs/security/threat-model.md",
+    "docs/security/risk-register.json"
   ],
   "risk_ids": [
+    "TM-15",
     "TM-16"
   ],
   "boundaries": [
-    "B8",
     "B9"
   ],
-  "summary": "Traced CI from the default-branch workflow through trusted PR metadata, fetched Git objects, the base evidence schema and isolated optional App publication. Candidate files and workflow artifacts are never executed by the independent gate. The version-only classifier falls back to ordinary evidence for unrecognized files, source changes and mode changes.",
-  "findings": [],
+  "summary": "Only the two image tags of the monitoring stack change (Prometheus v3.5.0 -> v3.15.1, Grafana 12.2.0 -> 13.3.0) plus a changelog line. Ports, bind addresses, users, volumes, environment, secrets handling, health checks, provisioning and deploy_ct.py are unchanged. Traced the upstream release notes for both ranges: no removed flag or provisioning key that the stack uses; Prometheus 3.13 stops sending basic_auth on cross-host redirects of a target (stricter); Grafana 13 disables the numeric data source id APIs by default (the provisioned data source and dashboard use uid only), keeps sign-up and anonymous access as configured, and migrates dashboards and folders into unified storage on first start, which has no in-place downgrade. The changelog tells operators to copy grafana-data while Grafana is stopped before rolling out. No new trust boundary, route or credential path.",
+  "findings": [
+    {
+      "id": "TM-16",
+      "evidence": "monitoring/compose.yaml references both images by mutable tag, not by digest; a re-pushed tag would change what deploy_ct.py starts.",
+      "resolution": "Pre-existing: the previous tags were mutable in the same way. This change does not introduce it; pinning by digest belongs to TM-16's next action (pin/lock).",
+      "disposition": "baseline"
+    }
+  ],
   "tests": [
-    {
-      "command": "python test/selftest_trusted_gate.py",
-      "result": "passed",
-      "evidence": "Real disposable Git repositories: tampered candidate with stale evidence fails, current evidence passes, moved head fails; no candidate code executed."
-    },
-    {
-      "command": "python test/selftest_threat_review.py",
-      "result": "passed",
-      "evidence": "26 tests passed, including broader bot updates with full evidence and supply-chain negative cases."
-    },
-    {
-      "command": "python -m ruff check .",
-      "result": "passed",
-      "evidence": "All checks passed."
-    },
-    {
-      "command": "python test/check_adr_index.py",
-      "result": "passed",
-      "evidence": "50 ADRs in the index."
-    },
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
-      "evidence": "No findings after manual added-line review."
+      "evidence": "Public-change scan: 0 finding(s)."
+    },
+    {
+      "command": "Operator probe: copy of an existing grafana-data (taken with Grafana stopped) started once with grafana/grafana:12.2.0 and once with 13.3.0, no network, provisioning mounted read-only as in compose.yaml",
+      "result": "passed",
+      "evidence": "13.3.0 healthy after about 14 s; log 'Unified storage migrations completed successfully'; the same 22 dashboards (by uid), the same folder and the same data sources (name, type, uid) as 12.2.0; memory 262 MiB under the 768 MiB limit of that deployment (139 MiB with 12.2.0)."
+    },
+    {
+      "command": "Operator probe with HTTPS and the deployment's certificate: the compose health check command `wget -q --no-check-certificate -O /dev/null https://127.0.0.1:3000/api/health` inside grafana/grafana:13.3.0",
+      "result": "passed",
+      "evidence": "Succeeds; wget in the 13.3.0 image is still busybox, as in 12.2.0."
+    },
+    {
+      "command": "Prometheus v3.15.1 with the same flag style (retention flags, web.listen-address, remote-write receiver) and busybox wget health check, run by the operator in a separate stack",
+      "result": "passed",
+      "evidence": "Container healthy, /-/ready answered, rules and remote write working after the switch from v3.14.0; the prom/prometheus image of this repo was not started yet."
     }
   ],
   "limitations": [
-    "Hosted independent gate starts after merge. Private App credential, protected environment and branch rule must be configured by the maintainer. Expected source enforcement and live merge denial require administrator verification.",
-    "Local integration used synthetic GitHub metadata. Runtime router/agent code was unchanged."
+    "deploy_ct.py was not run with the new tags; the operator rolls out after the merge and keeps the grafana-data copy until the stack is healthy.",
+    "Grafana 13 memory with only this repository's dashboard was not measured; the probe used a larger dashboard set and stayed at 262 MiB, the stock limit here is 384 MiB.",
+    "--storage.tsdb.retention.time is marked deprecated in current Prometheus docs (still working in v3.15.1); moving retention into the config file is left for a later change.",
+    "No CI job starts the containers; image behaviour is covered only by the operator probes above."
   ]
 }

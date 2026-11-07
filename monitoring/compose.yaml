@@ -5,7 +5,7 @@
 # Rollout: deploy_ct.py (rendert prometheus.yml aus prometheus.yml.tmpl, legt Secrets ab, startet den Stack).
 services:
   prometheus:
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.15.1
     container_name: skirnir-prometheus
     restart: unless-stopped
     user: "65534:65534"
@@ -32,7 +32,7 @@ services:
       retries: 3
 
   grafana:
-    image: grafana/grafana:12.2.0
+    image: grafana/grafana:13.3.0
     container_name: skirnir-grafana
     restart: unless-stopped
     user: "${GRAFANA_UID:-472}"     # deploy_ct.py setzt die UID des Zertifikatseigentuemers, damit der Schluessel lesbar ist
