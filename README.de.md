@@ -457,7 +457,9 @@ ein Statistik-Helfer mit dem Median einer Woche).
 
 **Agenten aktualisieren:** `deploy.py --agent` legt die Binaries mit einem Manifest auf den Router, signiert mit einem
 Betreiber-Schlüssel (nie vom Router); die Agenten holen sie über ihre ausgehende Verbindung, prüfen Signatur und Hash,
-tauschen sich selbst und starten neu. Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
+tauschen sich selbst und starten neu. Eine signierte Version, die älter ist als die laufende, lehnt der Agent ab
+(Update-Art `downgrade`); ein bewusster Rückschritt braucht `update.allow_downgrade: true` in der Konfiguration des
+Knotens (ADR-0054). Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
 Kanarienvogel-Knoten, der neue Versionen zuerst bekommt (`modes.agent_update`). Fehler und Hänger werden HA-Probleme.
 Windows mit Smart App Control blockt unsignierte Binaries, darum wird die Release-Binary nach dem Build Authenticode-signiert
 (`agent/sign.ps1`; `deploy.py --agent` verweigert eine unsignierte Binary, sobald ein Signier-Thumbprint konfiguriert ist).

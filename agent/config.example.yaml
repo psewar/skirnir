@@ -75,6 +75,7 @@ tunnel:                                         # ausgehende Verbindung zum Rout
 
 # update:                                       # Selbst-Update ueber den Router (Standard an); Schluessel zeigt `deploy.py --agent`
 #   public_key: <base64 Ed25519>                #   ohne public_key lehnt der Agent jeden Auftrag ab
+#   allow_downgrade: true                       #   NUR fuer einen bewussten Rueckschritt: aeltere signierte Version zulassen (ADR-0054)
 #   enabled: false
 
 # ollama_update:                                # Ollama-Update ueber den Router (0.12.0; nur wenn Ollama ein Kind ist, s. children)

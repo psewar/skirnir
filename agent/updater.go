@@ -32,6 +32,54 @@ import (
 type UpdateCfg struct {
 	Enabled   *bool  `yaml:"enabled"`
 	PublicKey string `yaml:"public_key"` // base64, Ed25519; deploy.py --agent displays it after signing
+	// AllowDowngrade (ADR-0054): an older signed version is installed only with this explicit switch, for a deliberate
+	// recovery. Without it an old but validly signed manifest cannot roll the agent back to a known-vulnerable release.
+	AllowDowngrade bool `yaml:"allow_downgrade"`
+}
+
+// updateKindDowngrade: the order names a version older than the running one (or no release version while a release
+// runs). A fixed kind so the router can tell it apart without reading the message (agentupdate.retry_after).
+const updateKindDowngrade = "downgrade"
+
+var errDowngrade = errors.New("older version refused (update.allow_downgrade: false)")
+
+// releaseVersion parses "MAJOR.MINOR.PATCH" (digits only). ok=false for anything else, e.g. the "dev" of a local build.
+func releaseVersion(v string) (parts [3]int, ok bool) {
+	fields := strings.Split(v, ".")
+	if len(fields) != 3 {
+		return parts, false
+	}
+	for i, f := range fields {
+		if f == "" || len(f) > 6 || strings.Trim(f, "0123456789") != "" {
+			return parts, false
+		}
+		for _, c := range f {
+			parts[i] = parts[i]*10 + int(c-'0')
+		}
+	}
+	return parts, true
+}
+
+// downgradeRefusal returns errDowngrade (wrapped with both versions) when installing want over running would go back.
+// A running non-release build ("dev") has no order to protect; a release only accepts a newer release version.
+func downgradeRefusal(running, want string, allow bool) error {
+	cur, curOK := releaseVersion(running)
+	if !curOK || allow {
+		return nil
+	}
+	next, nextOK := releaseVersion(want)
+	if !nextOK {
+		return fmt.Errorf("%w: %q is not a release version (running %s)", errDowngrade, want, running)
+	}
+	for i := range cur {
+		if next[i] != cur[i] {
+			if next[i] < cur[i] {
+				return fmt.Errorf("%w: %s is older than the running %s", errDowngrade, want, running)
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 func (c *UpdateCfg) on() bool { return c.Enabled == nil || *c.Enabled }
@@ -71,6 +119,9 @@ var appControlBlocked = []syscall.Errno{4551, 4556, 4557, 4558, 4559, 4580, 4581
 
 // updateKind maps a failure at the Windows error code to a fixed type (never the localized message text).
 func updateKind(err error) string {
+	if errors.Is(err, errDowngrade) {
+		return updateKindDowngrade
+	}
 	for _, code := range appControlBlocked {
 		if errors.Is(err, code) {
 			return updateKindAppControl
@@ -174,6 +225,10 @@ func (u *Updater) verifyOrder(o UpdateOrder) (*manifestFile, error) {
 	}
 	if m.Version != o.Version {
 		return nil, fmt.Errorf("Auftrag nennt %s, Manifest %s", o.Version, m.Version)
+	}
+	// Anti-rollback after the signature: the signed manifest version, never the unsigned order field alone.
+	if err := downgradeRefusal(version, m.Version, u.cfg.AllowDowngrade); err != nil {
+		return nil, err
 	}
 	for i := range m.Files {
 		f := &m.Files[i]
