@@ -2,10 +2,10 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "41177721b0027ded7d69500cc92b3056ba5b87c2",
-  "change_digest": "757104aed536a16c605339c9bb9998df91a22360beea717dd6615697c0cd1620",
+  "base_sha": "f564a1bb4e9d56767a0484ee8ddf8e135d1c3c3f",
+  "change_digest": "30813edfe1f7e3c1567077125c675d1e0aabdefe2a5bd5abdfbc33f825c18550",
   "reviewed_paths": [
-    "monitoring/compose.yaml"
+    "CHANGELOG.md"
   ],
   "risk_ids": [
     "TM-16"
@@ -13,25 +13,13 @@
   "boundaries": [
     "B9"
   ],
-  "summary": "Dependabot bump of the monitoring Prometheus image from v3.15.1 to v3.16.0 in monitoring/compose.yaml; only the tag and its digest change. The digest sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06 equals the current multi-arch index digest of prom/prometheus:v3.16.0 on Docker Hub, so the reference stays immutable (ADR-0055). Compose bumps are outside the narrow Dependabot exemption of ADR-0050, hence this record. Read the v3.16.0 release notes (published 2026-11-05): the [CHANGE] entries concern experimental search endpoints, --web.external-url defaulting to https only with --web.config.file TLS (not used here), PromQL sample statistics, deprecated remote-write 2.0 metadata metrics, remote-write receiver counting and exemplar label uniqueness; none affects this stack's flags (config.file, tsdb.path, web.listen-address, web.enable-lifecycle), its scrape configuration or the storage.tsdb.retention block. User 65534, the loopback port binding, volumes and secrets are unchanged. No new trust boundary, port, credential or network destination.",
-  "findings": [
-    {
-      "id": "TM-16",
-      "evidence": "A third-party container image is updated; a compromised release would run with the stack's metrics credentials.",
-      "resolution": "Pre-existing and unchanged in scope: the image stays pinned by digest (verified against the registry), runs as nobody with the port bound to loopback; release notes reviewed.",
-      "disposition": "baseline"
-    }
-  ],
+  "summary": "Documentation only: the v0.26.1 row of CHANGELOG.md links the published release (tag v0.26.1 at 4117772, router 0.19.1, agent 0.28.0; asset digests equal the 0.28.0 build), and the unreleased development-tooling section notes the Prometheus v3.16.0 update merged in #99. No code, workflow, checker, skill, threat model, register or configuration change.",
+  "findings": [],
   "tests": [
     {
-      "command": "Docker Hub registry HEAD /v2/prom/prometheus/manifests/v3.16.0 (index media types)",
+      "command": "gh release view v0.26.1 --json targetCommitish,assets",
       "result": "passed",
-      "evidence": "Docker-Content-Digest sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06, identical to the pinned digest."
-    },
-    {
-      "command": "python test/check_pinned_references.py",
-      "result": "passed",
-      "evidence": "Pinned references: 0 finding(s)."
+      "evidence": "target 41177721b0027ded7d69500cc92b3056ba5b87c2; asset digests 2124b414182b... (linux) and 974d34c3d22b... (windows) equal the 0.28.0 build."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -44,8 +32,5 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": [
-    "The image was not started; deploy_ct.py checks health, scrape target and the first data point when it rolls out.",
-    "v3.16.0 was published on 2026-11-05; the operator's 7-day minimum image age is reached on 2026-11-12."
-  ]
+  "limitations": []
 }
