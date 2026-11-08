@@ -2,24 +2,72 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "1fd80da4cc29609ddbc166f3354e92855ca0e882",
-  "change_digest": "b7501815f12a16d16affd8e18df438c261e87a833721eb0821817e41673cd429",
+  "base_sha": "14673bd35926d5c3ccb281c2eefe3979f62148fe",
+  "change_digest": "897c9c5bdcd4326eeeb06c9b3c0ae75cfa70a1d5aebe20d483fd818dcba92756",
   "reviewed_paths": [
-    "CHANGELOG.md"
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/live-memory.yml",
+    ".github/workflows/security.yml",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "decision-embed/Dockerfile",
+    "decision-jevlike/Dockerfile",
+    "docs/adr/0055-pin-third-party-references-immutably.md",
+    "docs/adr/README.md",
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
+    "monitoring/compose.yaml",
+    "test/check_pinned_references.py",
+    "test/selftest_pinned_references.py"
   ],
   "risk_ids": [
     "TM-16"
   ],
   "boundaries": [
+    "B8",
     "B9"
   ],
-  "summary": "Documentation only: the v0.26.0 row of CHANGELOG.md links the published release (tag v0.26.0 at 1fd80da, router 0.19.0, agent 0.28.0; release assets checked against the build hashes). No code, workflow, checker, skill, threat model, register or configuration change. TM-16 is referenced because release artifacts are part of the supply chain; nothing about them changes here.",
-  "findings": [],
+  "summary": "Supply-chain pinning (ADR-0055, TM-16). In ci.yml, live-memory.yml and security.yml every third-party action moves from its major tag to the commit SHA of the current release (checkout v7.0.1, setup-python v7.1.0, setup-go v7.0.0, upload-artifact v7.0.2; each SHA equals the current v7 tag, so behaviour is unchanged); threat-model.yml, threat-review.yml and trusted-security-gate.yml were already pinned and are untouched. govulncheck goes from @latest to v1.9.0 and pip-audit to ==2.10.1. pip-audit now also audits router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt and rerank-server/requirements.txt (all clean locally); decision-jevlike stays out because it installs a git dependency and an unpinned transformers stack (noted). monitoring/compose.yaml pins prom/prometheus:v3.15.1 and grafana/grafana:13.3.0 to their multi-arch index digests, verified equal to the RepoDigests of the containers running in the reference deployment, so a redeploy changes nothing. The decision-service Dockerfiles pin python:3.11-slim to its index digest. Dependabot gains docker-compose (/monitoring) and docker (decision services). test/check_pinned_references.py enforces the rule in CI (workflow actions, go install, pip tools, compose images, Dockerfile FROM) with a self-test of rejected and accepted forms. Permissions, triggers, secrets and job logic are unchanged; the ADR-0050 Dependabot exemption parser accepts the SHA-plus-version-comment form, so future action bumps keep that path. Workflow and review-policy changes should still be looked at by the maintainer.",
+  "findings": [
+    {
+      "id": "TM-16",
+      "evidence": "Before: 23 movable references (actions by tag in three workflows, govulncheck@latest, unversioned pip-audit, two compose images and two base images by tag); pip-audit covered only router/requirements.txt.",
+      "resolution": "Pinned and enforced in CI; optional requirement sets audited. Hash-locked Python installs and release provenance remain open, so TM-16 stays open in the register.",
+      "disposition": "baseline"
+    }
+  ],
   "tests": [
     {
-      "command": "gh release view v0.26.0 --json targetCommitish,assets",
+      "command": "python test/selftest_pinned_references.py && python test/check_pinned_references.py",
       "result": "passed",
-      "evidence": "target 1fd80da4cc29609ddbc166f3354e92855ca0e882; asset digests sha256:2124b414... (linux) and sha256:974d34c3... (windows) equal the local build."
+      "evidence": "0 failure(s) over 19 rejected/accepted cases; Pinned references: 0 finding(s)."
+    },
+    {
+      "command": "Negative check: python test/check_pinned_references.py on the unchanged tree (git stash)",
+      "result": "passed",
+      "evidence": "Pinned references: 23 finding(s), e.g. 'monitoring/compose.yaml:35: image grafana/grafana:13.3.0 has no @sha256 digest'."
+    },
+    {
+      "command": "python -m pip_audit -r <file> (pip-audit 2.10.1) for router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt, rerank-server/requirements.txt",
+      "result": "passed",
+      "evidence": "No known vulnerabilities found (each)."
+    },
+    {
+      "command": "Image digests: Docker Hub index digest lookup and docker image inspect RepoDigests of the running monitoring containers",
+      "result": "passed",
+      "evidence": "prometheus sha256:fa330227...191a2 and grafana sha256:488984b7...0b205 match the running containers."
+    },
+    {
+      "command": "gh api repos/<action>/commits/<tag> for the four actions",
+      "result": "passed",
+      "evidence": "Release SHAs equal the current v7 major tags (checkout 3d3c42e5, setup-python 6d4fd22b, setup-go b7ad1dad, upload-artifact cf430e03)."
+    },
+    {
+      "command": "ruff check .; check_adr_index.py; YAML parse of all workflows, dependabot.yml and monitoring/compose.yaml; selftest_threat_review.py; selftest_trusted_gate.py",
+      "result": "passed",
+      "evidence": "All checks passed; ADR index ok: 55 ADRs; yaml ok; both self-tests exit 0."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -32,5 +80,9 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": []
+  "limitations": [
+    "The new pip-audit loop and the docker/docker-compose Dependabot ecosystems are first exercised in CI and on GitHub.",
+    "The decision-service images were not rebuilt with the pinned base image.",
+    "decision-jevlike requirements are not audited (git dependency, unpinned transformers stack); hash-locked Python installs and release provenance remain open."
+  ]
 }

@@ -57,6 +57,7 @@ timing-sensitive. Run what your change touches before pushing, and the end-to-en
 ruff check .                                                   # lint (ruff.toml)
 python router/router.py --check router/config.example.yaml --pure   # configuration schema
 python test/check_adr_index.py                                 # ADR index is current
+python test/check_pinned_references.py                         # actions, tools and images pinned (ADR-0055)
 python test/selftest_control_flow.py && python test/check_control_flow.py   # explicit control flow (below)
 python test/selftest_<topic>.py                                # the self-tests your change touches
 python test/run_tests.py       # end-to-end suite, ~3 min; needs the loopback ports 21434/21435 and 210xx free
