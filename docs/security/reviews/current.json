@@ -2,10 +2,12 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "32856d1c1d61822f1480d09178426660713228e3",
-  "change_digest": "8335309444cff98dcc2434257ef97f2af787fd413c177c6b400e6f9817d6965a",
+  "base_sha": "38a6cac4937e2a607cb1e8f6a35252fe51428335",
+  "change_digest": "aa723042233c288583033d0d4040413fb617ed2df6e2a3048f9a2117ff1992cf",
   "reviewed_paths": [
-    ".github/workflows/trusted-security-gate.yml"
+    "CHANGELOG.md",
+    "docs/adr/0050-independent-security-evidence-and-narrow-dependency-bumps.md",
+    "docs/adr/README.md"
   ],
   "risk_ids": [
     "TM-16"
@@ -13,25 +15,13 @@
   "boundaries": [
     "B9"
   ],
-  "summary": "Dependabot bump of actions/create-github-app-token in the publisher job of the trusted security gate, from v2.2.2 (fee1f7d) to v3.3.0 (64ab729). Only the pinned commit and its version comment change; the step keeps a full commit SHA, the same inputs (app-id, private-key, permission-statuses: write), the same environment (security-gate-publisher), the same eligibility condition and the status-only use of the token. Verified upstream that 64ab729a6294000f5aa4a4bc0b73d1f32bc45510 is the commit of tag v3.3.0 and that action.yml at that commit still defines app-id, private-key and permission-statuses and runs on node24. The v3.0.0 breaking changes (proxy only via NODE_USE_ENV_PROXY, self-hosted runner v2.327.1 or later) do not apply: the job runs on GitHub-hosted ubuntu-latest without a proxy. app-id is deprecated in favour of client-id and only emits a warning. The narrow Dependabot exemption of ADR-0050 does not cover this file because its steps use the '- name:' then 'uses:' layout, which the conservative parser does not recognise; a full review is the intended path for the workflow that holds the gate's private key. No new trust boundary, permission, secret or network destination.",
-  "findings": [
-    {
-      "id": "TM-16",
-      "evidence": "The publisher step hands the GitHub App private key to a third-party action; a compromised action release could misuse it within the installation's permissions.",
-      "resolution": "Pre-existing and unchanged in scope: the action stays pinned by full commit SHA (now the verified v3.3.0 commit), the minted token is limited to statuses: write and the job runs only from the default branch in the security-gate-publisher environment.",
-      "disposition": "baseline"
-    }
-  ],
+  "summary": "Documentation only: the operator accepts ADR-0050 (independent security evidence and narrow dependency bumps), merged as proposed. Status proposed -> accepted, date 2026-11-08, decision-maker operator, and one closing paragraph recording the rollout fixtures (passing status from the dedicated App on a valid fixture, failing status on a fixture that removed its PR-side gate and record). The ADR index row and the CHANGELOG line follow. No workflow, checker, skill, threat model, register, configuration or code change; TM-16 is referenced because ADR-0050 governs the review mechanism itself.",
+  "findings": [],
   "tests": [
     {
-      "command": "gh api repos/actions/create-github-app-token/commits/v3.3.0 --jq .sha",
+      "command": "python test/check_adr_index.py",
       "result": "passed",
-      "evidence": "64ab729a6294000f5aa4a4bc0b73d1f32bc45510, identical to the pinned SHA."
-    },
-    {
-      "command": "Read action.yml of actions/create-github-app-token at 64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
-      "result": "passed",
-      "evidence": "Inputs app-id (deprecated, use client-id), private-key (required) and permission-statuses exist; runs using node24."
+      "evidence": "ADR index ok: 50 ADRs."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -45,8 +35,6 @@
     }
   ],
   "limitations": [
-    "The trusted gate runs from the default branch, so the new action version is exercised only after the merge; the first PR afterwards shows whether the publisher still posts skirnir/trusted-security-review.",
-    "The action's source between v2.2.2 and v3.3.0 was not audited line by line; review relied on the release notes, the pinned commit and action.yml.",
-    "Moving from app-id to client-id needs a new repository variable and is left for a separate change."
+    "Rollout step 4 of design/continuous-security-review.md (requiring skirnir/trusted-security-review with the dedicated App as expected source in branch protection) is a repository setting outside this PR and not yet verified as enforced."
   ]
 }
