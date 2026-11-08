@@ -6,8 +6,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -206,12 +208,76 @@ func loadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(raw, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	unknown, err := unknownTopLevelKeys(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("%s: unknown top-level key(s) %s: not read by this agent (misspelt, or retired in an earlier version); known keys: %s",
+			path, strings.Join(unknown, ", "), strings.Join(sortedKeys(knownTopLevelKeys()), ", "))
+	}
 	c.path = path
 	c.applyDefaults()
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &c, nil
+}
+
+// knownTopLevelKeys: the YAML names of Config's fields, derived from the struct so that a new block needs no second
+// list. yaml.v3 names a field without a tag by its lower-cased Go name.
+func knownTopLevelKeys() map[string]bool {
+	keys := map[string]bool{}
+	t := reflect.TypeOf(Config{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = strings.ToLower(f.Name)
+		}
+		keys[name] = true
+	}
+	return keys
+}
+
+// unknownTopLevelKeys: keys of the file's top-level mapping that no Config field reads, in file order. yaml.v3 ignores
+// them silently, so a misspelt or retired block would leave its settings unused without a word (ADR-0051). Nested
+// keys are not checked: retired nested keys such as tunnel.enabled stay harmless leftovers.
+func unknownTopLevelKeys(raw []byte) ([]string, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, nil // empty file or no mapping: validate() reports what is missing
+	}
+	known := knownTopLevelKeys()
+	var unknown []string
+	m := doc.Content[0].Content
+	for i := 0; i+1 < len(m); i += 2 {
+		if m[i].Tag == "!!merge" {
+			continue // YAML merge key (<<): its content is merged into the mapping, not a key of its own
+		}
+		if !known[m[i].Value] {
+			unknown = append(unknown, fmt.Sprintf("%q", m[i].Value))
+		}
+	}
+	return unknown, nil
+}
+
+func sortedKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (c *Config) applyDefaults() {

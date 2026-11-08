@@ -4,7 +4,7 @@ Mehrsprachiges Satz-Embedding (`intfloat/multilingual-e5-small`, 118 M Parameter
 auf int8 quantisiert (113 MB), Mean-Pooling, darauf eine Softmax-Regression fuer die Rollen. Gleiches HTTP-Protokoll wie
 `decision-jevlike` (`POST /decide`, `GET /health`), im Router als Engine `embed`.
 
-Gemessen 2026-09-17 (decision-eval, 132 Testfaelle): **0,932 Top-1**, Fallback 6 %, auf dem Router-CT (4-Kern-Xeon)
+Gemessen 2026-09-17 (decision-eval, 132 Testfaelle): **0,932 Top-1**, Fallback 6 %, auf dem Router-Host (4 CPU-Kerne)
 **10-19 ms** je Entscheidung, Container 456 MiB.
 
 | Datei | Zweck |

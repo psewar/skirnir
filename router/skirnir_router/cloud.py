@@ -10,7 +10,7 @@ Constraints, all configurable (`router.cloud`):
 - Data classes as DECLARATION (no content classifier): `routing.data_class`, else client default, else
   `default_data_class` (personal). Cloud only if class is at most `max_cloud_data_class` (internal).
 - Credential scan: prompts with recognizable keys/passwords do not go to cloud (`credential_scan: block`).
-- Budget per provider and month in CHF (prices per model in catalog); exhausted = provider is no longer a tier; warning
+- Budget per provider and month in the currency of the catalog prices (no conversion); exhausted = provider is no longer a tier; warning
   at `warn_at_percent` as HA Problem.
 - Egress: only hosts of configured providers (allowlist), keys from secrets.env (Secret-Store) - never in log.
 - Circuit breaker like for nodes.
@@ -121,7 +121,7 @@ def setup():
         t.models = {m for m, e in state.CFG.models.items() if (e or {}).get("cloud") == name}
         t.api_key, t.key_source = _load_key(spec)
         new[name] = t
-        log.info("cloud provider %s (%s): %s, key %s, %d models, budget %s CHF/month", name, spec["kind"],
+        log.info("cloud provider %s (%s): %s, key %s, %d models, budget %s/month", name, spec["kind"],
                  "active" if spec.get("enabled", True) else "disabled", f"from {t.key_source}" if t.api_key else "MISSING",
                  len(t.models), spec.get("budget_month_chf"))
     state.CLOUD = new
@@ -201,7 +201,7 @@ def provider_block_reason(tier, req=None):
             return f"data class {dc} > {t.spec['max_data_class']} for provider {t.provider}"
     budget = float(t.spec.get("budget_month_chf") or 0)
     if budget and spend_month(t.provider) >= budget:
-        return f"cloud provider {t.provider}: monthly budget {budget:.2f} CHF exhausted"
+        return f"cloud provider {t.provider}: monthly budget {budget:.2f} exhausted"
     return None
 
 
@@ -267,9 +267,9 @@ def budget_problems():
         pct = 100 * spend_month(name) / budget
         warn = float(t.spec.get("warn_at_percent", 80))
         if pct >= 100:
-            probs.append(f"Cloud {name}: Monatsbudget erschoepft ({spend_month(name):.2f}/{budget:.2f} CHF)")
+            probs.append(f"Cloud {name}: Monatsbudget erschoepft ({spend_month(name):.2f}/{budget:.2f})")
         elif pct >= warn:
-            probs.append(f"Cloud {name}: {pct:.0f} % des Monatsbudgets ({spend_month(name):.2f}/{budget:.2f} CHF)")
+            probs.append(f"Cloud {name}: {pct:.0f} % des Monatsbudgets ({spend_month(name):.2f}/{budget:.2f})")
     return probs
 
 

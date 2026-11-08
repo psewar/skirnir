@@ -5,7 +5,7 @@ Kleiner Dienst fuer einen GPU-Knoten: ordnet Kandidatentexte zu einer Frage (Cro
 CPU des Router-Hosts laeuft. Der Skirnir-Router nimmt `POST /rerank` an und reicht es ueber den Agenten-Tunnel an diesen Dienst
 weiter. Auf dem Knoten laeuft er als Kindprozess des Agenten.
 
-- **OpenVINO statt CUDA**: Laeuft auf einer Intel-iGPU (`GPU.0`), der CPU oder einer NPU und belegt so kein VRAM der grossen GPU.
+- **OpenVINO statt CUDA**: Laeuft auf einer Intel-iGPU (`GPU.0`), der CPU oder einer NPU und belegt so kein VRAM der großen GPU.
   Eine iGPU bleibt auch dann schnell, wenn die dedizierte GPU durch ein Spiel oder ein LLM voll ausgelastet ist.
 - **Standardmodell** `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (mehrsprachig, 118 M Parameter).
 - **Nur Loopback.** Der Dienst kennt keine Anmeldung; der Agent reicht weiter, und der Router prueft die Berechtigung.

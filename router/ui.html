@@ -184,15 +184,15 @@
   <section class="wide" data-tab="katalog">
     <h2>Modellkatalog <span class="muted" style="font-weight:normal">– lokale Modelle messen und benchmarken, Cloud-Modelle mit Preisen pflegen</span></h2>
     <p class="muted" style="margin:0 0 8px">
-      <b>VRAM-Bedarf = Gewichte + Kontext-Kosten × Kontextgrösse + <span id="ovh">0.8</span> GiB Reserve</b>. Gemessen wird bei 8k und 32k Kontext auf einem freien Knoten.
-      Cloud-Modelle (<span class="cloudc">☁</span>) brauchen kein VRAM; ihre Preise (CHF je 1 Mio. Tokens) speisen Budget und Usage.
+      <b>VRAM-Bedarf = Gewichte + Kontext-Kosten × Kontextgröße + <span id="ovh">0.8</span> GiB Reserve</b>. Gemessen wird bei 8k und 32k Kontext auf einem freien Knoten.
+      Cloud-Modelle (<span class="cloudc">☁</span>) brauchen kein VRAM; ihre Preise (je 1 Mio. Tokens) speisen Budget und Usage.
     </p>
-    <div class="newmodel" id="newModel" title="Cloud-Modell in den Katalog aufnehmen: Name im Router (z. B. openai:gpt-5.4), Anbieter, Name beim Anbieter (leer = Teil nach dem Doppelpunkt), Preise CHF je 1 Mio. Tokens, Kontext">
+    <div class="newmodel" id="newModel" title="Cloud-Modell in den Katalog aufnehmen: Name im Router (z. B. openai:gpt-5.4), Anbieter, Name beim Anbieter (leer = Teil nach dem Doppelpunkt), Preise je 1 Mio. Tokens, Kontext">
       <input type="text" id="nmName" placeholder="☁ neues Cloud-Modell, z. B. openai:gpt-5.4">
       <select id="nmProv"></select>
       <input type="text" id="nmPM" placeholder="Name beim Anbieter (optional)">
-      <input type="number" id="nmIn" placeholder="in CHF/M" step="0.01" min="0">
-      <input type="number" id="nmOut" placeholder="out CHF/M" step="0.01" min="0">
+      <input type="number" id="nmIn" placeholder="in /1M" step="0.01" min="0">
+      <input type="number" id="nmOut" placeholder="out /1M" step="0.01" min="0">
       <input type="number" id="nmCtx" placeholder="Kontext" step="1000" min="1000">
       <span><label class="muted" title="think: false -> reasoning_effort minimal"><input type="checkbox" id="nmReason" checked> reasoning</label> <button class="small" onclick="addCloudModel()">+ aufnehmen</button></span>
     </div>
@@ -311,11 +311,11 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "Notiz, optional": "note, optional",
   "+ Client anlegen & Secret erzeugen": "+ create client & generate secret",
   "– lokale Modelle messen und benchmarken, Cloud-Modelle mit Preisen pflegen": "– measure and benchmark local models, maintain cloud models with prices",
-  "VRAM-Bedarf = Gewichte + Kontext-Kosten × Kontextgrösse +": "VRAM need = weights + context cost × context size +",
+  "VRAM-Bedarf = Gewichte + Kontext-Kosten × Kontextgröße +": "VRAM need = weights + context cost × context size +",
   "GiB Reserve": "GiB reserve",
   ". Gemessen wird bei 8k und 32k Kontext auf einem freien Knoten. Cloud-Modelle (": ". Measured at 8k and 32k context on a free node. Cloud models (",
-  ") brauchen kein VRAM; ihre Preise (CHF je 1 Mio. Tokens) speisen Budget und Usage.": ") need no VRAM; their prices (CHF per 1M tokens) feed budget and usage.",
-  "Cloud-Modell in den Katalog aufnehmen: Name im Router (z. B. openai:gpt-5.4), Anbieter, Name beim Anbieter (leer = Teil nach dem Doppelpunkt), Preise CHF je 1 Mio. Tokens, Kontext": "Add a cloud model to the catalog: name in the router (e.g. openai:gpt-5.4), provider, name at the provider (empty = part after the colon), prices CHF per 1M tokens, context",
+  ") brauchen kein VRAM; ihre Preise (je 1 Mio. Tokens) speisen Budget und Usage.": ") need no VRAM; their prices (per 1M tokens) feed budget and usage.",
+  "Cloud-Modell in den Katalog aufnehmen: Name im Router (z. B. openai:gpt-5.4), Anbieter, Name beim Anbieter (leer = Teil nach dem Doppelpunkt), Preise je 1 Mio. Tokens, Kontext": "Add a cloud model to the catalog: name in the router (e.g. openai:gpt-5.4), provider, name at the provider (empty = part after the colon), prices per 1M tokens, context",
   "☁ neues Cloud-Modell, z. B. openai:gpt-5.4": "☁ new cloud model, e.g. openai:gpt-5.4",
   "Name beim Anbieter (optional)": "name at the provider (optional)",
   "Kontext": "Context",
@@ -364,11 +364,11 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "kein Budget": "no budget",
   "kein Benchmark": "no benchmark",
   "Fehler": "errors",
-  "{ph} CHF je 1 Mio. Tokens": "{ph} CHF per 1M tokens",
+  "{ph} je 1 Mio. Tokens": "{ph} per 1M tokens",
   "aus der UI": "from the UI",
   "Katalog": "Catalog",
   "aus dem Katalog entfernen (nur Einträge aus der UI)": "remove from the catalog (UI entries only)",
-  "unbekannt → Dateigrösse +20 %": "unknown → file size +20 %",
+  "unbekannt → Dateigröße +20 %": "unknown → file size +20 %",
   "auf {n}": "on {n}",
   "Messen": "Measure",
   "neu messen": "re-measure",
@@ -592,7 +592,7 @@ let SET_CHANGES = {}, MODEL_CHANGES = {}, MODEL_DELETES = [];   // Stufe 7: Eins
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const isCloud = m => !!((CFG && CFG.models[m]) || {}).cloud;
-const fmtChf = v => (v ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + ' CHF';
+const fmtCost = v => (v ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 4 });   // currency of the catalog prices
 
 const TABS = ['uebersicht', 'agenten', 'rollen', 'clients', 'katalog', 'einstellungen'];
 const NEW_TOKENS = {};   // Client -> einmalig gezeigtes Secret (nur im Browser-Speicher dieser Seite)
@@ -685,7 +685,7 @@ function renderCloud() {
     tb.insertAdjacentHTML('beforeend', `<tr><td><b>☁ ${esc(name)}</b><div class="muted">${esc(c.kind)} · ${esc(c.base_url)}</div></td>
       <td>${st}${cc.enabled === false ? `<div class="muted">${t('Cloud global aus')}</div>` : ''}</td>
       <td>${(c.models || []).map(m => `<span class="badge cloud">${esc(m)}</span>`).join('') || '<span class="muted">–</span>'}</td>
-      <td><b class="${cls}">${fmtChf(c.spend_month_chf)}</b> <span class="muted">/ ${c.budget_month_chf ? fmtChf(c.budget_month_chf) : t('kein Budget')}${c.budget_percent != null ? ' (' + c.budget_percent + ' %)' : ''}</span>${bar}</td>
+      <td><b class="${cls}">${fmtCost(c.spend_month_chf)}</b> <span class="muted">/ ${c.budget_month_chf ? fmtCost(c.budget_month_chf) : t('kein Budget')}${c.budget_percent != null ? ' (' + c.budget_percent + ' %)' : ''}</span>${bar}</td>
       <td>${c.breaker === 'closed' ? '<span class="ok">closed</span>' : `<span class="badge ${esc(c.breaker)}">${esc(c.breaker)}</span>`}${c.inflight ? ` · ${c.inflight} ${t('aktiv')}` : ''}</td>
       <td class="muted">${esc(c.region || '–')} · ${esc(c.max_data_class || cc.max_cloud_data_class || '–')}</td></tr>`);
   }
@@ -712,7 +712,7 @@ function renderModels() {
     if (isCloud(m)) {
       const pr = c.price_chf_per_m || {};
       const uiModel = (CFG.ui_models || []).includes(m);
-      const ed = (k, v, ph) => `<input class="inl" type="number" step="0.01" min="0" value="${v ?? ''}" placeholder="${ph}" title="${t('{ph} CHF je 1 Mio. Tokens', { ph })}" onchange="modelField('${esc(m)}','${k}',this.value)">`;
+      const ed = (k, v, ph) => `<input class="inl" type="number" step="0.01" min="0" value="${v ?? ''}" placeholder="${ph}" title="${t('{ph} je 1 Mio. Tokens', { ph })}" onchange="modelField('${esc(m)}','${k}',this.value)">`;
       tb.insertAdjacentHTML('beforeend', `<tr><td><span class="cloudc">☁</span> ${esc(m)}${c.provider_model ? `<div class="muted">${esc(c.provider_model)}</div>` : ''}${uiModel ? `<div class="muted">${t('aus der UI')}</div>` : ''}</td><td class="muted">–</td><td class="muted">–</td>
         <td><span class="cloudc">${ed('input', pr.input, 'in')} / ${ed('output', pr.output, 'out')}</span><div class="muted">${t('Kontext')} <input class="inl" type="number" step="1000" min="1000" value="${c.context_tokens ?? ''}" onchange="modelField('${esc(m)}','context_tokens',this.value)"></div></td>
         <td class="muted">${t('Katalog')}</td><td>${tempo}</td><td>${caps}</td><td class="cloudc">cloud:${esc(c.cloud)}</td>
@@ -722,7 +722,7 @@ function renderModels() {
     const known = c.weights_gib != null;
     const need = k => known ? (c.weights_gib + (c.kv_gib_per_1k || 0) * k + ovh).toFixed(1) : '?';
     let src;
-    if (!known) src = `<span class="warn">${t('unbekannt → Dateigrösse +20 %')}</span>`;
+    if (!known) src = `<span class="warn">${t('unbekannt → Dateigröße +20 %')}</span>`;
     else if ((c.source || '').startsWith('measured')) src = `<span class="ok">${t('gemessen')}</span><span class="muted"> ${esc(c.measured_at || '')}${c.measured_on ? ' ' + t('auf {n}', { n: esc(c.measured_on) }) : ''}${c.partial_offload ? ' <span class="bad">⚠ partial offload</span>' : ''}</span>`;
     else if ((c.source || '').startsWith('Alias')) src = `<span class="muted">${esc(c.source)}</span>`;
     else src = `<span class="warn">${t('geschätzt')}</span>`;
@@ -1061,12 +1061,12 @@ function renderLive() {
   renderModelCharts(last, col);
 }
 // Effektiv genutzte Modelle: gestapelter Verlauf (Anfragen/min je Modell), Legende mit aktuellem Anteil, Donuts seit Start
-function renderModelCharts(last, col) {   // hiess renderModels und verdeckte die Katalogtabelle (Review 2026-09-25)
+function renderModelCharts(last, col) {   // hieß renderModels und verdeckte die Katalogtabelle (Review 2026-09-25)
   const active = Object.entries(LIVE.models).filter(([, a]) => a.some(v => v > 0)).sort((a, b) => (last(b[1]) || 0) - (last(a[1]) || 0) || b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0));
   const totalNow = active.reduce((a, [, v]) => a + (last(v) || 0), 0);
   $('#lv-models').innerHTML = active.length ? active.map(([m, v], i) => `<span style="color:${col(i)}">● ${esc(m)} <b>${totalNow ? Math.round(100 * (last(v) || 0) / totalNow) + ' %' : '–'}</b> <span class="muted">${fmtN(last(v) || 0)}/min</span></span>`).join('') : `<span class="muted">${t('noch keine Anfragen im 30-s-Fenster')}</span>`;
   // Ohne Anfragen in den letzten 10 Minuten nur Ueberschrift + Legendenzeile: die leere Zeichenflaeche belegte sonst eine
-  // ganze Zeile ohne Information (kay, 2026-10-04). Erst sichtbar machen, dann zeichnen - cv() misst die Groesse am Element.
+  // ganze Zeile ohne Information (2026-10-04). Erst sichtbar machen, dann zeichnen - cv() misst die Groesse am Element.
   $('#ch-models').style.display = active.length ? '' : 'none';
   if (active.length) stacked('#ch-models', active.map(([, v], i) => ({ v, c: col(i) })));
   donut('#ch-model-share', groupBy('skirnir_requests_total', 'model'));
@@ -1084,8 +1084,8 @@ function renderOps() {
   const w = sch.score || {};
   $('#ops').innerHTML = `
     <div class="tile"><h4>${t('Nutzung heute')}</h4><div class="big">${u.requests ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">${t('Anfragen')}</span></div>
-      <div class="muted">${((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)).toLocaleString(LOCALE)} ${t('Tokens')} · ${u.errors ?? 0} ${t('Fehler')} · <span class="cloudc">${fmtChf(u.cost_chf)}</span> Cloud</div>
-      <div class="muted">${t('Cloud im Monat')}: <b class="cloudc">${fmtChf(cloudSpend)}</b> · Sessions ${STATE.sessions ?? 0} · Idempotency ${(STATE.idempotency || {}).entries ?? 0}</div></div>
+      <div class="muted">${((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)).toLocaleString(LOCALE)} ${t('Tokens')} · ${u.errors ?? 0} ${t('Fehler')} · <span class="cloudc">${fmtCost(u.cost_chf)}</span> Cloud</div>
+      <div class="muted">${t('Cloud im Monat')}: <b class="cloudc">${fmtCost(cloudSpend)}</b> · Sessions ${STATE.sessions ?? 0} · Idempotency ${(STATE.idempotency || {}).entries ?? 0}</div></div>
     <div class="tile"><h4>${t('Warteschlange')}</h4><div class="big ${adm.waiting ? 'warn' : ''}">${adm.waiting ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">${t('wartend')}</span></div>${q || `<div class="muted">${t('niemand wartet')}</div>`}</div>
     <div class="tile"><h4>Scheduler</h4><div class="muted">${t('Score: warm {warm} · Anfrage −{inflight} · voll −{saturated} · VRAM ×{vram} · Gewicht ×{weight} · Tempo ×{speed} · Fehler −{errors}', { warm: w.warm, inflight: w.inflight, saturated: w.saturated, vram: w.vram_free, weight: w.weight, speed: w.speed, errors: w.errors })}</div>
       <div class="muted">${t('Breaker: {f} Fehler / {w} s → {o} s offen', { f: (sch.breaker || {}).failures, w: (sch.breaker || {}).window_s, o: (sch.breaker || {}).open_s })}</div>

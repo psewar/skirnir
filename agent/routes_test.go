@@ -48,7 +48,7 @@ func TestRoutesConfig(t *testing.T) {
 		"Methode unbekannt":       {"[post]", "[FETCH]"},
 		"ohne Methoden":           {"[post]", "[]"},
 		"Name fehlt":              {"name: rerank", "name: \"\""},
-		"Name mit Grossbuchstabe": {"name: rerank", "name: Rerank"},
+		"Name mit Großbuchstabe":  {"name: rerank", "name: Rerank"},
 		"health fehlt":            {"health: /health", "health: \"\""},
 	}
 	for what, rep := range bad {

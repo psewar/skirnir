@@ -9,14 +9,14 @@ werden nicht eingeführt.
 
 ## Aktivierung und Berechtigungen
 
-Alle neuen Schalter sind standardmässig aus. Bestehende private Bank-IDs behalten
+Alle neuen Schalter sind standardmäßig aus. Bestehende private Bank-IDs behalten
 exakt ihre bisherige HMAC-Ableitung aus Principal, Projekt und Datenklasse.
 Bestehende Memory-Konfiguration nutzt weiterhin `strategy: legacy` und explizites
 `routing.memory`. Normale Inferenz benötigt weder PostgreSQL noch Hindsight.
 
 Für persistente Funktionen `router/requirements-session.txt` installieren. DSN,
 Hindsight-HTTPS-Endpunkt, Backend-Token und unabhängige zufällige Namespace- und
-Handoff-Signaturschlüssel ausschliesslich extern setzen. Die YAML enthält nur
+Handoff-Signaturschlüssel ausschließlich extern setzen. Die YAML enthält nur
 Umgebungsvariablennamen. Der Namespace-Schlüssel muss stabil bleiben; seine Rotation
 ändert Bank-Identitäten. Alte Outbox-Aufträge werden dabei verworfen (`revoked`),
 statt in eine neue Bank umgeleitet zu werden. Rotation des Handoff-Schlüssels macht
@@ -35,7 +35,7 @@ clientseitige Freigabe und sämtliche bestehenden Routing-Prüfungen. Authentifi
 über Bearer, Basic oder API-Key ist erforderlich; reine IP-Zuordnung reicht nicht.
 Berechtigungen werden pro Anfrage und direkt vor jedem HTTP-Versuch innerhalb des
 Concurrency-Slots erneut geprüft. Entzug stoppt wartende Aufträge, kann aber bereits
-versendete Daten nicht zurückholen. Massgeblich ist die aktuell geladene Konfiguration
+versendete Daten nicht zurückholen. Maßgeblich ist die aktuell geladene Konfiguration
 nach einem Reload. Pool-/Backend- und Lifecycle-Änderungen erfordern einen Neustart.
 Mehrere Worker müssen dieselben aktuellen Grants und Secrets verwenden.
 
@@ -55,7 +55,7 @@ weitergereicht. Bestehende unbeteiligte Inferenzpfade bleiben unverändert.
 
 ## Hermes sicher anbinden
 
-Das offizielle Hindsight-Plugin gemäss
+Das offizielle Hindsight-Plugin gemäß
 [Integrationsanleitung](https://hindsight.vectorize.io/sdks/integrations/hermes)
 installieren (`hermes plugins install hindsight`) und `memory.provider: hindsight`
 auswählen. Im separaten `hindsight/config.json`:
@@ -107,7 +107,7 @@ Plugin-Metadaten können keine Bestätigung von Assistentenaussagen erzwingen.
 Identische Dokument-/Inhalts-Snapshots deduplizieren. Geänderte Snapshots werden
 separate unverifizierte Quellen; ein fortlaufendes Ersetzen oder Anhängen eines
 vollständigen Transkripts wird nicht zugesichert. Deshalb Hermes `auto_retain`
-auslassen und kurze Wissenseinträge gezielt speichern. Zu grosse Eingänge scheitern
+auslassen und kurze Wissenseinträge gezielt speichern. Zu große Eingänge scheitern
 explizit. Ein vom Upstream entfernter Operationsstatus liefert im nativen Gateway
 404 entsprechend dem Plugin-Verhalten; Skirnirs Status-API nennt `not_found`.
 Das ist kein Nachweis erfolgreicher Extraktion oder vollständiger Löschung.
@@ -158,12 +158,12 @@ sowohl `read` als auch `delete` hat, kuratiert diesen Bereich:
 - Jede Kurator-Löschung wird mit Kurator, Besitzer und Bereich protokolliert und als
   `outcome="curated"` gezählt. Der Lösch-Auftrag läuft danach unter dem Recht des Kurators;
   wird es entzogen, stoppen offene Löschungen.
-- „Ändern“ heisst: korrigierten Fakt schreiben, alte Operation löschen. Hindsights
+- „Ändern“ heißt: korrigierten Fakt schreiben, alte Operation löschen. Hindsights
   direktes Bearbeiten ist nicht freigegeben.
 
 Zustände: `pending`, `processing`, `accepted`, `completed`, `dead`, `revoked`,
 `cancelled`, `delete_pending`, `deleted`. `accepted` bestätigt den Upstream-Eingang,
-der Auftrag wird noch geprüft; `completed` heisst, Hindsight meldet die Extraktion fertig.
+der Auftrag wird noch geprüft; `completed` heißt, Hindsight meldet die Extraktion fertig.
 
 **Geprüfte Zustellung.** Hindsight wiederholt einen gescheiterten LLM-Aufruf nur kurz
 (Standard drei Versuche, höchstens 60 s Abstand) und markiert die Operation dann
@@ -205,7 +205,7 @@ Tombstones nicht entfernen, solange alte Events erneut gesendet werden könnten.
 
 ## Session-Suche und Handoff v1
 
-`GET /v1/skirnir/sessions` listet ausschliesslich eigene Sessions in freigegebenen
+`GET /v1/skirnir/sessions` listet ausschließlich eigene Sessions in freigegebenen
 Projekten. Filter: `project`, `status=active|archived`, `updated_since` mit Zeitzone,
 `q` als Projekt-Teilstring, `limit` 1..100 (Default 50), `before` als zurückgegebener
 Cursor. Listings enthalten keine Gesprächsinhalte oder Metadaten. `next_before`
@@ -291,7 +291,7 @@ Compactions, Handoffs und Backend-Verfügbarkeit. Labels enthalten keine Clients
 Sessions, Banks oder Inhalte. Die englische Referenz listet die Metriknamen.
 
 403 bedeutet fehlende/entzogene Freigabe; 409 Event-Konflikt, Lease oder unklaren
-Versand; 413 ein Grössenlimit; 503 fehlenden Dienst oder Kapazität. Dead Letters
+Versand; 413 ein Größenlimit; 503 fehlenden Dienst oder Kapazität. Dead Letters
 gezielt untersuchen, nicht blind unter Umgehung der Rechte erneut versenden.
 Neustart nimmt berechtigte wartende/abgelaufene Aufträge wieder auf.
 
@@ -300,8 +300,8 @@ PostgreSQL-CI führt alle drei Integrationsskripte gegen PostgreSQL 16 aus.
 Der optionale echte SDK benötigt `test/requirements-hindsight.txt`.
 Der synthetische Benchmark prüft Budgets 4096/8192/16384, je 20 Projektionen,
 Guard-Marker, Tool-Paare, stabile Hashes und Wechsel auf kleinere Fenster.
-Seine konservative Grösse sinkt von 83595 auf 2495 (97,02 %). Das ist eine
-Grössenmessung, keine Garantie semantischer Vollständigkeit oder Modellqualität.
+Seine konservative Größe sinkt von 83595 auf 2495 (97,02 %). Das ist eine
+Größenmessung, keine Garantie semantischer Vollständigkeit oder Modellqualität.
 Laufzeitwerte sind nur informativ. Separate Tests prüfen Recall-Scores/Provenienz.
 Echter Hindsight-Dienst und vollständiger Hermes-Lauf bleiben separat zu prüfen.
 
@@ -314,5 +314,5 @@ Schema-Version 3. Ein Code-Downgrade benötigt daher einen geprüften Kompatibil
 mit Kenntnis von Migration 3 oder einen separat geplanten Restore der vorherigen DB.
 Versionsstand niemals manuell herabsetzen; weder Migrationen 1/2 ändern noch das
 Schema als Abkürzung löschen. DB-Restore benötigt einen eigenen Recovery-Plan
-einschliesslich Tombstones und Upstream-Idempotenz; er macht Hindsight-Seiteneffekte
+einschließlich Tombstones und Upstream-Idempotenz; er macht Hindsight-Seiteneffekte
 nicht rückgängig.

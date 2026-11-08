@@ -299,7 +299,7 @@ def t_auth():
     state.INTERNAL_TOKEN = None
 
     def req(**headers):
-        return SimpleNamespace(headers=CIMultiDict(headers), remote="10.9.9.9")
+        return SimpleNamespace(headers=CIMultiDict(headers), remote="203.0.113.9")
 
     check("x-api-key -> Client", auth.resolve_client(req(**{"x-api-key": tok})) == ("agent-cli", "x-api-key"))
     check("Bearer -> Client", auth.resolve_client(req(Authorization=f"Bearer {tok}")) == ("agent-cli", "bearer"))

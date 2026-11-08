@@ -246,18 +246,13 @@ func migrateLegacyInstall(cfgPath *string) (bool, error) {
 	return true, nil
 }
 
-// upgradeConfigText: paths and names of old installation, old block name mimir: -> secret_store: (same keys).
+// upgradeConfigText: paths and names of the old installation. A block the agent no longer reads is not renamed here:
+// loadConfig rejects it like any unknown top-level key, and the probe in migrateLegacyInstall stops the move (ADR-0051).
 func upgradeConfigText(s string) string {
 	for old, repl := range map[string]string{`\ollama-router-agent\`: `\skirnir-agent\`, "OllamaRouterAgent": "SkirnirAgent", "Ollama Router Agent": "Skirnir Agent"} {
 		s = strings.ReplaceAll(s, old, repl)
 	}
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		if strings.TrimRight(l, "\r") == "mimir:" {
-			lines[i] = "secret_store:   # hiess bis 0.9.0 mimir: (setup hat umbenannt)"
-		}
-	}
-	return strings.Join(lines, "\n")
+	return s
 }
 
 func setupWriteConfig(in *bufio.Reader, cfgPath string) error {
@@ -294,7 +289,7 @@ func setupWriteConfig(in *bufio.Reader, cfgPath string) error {
 }
 
 // setupUpgradeConfig: carefully update existing file - add update key, change old NT-SERVICE account to
-// LocalSystem, alter Blockname mimir: melden.
+// LocalSystem.
 func setupUpgradeConfig(in *bufio.Reader, cfgPath string) error {
 	raw, err := os.ReadFile(cfgPath)
 	if err != nil {
@@ -319,11 +314,6 @@ func setupUpgradeConfig(in *bufio.Reader, cfgPath string) error {
 			s = strings.Join(lines, "\n")
 			changed = true
 		}
-	}
-	if strings.Contains(s, "\nmimir:") {
-		s = upgradeConfigText(s)
-		fmt.Println("  block `mimir:` renamed to `secret_store:` (same keys)")
-		changed = true
 	}
 	if _, err := loadConfig(cfgPath); err == nil {
 		// Test the modified version before writing it

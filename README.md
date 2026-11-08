@@ -43,7 +43,7 @@ want to run it, you should know Python, systemd and Ollama.
 - **Auto role** `auto:latest`: a chain of local decision engines (embedding model on CPU, small LLM, TF-IDF, rules) picks the role
   from the text of the request. Measured 93 to 98 % accuracy.
 - **Cloud as a tier.** OpenAI and Anthropic models can sit as the last (or first) tier of a role, with data classes, credential
-  scan, monthly budget in CHF and an egress allowlist. By default nothing goes to the cloud.
+  scan, monthly budget and an egress allowlist. By default nothing goes to the cloud.
 - **Client identities** on the inference port (Bearer, Basic, source IP), role and model locks, rate limit, audit log.
 - **Observable:** Prometheus endpoint, usage per day and client, decision log, Home Assistant device via MQTT discovery, web UI
   with live charts, catalogue, role editor, playground and load test.
@@ -358,8 +358,10 @@ Limits (`router.cloud`):
   A declared `routing.data_class` is never overruled.
 - **Credential scan** (`block`): prompts with recognisable keys (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
   do not go to the cloud; locally they run normally.
-- **Budget** per provider and month in CHF; exhausted = the provider drops out as a tier, from `warn_at_percent` on a Home
-  Assistant problem is raised. Cost per request in usage and metrics.
+- **Budget** per provider and month, in the currency of the catalogue prices (the router does not convert currencies; the
+  suffix `_chf` of keys, fields and metrics and the unit of the Home Assistant cost sensor are historical); exhausted =
+  the provider drops out as a tier, from `warn_at_percent` on a Home Assistant problem is raised. Cost per request in usage
+  and metrics.
 - **Egress allowlist** for `base_url` (+ `egress_allow`), keys only from `secrets.env`, never in the log; circuit breaker as
   with nodes; shadow runs never go to the cloud.
 
@@ -453,7 +455,7 @@ benchmarks. Their raw values are meant for a baseline in Home Assistant (e.g. a 
 - optionally provides a TLS proxy in front of Ollama (`ollama_proxy`, port 11443, certificate pinned by fingerprint) for routers
   that should access it directly without the tunnel,
 - **guards the GPU** (agent 0.7.0, [design/gpu-guard.md](design/gpu-guard.md), German): sets a power limit of 80 % of the
-  card's default (RTX 5090: 460 W), drops to 70 % after 10 minutes of sustained full load, re-applies after driver resets,
+  card's default (460 W for a 575 W card), drops to 70 % after 10 minutes of sustained full load, re-applies after driver resets,
   never raises above the default, and warns on 16-pin voltage sag, memory temperature and hardware throttling. On by
   default; opting out (`gpu_guard.enabled: false`) is deliberate and therefore reported as a problem. The router caps a
   throttled node to one request, penalises it in the score and forwards problems to Home Assistant (`modes.gpu_guard`,
@@ -484,6 +486,11 @@ itself as the service *Skirnir Agent* and the node appears in the *Agents* tab f
 A new GPU machine needs: Ollama with models, the agent binary, a configuration with `router.url` (template
 [agent/config.example.yaml](agent/config.example.yaml)), `Install-Service.ps1` as administrator, then approval in the router
 UI (Wake-on-LAN, weight, MQTT device). No token, no firewall rule, no certificate, no IP by hand.
+
+The agent refuses a configuration with a top-level key it does not read (a misspelt block, or one retired in an earlier
+version) and names the key. `skirnir-agent check-config` shows this before a restart; a self-update then ends as a failed
+order and the old binary keeps running (agent 0.28.0,
+[ADR-0051](docs/adr/0051-agent-rejects-unknown-top-level-configuration-keys.md)).
 
 ## Installing the router
 
@@ -583,7 +590,7 @@ WebSocket API); recorder history does not carry over.
 
 ## Measurements as a reference
 
-VRAM need according to the formula above, measured on an RTX 5090 (31.8 GiB, KV cache f16, Ollama 0.33/0.34); speed from the
+VRAM need according to the formula above, measured on a 32 GB GPU (31.8 GiB usable, KV cache f16, Ollama 0.33/0.34); speed from the
 UI benchmark (200 tokens, temperature 0, median of two runs, context 8k).
 
 | Model | Weights GiB | Context cost MiB/1k | VRAM @8k / @32k / @64k GiB | gen tok/s | prompt tok/s | Capabilities |
@@ -594,7 +601,7 @@ UI benchmark (200 tokens, temperature 0, median of two runs, context 8k).
 | granite4.2:30b | 16.8 | 248 | 19.5 / 25.3 / 33.1 ✗ | 76 | 3478 | tools, thinking |
 | gemma4:26b | 16.1 | 12 | 17.0 / 17.3 / 17.7 | 233 | 1822 | vision, tools, thinking |
 | gpt-oss:20b | 12.0 | 2 | 12.8 / 12.8 / 12.9 | 270 | 6712 | tools, thinking (no `structured`) |
-| gemma4:12b (RTX 4080) | 7.8 | 2 | 8.6 / 8.6 / 8.7 | 71 | 1277 | vision, tools, thinking |
+| gemma4:12b (smaller second GPU) | 7.8 | 2 | 8.6 / 8.6 / 8.7 | 71 | 1277 | vision, tools, thinking |
 | granite4.2:8b | 5.0 | 162 | 7.0 / 10.8 / 15.9 | 213 | 7919 | tools, thinking |
 
 Models with hybrid attention (qwen3.6, gemma4, gpt-oss) cost practically no VRAM per context token; granite and the coder models

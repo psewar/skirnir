@@ -63,7 +63,7 @@ func TestMatchGame(t *testing.T) {
 	}
 	for _, c := range []tc{
 		{"kein Spiel", []procInfo{{Name: "explorer.exe", Path: `C:\Windows\explorer.exe`}, {Name: "ollama.exe", Path: `C:\Ollama\ollama.exe`}}, "", "", false},
-		{"Pfad unter Steam (gross/klein egal)", []procInfo{{Name: "cs2.exe", Path: `d:\steamlibrary\STEAMAPPS\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe`}}, "cs2.exe", "pfad", true},
+		{"Pfad unter Steam (groß/klein egal)", []procInfo{{Name: "cs2.exe", Path: `d:\steamlibrary\STEAMAPPS\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe`}}, "cs2.exe", "pfad", true},
 		{"Ausnahmeordner zaehlt nicht", []procInfo{{Name: "x.exe", Path: `D:\SteamLibrary\steamapps\common\Steamworks Shared\_CommonRedist\x.exe`}}, "", "", false},
 		{"Pfad unlesbar -> per Name", []procInfo{{Name: "Diablo IV.exe", Path: ""}}, "Diablo IV.exe", "name", true},
 		{"Name gleich, aber Pfad lesbar woanders -> kein Spiel", []procInfo{{Name: "Diablo IV.exe", Path: `C:\Temp\Diablo IV.exe`}}, "", "", false},
@@ -152,7 +152,7 @@ func TestExeIndex(t *testing.T) {
 	}
 	mk("Spiel/Spiel.exe", 30<<20)
 	mk("Spiel/bin/x64/Tief.exe", 30<<20)   // Tiefe 3: drin
-	mk("Spiel/a/b/c/d/ZuTief.exe", 30<<20) // Tiefe 5: draussen
+	mk("Spiel/a/b/c/d/ZuTief.exe", 30<<20) // Tiefe 5: draußen
 	mk("Spiel/Klein.exe", 1<<20)           // zu klein
 	mk("Spiel/Launcher.exe", 30<<20)       // Allerweltsname
 	mk("Spiel/daten.pak", 30<<20)          // no .exe

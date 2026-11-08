@@ -9,22 +9,22 @@
 > **Stand 2026-09-24, abends: umgesetzt** in Agent 0.7.0 (`agent/guard.go`, Tests `guard_test.go`) und Router 0.1.2
 > (`modes.gpu_guard`, Policy `gpu_guard` je Knoten, HA-Probleme, Metriken, UI-Badge). Entscheide des Betreibers: Default
 > 80 %, die Abwahl zählt als HA-Problem (abweichend von Abschnitt 4), `require_fresh_status` Standard aus. Konfigschlüssel
-> im Agenten heissen englisch und flach (`power_limit_pct`, `high_load_s`, `stage2_pct`, `recovery_s`, `voltage_warn_v`, …,
+> im Agenten heißen englisch und flach (`power_limit_pct`, `high_load_s`, `stage2_pct`, `recovery_s`, `voltage_warn_v`, …,
 > siehe `agent/README.md`). Lasttest (5a) und Nachtlauf Stufe 2 (5b) am 2026-09-25 gemessen; offen ist die Messwoche (HA-Historie). Der Router-Teil zu `routing.reason`/`skipped` ist nicht gebaut (Deckel wirkt über `max_inflight`).
-> **0.9.0 (2026-09-25, Review):** Lastmass für Hochlast ist die Board Power aus NVML, nicht mehr die 16-Pin-Leistung aus GPU-Z:
+> **0.9.0 (2026-09-25, Review):** Lastmaß für Hochlast ist die Board Power aus NVML, nicht mehr die 16-Pin-Leistung aus GPU-Z:
 > die Relay-Werte kommen per `POST /gpuz` von localhost und dürfen das Limit nicht steuern; Board Power liegt nie unter der
 > 16-Pin-Leistung (Slot-Anteil), das Limit gilt für sie. 16-Pin-Leistung und -Spannung bleiben Anzeige und Warnung. Nach einem
 > Dienstneustart erkennt der Guard seine eigenen Zielwerte (Stufe 2 bleibt nicht mehr hängen).
 
 Anlass: Berichte über verschmorte 12VHPWR/12V-2x6-Stecker an RTX-5090-Karten nach längerer Zeit unter hohem Strom.
-Dieses Dokument prüft, was Router und Agent dagegen tun können, und schlägt einen Schutz vor, der **standardmässig an**
+Dieses Dokument prüft, was Router und Agent dagegen tun können, und schlägt einen Schutz vor, der **standardmäßig an**
 ist und ausdrücklich abgewählt werden muss. Bezug: `agent/` (`gpu.go`, `gpu_nvml_windows.go`, `heartbeat.go`,
 `mqtt.go`, `config.go`, `provision.go`, `tunnel.go`) und `router/ollama_router/` (`poll.py`, `admission.py`,
 `nodes.py`, `registry.py`, `config.py`, `scheduler.py`, `request.py`, `ha.py`). Nur Analyse, nichts davon ist gebaut.
 
 Stand der Quellen: Der Agent las bis 0.5.3 per NVML nur Auslastung und VRAM (`nvmlDeviceGetUtilizationRates`,
 `nvmlDeviceGetMemoryInfo[_v2]`), Heartbeat-Intervall vom Router provisioniert (`heartbeat_interval_s`, im Betrieb 2 s,
-lokaler Rückfall 3 s). Die Messgrössen sind seit Agent 0.6.0 (gleicher Tag) im Repo (`agent/sensors.go`, Heartbeat-Block `sensors`, Router `nodes.<n>.sensors`); die Schwellen unten sind noch unbelegte Vorschläge und entsprechend markiert.
+lokaler Rückfall 3 s). Die Messgrößen sind seit Agent 0.6.0 (gleicher Tag) im Repo (`agent/sensors.go`, Heartbeat-Block `sensors`, Router `nodes.<n>.sensors`); die Schwellen unten sind noch unbelegte Vorschläge und entsprechend markiert.
 
 ## 1. Bedrohungsmodell – und was Software kann
 
@@ -45,12 +45,12 @@ Der Schutz hier ist also eine Versicherungsprämie: ein paar Prozent Rechenleist
 gegen unbegrenzte Vollast-Dauer. Er ersetzt weder das korrekte Einstecken (Klick, kein Knick am Stecker) noch einen
 Kabelwechsel, wenn der Spannungsabfall auffällig ist.
 
-## 2. Messgrössen und ihre Aussagekraft
+## 2. Messgrößen und ihre Aussagekraft
 
-| Grösse | Quelle | Aussage | Grenzen |
+| Größe | Quelle | Aussage | Grenzen |
 |---|---|---|---|
 | Board Power (W) | NVML `nvmlDeviceGetPowerUsage` | Gesamtaufnahme der Karte (Stecker + PCIe-Slot, Slot bis 75 W) | ohne Anmeldung, immer da; überschätzt den Steckerstrom um den Slot-Anteil, also **konservativ** |
-| 16-Pin Power (W) | GPU-Z Shared Memory | die Grösse, die zählt: Leistung durch den Stecker | nur wenn GPU-Z läuft (Windows, Benutzersitzung) |
+| 16-Pin Power (W) | GPU-Z Shared Memory | die Größe, die zählt: Leistung durch den Stecker | nur wenn GPU-Z läuft (Windows, Benutzersitzung) |
 | 16-Pin Spannung (V) | GPU-Z | **einziger Kontaktindikator**: fällt unter Last stärker als üblich ab -> höherer Übergangswiderstand in Kabel/Stecker | Absolutwert hängt vom Netzteil ab (ATX: 12 V ±5 %); darum Abfall gegen die eigene Leerlauf-Referenz messen, nicht nur Absolutwert |
 | Power-Limit aktuell/Standard (W) | NVML `GetPowerManagementLimit`, `GetPowerManagementDefaultLimit`, `GetPowerManagementLimitConstraints` | ob der Hebel gesetzt ist und wie weit er darf (Min..Max) | Limit ist Zielwert, nicht Messwert |
 | Throttle-Gründe (Bitmaske) | NVML `GetCurrentClocksThrottleReasons` | `SwPowerCap` = das Limit greift (Bestätigung, dass der Hebel wirkt); `HwSlowdown`/`HwPowerBrake` = Hardware bremst selbst -> etwas ist ernsthaft falsch | Bit-Semantik treiberabhängig |
@@ -61,8 +61,8 @@ Kabelwechsel, wenn der Spannungsabfall auffällig ist.
 Messbeispiel im Leerlauf (Betreiber): Board 24,5 W, 16-Pin 21,9 W bei 12,1 V. Damit ist die Leerlauf-Referenz der
 Spannung ~12,1 V an dieser Karte mit diesem Netzteil.
 
-Schwellen für die Spannung (**Vorschlag, nicht gemessen**): Bei 575 W fliessen ~48 A. Ein gesunder Kabelweg
-(Kabel + zwei Steckverbindungen, Grössenordnung wenige mΩ) verliert dabei etwa 0,1–0,3 V. Vorschlag:
+Schwellen für die Spannung (**Vorschlag, nicht gemessen**): Bei 575 W fließen ~48 A. Ein gesunder Kabelweg
+(Kabel + zwei Steckverbindungen, Größenordnung wenige mΩ) verliert dabei etwa 0,1–0,3 V. Vorschlag:
 Warnung, wenn unter Last (16-Pin >= 300 W) die Spannung **unter 11,6 V** fällt **oder** der Abfall gegen die
 Leerlauf-Referenz **mehr als 0,35 V** beträgt; beides erst nach 30 s Bestand. Die Referenz lernt der Agent selbst
 (Median der 16-Pin-Spannung bei < 60 W über 24 h, analog zur VRAM-Baseline in `nodes.learn_baseline`). Die Zahlen
@@ -76,7 +76,7 @@ demselben Konto oder der Wert kommt aus einem kleinen Benutzer-Helfer.
 
 Zur Erwartung, wo Hochlast auftritt (**Annahme**): Die Decode-Phase eines LLM ist speicherbandbreitenbegrenzt und
 erreicht das Limit meist nicht; Prefill langer Kontexte (64k) und parallele Anfragen (`OLLAMA_NUM_PARALLEL` 2,
-`max_inflight` 2) treiben die Karte ans Limit. Der Schutz wirkt also vor allem bei grossen Kontexten und Parallelität.
+`max_inflight` 2) treiben die Karte ans Limit. Der Schutz wirkt also vor allem bei großen Kontexten und Parallelität.
 
 ## 3. Mechanismus-Optionen
 
@@ -101,7 +101,7 @@ Agenten nicht angebunden (`gpu_nvml_other.go`), dort gibt es den Hebel vorerst n
 Der Router kennt je Knoten `inflight`, `effective_max_inflight()` (Policy `max_inflight`, sonst
 `modes.admission.max_inflight_default`) und den Zustandsautomaten `offline/free/busy` (`poll.evaluate`). Möglich:
 Inflight-Deckel 1 bei Hochlast, Admission-Pause (neue Anfragen warten in `admission.WAITING`), Bevorzugung anderer
-Knoten im Score. **Nicht** geeignet: den Knoten `busy` setzen – `busy` bedeutet "fremd belegt", entlädt grosse Modelle
+Knoten im Score. **Nicht** geeignet: den Knoten `busy` setzen – `busy` bedeutet "fremd belegt", entlädt große Modelle
 (`unload_on_busy`) und lässt nur `busy_ok`-Stufen zu. Ein kleines Modell zieht auf derselben Karte nicht weniger Strom
 pro Sekunde, und das Entladen kostet danach einen Kaltstart. Drosselung senkt Parallelität und begrenzt Dauer, aber
 **nicht die Spitzenleistung** einer einzelnen Anfrage; als alleiniger Schutz ist (b) schwach.
@@ -182,7 +182,7 @@ modes:
     require_fresh_status: true   # ohne frischen Status kein Inflight > 1 (Vorschlag, s. Rückfallordnung)
 nodes:
   <name>:
-    gpu_guard: true          # Policy je Knoten; false = Router ignoriert den Status dieses Knotens (RTX 4080 mit 8-Pin z. B.)
+    gpu_guard: true          # Policy je Knoten; false = Router ignoriert den Status dieses Knotens (z. B. eine Karte mit 8-Pin-Steckern)
 ```
 
 ### Zustandsfolge im Agenten
@@ -212,9 +212,9 @@ an/aus), damit `/health` des Agenten zeigt, ob der Router mitspielt.
   Automaten `offline/free/busy`, sondern ein Flag neben dem Zustand – so bleibt `busy` (fremde Nutzung) unberührt.
 - `nodes.effective_max_inflight()`: bei `guard.state == gedrosselt` -> `min(bisher, throttled_max_inflight)`; die
   Admission (`admission.saturated`) wartet dann wie heute mit Priorität statt Ollamas Schlange zu füllen.
-- `scheduler`: Score-Abzug `score_penalty` bei `hochlast|gedrosselt`, damit ein zweiter Knoten (RTX 4080) die
+- `scheduler`: Score-Abzug `score_penalty` bei `hochlast|gedrosselt`, damit ein zweiter Knoten mit kleinerer Karte die
   Anfrage bekommt, wenn er die Stufe tragen kann. Kein harter Ausschluss: eine Sprachanfrage soll nicht auf 503 laufen,
-  weil die einzige 5090 gerade gedrosselt ist.
+  weil die einzige große Karte gerade gedrosselt ist.
 - `routing.reason` bleibt `rank|warm-first|…`; neu im Eintrag `route`: `"guard": {"node": "<name>", "state": "gedrosselt"}`
   und in `skipped` der Grund `"gpu_guard: <knoten> gedrosselt, Deckel 1"` wenn ein Knoten deshalb überlaufen wurde.
 - Ereignisse über `state.remember`: `{"event": "gpu_guard", "node", "state", "limit_w", "reason"}`; `gpu_guard` in die
@@ -277,8 +277,8 @@ darf das Limit nie über den Standard heben. Testreihenfolge vom Ungefährlichen
 
 Aufbau: `tools/guard_loadtest.py` (erhöht, `nvidia-smi -pl` je Stufe, Guard auf 100 % geparkt), je Stufe zwei Prefill-Anfragen
 mit ~18k Token frischem Text, zwei parallele Generierungen (~700 Token), dann Prefill und Generierung parallel; dazu
-`/health` des Agenten jede Sekunde (Board Power NVML, 16-Pin GPU-Z, Throttle-Bits). RTX 5090, Treiber 616.56, Ollama 0.11,
-Leerlauf-Referenz 12,05 V. Die Stufe 500 W nur beim MoE-Modell.
+`/health` des Agenten jede Sekunde (Board Power NVML, 16-Pin GPU-Z, Throttle-Bits). Karte mit 12V-2x6-Stecker und
+575 W Standardlimit, Treiber 616.56, Ollama 0.11, Leerlauf-Referenz 12,05 V. Die Stufe 500 W nur beim MoE-Modell.
 
 | Modell | Limit W | Prefill tok/s | Gen tok/s (2 parallel) | Prefill neben Gen | Board max W | 16-Pin max W | 16-Pin unter Last V | `sw_power_cap` Proben |
 |---|---|---|---|---|---|---|---|---|
@@ -353,7 +353,7 @@ Befunde:
 - **Persistenz des Limits**: `nvidia-smi -pl` ist flüchtig; ob neuere NVML-Versionen eine persistente Variante bieten,
   ist nicht verifiziert (**Annahme: flüchtig**, darum `reapply_s`).
 - **Mehrere GPUs**: Agent und Guard behandeln heute Index 0. Ein Knoten mit zwei Karten braucht den Guard je Karte.
-- **Karten ohne 12V-2x6** (RTX 4080 mit 12VHPWR oder 8-Pin-Partnerkarten): Der Guard läuft auch dort (Limit senken schadet
+- **Karten ohne 12V-2x6** (ältere Karten mit 12VHPWR oder Partnerkarten mit 8-Pin-Steckern): Der Guard läuft auch dort (Limit senken schadet
   nie), aber die Steckerbegründung passt nicht; Policy je Knoten `gpu_guard: false` oder `power_limit_pct: 100` ist dort
   legitim. Den Kartentyp aus `facts.gpu` automatisch zu erkennen wäre möglich, aber eine Liste, die veraltet.
 - **Was der Guard nicht sieht**: Ein Kontaktfehler, der die Spannung am Kartenanschluss nicht messbar drückt (GPU-Z misst

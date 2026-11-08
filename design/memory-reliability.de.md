@@ -44,7 +44,7 @@ Event, keine Löschung bestehender Idempotenzdaten.
 
 Der Status ergänzt `last_error`, `retry_rounds` und `upstream_attempts` (Neueinreichungen
 nach gescheiterter Upstream-Extraktion, siehe geprüfte Zustellung in der Shared-Memory-
-Anleitung). Fehler werden ausschliesslich als feste Kategorien gespeichert: unavailable,
+Anleitung). Fehler werden ausschließlich als feste Kategorien gespeichert: unavailable,
 timeout, transport, upstream_auth, upstream_rejected, protocol, remote_pending,
 policy_changed, lease_expired, upstream_failed, remote_unknown.
 Keine Fehlertexte, Endpunkte, Credentials oder Upstream-Bodies werden persistiert.
@@ -94,10 +94,10 @@ Wiederholte Compaction unter denselben Einstellungen reduziert denselben Tool-Te
 nicht erneut. Ein Strategiewechsel kann früher ausgelassenen Text nicht aus einer
 alten Projection rekonstruieren; dafür die Originalereignisse abrufen.
 
-Neue synthetische Qualitätstests prüfen Entscheidungen, abschliessende Fehler,
+Neue synthetische Qualitätstests prüfen Entscheidungen, abschließende Fehler,
 offene Aufgaben, Tool-Paare und unveränderte Originale auch bei wiederholter
-Compaction und kleinerem Modellfenster. Der bisherige Grössenbenchmark bleibt eine
-Grössen-/Stabilitätsmessung, keine Garantie semantischen Modellverständnisses.
+Compaction und kleinerem Modellfenster. Der bisherige Größenbenchmark bleibt eine
+Größen-/Stabilitätsmessung, keine Garantie semantischen Modellverständnisses.
 
 Der Gateway akzeptiert zusätzlich den aktuellen Hermes-Default
 `observation_scopes: shared` und übernimmt ihn in Outbox und Upstream-Auftrag.
@@ -113,13 +113,13 @@ ohne Opt-in werden echte Tests ausdrücklich als übersprungen ausgewiesen.
 Bei Opt-in mit fehlender Konfiguration scheitert der Test.
 
 Der separate manuelle Workflow **Opt-in real Hindsight memory smoke** startet
-Wegwerf-PostgreSQL und einen ausschliesslich über Loopback erreichbaren Hindsight-
+Wegwerf-PostgreSQL und einen ausschließlich über Loopback erreichbaren Hindsight-
 Container. Er benötigt offizielles Image (für Reproduzierbarkeit Digest festlegen),
 Provider/Modell und das Secret `SKIRNIR_LIVE_TEST_LLM_KEY`. Geprüft werden echte
 SDK-Annahme, Extraktionsabschluss, gemeinsamer Recall, verweigerter Fremdzugriff und
-gezielte Quellenlöschung einschliesslich Dokument-Abwesenheit. Embedding-Modelle
+gezielte Quellenlöschung einschließlich Dokument-Abwesenheit. Embedding-Modelle
 können heruntergeladen werden; synthetische Extraktion kann Providerkosten erzeugen.
-Container/Volumes werden anschliessend entfernt, Modell-/Containerlogs nicht publiziert.
+Container/Volumes werden anschließend entfernt, Modell-/Containerlogs nicht publiziert.
 Normale PR-CI braucht weder diesen Dienst noch Modellschlüssel.
 
 Alternativ extern `SKIRNIR_TEST_SESSION_DSN`, `SKIRNIR_TEST_HINDSIGHT_URL` und bei

@@ -61,7 +61,7 @@ die Config (node, router.url; optional secret_store fuer ein MQTT-Passwort aus d
 als Agent-Kind (`routes.go`). Je Route: `name`, `path` (exakter Vergleich ohne Query), `methods`, `upstream` (nur
 `127.0.0.1` oder `[::1]`, sonst laedt die Config nicht) und `health`. Eine nicht gelistete Methode beantwortet der Agent selbst
 mit `405` und `Allow`, ohne Dienst oder Ollama aufzurufen; nicht gelistete Pfade gehen wie bisher an `tunnel.upstream`. Der
-Agent fragt `upstream+health` alle 5 s ab und meldet im Heartbeat `routes: {<name>: {up, reason}}`: `200` heisst `up`, sonst
+Agent fragt `upstream+health` alle 5 s ab und meldet im Heartbeat `routes: {<name>: {up, reason}}`: `200` heißt `up`, sonst
 nennt `reason` den Zustand, den der Dienst im Feld `status` meldet (`starting`, `selftest_failed`), oder `unhealthy` bzw.
 `unreachable`; vor der ersten Pruefung gilt `starting`. `/health` des Agenten zeigt dasselbe Feld. Ohne `routes` fehlt das
 Feld, und der Tunnel arbeitet wie zuvor. Tests: `routes_test.go`.
@@ -70,7 +70,7 @@ Feld, und der Tunnel arbeitet wie zuvor. Tests: `routes_test.go`.
 
 Der Agent fragt sein lokales Ollama (`tunnel.upstream`) jede Sekunde nach den geladenen Modellen (`/api/ps`) und alle 5 s nach
 den installierten (`/api/tags`), direkt auf localhost (`ollamawatch.go`). Aendert sich etwas, geht der Zustand sofort als
-Rahmen `OLLAMA` (Typ 9) durch den Tunnel, sonst spaetestens alle 30 s vollstaendig; ausserdem zu Beginn jeder Sitzung und
+Rahmen `OLLAMA` (Typ 9) durch den Tunnel, sonst spaetestens alle 30 s vollstaendig; außerdem zu Beginn jeder Sitzung und
 nach der Freigabe. Nutzlast: `{up, error, rev, ts, tags, ps}`, `tags`/`ps` sind Ollamas eigene Eintraege. `expires_at` in
 `/api/ps` zaehlt nicht als Aenderung (wandert mit jeder Anfrage). Nach drei Fehlschlaegen in Folge meldet der Agent
 `up: false` mit Grund; der Router nimmt den Knoten dann sofort aus dem Routing. Solange die Meldungen frisch sind (45 s), pollt
@@ -91,7 +91,7 @@ Der Heartbeat traegt zwei Bloecke, damit der Router nicht aus fremdem VRAM raten
   Seit 0.19.0 misst er, solange ein Spiel laeuft, dessen GPU-Bedarf ueber alle Spielprozesse (`procs`): eigener und
   geteilter Grafikspeicher (`\GPU Process Memory(*)`) und die hoechste Auslastung einer GPU-Engine (`\GPU Engine(*)`,
   fehlt im ersten Durchlauf, weil die Rate zwei Messungen braucht). Damit unterscheidet der Router ein kleines Spiel von
-  einem, das die GPU braucht oder neben einem grossen Modell in den geteilten Speicher ausweicht. Ist die Messung nicht
+  einem, das die GPU braucht oder neben einem großen Modell in den geteilten Speicher ausweicht. Ist die Messung nicht
   moeglich, fehlen die Felder; der Router wertet dann jedes Spiel wie bisher als busy.
 - `memory: {ram_available_gib, ram_total_gib, commit_free_gib, commit_limit_gib}` aus `GlobalMemoryStatusEx`; Linux meldet
   nur RAM (`MemAvailable`), weil der Commit dort bei Ueberbuchung keine Grenze ist.
@@ -137,6 +137,9 @@ skirnir-agent.exe gpu                     Messquelle und alle Sensoren einmal au
 skirnir-agent.exe game                    Spielerkennung und Hauptspeicher einmal ausgeben (Ordner, Programmnamen, Treffer,
                                           GPU-Bedarf des Spiels)
 ```
+
+`check-config` (und jeder Start) lehnt einen Schlüssel auf oberster Ebene ab, den der Agent nicht liest, und nennt ihn samt
+der bekannten Schlüssel (0.28.0, [ADR-0051](../docs/adr/0051-agent-rejects-unknown-top-level-configuration-keys.md)).
 
 `/health` auf `127.0.0.1:10398`: GPU, Heartbeat (Router-Urteil), MQTT, Kinder. `POST /restart-child?name=stt` startet ein Kind neu.
 

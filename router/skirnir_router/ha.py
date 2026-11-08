@@ -219,7 +219,7 @@ class HAPublisher:
                 self.legacy_state.add(msg.topic)
 
     def _dev(self):
-        # Device "Skirnir" (since 2026-09-16; 2026-09-09..16 "Huginn"); identifiers/unique_ids since 2026-09-25 skirnir-router.
+        # Device "Skirnir" (since 2026-09-16, earlier under another name); identifiers/unique_ids since 2026-09-25 skirnir-router.
         return {"identifiers": ["skirnir-router"], "name": "Skirnir", "manufacturer": "Skirnir",
                 "model": "skirnir-router", "sw_version": VERSION,
                 "configuration_url": state.CFG.public_url or None}

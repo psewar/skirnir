@@ -14,7 +14,7 @@ optionalen Cloud-Fallback sowie optionalen persistenten Sitzungskontext und geme
 
 Skirnir steht vor einer oder mehreren Ollama-Installationen auf GPU-Rechnern und verhält sich gegenüber seinen Clients wie
 **ein** Ollama-Server. Clients fragen nicht nach einem konkreten Modell, sondern nach einer **Rolle** (`standard:latest`,
-`gross:latest`, `code:latest` …); der Router wählt pro Anfrage Knoten, Modell und Kontextgrösse – nach dem, was gerade
+`gross:latest`, `code:latest` …); der Router wählt pro Anfrage Knoten, Modell und Kontextgröße – nach dem, was gerade
 geladen ist, ob die GPU von einem Spiel belegt wird, wie viel VRAM frei ist, wie schnell und wie fehlerfrei ein Modell auf
 einem Knoten zuletzt war. Die Ollama-API bleibt unverändert, dazu kommen eine OpenAI-kompatible Schnittstelle unter `/v1`
 und die Anthropic-Messages-API (`/v1/messages`, z. B. für Claude Code).
@@ -33,7 +33,7 @@ Stabilitätszusagen; diese README gibt es auf Englisch und Deutsch, die Unter-RE
   nimmt die beste Stufe, die ein Knoten jetzt bedienen kann; ein schon geladenes Modell gewinnt („warm zuerst“).
 - **Mehrere GPU-Knoten**, Windows oder Linux, angebunden über einen kleinen **Agenten** (Go), der einen ausgehenden Tunnel zum
   Router hält. Kein offener Port am Knoten, kein Zertifikat, keine feste IP. Wake-on-LAN für schlafende Knoten.
-- **Busy-Erkennung.** Belegt ein Spiel die GPU (fremdes VRAM, Auslastung), laufen dort nur noch `busy_ok`-Stufen; grosse Modelle
+- **Busy-Erkennung.** Belegt ein Spiel die GPU (fremdes VRAM, Auslastung), laufen dort nur noch `busy_ok`-Stufen; große Modelle
   werden entladen und nach dem Spielen wieder vorgewärmt.
 - **Scheduler** mit Score (warm, Last, VRAM, Tempo, Fehlerrate), Circuit Breaker je Knoten und **Admission Control** mit
   Prioritäten und Deadline im Router statt in Ollamas eigener Schlange.
@@ -42,7 +42,7 @@ Stabilitätszusagen; diese README gibt es auf Englisch und Deutsch, die Unter-RE
 - **Auto-Rolle** `auto:latest`: eine Kette lokaler Entscheidungs-Engines (Embedding-Modell auf CPU, kleines LLM, TF-IDF, Regeln)
   wählt die Rolle aus dem Text der Anfrage. Gemessen 93 bis 98 % Treffer.
 - **Cloud als Stufe.** OpenAI- und Anthropic-Modelle können als letzte (oder erste) Stufe in Rollen liegen, mit Datenklassen,
-  Credential-Scan, Monatsbudget in CHF und Egress-Allowlist. Standardmässig geht nichts in die Cloud.
+  Credential-Scan, Monatsbudget und Egress-Allowlist. Standardmäßig geht nichts in die Cloud.
 - **Client-Identitäten** auf dem Inferenz-Port (Bearer, Basic, Quell-IP), Rollen- und Modellsperren, Rate Limit, Audit-Log.
 - **Beobachtbar:** Prometheus-Endpunkt, Nutzung je Tag und Client, Entscheidungsprotokoll, Home-Assistant-Gerät per MQTT-Discovery,
   Web-UI mit Live-Grafiken, Katalog, Rollen-Editor, Probierfeld und Lasttest.
@@ -70,7 +70,7 @@ Stabilitätszusagen; diese README gibt es auf Englisch und Deutsch, die Unter-RE
 ```
 
 Der Agent meldet den Zustand seines Knotens selbst. Alle 2 s schickt er GPU-Auslastung, VRAM und Sensoren (Heartbeat). Seit
-Agent 0.14.0 beobachtet er ausserdem sein lokales Ollama und meldet installierte Modelle (`/api/tags`), geladene Modelle
+Agent 0.14.0 beobachtet er außerdem sein lokales Ollama und meldet installierte Modelle (`/api/tags`), geladene Modelle
 (`/api/ps`) und ob Ollama überhaupt antwortet, sofort bei jeder Änderung und spätestens alle 30 s vollständig. Aus beidem
 entsteht je Knoten der Zustand `offline` / `free` / `busy`. Nur bei Knoten, deren Agent den Ollama-Zustand nicht meldet (ältere
 Agenten, statische Knoten ohne Agent), fragt der Router Ollama weiterhin selbst alle 5 s ab. Alle Ollama-Aufrufe des Routers
@@ -83,12 +83,12 @@ laufen durch den Tunnel des Agenten; Ollama selbst bleibt auf `localhost`.
 | **11434** | Ollama-API: `GET /api/tags`, `/api/ps`, `/api/version`, `POST /api/show`; Inferenz `POST /api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings` (Streaming wird durchgereicht, `model` in der Antwort trägt den Rollennamen). `/api/pull`, `push`, `create`, `copy`, `delete` → 403. TLS mit dem eigenen Zertifikat (`api_tls`). | Clients |
 | **11434 `/v1`** | OpenAI-kompatibel: `GET /v1/models`, `POST /v1/chat/completions` (SSE-Streaming, `tools`, `response_format`), `/v1/completions`, `/v1/embeddings`. Der Router übersetzt selbst nach `/api/chat`, damit Rollen, Kontextstufen und `keep_alive` gelten – Ollamas eigenes `/v1` kennt weder `num_ctx` noch `keep_alive`. | OpenAI-Clients |
 | **11434 `/v1/messages`** | Anthropic-Messages-API: `POST /v1/messages` (streamend und nicht), `POST /v1/messages/count_tokens`; `GET /v1/models` antwortet in Anthropic-Form, wenn die Anfrage `anthropic-version` trägt. Übersetzung auf `/api/chat` wie bei `/v1`, siehe [Anthropic-Clients](#anthropic-clients-claude-code). | Claude Code, Anthropic-SDKs |
-| **11434 `/rerank`, `/info`** | Optionales TEI-kompatibles Reranking auf einem GPU-Knoten durch den Agent-Tunnel (standardmässig aus, Client-Recht `rerank`), siehe [Rerank-Endpunkt](#optionaler-rerank-endpunkt). | Gedächtnisdienste |
+| **11434 `/rerank`, `/info`** | Optionales TEI-kompatibles Reranking auf einem GPU-Knoten durch den Agent-Tunnel (standardmäßig aus, Client-Recht `rerank`), siehe [Rerank-Endpunkt](#optionaler-rerank-endpunkt). | Gedächtnisdienste |
 | **11435** | Web-UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/nodes`, `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2-Hashes in der Konfiguration, geprüftes Paar 10 min gecacht). Jede Nicht-GET-Anfrage an `/admin/*` braucht zusätzlich den Header `X-Skirnir-UI: 1` (CSRF-Schutz, ADR-0042; die Web-UI sendet ihn). Standard-Listener `127.0.0.1:11435`; für entfernte Agenten und Browser `control_listen` setzen (ADR-0040). | Browser, Skripte, Prometheus |
 | **11435 `/v1/tunnel`** | WebSocket vom Agenten: Anmeldung mit Ed25519-Signatur auf eine Challenge, Heartbeat, Konfigurationspaket, alle Ollama-Aufrufe als multiplexte Streams (REQ/RESP/DATA/END/ERR/CANCEL). | Agent → Router |
 | MQTT 8883 | Discovery und Zustände für Home Assistant (TLS, Passwort aus `secrets.env`). | Router → Broker |
 
-Anfragen dürfen 600 s dauern (`request_timeout_s`). Bricht der Client ab, schliesst der Router die Upstream-Antwort, der Tunnel
+Anfragen dürfen 600 s dauern (`request_timeout_s`). Bricht der Client ab, schließt der Router die Upstream-Antwort, der Tunnel
 schickt CANCEL, der Agent beendet die Ollama-Anfrage. Der Inferenz-Port nutzt TCP-Keepalive (erste Probe nach 60 s Stille, dann
 alle 15 s, nach 4 ohne Antwort tot): Eine Anfrage ohne Stream kann minutenlang ohne ein Byte laufen, und irgendwo auf dem Weg zum
 Client verfällt der Verbindungszustand sonst still. Die Proben halten ihn frisch und lassen eine tote Verbindung als Fehler auffallen.
@@ -97,7 +97,7 @@ Client verfällt der Verbindungszustand sonst still. Die Proben halten ihn frisc
 
 Claude Code und die Anthropic-SDKs sprechen die Messages-API. Zeigen sie auf den Router (`ANTHROPIC_BASE_URL=https://router:11434`,
 Modell = eine Rolle wie `code:latest`), bekommen sie dasselbe wie alle anderen Clients: die Stufen der Rolle, `num_ctx` der Stufe
-(oder den grösseren Kontext, mit dem das Modell schon geladen ist), warm zuerst, Warten bei `gpu_busy`, Tool-Call-Rettung,
+(oder den größeren Kontext, mit dem das Modell schon geladen ist), warm zuerst, Warten bei `gpu_busy`, Tool-Call-Rettung,
 Client-Identität, Metriken und Entscheidungslog (`via=anthropic`). Ollamas eigenes `/v1/messages` kann das nicht: es kennt kein
 `num_ctx`, das Modell lädt mit Ollamas Default-Kontext neu und verdrängt den Runner, den alle anderen Clients teilen.
 
@@ -128,7 +128,7 @@ der Router nimmt beides. `anthropic-version` und `anthropic-beta` werden angenom
 
 `router.anthropic.think` (auch in den Einstellungen der UI, wirkt ohne Neustart): `auto` folgt dem `thinking`-Block des
 Clients, `on` und `off` setzen es fest. Claude Code verlangt bei jedem Zug adaptives Denken; ein Modell, das nur an oder aus
-kennt (wie qwen3.8), denkt dann bei jedem Zug, auch beim blossen Lesen einer Datei. Das Entscheidungslog führt `think` je
+kennt (wie qwen3.8), denkt dann bei jedem Zug, auch beim bloßen Lesen einer Datei. Das Entscheidungslog führt `think` je
 Anfrage.
 
 ## Rollen und Stufen
@@ -161,7 +161,7 @@ roles:
   leichtes Spiel um die Eintrittsschwelle schaltete den Knoten sonst alle paar Sekunden um.
 - **Spiel und Hauptspeicher als Fakt (Agent 0.17.0, Windows).** Der Agent meldet, ob ein Spiel läuft (Prozesspfad in einer
   Steam-Bibliothek oder im Installationsordner eines bekannten Spieleverlags; ist der Pfad nicht lesbar, über den Namen
-  eines grossen Programms in so einem Ordner), und den freien Hauptspeicher (verfügbarer RAM und freier Commit). Ein
+  eines großen Programms in so einem Ordner), und den freien Hauptspeicher (verfügbarer RAM und freier Commit). Ein
   laufendes Spiel macht den Knoten nach `busy_enter.game_sustain_s` (10 s) `busy`, auch wenn es kaum VRAM belegt, und hält
   ihn nach dem Ende noch `busy_exit.game_quiet_s` (60 s). Liegen verfügbarer RAM oder freier Commit `memory_pressure.polls`
   Heartbeats lang (2) unter `memory_pressure.min_free_gib` (8 GiB), steht der Knoten unter Speicherdruck: nichts wird kalt
@@ -216,7 +216,7 @@ Gedächtnis-Recall zusätzlich `X-Skirnir-Memory-State` (`available`, `bank_miss
 kommt nur, wenn der Client selbst einen `routing`-Block geschickt hat – Altclients sehen einen unveränderten Body. Bei `/v1`
 steht er im `chat.completion` bzw. im letzten SSE-Chunk.
 
-Grössenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_messages` 1000, Body 64 MiB.
+Größenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_messages` 1000, Body 64 MiB.
 
 ## Scheduler, Circuit Breaker, Admission
 
@@ -255,8 +255,8 @@ Grössenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_mes
 
 ## Auto-Rolle: die Decision Engine
 
-Ein Client, der nicht weiss, welche Rolle passt, fragt `auto:latest`. Eine Kette von Engines wählt eine der konfigurierten
-Rollen; unsicher (kleiner Abstand Platz 1/2, hohe Entropie, geringe Wahrscheinlichkeit) heisst: nächste Engine, am Ende `default`.
+Ein Client, der nicht weiß, welche Rolle passt, fragt `auto:latest`. Eine Kette von Engines wählt eine der konfigurierten
+Rollen; unsicher (kleiner Abstand Platz 1/2, hohe Entropie, geringe Wahrscheinlichkeit) heißt: nächste Engine, am Ende `default`.
 Entwurf: [design/decision-engine.md](design/decision-engine.md), Messreihe: [decision-eval/README.md](decision-eval/README.md).
 
 | Engine | Was | Top-1 auf 132 ungesehenen Testfällen | Latenz | Wo |
@@ -317,7 +317,7 @@ client_auth:
 
 Je Client: `roles`, `models` (konkrete Modellnamen erlaubt?), `requests_per_minute` (429), `max_priority`, `cloud`, `data_class`,
 `rerank` und `inference` (`false` = nur der [Rerank-Endpunkt](#optionaler-rerank-endpunkt), alles andere 403).
-Verstösse geben 403 und landen im Audit-Log (`auth_denied`, `bad_token`, `forbidden`, `rate_limited` – nie Prompts, nie Tokens).
+Verstöße geben 403 und landen im Audit-Log (`auth_denied`, `bad_token`, `forbidden`, `rate_limited` – nie Prompts, nie Tokens).
 Clients lassen sich auch in der UI anlegen; der Router erzeugt das Secret, zeigt den Klartext genau einmal und speichert den Hash
 in `roles.yaml`. Der Knopf „Ausprobieren“ nutzt die interne Identität `skirnir-ui`, die nur von localhost gilt.
 
@@ -336,7 +336,7 @@ Schranken (`router.cloud`):
 - **Inhaltsprüfung statt Pauschalsperre** (Router 0.13.0, Opt-in je Client: `clients.<c>.privacy_check: true` und
   `router.cloud.privacy_check.enabled: true`): Für einen Client, dessen Klasse ohne Deklaration `personal` ist, bleibt die
   Cloud-Stufe Kandidat, und wenn sie wirklich gewählt wird, wird die Anfrage geprüft: Regeln auf dem, was der Nutzer
-  geschrieben hat (eigene `terms` wie Namen der Familie, E-Mail, Telefon, IBAN, AHV, Strassenadresse, eingebaute
+  geschrieben hat (eigene `terms` wie Namen der Familie, E-Mail, Telefon, IBAN, AHV, Straßenadresse, eingebaute
   Stichwortgruppen für Gesundheit, Finanzen, Zugangsdaten, Beziehungen, Recht), danach ein Klassifikator auf dem Router-Host
   (decision-embed `POST /privacy`, e5-small mit trainiertem Kopf, wenige ms). Über seiner Schwelle, bei einem Regeltreffer
   oder wenn der Klassifikator nicht antwortet (fail closed), bleibt die Anfrage lokal und bekommt den eingestellten Satz
@@ -347,8 +347,9 @@ Schranken (`router.cloud`):
   den Text. Eine deklarierte `routing.data_class` wird nie übergangen.
 - **Credential-Scan** (`block`): Prompts mit erkennbaren Schlüsseln (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
   gehen nicht in die Cloud; lokal laufen sie normal.
-- **Budget** je Anbieter und Monat in CHF; erschöpft = Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem.
-  Kosten je Anfrage in Usage und Metriken.
+- **Budget** je Anbieter und Monat, in der Währung der Katalogpreise (der Router rechnet keine Währungen um; die Endung
+  `_chf` von Schlüsseln, Feldern und Metriken und die Einheit des HA-Kostensensors sind historisch); erschöpft =
+  Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem. Kosten je Anfrage in Usage und Metriken.
 - **Egress-Allowlist** für `base_url` (+ `egress_allow`), Schlüssel nur aus `secrets.env`, nie im Log; Circuit Breaker wie bei
   Knoten; Schattenläufe gehen nie in die Cloud.
 
@@ -378,7 +379,7 @@ Für Verläufe über Tage und Wochen gehört ein Prometheus vor `/metrics` (Scra
 Zeitreihendatenbank. Genau das liefert [monitoring/](monitoring/): Prometheus mit 90 Tagen Verlauf und ein Grafana-Dashboard als zwei
 Container auf dem Router-Host. Das
 Entscheidungsprotokoll (`/admin/state`, 2000 Einträge, persistiert in `events.jsonl` neben der Konfiguration und damit über Neustarts hinweg; `?decisions=N` wählt die gelieferte Menge, Standard 50) hält die letzten Routen und Ereignisse (busy/free, WOL, Breaker, Warteschlange, Shadow,
-Decision). `/admin/state` zeigt ausserdem `build` (Deploy-Manifest) und `supply_chain` (Ollama-Version und Modell-Digests je Knoten).
+Decision). `/admin/state` zeigt außerdem `build` (Deploy-Manifest) und `supply_chain` (Ollama-Version und Modell-Digests je Knoten).
 
 ## Web-UI
 
@@ -422,7 +423,7 @@ Client-Token); Modell = Rolle.
 
 **Langsamkeits-Signale** (Router 0.9.2). Wenn ein Modell langsam läuft, schlägt nichts fehl; darum meldet der Router es je
 Knoten als Fakt: `binary_sensor.skirnir_node_<knoten>_ram_spill` **Modell teilweise im RAM** ist an, solange Ollama einen Teil
-eines geladenen Modells in den Arbeitsspeicher legen musste (`/api/ps`: `size` grösser als `size_vram`; diese Schichten rechnen
+eines geladenen Modells in den Arbeitsspeicher legen musste (`/api/ps`: `size` größer als `size_vram`; diese Schichten rechnen
 auf der CPU, jede Anfrage ist vielfach langsamer), mit Modellen und GiB als Attribut; ab `router.ram_spill_problem_gib`
 (0,5 GiB, 0 = aus) ist es auch ein **Problem**. `sensor.skirnir_node_<knoten>_gen_tps` und `_prompt_tps` tragen die Erzeugungs-
 und Prompt-Rate (tok/s) der letzten warmen Anfrage auf dem Knoten, mit dem Modell als Attribut; eine Antwort unter 20 Token, ein
@@ -447,7 +448,7 @@ ein Statistik-Helfer mit dem Median einer Woche).
 - stellt optional einen TLS-Proxy vor Ollama (`ollama_proxy`, Port 11443, Zertifikat per Fingerprint gepinnt) für Router, die
   ohne Tunnel direkt zugreifen sollen,
 - **schützt die GPU** (Agent 0.7.0, [design/gpu-guard.md](design/gpu-guard.md)): setzt ein Power-Limit von 80 % des
-  Standardlimits (RTX 5090: 460 W), geht nach 10 Minuten Dauer-Vollast für 5 Minuten auf 70 %, setzt nach Treiber-Resets
+  Standardlimits (460 W bei einer 575-W-Karte), geht nach 10 Minuten Dauer-Vollast für 5 Minuten auf 70 %, setzt nach Treiber-Resets
   nach, hebt nie über den Standard und warnt bei Spannungsabfall am 16-Pin-Stecker, Speichertemperatur und
   Hardware-Drosselung. Standard an; die Abwahl (`gpu_guard.enabled: false`) ist eine Entscheidung und wird deshalb als
   Problem gemeldet. Der Router deckelt einen gedrosselten Knoten auf eine Anfrage, zieht Score ab und reicht Probleme an
@@ -480,6 +481,11 @@ Ein neuer GPU-Rechner braucht: Ollama mit Modellen, das Agent-Binary, eine Konfi
 [agent/config.example.yaml](agent/config.example.yaml)), `Install-Service.ps1` als Administrator, dann die Freigabe in der
 Router-UI (Wake-on-LAN, Gewicht, MQTT-Gerät). Kein Token, keine Firewall-Regel, kein Zertifikat, keine IP von Hand.
 
+Der Agent lehnt eine Konfiguration mit einem Schlüssel auf oberster Ebene ab, den er nicht liest (ein vertippter oder in
+einer früheren Version entfernter Block), und nennt den Schlüssel. `skirnir-agent check-config` zeigt das vor einem
+Neustart; ein Selbst-Update endet dann als fehlgeschlagener Auftrag, und die alte Binary läuft weiter (Agent 0.28.0,
+[ADR-0051](docs/adr/0051-agent-rejects-unknown-top-level-configuration-keys.md)).
+
 ## Installation des Routers
 
 Voraussetzungen: Debian 12 (oder vergleichbar) mit Python 3.11, Pakete `python3-aiohttp`, `python3-yaml`, `python3-cryptography`;
@@ -505,7 +511,7 @@ Ein TLS-Zertifikat für den Hostnamen des Routers (z. B. Let's Encrypt), auf den
 **Ausrollen von einer Arbeitsstation** (LXC): [deploy/deploy.py](deploy/deploy.py) kopiert Code, Konfiguration und
 Einheiten per SFTP auf den LXC-Host, von dort per Datei-Push in den Container (Vorlagen `CT_EXEC`/`CT_PUSH`, Standard LXD), prüft die Konfiguration vor und nach dem
 Push und startet den Dienst nur bei bestandener Prüfung neu. Alles Standortspezifische (Host, Container-Nummer, Produktiv-
-`config.yaml`, Secret-Store-Zugang) liest es aus einem **Ops-Ordner ausserhalb des Repos**, siehe [deploy/ops_env.py](deploy/ops_env.py).
+`config.yaml`, Secret-Store-Zugang) liest es aus einem **Ops-Ordner außerhalb des Repos**, siehe [deploy/ops_env.py](deploy/ops_env.py).
 So kann das Repo öffentlich sein, ohne dass Hashes, IPs oder Hostnamen darin landen. Wer kein LXC-Host hat, kopiert von Hand
 oder passt die zwei Vorlagen `CT_EXEC`/`CT_PUSH` in `deploy.env` an.
 
@@ -579,7 +585,7 @@ Connect weg. Home Assistant führt Registereinträge je unique_id, darum müssen
 
 ## Messwerte als Anhaltspunkt
 
-VRAM-Bedarf nach der Formel oben, gemessen auf einer RTX 5090 (31,8 GiB, KV-Cache f16, Ollama 0.33/0.34); Tempo aus dem
+VRAM-Bedarf nach der Formel oben, gemessen auf einer 32-GB-GPU (31,8 GiB nutzbar, KV-Cache f16, Ollama 0.33/0.34); Tempo aus dem
 UI-Benchmark (200 Token, temperature 0, Median aus zwei Läufen, Kontext 8k).
 
 | Modell | Gewichte GiB | Kontext-Kosten MiB/1k | VRAM @8k / @32k / @64k GiB | gen tok/s | prompt tok/s | Fähigkeiten |
@@ -590,12 +596,12 @@ UI-Benchmark (200 Token, temperature 0, Median aus zwei Läufen, Kontext 8k).
 | granite4.2:30b | 16,8 | 248 | 19,5 / 25,3 / 33,1 ✗ | 76 | 3478 | tools, thinking |
 | gemma4:26b | 16,1 | 12 | 17,0 / 17,3 / 17,7 | 233 | 1822 | vision, tools, thinking |
 | gpt-oss:20b | 12,0 | 2 | 12,8 / 12,8 / 12,9 | 270 | 6712 | tools, thinking (kein `structured`) |
-| gemma4:12b (RTX 4080) | 7,8 | 2 | 8,6 / 8,6 / 8,7 | 71 | 1277 | vision, tools, thinking |
+| gemma4:12b (kleinere zweite GPU) | 7,8 | 2 | 8,6 / 8,6 / 8,7 | 71 | 1277 | vision, tools, thinking |
 | granite4.2:8b | 5,0 | 162 | 7,0 / 10,8 / 15,9 | 213 | 7919 | tools, thinking |
 
 Modelle mit hybrider Attention (qwen3.6, gemma4, gpt-oss) kosten pro Kontext-Token praktisch kein VRAM; granite und die
 Coder-Modelle zahlen spürbar. Thinking-Modelle erzeugen ohne `think: false` unsichtbare Denk-Token – die Antwortdauer ist dann
-kein Mass für das Tempo. Neu messen, wenn Ollama, Treiber oder KV-Cache-Typ wechseln.
+kein Maß für das Tempo. Neu messen, wenn Ollama, Treiber oder KV-Cache-Typ wechseln.
 
 ## Grenzen und Nicht-Ziele
 
@@ -625,7 +631,7 @@ idempotente Event-IDs, paginierter Verlauf, versionierte Task-Checkpoints sowie
 explizite Session-Loeschung. Die authentifizierte Clientidentitaet bestimmt den Owner;
 eine Session-ID erteilt keine Berechtigung. Token-Zugangsdaten sind auch im
 observe-Modus erforderlich, IP-only-Zugriff ist ausgeschlossen. `routing.session_id`
-bleibt ausschliesslich Knoten-/Modell-Affinitaet. Inferenz und Streaming bleiben gleich.
+bleibt ausschließlich Knoten-/Modell-Affinitaet. Inferenz und Streaming bleiben gleich.
 
 `client-managed` speichert weiterhin nur explizite Ereignisse. Hermes verwaltet
 Compaction und Memory selbst. [API, Konfiguration, Migration, Rollback und Tests
@@ -675,7 +681,7 @@ Erfolg wird erst nach dauerhafter Speicherung der vollstaendigen Antwort gemelde
 Serverseitig freigegebene Memory Scopes, eine persistente PostgreSQL-Outbox,
 signierte Agent-Übergaben und Session-Suche erweitern das optionale Context Gateway.
 Neue Strategien, Tool-Reduktion, automatische Checkpoints und Aufbewahrungsregeln
-bleiben standardmässig aus. Private Bank-IDs und bestehende Inferenz-Clients bleiben
+bleiben standardmäßig aus. Private Bank-IDs und bestehende Inferenz-Clients bleiben
 kompatibel. Siehe [Aktivierung, Hermes-Anbindung, API und Rollback](design/shared-memory-interoperability.de.md).
 
 Betriebliche Verbesserungen: [Memory-Zuverlässigkeit, Recovery und echte Smoke-Tests](design/memory-reliability.de.md).
@@ -683,14 +689,14 @@ Betriebliche Verbesserungen: [Memory-Zuverlässigkeit, Recovery und echte Smoke-
 ## Optionaler Rerank-Endpunkt
 
 `POST /rerank` auf dem Inferenz-Port spricht das TEI-Rerank-Protokoll und reicht die Anfrage durch den Agent-Tunnel an einen
-Reranker-Dienst auf einem GPU-Knoten weiter (Agent-Route `rerank`, Gesundheit im Heartbeat gemeldet). Standardmässig aus; ein
+Reranker-Dienst auf einem GPU-Knoten weiter (Agent-Route `rerank`, Gesundheit im Heartbeat gemeldet). Standardmäßig aus; ein
 Client braucht das Recht `rerank: true` und darf an seiner Quelladresse erkannt werden. Kein WOL, keine Warteschlange, keine
 Wiederholung: kann kein Knoten reranken, antwortet der Router sofort mit `424 rerank_unavailable` und einem Grund, damit ein
 Aufrufer mit eigenem CPU-Reranker ohne Verzögerung zurückfällt. Siehe [Konfiguration, Drahtformat und Gründe (Englisch)](design/rerank.md).
 
 ## Optionaler OpenAI-kompatibler Knoten
 
-Ein GPU-Knoten kann statt Ollama einen OpenAI-kompatiblen Inferenz-Server betreiben, zum Beispiel Strata, das ein grosses
+Ein GPU-Knoten kann statt Ollama einen OpenAI-kompatiblen Inferenz-Server betreiben, zum Beispiel Strata, das ein großes
 Mixture-of-Experts-Modell aus einer GPU plus Arbeitsspeicher bedient. Die Agent-Einstellung `tunnel.upstream_api: openai`
 (Standard `ollama`) richtet den Tunnel auf diesen Server: Der Agent meldet dessen Modelle aus `/v1/models` und sagt es in
 seinen Fakten. Der Router schickt Chat- und Generate-Anfragen dann als `/v1/chat/completions` durch den Tunnel, übersetzt

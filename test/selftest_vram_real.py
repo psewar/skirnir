@@ -2,7 +2,7 @@
 """Self-test of real VRAM accounting (Router 0.3.5). Runs without Router and network, using the real Node and
 Config classes, but without Ollama.
 
-Measurements from 2026-09-30 on gpu-desktop (RTX 5090, 31.8 GiB; fully unloaded per run, delta per nvidia-smi, Desktop
+Measurements from 2026-09-30 on a 32 GB GPU (31.8 GiB usable; fully unloaded per run, delta per nvidia-smi, Desktop
 idle 0.6 GiB): qwen3.6:35b-a3b uses real 24.93 / 26.43 / 27.93 GiB at 131k / 196k / 262k, /api/ps reports only
 20.79 / 20.98 / 21.16. laguna-xs-2.1 real 29.71 GiB at 131k (ps 19.23), partially in RAM at 196k.
 

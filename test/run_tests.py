@@ -718,7 +718,7 @@ def main():
               and (oa_.get("routing") or {}).get("node") == "cloud:testcloud", raw.decode()[:200])
         u_ = json.loads(http(C + "/admin/usage")[1])["today"]
         spent = u_["cost_chf"]
-        check("Usage: Cloud costs per call counted (0.32 CHF at test prices), visible in daily budget", 1.5 < spent < 1.7 and (u_["clients"]["-"]["models"].get("testcloud:mini") or {}).get("cost_chf", 0) > 1.0,
+        check("Usage: Cloud costs per call counted (0.32 at test prices), visible in daily budget", 1.5 < spent < 1.7 and (u_["clients"]["-"]["models"].get("testcloud:mini") or {}).get("cost_chf", 0) > 1.0,
               f"cost_chf heute={spent}")
         hit = None
         for _ in range(4):
@@ -727,7 +727,7 @@ def main():
             if ri.get("model") == "qwen3.6:35b-a3b":
                 hit = [s_["reason"] for s_ in ri.get("skipped", []) if "monthly budget" in s_["reason"]]
                 break
-        check("Budget 1.9 CHF exhausted: Cloud tier falls away (reason), served locally", bool(hit), str(hit or ri))
+        check("Budget 1.9 exhausted: Cloud tier falls away (reason), served locally", bool(hit), str(hit or ri))
         ha_ = json.loads(http(C + "/admin/ha")[1])
         check("HA: budget problem reported, cloud costs in snapshot", any("Cloud testcloud" in p_ for p_ in ha_["problems"]) and ha_["cloud_spend_month_chf"] >= 1.9
               and ha_["cloud"]["testcloud"]["budget_percent"] >= 100, str(ha_["problems"]) + f" spend={ha_['cloud_spend_month_chf']}")
@@ -749,7 +749,7 @@ def main():
               and "router.cloud.providers.testcloud.base_url" not in items7 and "router.client_auth.clients.tester.token_sha256" not in items7, str(sorted(items7)[:5]))
         st, raw = http(C + "/admin/config", {"settings": {"router.cloud.providers.testcloud.budget_month_chf": 50, "router.cloud.providers.testcloud.warn_at_percent": 90}}, method="PUT")
         s7 = state()["cloud"]["testcloud"]
-        check("PUT settings: budget changed live (1.9 -> 50 CHF), provider back under the limit", st == 200 and s7["budget_month_chf"] == 50.0 and s7["budget_percent"] < 10, f"{st} {s7}")
+        check("PUT settings: budget changed live (1.9 -> 50), provider back under the limit", st == 200 and s7["budget_month_chf"] == 50.0 and s7["budget_percent"] < 10, f"{st} {s7}")
         st, raw = http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"execution": "cloud", "data_class": "internal"}})
         ri = rinfo(raw, st)
         check("after the budget increase, the Cloud tier serves again", st == 200 and ri.get("node") == "cloud:testcloud", str({k: ri.get(k) for k in ("node", "skipped")}))
@@ -826,7 +826,7 @@ def main():
         check("Rotation: old secret no longer valid (observe: served anonymously), new one valid", st == 200 and tok7b and tok7b != tok7 and ri_old.get("client") is None and ri_new.get("client") == "pi-voice",
               f"alt={ri_old.get('client')} neu={ri_new.get('client')}")
         st, raw = http(C + "/admin/config", {"settings": {"router.client_auth.clients.pi-voice.ip": "127.0.0.1", "router.client_auth.clients.pi-voice.data_class": "internal",
-                                                 "router.cloud.providers.testcloud.budget_month_chf": 50}}, method="PUT")   # Budget: the Cloud block above consumed 1.9 CHF
+                                                 "router.cloud.providers.testcloud.budget_month_chf": 50}}, method="PUT")   # Budget: the Cloud block above consumed 1.9
         ri = rinfo(*http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"execution": "cloud"}})[::-1])
         check("Source IP + data class via UI: request without header is pi-voice and may go to cloud", st == 200 and ri.get("client") == "pi-voice" and ri.get("node") == "cloud:testcloud",
               f"{st} {raw.decode()[:80]} client={ri.get('client')} node={ri.get('node')} {ri.get('skipped')}")
@@ -898,7 +898,7 @@ def main():
         check("/admin/decide: embed (tier 2, same HTTP protocol as jevlike) responds under own name", st == 200 and de_.get("engine") == "embed" and de_.get("selected") == "gross", f"{st} {raw.decode()[:120]}")
         st, raw = http(C + "/admin/decide", {"context": "irgendwas", "engine": "local_llm"})
         check("/admin/decide: local_llm via own router responds (or falls back cleanly to default)", st == 200 and json.loads(raw).get("engine") in ("local_llm", "default"), f"{st} {raw.decode()[:120]}")
-        http(R + "/api/chat", {"model": "assist:latest", "stream": False, "messages": [{"role": "user", "content": "Mail an max@example.org: Licht in 192.168.1.20 an"}]}, headers=dh("tester-token"), timeout=120)
+        http(R + "/api/chat", {"model": "assist:latest", "stream": False, "messages": [{"role": "user", "content": "Mail an max@example.org: Licht in 192.0.2.20 an"}]}, headers=dh("tester-token"), timeout=120)
         time.sleep(0.3)
         rows = [json.loads(l) for l in open(os.path.join(HERE, "decisions.jsonl"), encoding="utf-8") if l.strip()] if os.path.exists(os.path.join(HERE, "decisions.jsonl")) else []
         eng = [r for r in rows if r["label_source"] == "engine"]; cli = [r for r in rows if r["label_source"] == "client"]
@@ -951,7 +951,7 @@ def main():
             hb("big", 3, 9000, 23000); time.sleep(0.3)   # Normalbetrieb: 8.79 GiB
         b1 = learned()
         check("Baseline learns normal operation, not quietest moment", b1 is not None and b1 > 4.0,
-              f"gelernt {b1} GiB (Ausreisser 1.95, Normalfall 8.79 - das alte Minimum haette 1.95 geliefert)")
+              f"gelernt {b1} GiB (Ausreißer 1.95, Normalfall 8.79 - das alte Minimum haette 1.95 geliefert)")
         # Game hours do not belong here: under high load, no sampling occurs
         for _ in range(3):
             hb("big", 80, 30000, 2000); time.sleep(0.2)   # "Game": 29.3 GiB busy, GPU hot

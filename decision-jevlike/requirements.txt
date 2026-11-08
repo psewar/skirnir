@@ -1,4 +1,4 @@
-# Lokale Entwicklung/Training auf gpu-desktop (venv .venv, CUDA 12.8 fuer die RTX 5090):
+# Lokale Entwicklung/Training auf einem GPU-Rechner (venv .venv, CUDA 12.8, noetig fuer RTX-50-Karten):
 #   python -m venv .venv
 #   .venv\Scripts\python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
 #   .venv\Scripts\python -m pip install -r requirements.txt
