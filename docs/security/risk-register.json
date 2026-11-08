@@ -231,14 +231,14 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Compromised release or old valid manifest.",
-      "controls": "Signed agent manifest and hash; separate Ollama source/checksum.",
-      "next_action": "Define anti-rollback/recovery and signing-key rotation.",
+      "controls": "Signed agent manifest and hash; separate Ollama source/checksum. Since agent 0.28.0 the agent refuses a signed version older than the running release (ADR-0054); deliberate rollback only with the node-local update.allow_downgrade switch.",
+      "next_action": "Define signing-key rotation and recovery; practise a rotation.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "agent/updater_test.go",
         "agent/ollamaupdate_test.go"
       ],
-      "validation_gap": "V13: monotone version policy is not implemented."
+      "validation_gap": "V13: anti-rollback is implemented and unit-tested; signing-key rotation and recovery are not."
     },
     {
       "id": "TM-14",

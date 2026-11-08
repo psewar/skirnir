@@ -144,3 +144,49 @@ func TestUpdateReportKindAlwaysSent(t *testing.T) {
 		t.Fatalf("kind fehlt im Bericht: %s", b)
 	}
 }
+
+// ADR-0054 / TM-13: a validly signed but older manifest must not roll a release back.
+func TestDowngradeRefusal(t *testing.T) {
+	cases := []struct {
+		running, want  string
+		allow, refused bool
+	}{
+		{"0.27.0", "0.28.0", false, false},
+		{"0.27.0", "0.27.1", false, false},
+		{"0.27.0", "1.0.0", false, false},
+		{"0.27.0", "0.26.9", false, true},
+		{"0.27.0", "0.9.99", false, true},
+		{"0.27.0", "dev", false, true},
+		{"0.27.0", "0.28.0-rc1", false, true},
+		{"0.27.0", "0.26.9", true, false},
+		{"dev", "0.1.0", false, false},
+	}
+	for _, c := range cases {
+		err := downgradeRefusal(c.running, c.want, c.allow)
+		if (err != nil) != c.refused {
+			t.Fatalf("%s -> %s allow=%v: refused=%v, want %v (%v)", c.running, c.want, c.allow, err != nil, c.refused, err)
+		}
+		if err != nil && updateKind(err) != updateKindDowngrade {
+			t.Fatalf("%s -> %s: kind %q, want %q", c.running, c.want, updateKind(err), updateKindDowngrade)
+		}
+	}
+}
+
+func TestUpdaterVerifyOrderRefusesSignedDowngrade(t *testing.T) {
+	prev := version
+	version = "0.27.0"
+	defer func() { version = prev }()
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	sum := hex.EncodeToString(sha256.New().Sum(nil))
+	key := base64.StdEncoding.EncodeToString(pub)
+	old := signedOrder(t, priv, "0.26.1", "skirnir-agent-0.26.1-test", sum)
+	if _, err := newUpdater(UpdateCfg{PublicKey: key}, "", nil).verifyOrder(old); !errors.Is(err, errDowngrade) {
+		t.Fatalf("signed older manifest accepted: %v", err)
+	}
+	if _, err := newUpdater(UpdateCfg{PublicKey: key, AllowDowngrade: true}, "", nil).verifyOrder(old); err != nil {
+		t.Fatalf("explicit allow_downgrade refused: %v", err)
+	}
+	if _, err := newUpdater(UpdateCfg{PublicKey: key}, "", nil).verifyOrder(signedOrder(t, priv, "0.28.0", "skirnir-agent-0.28.0-test", sum)); err != nil {
+		t.Fatalf("newer manifest refused: %v", err)
+	}
+}

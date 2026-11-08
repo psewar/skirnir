@@ -2,59 +2,51 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "e667e107bd081e8ad107bb139734c74daae9dff3",
-  "change_digest": "75456b71eb9ae8ab3fb4eaea292a81af99ca29eb37330048817f9d5c83e5f844",
+  "base_sha": "5b97f09462ec253685aa867b92a66b1f44d1896b",
+  "change_digest": "9f373b4e58a2b02778df729ebb1e05f39e8b4eca3bbe62a40fe1b6aff272a7f6",
   "reviewed_paths": [
     "CHANGELOG.md",
     "README.de.md",
     "README.md",
-    "docs/adr/0053-control-port-requires-users-even-on-loopback.md",
+    "agent/config.example.yaml",
+    "agent/updater.go",
+    "agent/updater_test.go",
+    "docs/adr/0054-agent-refuses-signed-downgrades.md",
     "docs/adr/README.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md",
-    "router/config.example.yaml",
-    "router/skirnir_router/app.py",
-    "router/skirnir_router/auth.py",
-    "router/skirnir_router/config.py",
-    "test/selftest_config_load.py",
-    "test/selftest_security.py"
+    "docs/security/threat-model.md"
   ],
   "risk_ids": [
-    "TM-02"
+    "TM-13"
   ],
   "boundaries": [
-    "B2"
+    "B8"
   ],
-  "summary": "Router 0.19.0 (same unreleased v0.26.0 as ADR-0052): the control port requires users even on loopback (ADR-0053, TM-02). auth.basic_auth_middleware no longer serves loopback peers without users unless control_auth.allow_unauthenticated_loopback is the boolean true, the listener is literal 127.0.0.1 or ::1 and the peer is loopback; otherwise 503 before any handler or CSRF check. config validates the switch as a boolean (schema entry added) and app logs a start warning whenever no control users exist. The /v1/ tunnel path keeps its own Ed25519 authentication and is untouched. Breaking only for password-free development setups; the reference deployment configures control users and TLS. Rebased onto main after #90 and #93; German texts follow main's spelling.",
+  "summary": "Agent 0.28.0 (same unreleased v0.26.0 as the configuration-key check of ADR-0051) refuses signed downgrades (ADR-0054, TM-13). Updater.verifyOrder compares the signed manifest version (after the Ed25519 check, never the unsigned order field alone) with the running release via downgradeRefusal; an older or non-release target is refused with errDowngrade and reported as update kind 'downgrade' through updateKind (no message parsing). update.allow_downgrade, a field of the existing update block in the node-local YAML and out of the router's reach, permits a deliberate rollback; it is a known field, so the strict top-level key check of ADR-0051 is unaffected. A local 'dev' build is not checked. Version parsing accepts only MAJOR.MINOR.PATCH digits (max 6 per field, no overflow). The router keeps retrying a refused order after 6 h (agentupdate.retry_after), which is benign. Signing-key rotation and recovery stay open, so TM-13 stays open in the register. Rebased onto main after #91 and #93; German texts follow main's spelling.",
   "findings": [
     {
-      "id": "TM-02",
-      "evidence": "router 0.18.x auth.basic_auth_middleware served any loopback peer on a loopback listener without users, which a local reverse proxy also is.",
-      "resolution": "Fixed: explicit boolean development switch required (auth.py, config.py, app.py warning); selftest_security covers a proxy-like loopback peer, the switch, a remote peer and a non-loopback listener; the check fails against the previous middleware.",
-      "disposition": "fixed"
+      "id": "TM-13",
+      "evidence": "agent 0.27.0 Updater.verifyOrder refused only the running version; any older validly signed manifest was installable.",
+      "resolution": "Anti-rollback implemented and tested (agent/updater.go, updater_test.go); signing-key rotation and recovery remain open, so the risk stays open.",
+      "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_security.py",
+      "command": "cd agent && gofmt -l . && go vet ./... && go test -count=1 ./...",
       "result": "passed",
-      "evidence": "PASS loopback without users is denied unless explicitly allowed; PASS explicit development switch allows unauthenticated loopback; PASS development switch never opens the port to other addresses; PASS development switch needs a literal loopback listener."
+      "evidence": "gofmt clean, vet clean, ok github.com/psewar/skirnir/agent, including TestDowngradeRefusal and TestUpdaterVerifyOrderRefusesSignedDowngrade."
     },
     {
-      "command": "Negative check (before rebase): selftest_security.py against the previous middleware",
+      "command": "Negative check (before rebase): go test -run Downgrade with the previous agent/updater.go",
       "result": "passed",
-      "evidence": "AttributeError at 'loopback without users is denied unless explicitly allowed': the old middleware returned the handler result."
+      "evidence": "FAIL [build failed]: unknown field AllowDowngrade in struct literal of type UpdateCfg; the old updater has no downgrade protection."
     },
     {
-      "command": "python test/selftest_config_load.py",
+      "command": "ruff check .; python test/check_adr_index.py; python test/selftest_threat_review.py",
       "result": "passed",
-      "evidence": "PASS control_auth.allow_unauthenticated_loopback defaults to false; PASS invalid (allow_unauthenticated_loopback not boolean): Problem."
-    },
-    {
-      "command": "Every `python test/...` and `python router/...` command of the router CI job (ci.yml), except integration/e2e; ruff check .; check_adr_index.py",
-      "result": "passed",
-      "evidence": "No failures; All checks passed; ADR index ok: 53 ADRs; router.py --check config.example.yaml --pure: configuration ok."
+      "evidence": "All checks passed; ADR index ok: 54 ADRs; threat review self-test completed."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -68,7 +60,7 @@
     }
   ],
   "limitations": [
-    "A real reverse-proxy topology is not exercised in CI; the unit tests model its loopback peer.",
-    "PostgreSQL session-store integration and the nightly end-to-end suite were not run locally; CI runs the PostgreSQL job."
+    "Agent tests ran on Windows locally; Linux and the Windows cross-build run in CI.",
+    "Signing-key rotation and recovery are not part of this change."
   ]
 }
