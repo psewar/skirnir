@@ -2,24 +2,56 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "f564a1bb4e9d56767a0484ee8ddf8e135d1c3c3f",
-  "change_digest": "30813edfe1f7e3c1567077125c675d1e0aabdefe2a5bd5abdfbc33f825c18550",
+  "base_sha": "532546b797e015ad8470202cc13bd2dbbc870475",
+  "change_digest": "c50386e2d704ff9919536932d2fa7d9ec51af29c563b2778d324f8ad5eba01ac",
   "reviewed_paths": [
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs/security/risk-register.json",
+    "test/selftest_memory.py",
+    "test/selftest_sessions.py"
   ],
   "risk_ids": [
-    "TM-16"
+    "TM-09"
   ],
   "boundaries": [
-    "B9"
+    "B1",
+    "B4",
+    "B5"
   ],
-  "summary": "Documentation only: the v0.26.1 row of CHANGELOG.md links the published release (tag v0.26.1 at 4117772, router 0.19.1, agent 0.28.0; asset digests equal the 0.28.0 build), and the unreleased development-tooling section notes the Prometheus v3.16.0 update merged in #99. No code, workflow, checker, skill, threat model, register or configuration change.",
-  "findings": [],
+  "summary": "Test-only change for TM-09 (session and memory isolation). test/selftest_sessions.py gains route-inventory tests that enumerate every route under /v1/skirnir/sessions from the built API app (17+ method/template pairs): without credentials each answers 401 and no owner-scoped store method is called (health() from the store lifecycle is excluded by signature: only methods whose first parameter is owner count); with a valid client of the same project who does not own the session (store returns NOT_FOUND), no session-scoped route answers 2xx and every owner-scoped store call receives the authenticated caller. test/selftest_memory.py enumerates every route under /v1/skirnir/memory and /v1/skirnir/hindsight: under enforce all answer 401; under observe none answers 2xx and well-formed recall/retain requests reach the identity check and get 401; the memory backend and inference upstream receive no call. Observed behaviour, not a defect: under observe the memory handlers validate the body before checking identity, so a malformed body gets 400 instead of 401; no backend access happens either way. No router code, workflow, configuration or policy change.",
+  "findings": [
+    {
+      "id": "TM-09",
+      "evidence": "Session/memory isolation was tested for selected routes only; a route added later had no automatic coverage.",
+      "resolution": "Route-inventory tests with fault-injection evidence; token/grant rotation, the gateway with the gateway enabled and deployment coverage remain, so TM-09 stays open.",
+      "disposition": "baseline"
+    }
+  ],
   "tests": [
     {
-      "command": "gh release view v0.26.1 --json targetCommitish,assets",
+      "command": "python test/selftest_sessions.py",
       "result": "passed",
-      "evidence": "target 41177721b0027ded7d69500cc92b3056ba5b87c2; asset digests 2124b414182b... (linux) and 974d34c3d22b... (windows) equal the 0.28.0 build."
+      "evidence": "Ran 22 tests, OK (incl. test_every_session_route_requires_identity and test_every_session_route_scopes_store_access_to_the_caller)."
+    },
+    {
+      "command": "python test/selftest_memory.py",
+      "result": "passed",
+      "evidence": "Ran 41 tests, OK (incl. test_every_memory_route_requires_identity)."
+    },
+    {
+      "command": "Fault injection: session GET reads with a fixed owner 'alice' (session_api.py, reverted)",
+      "result": "passed",
+      "evidence": "FAIL for DELETE/GET /{session_id}, /checkpoints, /checkpoints/latest, ...: [('get', 'alice')]."
+    },
+    {
+      "command": "Fault injection: memory.scope_for treats an unauthenticated request as client-a (memory.py, reverted)",
+      "result": "passed",
+      "evidence": "FAIL observe recall 200 != 401 and retain 202 != 401 (plus the existing test_auth_and_client_owned_memory)."
+    },
+    {
+      "command": "ruff check .",
+      "result": "passed",
+      "evidence": "All checks passed."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -32,5 +64,8 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": []
+  "limitations": [
+    "The memory-gateway routes are disabled in the memory harness (404 under observe); under enforce the middleware refuses them; their owner scoping with the gateway enabled is not part of this inventory.",
+    "Token and grant rotation and deployment checks are not covered."
+  ]
 }

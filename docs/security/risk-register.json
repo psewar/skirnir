@@ -158,15 +158,15 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Stolen token or foreign UUID/project alias access.",
-      "controls": "Credential principals and scoped authorization.",
-      "next_action": "Test every route and token/grant rotation.",
+      "controls": "Credential principals and scoped authorization. Route-inventory tests enumerate every registered session and memory route: none is reachable without an identity, and every owner-scoped session-store call uses the authenticated caller, never an owner taken from the request.",
+      "next_action": "Token and grant rotation tests; the memory gateway routes with the gateway enabled; deployment checks.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_sessions.py",
         "test/selftest_memory.py",
         "test/selftest_interoperability.py"
       ],
-      "validation_gap": "V8: complete endpoint and deployment coverage needed."
+      "validation_gap": "V8: route inventory covers authentication for all session and memory routes and owner scoping for session routes; gateway routes with the gateway enabled, rotation and deployment coverage remain."
     },
     {
       "id": "TM-10",

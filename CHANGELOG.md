@@ -2,6 +2,7 @@
 
 ## Unreleased — development tooling
 
+- Route-inventory tests (TM-09): the session and memory self-tests enumerate every registered route from the router, so a route added later is covered automatically. No route answers without an identity (401 under `enforce`, never 2xx under `observe`, the memory backend is never reached), and every owner-scoped session-store call uses the authenticated caller. Fault injection (a fixed owner, a skipped identity check) makes both tests fail.
 - Monitoring: Prometheus v3.15.1 → v3.16.0 (#99, digest-pinned; the first image update proposed by Dependabot's docker-compose ecosystem). The stack's flags, scrape configuration and retention are unaffected by the 3.16 changes.
 - Third-party references are pinned (ADR-0055, TM-16): workflow actions to commit SHAs, `govulncheck` and `pip-audit` to versions, the monitoring images and the decision-service base images to digests (the running monitoring stack already used exactly these digests). `test/check_pinned_references.py` enforces it in CI; Dependabot also updates the image digests. `pip-audit` additionally audits the session-store, development, memory-test and rerank-server requirements.
 

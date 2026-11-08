@@ -6,6 +6,7 @@ Run: python test/selftest_sessions.py
 import asyncio
 import copy
 import hashlib
+import inspect
 import io
 import os
 import sys
@@ -95,6 +96,52 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def request(self, method="GET", path=None, token="alice", **kwargs):
         headers = {} if token is None else {"Authorization": "Bearer " + token}
         return await self.client.request(method, path or URL + "/" + self.sid, headers=headers, **kwargs)
+
+    # TM-09: every registered session route, found from the router itself, so a route added later is covered too.
+    def session_routes(self):
+        api, _ = app.build_apps()
+        routes = set()
+        for route in api.router.routes():
+            info = route.resource.get_info() if route.resource is not None else {}
+            template = info.get("formatter") or info.get("path") or ""
+            if template.startswith(URL) and route.method not in ("HEAD", "OPTIONS"):
+                routes.add((route.method, template))
+        return sorted(routes)
+
+    def owner_arguments(self):
+        """The owner each owner-scoped store call received (first parameter named owner)."""
+        seen = []
+        for name, args, kwargs in self.store.mock_calls:
+            method = getattr(SessionStore, name.split(".")[0], None)
+            params = list(inspect.signature(method).parameters)[1:] if method else []
+            if params and params[0] == "owner":
+                seen.append((name, kwargs.get("owner", args[0] if args else None)))
+        return seen
+
+    async def test_every_session_route_requires_identity(self):
+        routes = self.session_routes()
+        self.assertGreaterEqual(len(routes), 15, routes)
+        for method, template in routes:
+            with self.subTest(route=f"{method} {template}"):
+                response = await self.request(method, template.replace("{session_id}", self.sid), token=None, json={})
+                self.assertEqual(response.status, 401)
+        # health() comes from the store lifecycle, not from these requests; no owner-scoped call may happen at all.
+        self.assertEqual(self.owner_arguments(), [], "no owner-scoped store access without an identity")
+
+    async def test_every_session_route_scopes_store_access_to_the_caller(self):
+        # bob is a valid client of the same project; the session belongs to alice, so the store finds nothing for bob.
+        for method_name in ("get", "update", "delete", "read", "context", "compactions", "search"):
+            getattr(self.store, method_name).return_value = NOT_FOUND
+        self.store.append.return_value = NOT_FOUND
+        self.store.discover.return_value = []
+        for method, template in self.session_routes():
+            with self.subTest(route=f"{method} {template}"):
+                self.store.reset_mock()
+                response = await self.request(method, template.replace("{session_id}", self.sid), token="bob",
+                                              json={"project": "work", "status": "archived"})
+                self.assertFalse(200 <= response.status < 300 and "{session_id}" in template,
+                                 f"{method} {template} answered {response.status} for a session of another owner")
+                self.assertTrue(all(owner == "bob" for _, owner in self.owner_arguments()), self.owner_arguments())
 
     async def test_create_explicit_and_no_owner_spoof(self):
         response = await self.request("POST", URL, json={"project": "work", "metadata": {"name": "task"}})

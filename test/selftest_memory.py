@@ -271,6 +271,35 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
 
 
 class MemoryHttpTests(MemoryHarness):
+    async def test_every_memory_route_requires_identity(self):
+        # TM-09: every registered memory and Hindsight-gateway route, found from the router, so later routes are covered.
+        api, _ = app.build_apps()
+        routes = set()
+        for route in api.router.routes():
+            info = route.resource.get_info() if route.resource is not None else {}
+            template = info.get("formatter") or info.get("path") or ""
+            if template.startswith(("/v1/skirnir/memory", "/v1/skirnir/hindsight")) and route.method not in ("HEAD", "OPTIONS"):
+                routes.add((route.method, template))
+        self.assertGreaterEqual(len(routes), 10, sorted(routes))
+        for mode in ("enforce", "observe"):
+            state.CFG.client_auth["mode"], state.CLIENT_AUTH_MODE = mode, None
+            for method, template in sorted(routes):
+                path = template.replace("{alias}", PROJECT).replace("{operation_id}", "op-synthetic")
+                with self.subTest(mode=mode, route=f"{method} {path}"):
+                    r = await self.client.request(method, path, json={"query": "synthetic", "items": []})
+                    if mode == "enforce":
+                        self.assertEqual(r.status, 401)
+                    else:   # observe: the route refuses itself (malformed body 400, disabled gateway 404, otherwise 401)
+                        self.assertFalse(200 <= r.status < 300, r.status)
+            # Well-formed requests reach the identity check in observe mode too.
+            for path, body in ((memory.PREFIX + "/recall", {"project": PROJECT, "query": "synthetic"}),
+                               (memory.PREFIX + "/retain", {"project": PROJECT, "event_id": "e-1", "content": "synthetic",
+                                                            "confirmed": True})):
+                with self.subTest(mode=mode, route=path, body="valid"):
+                    self.assertEqual((await self.client.post(path, json=body)).status, 401)
+        self.assertEqual(self.calls, [], "the memory backend is never reached without an identity")
+        self.assertEqual(self.upstream_bodies, [])
+
     async def test_protocol_and_bank_isolation(self):
         for token in ("client-a", "client-b"):
             r = await self.call(token=token)
