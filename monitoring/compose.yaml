@@ -12,7 +12,7 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=90d
+      # retention (90 days) lives in prometheus.yml (storage.tsdb.retention); the --storage.tsdb.retention.* flags are deprecated
       - --web.listen-address=0.0.0.0:9090
       - --web.enable-lifecycle
     ports:
