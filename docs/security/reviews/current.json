@@ -2,133 +2,36 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "14673bd35926d5c3ccb281c2eefe3979f62148fe",
-  "change_digest": "3fd9e806ef9c1fe3d66273106d884206232d7b0e29eec404dac0a4628eb24cad",
+  "base_sha": "41177721b0027ded7d69500cc92b3056ba5b87c2",
+  "change_digest": "757104aed536a16c605339c9bb9998df91a22360beea717dd6615697c0cd1620",
   "reviewed_paths": [
-    ".github/dependabot.yml",
-    ".github/workflows/ci.yml",
-    ".github/workflows/live-memory.yml",
-    ".github/workflows/security.yml",
-    "AGENTS.md",
-    "CHANGELOG.md",
-    "decision-embed/Dockerfile",
-    "decision-jevlike/Dockerfile",
-    "docs/adr/0055-pin-third-party-references-immutably.md",
-    "docs/adr/0056-owner-only-router-files-and-log-canaries.md",
-    "docs/adr/0057-bound-unauthenticated-statistics-and-audit-volume.md",
-    "docs/adr/README.md",
-    "docs/security/risk-register.json",
-    "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md",
-    "monitoring/compose.yaml",
-    "router/skirnir-router.service",
-    "router/skirnir_router/auth.py",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/config.py",
-    "router/skirnir_router/fallback_observation.py",
-    "router/skirnir_router/registry.py",
-    "router/skirnir_router/state.py",
-    "test/check_pinned_references.py",
-    "test/selftest_log_hygiene.py",
-    "test/selftest_pinned_references.py",
-    "test/selftest_security.py"
+    "monitoring/compose.yaml"
   ],
   "risk_ids": [
-    "TM-08",
-    "TM-15",
     "TM-16"
   ],
   "boundaries": [
-    "B1",
-    "B8",
     "B9"
   ],
-  "summary": "Supply-chain pinning (ADR-0055, TM-16). In ci.yml, live-memory.yml and security.yml every third-party action moves from its major tag to the commit SHA of the current release (checkout v7.0.1, setup-python v7.1.0, setup-go v7.0.0, upload-artifact v7.0.2; each SHA equals the current v7 tag, so behaviour is unchanged); threat-model.yml, threat-review.yml and trusted-security-gate.yml were already pinned and are untouched. govulncheck goes from @latest to v1.9.0 and pip-audit to ==2.10.1. pip-audit now also audits router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt and rerank-server/requirements.txt (all clean locally); the rerank server's exact pins are audited with --no-deps --disable-pip because they need Python >= 3.12 (numpy 2.5.4) while the job runs 3.11, so its transitive dependencies are not audited; decision-jevlike stays out because it installs a git dependency and an unpinned transformers stack (noted). monitoring/compose.yaml pins prom/prometheus:v3.15.1 and grafana/grafana:13.3.0 to their multi-arch index digests, verified equal to the RepoDigests of the containers running in the reference deployment, so a redeploy changes nothing. The decision-service Dockerfiles pin python:3.11-slim to its index digest. Dependabot gains docker-compose (/monitoring) and docker (decision services). test/check_pinned_references.py enforces the rule in CI (workflow actions, go install, pip tools, compose images, Dockerfile FROM) with a self-test of rejected and accepted forms. Permissions, triggers, secrets and job logic are unchanged; the ADR-0050 Dependabot exemption parser accepts the SHA-plus-version-comment form, so future action bumps keep that path. Workflow and review-policy changes should still be looked at by the maintainer. Stacked on that change: router 0.19.1 makes its files owner-only and adds a secret-canary test (ADR-0056, TM-15). common.open_private opens with O_CREAT mode 0600 and fchmods an existing file to 0600 where available; it replaces open() at all seven router write sites (audit log, journal append and compaction, registry, UI overrides with token hashes, save_json_file users such as metrics, fallback observations). Errors still surface as OSError to the same except OSError boundaries as before. The systemd unit adds UMask=0077. test/selftest_log_hygiene.py runs the real API and control apps in-process with canaries (wrong/valid client token, wrong/valid control password, a prompt on the Ollama and OpenAI paths, a token rotated through POST /admin/clients/<name>/token) and searches every captured log record, audit.jsonl, events.jsonl and roles.yaml after confirming the events were recorded; on POSIX it checks the 0600 modes and the tightening of a pre-existing 0644 file. Audit field content is unchanged (no prompts, no tokens; rotation logs only an 8-character hash prefix). Stacked further: bounded pre-authentication state (ADR-0057, TM-08). auth.client_auth_middleware now keeps unauthenticated sources in an insertion-ordered table refreshed on every hit and evicts the least recently seen beyond MAX_UNAUTH_SOURCES = 1024 (evictions counted, shown as unauthenticated_evicted in client_auth_view). _audit_unauth writes one auth_denied/auth_missing line per source and event kind every 300 s and at most 120 a minute over all sources (deque of timestamps); withheld lines are counted per source (suppressed) and globally (suppressed_all) and reported in the next written line. Before, enforce wrote a line for every refusal. The deny decision, status codes, per-source totals and the identified-client path (rate limit, inference refusal) are unchanged; audit field content stays free of tokens and prompts. The new structures are touched only on the unauthenticated path and are O(1) amortised per request.",
+  "summary": "Dependabot bump of the monitoring Prometheus image from v3.15.1 to v3.16.0 in monitoring/compose.yaml; only the tag and its digest change. The digest sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06 equals the current multi-arch index digest of prom/prometheus:v3.16.0 on Docker Hub, so the reference stays immutable (ADR-0055). Compose bumps are outside the narrow Dependabot exemption of ADR-0050, hence this record. Read the v3.16.0 release notes (published 2026-11-05): the [CHANGE] entries concern experimental search endpoints, --web.external-url defaulting to https only with --web.config.file TLS (not used here), PromQL sample statistics, deprecated remote-write 2.0 metadata metrics, remote-write receiver counting and exemplar label uniqueness; none affects this stack's flags (config.file, tsdb.path, web.listen-address, web.enable-lifecycle), its scrape configuration or the storage.tsdb.retention block. User 65534, the loopback port binding, volumes and secrets are unchanged. No new trust boundary, port, credential or network destination.",
   "findings": [
     {
       "id": "TM-16",
-      "evidence": "Before: 23 movable references (actions by tag in three workflows, govulncheck@latest, unversioned pip-audit, two compose images and two base images by tag); pip-audit covered only router/requirements.txt.",
-      "resolution": "Pinned and enforced in CI; optional requirement sets audited. Hash-locked Python installs and release provenance remain open, so TM-16 stays open in the register.",
-      "disposition": "baseline"
-    },
-    {
-      "id": "TM-15",
-      "evidence": "Router 0.19.0 created audit.jsonl, events.jsonl and roles.yaml with the process umask (0644 observed under Linux in the negative check); the no-secrets rule for logs was untested.",
-      "resolution": "Owner-only files in code and unit umask, CI canary test; rotation, backups and independent retention remain open, so TM-15 stays open.",
-      "disposition": "baseline"
-    },
-    {
-      "id": "TM-08",
-      "evidence": "Router 0.19.0: CLIENT_STATS['unauth'] grew one entry per source address without limit and enforce wrote an audit line per refusal (measured: 1324 sources -> 1325 entries, 1324 lines).",
-      "resolution": "Bounded table and throttled audit with counts; concurrency/time/byte/cost limits for authenticated traffic remain, so TM-08 stays open.",
+      "evidence": "A third-party container image is updated; a compromised release would run with the stack's metrics credentials.",
+      "resolution": "Pre-existing and unchanged in scope: the image stays pinned by digest (verified against the registry), runs as nobody with the port bound to loopback; release notes reviewed.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_pinned_references.py && python test/check_pinned_references.py",
+      "command": "Docker Hub registry HEAD /v2/prom/prometheus/manifests/v3.16.0 (index media types)",
       "result": "passed",
-      "evidence": "0 failure(s) over 19 rejected/accepted cases; Pinned references: 0 finding(s)."
+      "evidence": "Docker-Content-Digest sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06, identical to the pinned digest."
     },
     {
-      "command": "Negative check: python test/check_pinned_references.py on the unchanged tree (git stash)",
+      "command": "python test/check_pinned_references.py",
       "result": "passed",
-      "evidence": "Pinned references: 23 finding(s), e.g. 'monitoring/compose.yaml:35: image grafana/grafana:13.3.0 has no @sha256 digest'."
-    },
-    {
-      "command": "python -m pip_audit -r <file> (pip-audit 2.10.1) for router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt, rerank-server/requirements.txt",
-      "result": "passed",
-      "evidence": "No known vulnerabilities found (each). CI on Python 3.11 could not resolve rerank-server (numpy==2.5.4 needs >= 3.12); python -m pip_audit --no-deps --disable-pip -r rerank-server/requirements.txt: No known vulnerabilities found. CI showed that --no-deps alone still dry-run installs the pins with pip; --disable-pip avoids that."
-    },
-    {
-      "command": "Image digests: Docker Hub index digest lookup and docker image inspect RepoDigests of the running monitoring containers",
-      "result": "passed",
-      "evidence": "prometheus sha256:fa330227...191a2 and grafana sha256:488984b7...0b205 match the running containers."
-    },
-    {
-      "command": "gh api repos/<action>/commits/<tag> for the four actions",
-      "result": "passed",
-      "evidence": "Release SHAs equal the current v7 major tags (checkout 3d3c42e5, setup-python 6d4fd22b, setup-go b7ad1dad, upload-artifact cf430e03)."
-    },
-    {
-      "command": "ruff check .; check_adr_index.py; YAML parse of all workflows, dependabot.yml and monitoring/compose.yaml; selftest_threat_review.py; selftest_trusted_gate.py",
-      "result": "passed",
-      "evidence": "All checks passed; ADR index ok: 55 ADRs; yaml ok; both self-tests exit 0."
-    },
-    {
-      "command": "python test/selftest_log_hygiene.py (Windows)",
-      "result": "passed",
-      "evidence": "0 failure(s); file-mode checks skipped (no POSIX mode bits)."
-    },
-    {
-      "command": "skirnir-ops/suite/selftest_linux.sh <worktree> selftest_log_hygiene.py (WSL, Linux)",
-      "result": "passed",
-      "evidence": "rc=0, 0 failure(s), PASS: 40 including 0600 modes and tightening of an existing file."
-    },
-    {
-      "command": "Negative check (Linux): selftest_log_hygiene.py with router/ from main (git stash)",
-      "result": "passed",
-      "evidence": "FAIL audit log is owner-only (0600) [0o644]; FAIL journal ... [0o644]; FAIL overrides ... [0o644]."
-    },
-    {
-      "command": "Every `python test/...` and `python router/...` command of the router CI job, except integration/e2e; ruff; router.py --check config.example.yaml --pure; check_adr_index.py",
-      "result": "passed",
-      "evidence": "No failures; ADR index ok: 56 ADRs."
-    },
-    {
-      "command": "python test/selftest_security.py (TM-08 checks)",
-      "result": "passed",
-      "evidence": "PASS a repeating source writes one audit line per interval; PASS another event kind of the same source is written and reports what was withheld; PASS an address spray cannot grow the source table; PASS evicted sources are counted; PASS an address spray is capped by the per-minute audit budget; PASS lines withheld by the budget are counted; PASS the admin view reports evictions."
-    },
-    {
-      "command": "Behaviour comparison script (5 refusals of one source, spray of 1324 sources) against router/skirnir_router/auth.py old and new",
-      "result": "passed",
-      "evidence": "old: 5 lines, 1325 sources, 1324 lines; new: 1 line, 1024 sources, 119 lines (budget 120 incl. the first)."
-    },
-    {
-      "command": "python test/run_tests.py (end-to-end suite, local)",
-      "result": "passed",
-      "evidence": "rc=0, '0 failures: []', including the audit-log check for auth_missing, forbidden, rate_limited, auth_denied and client_auth_mode."
+      "evidence": "Pinned references: 0 finding(s)."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -142,10 +45,7 @@
     }
   ],
   "limitations": [
-    "The new pip-audit loop and the docker/docker-compose Dependabot ecosystems are first exercised in CI and on GitHub.",
-    "The decision-service images were not rebuilt with the pinned base image.",
-    "decision-jevlike requirements are not audited (git dependency, unpinned transformers stack); hash-locked Python installs and release provenance remain open.",
-    "rerank-server: only its exact pins are audited (--no-deps --disable-pip), not their transitive dependencies.",
-    "The canary test covers authentication, inference without a node and token rotation; memory, session and upstream error paths are not covered."
+    "The image was not started; deploy_ct.py checks health, scrape target and the first data point when it rolls out.",
+    "v3.16.0 was published on 2026-11-05; the operator's 7-day minimum image age is reached on 2026-11-12."
   ]
 }
