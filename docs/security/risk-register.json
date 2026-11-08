@@ -267,13 +267,14 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Metadata/secrets leak or local audit is altered.",
-      "controls": "Audit intends to omit prompts and tokens.",
-      "next_action": "Test canaries, redaction, ACLs, rotation and backup controls.",
+      "controls": "Audit omits prompts and tokens; router-written files are owner-only (common.open_private, unit UMask=0077, ADR-0056); a CI canary test covers client and control authentication, inference paths and token rotation.",
+      "next_action": "Log rotation and retention, backup controls for these files, independent audit retention; canaries for memory and session paths.",
       "owner_role": "maintainer and operator",
       "test_refs": [
-        "test/check_public_changes.py"
+        "test/check_public_changes.py",
+        "test/selftest_log_hygiene.py"
       ],
-      "validation_gap": "V14: source scan does not prove runtime-log hygiene."
+      "validation_gap": "V14: the canary test covers authentication, inference without a node and token rotation; memory, session and upstream error paths, rotation and backups are not covered."
     },
     {
       "id": "TM-16",

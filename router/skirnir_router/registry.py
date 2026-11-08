@@ -18,7 +18,7 @@ else:  # pragma: no cover
     InvalidSignature = Ed25519PublicKey = None
 
 from . import agentupdate, nodes, ollamaupdate, state, tunnel, values
-from .common import BASE64, VERSION, log, normalize_mac, read_env_value, read_json, safe_node_name
+from .common import BASE64, VERSION, log, normalize_mac, open_private, read_env_value, read_json, safe_node_name
 from .outcome import Problem, failed, invalid, unauthenticated
 
 # Unapproved identities are untrusted, even when they sign their own key.
@@ -93,7 +93,7 @@ class NodeRegistry:
         will retry; the caller receives the Problem."""
         tmp = self.path + ".tmp"
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
+            with open_private(tmp, "w") as f:
                 json.dump({"nodes": self.nodes, "saved": time.strftime("%Y-%m-%dT%H:%M:%S")}, f, indent=1, ensure_ascii=False)
             os.replace(tmp, self.path)
         except OSError as e:  # exception-ok: file system boundary

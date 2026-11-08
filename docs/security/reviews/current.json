@@ -3,7 +3,7 @@
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
   "base_sha": "14673bd35926d5c3ccb281c2eefe3979f62148fe",
-  "change_digest": "ef8172fe5d264df2342a4e381cd700df0ad8c371aadb4b20ff334314b8673b6c",
+  "change_digest": "a28303d8c072de29616fdf23b7e8ee227b0bfe660d4fe3a95e21922362c603b9",
   "reviewed_paths": [
     ".github/dependabot.yml",
     ".github/workflows/ci.yml",
@@ -14,27 +14,43 @@
     "decision-embed/Dockerfile",
     "decision-jevlike/Dockerfile",
     "docs/adr/0055-pin-third-party-references-immutably.md",
+    "docs/adr/0056-owner-only-router-files-and-log-canaries.md",
     "docs/adr/README.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
     "monitoring/compose.yaml",
+    "router/skirnir-router.service",
+    "router/skirnir_router/auth.py",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/config.py",
+    "router/skirnir_router/fallback_observation.py",
+    "router/skirnir_router/registry.py",
+    "router/skirnir_router/state.py",
     "test/check_pinned_references.py",
+    "test/selftest_log_hygiene.py",
     "test/selftest_pinned_references.py"
   ],
   "risk_ids": [
+    "TM-15",
     "TM-16"
   ],
   "boundaries": [
     "B8",
     "B9"
   ],
-  "summary": "Supply-chain pinning (ADR-0055, TM-16). In ci.yml, live-memory.yml and security.yml every third-party action moves from its major tag to the commit SHA of the current release (checkout v7.0.1, setup-python v7.1.0, setup-go v7.0.0, upload-artifact v7.0.2; each SHA equals the current v7 tag, so behaviour is unchanged); threat-model.yml, threat-review.yml and trusted-security-gate.yml were already pinned and are untouched. govulncheck goes from @latest to v1.9.0 and pip-audit to ==2.10.1. pip-audit now also audits router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt and rerank-server/requirements.txt (all clean locally); the rerank server's exact pins are audited with --no-deps --disable-pip because they need Python >= 3.12 (numpy 2.5.4) while the job runs 3.11, so its transitive dependencies are not audited; decision-jevlike stays out because it installs a git dependency and an unpinned transformers stack (noted). monitoring/compose.yaml pins prom/prometheus:v3.15.1 and grafana/grafana:13.3.0 to their multi-arch index digests, verified equal to the RepoDigests of the containers running in the reference deployment, so a redeploy changes nothing. The decision-service Dockerfiles pin python:3.11-slim to its index digest. Dependabot gains docker-compose (/monitoring) and docker (decision services). test/check_pinned_references.py enforces the rule in CI (workflow actions, go install, pip tools, compose images, Dockerfile FROM) with a self-test of rejected and accepted forms. Permissions, triggers, secrets and job logic are unchanged; the ADR-0050 Dependabot exemption parser accepts the SHA-plus-version-comment form, so future action bumps keep that path. Workflow and review-policy changes should still be looked at by the maintainer.",
+  "summary": "Supply-chain pinning (ADR-0055, TM-16). In ci.yml, live-memory.yml and security.yml every third-party action moves from its major tag to the commit SHA of the current release (checkout v7.0.1, setup-python v7.1.0, setup-go v7.0.0, upload-artifact v7.0.2; each SHA equals the current v7 tag, so behaviour is unchanged); threat-model.yml, threat-review.yml and trusted-security-gate.yml were already pinned and are untouched. govulncheck goes from @latest to v1.9.0 and pip-audit to ==2.10.1. pip-audit now also audits router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt and rerank-server/requirements.txt (all clean locally); the rerank server's exact pins are audited with --no-deps --disable-pip because they need Python >= 3.12 (numpy 2.5.4) while the job runs 3.11, so its transitive dependencies are not audited; decision-jevlike stays out because it installs a git dependency and an unpinned transformers stack (noted). monitoring/compose.yaml pins prom/prometheus:v3.15.1 and grafana/grafana:13.3.0 to their multi-arch index digests, verified equal to the RepoDigests of the containers running in the reference deployment, so a redeploy changes nothing. The decision-service Dockerfiles pin python:3.11-slim to its index digest. Dependabot gains docker-compose (/monitoring) and docker (decision services). test/check_pinned_references.py enforces the rule in CI (workflow actions, go install, pip tools, compose images, Dockerfile FROM) with a self-test of rejected and accepted forms. Permissions, triggers, secrets and job logic are unchanged; the ADR-0050 Dependabot exemption parser accepts the SHA-plus-version-comment form, so future action bumps keep that path. Workflow and review-policy changes should still be looked at by the maintainer. Stacked on that change: router 0.19.1 makes its files owner-only and adds a secret-canary test (ADR-0056, TM-15). common.open_private opens with O_CREAT mode 0600 and fchmods an existing file to 0600 where available; it replaces open() at all seven router write sites (audit log, journal append and compaction, registry, UI overrides with token hashes, save_json_file users such as metrics, fallback observations). Errors still surface as OSError to the same except OSError boundaries as before. The systemd unit adds UMask=0077. test/selftest_log_hygiene.py runs the real API and control apps in-process with canaries (wrong/valid client token, wrong/valid control password, a prompt on the Ollama and OpenAI paths, a token rotated through POST /admin/clients/<name>/token) and searches every captured log record, audit.jsonl, events.jsonl and roles.yaml after confirming the events were recorded; on POSIX it checks the 0600 modes and the tightening of a pre-existing 0644 file. Audit field content is unchanged (no prompts, no tokens; rotation logs only an 8-character hash prefix).",
   "findings": [
     {
       "id": "TM-16",
       "evidence": "Before: 23 movable references (actions by tag in three workflows, govulncheck@latest, unversioned pip-audit, two compose images and two base images by tag); pip-audit covered only router/requirements.txt.",
       "resolution": "Pinned and enforced in CI; optional requirement sets audited. Hash-locked Python installs and release provenance remain open, so TM-16 stays open in the register.",
+      "disposition": "baseline"
+    },
+    {
+      "id": "TM-15",
+      "evidence": "Router 0.19.0 created audit.jsonl, events.jsonl and roles.yaml with the process umask (0644 observed under Linux in the negative check); the no-secrets rule for logs was untested.",
+      "resolution": "Owner-only files in code and unit umask, CI canary test; rotation, backups and independent retention remain open, so TM-15 stays open.",
       "disposition": "baseline"
     }
   ],
@@ -70,6 +86,26 @@
       "evidence": "All checks passed; ADR index ok: 55 ADRs; yaml ok; both self-tests exit 0."
     },
     {
+      "command": "python test/selftest_log_hygiene.py (Windows)",
+      "result": "passed",
+      "evidence": "0 failure(s); file-mode checks skipped (no POSIX mode bits)."
+    },
+    {
+      "command": "skirnir-ops/suite/selftest_linux.sh <worktree> selftest_log_hygiene.py (WSL, Linux)",
+      "result": "passed",
+      "evidence": "rc=0, 0 failure(s), PASS: 40 including 0600 modes and tightening of an existing file."
+    },
+    {
+      "command": "Negative check (Linux): selftest_log_hygiene.py with router/ from main (git stash)",
+      "result": "passed",
+      "evidence": "FAIL audit log is owner-only (0600) [0o644]; FAIL journal ... [0o644]; FAIL overrides ... [0o644]."
+    },
+    {
+      "command": "Every `python test/...` and `python router/...` command of the router CI job, except integration/e2e; ruff; router.py --check config.example.yaml --pure; check_adr_index.py",
+      "result": "passed",
+      "evidence": "No failures; ADR index ok: 56 ADRs."
+    },
+    {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
@@ -84,6 +120,7 @@
     "The new pip-audit loop and the docker/docker-compose Dependabot ecosystems are first exercised in CI and on GitHub.",
     "The decision-service images were not rebuilt with the pinned base image.",
     "decision-jevlike requirements are not audited (git dependency, unpinned transformers stack); hash-locked Python installs and release provenance remain open.",
-    "rerank-server: only its exact pins are audited (--no-deps --disable-pip), not their transitive dependencies."
+    "rerank-server: only its exact pins are audited (--no-deps --disable-pip), not their transitive dependencies.",
+    "The canary test covers authentication, inference without a node and token rotation; memory, session and upstream error paths are not covered."
   ]
 }

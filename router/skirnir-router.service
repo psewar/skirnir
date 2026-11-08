@@ -32,6 +32,8 @@ ReadWritePaths=/etc/skirnir-router
 StateDirectory=skirnir-router
 LogsDirectory=skirnir-router
 PrivateTmp=true
+# Files the service creates are owner-only (ADR-0056): audit log, journal, registry, token-hash overrides.
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

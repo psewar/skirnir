@@ -31,6 +31,7 @@ jobs:
       - run: python test/selftest_trusted_gate.py
       - name: Third-party references are pinned (ADR-0055)
         run: python test/selftest_pinned_references.py && python test/check_pinned_references.py
+      - run: python test/selftest_log_hygiene.py
       - run: python test/selftest_english_names.py
       - run: python test/selftest_toolcall_rescue.py
       - run: python test/selftest_availability.py

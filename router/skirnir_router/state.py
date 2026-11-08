@@ -126,7 +126,8 @@ def _decisions_compact():
         return
     tmp = DECISIONS_FILE + ".tmp"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        from .common import open_private   # late, like the other helpers here
+        with open_private(tmp, "w") as f:
             for e in DECISIONS:
                 f.write(json.dumps(e, ensure_ascii=False) + "\n")
         os.replace(tmp, DECISIONS_FILE)
@@ -153,7 +154,8 @@ def decisions_append(entry):
         return
     import json
     try:
-        with open(DECISIONS_FILE, "a", encoding="utf-8") as f:
+        from .common import open_private   # late, like the other helpers here
+        with open_private(DECISIONS_FILE, "a") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except (OSError, TypeError, ValueError) as e:  # exception-ok: file system boundary; json reports unencodable entries only so
         _warn_journal(e)
