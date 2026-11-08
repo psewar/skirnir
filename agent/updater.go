@@ -32,6 +32,10 @@ import (
 type UpdateCfg struct {
 	Enabled   *bool  `yaml:"enabled"`
 	PublicKey string `yaml:"public_key"` // base64, Ed25519; deploy.py --agent displays it after signing
+	// PublicKeys (ADR-0058): further trusted operator keys, so a signing key can be rotated without a gap: add the new key
+	// on every node, sign with it, then remove the old one. Only the node's own configuration lists keys; the router
+	// cannot add one.
+	PublicKeys []string `yaml:"public_keys"`
 	// AllowDowngrade (ADR-0054): an older signed version is installed only with this explicit switch, for a deliberate
 	// recovery. Without it an old but validly signed manifest cannot roll the agent back to a known-vulnerable release.
 	AllowDowngrade bool `yaml:"allow_downgrade"`
@@ -83,6 +87,31 @@ func downgradeRefusal(running, want string, allow bool) error {
 }
 
 func (c *UpdateCfg) on() bool { return c.Enabled == nil || *c.Enabled }
+
+// trustedKeys decodes public_key and public_keys. Every configured key must be a valid Ed25519 key: a typo is reported
+// with its position instead of silently shrinking the trusted set during a rotation.
+func (c *UpdateCfg) trustedKeys() ([]ed25519.PublicKey, error) {
+	raw := c.PublicKeys
+	if c.PublicKey != "" {
+		raw = append([]string{c.PublicKey}, raw...)
+	}
+	keys := make([]ed25519.PublicKey, 0, len(raw))
+	for i, k := range raw {
+		pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(k))
+		if err != nil || len(pub) != ed25519.PublicKeySize {
+			entry := i + 1 // position within public_keys
+			if c.PublicKey != "" {
+				if i == 0 {
+					return nil, errors.New("update.public_key ist kein Ed25519-Schluessel (32 Bytes base64)")
+				}
+				entry = i
+			}
+			return nil, fmt.Errorf("update.public_keys enthaelt einen ungueltigen Schluessel (Eintrag %d, 32 Bytes base64 erwartet)", entry)
+		}
+		keys = append(keys, ed25519.PublicKey(pub))
+	}
+	return keys, nil
+}
 
 // UpdateOrder: control message {"t":"update", ...} from the router.
 type UpdateOrder struct {
@@ -197,6 +226,16 @@ type manifestFile struct {
 	Size   int64  `json:"size"`
 }
 
+// signedByAny: the signature verifies under one of the trusted operator keys (ADR-0058).
+func signedByAny(keys []ed25519.PublicKey, msg, sig []byte) bool {
+	for _, k := range keys {
+		if ed25519.Verify(k, msg, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 // verifyOrder checks signature and manifest and returns the matching file entry.
 func (u *Updater) verifyOrder(o UpdateOrder) (*manifestFile, error) {
 	if !u.cfg.on() {
@@ -205,15 +244,15 @@ func (u *Updater) verifyOrder(o UpdateOrder) (*manifestFile, error) {
 	if o.Version == version {
 		return nil, fmt.Errorf("laeuft schon mit %s", version)
 	}
-	if u.cfg.PublicKey == "" {
+	keys, err := u.cfg.trustedKeys()
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
 		return nil, errors.New("kein update.public_key konfiguriert - Manifest nicht pruefbar")
 	}
-	pub, err := base64.StdEncoding.DecodeString(u.cfg.PublicKey)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		return nil, errors.New("update.public_key ist kein Ed25519-Schluessel (32 Bytes base64)")
-	}
 	sig, err := base64.StdEncoding.DecodeString(o.Signature)
-	if err != nil || !ed25519.Verify(ed25519.PublicKey(pub), []byte(o.Manifest), sig) {
+	if err != nil || !signedByAny(keys, []byte(o.Manifest), sig) {
 		return nil, errors.New("Manifest-Signatur ungueltig - Auftrag abgelehnt")
 	}
 	var m struct {
