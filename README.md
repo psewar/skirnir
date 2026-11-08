@@ -465,7 +465,9 @@ benchmarks. Their raw values are meant for a baseline in Home Assistant (e.g. a 
 **Updating agents:** `deploy.py --agent` puts the binaries with a manifest signed by an operator key (never by the router)
 on the router; agents pull them through their outbound connection, verify signature and hash, swap themselves and restart.
 An agent refuses a signed version older than the one it runs (update kind `downgrade`); a deliberate rollback needs
-`update.allow_downgrade: true` in the node's own configuration (ADR-0054).
+`update.allow_downgrade: true` in the node's own configuration (ADR-0054). To rotate the signing key without a gap, add
+the new public key to `update.public_keys` on every node (`deploy.py --new-agent-key` creates it), switch signing with
+`deploy.py --use-next-agent-key`, then remove the old public key from the nodes (ADR-0058).
 A button per node in the web UI, or the rollout loop with a per-node policy and a canary node that gets new versions first
 (`modes.agent_update`). Failures and stalls become Home Assistant problems. Windows with Smart App Control blocks unsigned
 binaries, so the release binary is Authenticode-signed after the build (`agent/sign.ps1`; `deploy.py --agent` refuses an

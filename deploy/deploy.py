@@ -6,6 +6,10 @@ Usage:  python deploy.py              (full deploy)
          python deploy.py --status     (status + journal only)
          python deploy.py --pull-roles (fetch CT roles.yaml to the ops folder for viewing/backup)
          python deploy.py --agent [dist-folder] [--version v]   (sign agent binaries and place them on the router)
+         python deploy.py --new-agent-key       (rotation step 1: create the next signing key, print its public part)
+         python deploy.py --use-next-agent-key  (rotation step 2: sign with the next key from now on, archive the old)
+Key rotation (ADR-0058): add the next public key to update.public_keys on every node, then --use-next-agent-key, then
+remove the old public key from the nodes. Both steps work offline in the ops folder.
 The LXC host's SSH host key is saved to <ops>/known_hosts on first connection and verified thereafter
 (a different key aborts - delete the file if the host was genuinely reinstalled).
 
@@ -26,6 +30,7 @@ import paramiko
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import agent_keys  # noqa: E402
 import ops_env  # noqa: E402
 
 ROUTER_DIR = os.path.join(HERE, "..", "router")
@@ -265,6 +270,10 @@ def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print(__doc__)
         return
+    if "--new-agent-key" in sys.argv:
+        sys.exit(agent_keys.new_agent_key(ops_env.ops_dir()))
+    if "--use-next-agent-key" in sys.argv:
+        sys.exit(agent_keys.use_next_agent_key(ops_env.ops_dir()))
     host = OPS["ROUTER_HOST"]
     c = connect()
     if "--agent" in sys.argv:

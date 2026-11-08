@@ -190,3 +190,32 @@ func TestUpdaterVerifyOrderRefusesSignedDowngrade(t *testing.T) {
 		t.Fatalf("newer manifest refused: %v", err)
 	}
 }
+
+// ADR-0058 / TM-13: a signing key can be rotated - any configured operator key verifies, nothing else does.
+func TestUpdaterAcceptsAnyConfiguredKeyForRotation(t *testing.T) {
+	oldPub, oldPriv, _ := ed25519.GenerateKey(rand.Reader)
+	newPub, newPriv, _ := ed25519.GenerateKey(rand.Reader)
+	_, strangerPriv, _ := ed25519.GenerateKey(rand.Reader)
+	sum := hex.EncodeToString(sha256.New().Sum(nil))
+	enc := base64.StdEncoding.EncodeToString
+	both := UpdateCfg{PublicKey: enc(oldPub), PublicKeys: []string{enc(newPub)}}
+	for label, priv := range map[string]ed25519.PrivateKey{"old key": oldPriv, "new key": newPriv} {
+		if _, err := newUpdater(both, "", nil).verifyOrder(signedOrder(t, priv, "9.9.9", "skirnir-agent-9.9.9-test", sum)); err != nil {
+			t.Fatalf("manifest signed with the %s refused during rotation: %v", label, err)
+		}
+	}
+	if _, err := newUpdater(both, "", nil).verifyOrder(signedOrder(t, strangerPriv, "9.9.9", "skirnir-agent-9.9.9-test", sum)); err == nil || !strings.Contains(err.Error(), "Signatur") {
+		t.Fatalf("manifest signed with an unlisted key accepted: %v", err)
+	}
+	onlyNew := UpdateCfg{PublicKeys: []string{enc(newPub)}}
+	if _, err := newUpdater(onlyNew, "", nil).verifyOrder(signedOrder(t, oldPriv, "9.9.9", "skirnir-agent-9.9.9-test", sum)); err == nil {
+		t.Fatal("old key still accepted after it was removed from the configuration")
+	}
+	if _, err := newUpdater(onlyNew, "", nil).verifyOrder(signedOrder(t, newPriv, "9.9.9", "skirnir-agent-9.9.9-test", sum)); err != nil {
+		t.Fatalf("public_keys alone refused: %v", err)
+	}
+	typo := UpdateCfg{PublicKey: enc(oldPub), PublicKeys: []string{"not-a-key"}}
+	if _, err := newUpdater(typo, "", nil).verifyOrder(signedOrder(t, oldPriv, "9.9.9", "skirnir-agent-9.9.9-test", sum)); err == nil || !strings.Contains(err.Error(), "Eintrag 1") {
+		t.Fatalf("an invalid entry in public_keys was not reported: %v", err)
+	}
+}

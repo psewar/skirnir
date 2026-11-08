@@ -459,7 +459,9 @@ ein Statistik-Helfer mit dem Median einer Woche).
 Betreiber-Schlüssel (nie vom Router); die Agenten holen sie über ihre ausgehende Verbindung, prüfen Signatur und Hash,
 tauschen sich selbst und starten neu. Eine signierte Version, die älter ist als die laufende, lehnt der Agent ab
 (Update-Art `downgrade`); ein bewusster Rückschritt braucht `update.allow_downgrade: true` in der Konfiguration des
-Knotens (ADR-0054). Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
+Knotens (ADR-0054). Den Signierschlüssel ohne Lücke wechseln: den neuen öffentlichen Schlüssel auf allen Knoten in
+`update.public_keys` eintragen (`deploy.py --new-agent-key` erzeugt ihn), mit `deploy.py --use-next-agent-key` auf ihn
+umstellen und danach den alten öffentlichen Schlüssel von den Knoten entfernen (ADR-0058). Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
 Kanarienvogel-Knoten, der neue Versionen zuerst bekommt (`modes.agent_update`). Fehler und Hänger werden HA-Probleme.
 Windows mit Smart App Control blockt unsignierte Binaries, darum wird die Release-Binary nach dem Build Authenticode-signiert
 (`agent/sign.ps1`; `deploy.py --agent` verweigert eine unsignierte Binary, sobald ein Signier-Thumbprint konfiguriert ist).

@@ -2,49 +2,60 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "8ac9b2e1629ca0edf65fc0a4e686d5982f445bde",
-  "change_digest": "441eace7f4e2c38b06c1723d61c03a97b71830a397dc16c9be625bfaff5978a8",
+  "base_sha": "7288c446930e30c6cc9fa71a92dc7fc19d320635",
+  "change_digest": "e1c48f861733fd76228ced7f14d2970e9ca89ecd4e141982d6c6ac92197aa35d",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
+    "README.de.md",
+    "README.md",
+    "agent/config.example.yaml",
+    "agent/updater.go",
+    "agent/updater_test.go",
+    "deploy/agent_keys.py",
+    "deploy/deploy.py",
+    "docs/adr/0058-rotate-the-agent-signing-key-with-several-trusted-keys.md",
+    "docs/adr/README.md",
     "docs/security/risk-register.json",
-    "test/selftest_agent_revocation.py"
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
+    "test/selftest_key_rotation.py"
   ],
   "risk_ids": [
-    "TM-07"
+    "TM-13"
   ],
   "boundaries": [
-    "B3"
+    "B8"
   ],
-  "summary": "Test-only change for TM-07 (agent enrollment and compromise). test/selftest_agent_revocation.py runs the control app in-process and connects to /v1/tunnel with a real aiohttp WebSocket client that signs challenge nonce + name + public key with an Ed25519 key, exactly like the agent's hello. It approves a pending key through registry.approve_node, opens two tunnel streams from the router side (one waiting for the response head, one with head and a body chunk already delivered by the test agent), revokes through registry.revoke_node and checks that both raise ClientError with the reason 'revoked', the agent receives status revoked before the close, the dynamic node leaves state.NODES and the registry entry is revoked. The revoked key reconnecting gets status revoked and a close, and never appears in state.PENDING or state.NODES. A second test sends MAX_ENROLL_PER_IP new keys from one address (pending), then one more: it is told to wait with the refusal, closed with 1008 and not written to the registry; an already approved key still connects. CI runs the test in the router job. No router code, configuration or policy change.",
+  "summary": "Agent 0.29.0 can trust several operator keys so the signing key can be rotated (ADR-0058, TM-13). UpdateCfg gains public_keys (node-local YAML only; the router provisioning never writes it). trustedKeys() decodes public_key plus public_keys and refuses the whole set if any entry is not a 32-byte Ed25519 key, naming its position, so a typo cannot silently shrink the trusted set; with no key the order is refused as before. verifyOrder accepts the manifest if the signature verifies under any trusted key (signedByAny), then applies the unchanged manifest, version, downgrade (ADR-0054) and file checks; the refusal text 'Manifest-Signatur ungueltig' used by the end-to-end suite is kept. deploy.py gains --new-agent-key and --use-next-agent-key, implemented in the new deploy/agent_keys.py: step 1 refuses without a current key or with a pending next key and creates agent-update.next.key with O_EXCL and mode 0600; step 2 refuses without a prepared key, keeps the old key as agent-update.retired-<time>.key and moves the next key into place; both run offline in the ops folder before any SSH connection. The router's optional single-key self-check is unchanged and documented as switched together with the signing key.",
   "findings": [
     {
-      "id": "TM-07",
-      "evidence": "Revocation of active streams and the enrollment flood were covered by unit checks of enrollment_denial and an end-to-end check of routing/registry state only.",
-      "resolution": "Wire-level tests with fault-injection evidence; out-of-band fingerprint verification and plausibility of a compromised approved agent's reports remain, so TM-07 stays open.",
+      "id": "TM-13",
+      "evidence": "Agent 0.28.0 trusted exactly one update.public_key, so replacing the signing key required changing every node and the key at the same moment.",
+      "resolution": "Several node-local trusted keys and two self-checking deploy steps; a rotation has not been practised in the deployment yet, so TM-13 stays open.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_agent_revocation.py",
+      "command": "cd agent && gofmt -l . && go vet ./... && go test -count=1 ./...",
       "result": "passed",
-      "evidence": "Ran 2 tests, OK."
+      "evidence": "ok github.com/psewar/skirnir/agent, incl. TestUpdaterAcceptsAnyConfiguredKeyForRotation (old+new accepted, unlisted refused, old refused after removal, public_keys alone, invalid entry reported as 'Eintrag 1')."
     },
     {
-      "command": "Fault injection: revoke_node without tun.close_all('revoked') (registry.py, reverted)",
+      "command": "Negative check: go test -run Rotation against the previous agent/updater.go (git stash)",
       "result": "passed",
-      "evidence": "FAIL: 'revoked' not found in 'tunnel synthetic-gpu: tunnel closed'."
+      "evidence": "build failed: unknown field PublicKeys in struct literal of type UpdateCfg (single-key updater)."
     },
     {
-      "command": "Fault injection: handle_tunnel_v2 without the revoked-state refusal (registry.py, reverted)",
+      "command": "python test/selftest_key_rotation.py",
       "result": "passed",
-      "evidence": "FAIL: 'pending' != 'revoked'."
+      "evidence": "10 PASS, 0 failure(s): refusals without current/prepared key, second prepare refused, switch, retired key kept, no double switch."
     },
     {
-      "command": "ruff check .",
+      "command": "ruff check .; check_adr_index.py; check_pinned_references.py; selftest_english_names.py; YAML parse of ci.yml",
       "result": "passed",
-      "evidence": "All checks passed."
+      "evidence": "All checks passed; ADR index ok: 58 ADRs; 0 findings; ALLE OK; yaml ok."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -58,7 +69,8 @@
     }
   ],
   "limitations": [
-    "Ran on Windows locally; Linux runs in CI.",
-    "Fingerprint verification before approval is an operator procedure and not testable here."
+    "Agent tests ran on Windows locally; Linux and the cross-build run in CI.",
+    "The 0600 mode of the next key is checked only on POSIX; the deploy steps were not run against the real ops folder.",
+    "The router's optional modes.agent_update.public_key self-check still takes a single key."
   ]
 }
