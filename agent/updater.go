@@ -251,7 +251,7 @@ func (u *Updater) run(o UpdateOrder) error {
 		return err
 	}
 	// ... and it must accept the existing configuration: otherwise the swapped service restarts in a loop, instead of the
-	// order ending cleanly as failed (e.g. after removed config keys, 0.9.1: tunnel.enabled, mimir:)
+	// order ending cleanly as failed (e.g. after a removed config block, or a top-level key it does not know)
 	if u.cfgPath != "" {
 		chk := exec.Command(newPath, "check-config", "--config", u.cfgPath)
 		hideWindow(chk)
