@@ -2,20 +2,22 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "38a6cac4937e2a607cb1e8f6a35252fe51428335",
-  "change_digest": "aa723042233c288583033d0d4040413fb617ed2df6e2a3048f9a2117ff1992cf",
+  "base_sha": "d4ace572af3e259d850e0df7fb6750cd845af05f",
+  "change_digest": "e7334440ae55b19d913b2f0ea0ee274f414684b2e81f246febb914937187ce9b",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "docs/adr/0050-independent-security-evidence-and-narrow-dependency-bumps.md",
+    "docs/adr/0048-restrict-cloud-provider-transport.md",
+    "docs/adr/0049-resume-full-security-review-coverage.md",
     "docs/adr/README.md"
   ],
   "risk_ids": [
     "TM-16"
   ],
   "boundaries": [
+    "B6",
     "B9"
   ],
-  "summary": "Documentation only: the operator accepts ADR-0050 (independent security evidence and narrow dependency bumps), merged as proposed. Status proposed -> accepted, date 2026-11-08, decision-maker operator, and one closing paragraph recording the rollout fixtures (passing status from the dedicated App on a valid fixture, failing status on a fixture that removed its PR-side gate and record). The ADR index row and the CHANGELOG line follow. No workflow, checker, skill, threat model, register, configuration or code change; TM-16 is referenced because ADR-0050 governs the review mechanism itself.",
+  "summary": "Documentation only: the operator accepts ADR-0048 (final HTTPS destinations for cloud providers) and ADR-0049 (resume bounded full reviews across scheduled runs), both merged as proposed. Each ADR gets status accepted, date 2026-11-08, decision-maker operator and one closing sentence; the decision text is unchanged. The ADR index follows. The CHANGELOG links the published v0.25.2 release in its table row (date of release 2026-11-08, ADR-0048 referenced) and labels the development-tooling section as included in v0.25.2, with a stray blank-line pair removed. No code, workflow, checker, skill, threat model, register or configuration change.",
   "findings": [],
   "tests": [
     {
@@ -35,6 +37,6 @@
     }
   ],
   "limitations": [
-    "Rollout step 4 of design/continuous-security-review.md (requiring skirnir/trusted-security-review with the dedicated App as expected source in branch protection) is a repository setting outside this PR and not yet verified as enforced."
+    "ADR-0049's ledger has not yet run on a scheduled full review; the first weekly run after the merge of #81 is due on 2026-11-09."
   ]
 }
