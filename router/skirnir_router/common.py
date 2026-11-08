@@ -9,7 +9,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.19.0"
+VERSION = "0.19.1"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -45,11 +45,22 @@ def load_json_file(path, what):
         return None
 
 
+def open_private(path, mode):
+    """Text file for writing ("w" truncates, "a" appends) that only the owner can read (ADR-0056, TM-15): a new file is
+    created 0600 and an existing one is tightened to 0600 where the platform has fchmod. Audit log, journal, registry,
+    overrides (token hashes) and fallback observations carry client names, addresses and model use."""
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if mode == "a" else os.O_TRUNC)
+    fd = os.open(path, flags, 0o600)
+    if hasattr(os, "fchmod"):   # POSIX; Windows has no owner/other mode bits to tighten
+        os.fchmod(fd, 0o600)
+    return os.fdopen(fd, mode, encoding="utf-8")
+
+
 def save_json_file(path, data, what, **dump_kw):
     """Atomic write (tmp + replace). False with warning on failure; state remains with caller in memory."""
     tmp = path + ".tmp"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        with open_private(tmp, "w") as f:
             json.dump(data, f, **dump_kw)
         os.replace(tmp, path)
     except (OSError, TypeError, ValueError) as e:  # exception-ok: file system boundary; json reports unencodable data only so

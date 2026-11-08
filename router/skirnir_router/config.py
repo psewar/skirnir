@@ -17,7 +17,7 @@ from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig
 from .rerank_config import RerankConfig, parse_rerank_config
 from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
 from . import settings as settings_mod
-from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES, log, tls_fingerprint
+from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES, log, open_private, tls_fingerprint
 from .outcome import Problem, failed, invalid
 
 
@@ -736,7 +736,7 @@ def write_overrides(new):
         return problem
     tmp = state.CFG.overrides_path + ".tmp"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        with open_private(tmp, "w") as f:
             f.write("# Written by the router UI (%s). Overrides roles/models/expose_concrete_models from config.yaml;\n"
                     "# settings = single settings (path -> value, allowlist in settings.py), delete_models = catalog entries removed in the UI.\n"
                     % time.strftime("%Y-%m-%d %H:%M:%S"))

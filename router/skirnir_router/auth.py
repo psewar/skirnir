@@ -12,7 +12,7 @@ from collections import deque
 from aiohttp import web
 
 from . import state
-from .common import anthropic_error, basic_credentials, log, ollama_error, openai_error
+from .common import anthropic_error, basic_credentials, log, ollama_error, open_private, openai_error
 from .outcome import Problem
 
 
@@ -47,7 +47,7 @@ def audit(event, **fields):
             d = os.path.dirname(path)
             if d:
                 os.makedirs(d, exist_ok=True)
-            with open(path, "a", encoding="utf-8") as f:
+            with open_private(path, "a") as f:
                 f.write(line + "\n")
         except OSError as e:  # exception-ok: file system boundary; the event still goes to the journal below
             if not _audit_failed[0]:

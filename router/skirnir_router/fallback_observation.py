@@ -13,7 +13,7 @@ import os
 import time
 
 from . import admission, decision, scheduler, state
-from .common import log
+from .common import log, open_private
 
 LIGHT_DEFAULT = ("standard", "assist")   # Classes for which a deeper tier might be an option (not Programming, not Analysis)
 CLASSIFY_PATHS = ("/api/chat", "/api/generate")
@@ -128,7 +128,7 @@ def _write(rec, task):
     try:
         if os.path.exists(p) and os.path.getsize(p) >= FILE_MAX_BYTES:
             os.replace(p, p + ".1")
-        with open(p, "a", encoding="utf-8") as f:
+        with open_private(p, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     # Disk full, permissions: not safely checkable in advance; report throttled, the request is long answered
     except OSError as e:  # exception-ok: file system boundary
