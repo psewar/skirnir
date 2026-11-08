@@ -143,6 +143,10 @@ async def main(cfg_path):
         ctl_ssl.load_cert_chain(state.CFG.control_tls[0], state.CFG.control_tls[1])
     elif state.CFG.control_users:
         log.warning("basic auth without TLS: passwords cross the network in plain text (set control_tls)")
+    if not state.CFG.control_users:
+        log.warning("control_auth has no users: the control port answers 503%s (ADR-0053)",
+                    " except unauthenticated loopback requests (allow_unauthenticated_loopback: development only)"
+                    if state.CFG.control_open_loopback else "")
     if state.CFG.api_tls and ctl_ssl is None:
         log.error("api_tls: true needs control_tls (certificate) - router does not start")
         sys.exit(2)

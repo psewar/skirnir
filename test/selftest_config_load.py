@@ -50,6 +50,17 @@ try:
     check("invalid (role tier without catalog entry): Problem", failed(problem) and "missing from the model catalog" in problem.message,
           getattr(problem, "message", problem))
 
+    # ADR-0053: the development switch for unauthenticated loopback control is off by default and strictly boolean
+    shutil.copy(EXAMPLE, path)
+    cfg = config.Config.load(path, use_overrides=False)
+    check("control_auth.allow_unauthenticated_loopback defaults to false", cfg.control_open_loopback is False)
+    bad3 = copy.deepcopy(base)
+    bad3["router"].setdefault("control_auth", {})["allow_unauthenticated_loopback"] = "yes"
+    yaml.safe_dump(bad3, open(path, "w", encoding="utf-8"), allow_unicode=True)
+    problem = config.Config.load(path, use_overrides=False)
+    check("invalid (allow_unauthenticated_loopback not boolean): Problem", failed(problem)
+          and "allow_unauthenticated_loopback" in problem.message, getattr(problem, "message", problem))
+
     # Reload: valid load, then a file with an error LATE in the flow (decision_engine, after roles and models)
     shutil.copy(EXAMPLE, path)
     cfg = config.Config.load(path, use_overrides=False)

@@ -69,7 +69,7 @@ SCHEMA = {
         "session_store": {k: None for k in SessionConfig.__dataclass_fields__},
         "rerank": {k: None for k in RerankConfig.__dataclass_fields__},
         "limits": {"max_images": None, "max_tools": None, "max_messages": None}, "session_affinity_ttl_s": None,
-        "idempotency_ttl_s": None, "control_auth": {"users": None}, "heartbeat_token": None, "api_tls": None,
+        "idempotency_ttl_s": None, "control_auth": {"users": None, "allow_unauthenticated_loopback": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
                                           "cloud": None, "data_class": None, "privacy_check": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
@@ -348,8 +348,13 @@ class Config:
         self.anthropic_think = str(an.get("think", _d("router.anthropic.think")))
         if self.anthropic_think not in THINK_MODES:
             return invalid(f"router.anthropic.think must be one of {THINK_MODES}, not {self.anthropic_think!r}")
-        # Basic Auth for UI + /admin/*: {user: "pbkdf2:<iter>:<salt_hex>:<hash_hex>"}; empty = open (tests only)
-        self.control_users = dict((r.get("control_auth") or {}).get("users") or {})
+        # Basic Auth for UI + /admin/*: {user: "pbkdf2:<iter>:<salt_hex>:<hash_hex>"}. Without users the control port
+        # answers 503 (ADR-0053); unauthenticated loopback access only with the explicit development switch below.
+        ctl_auth = r.get("control_auth") or {}
+        self.control_users = dict(ctl_auth.get("users") or {})
+        if type(ctl_auth.get("allow_unauthenticated_loopback", False)) is not bool:
+            return invalid("router.control_auth.allow_unauthenticated_loopback must be true or false")
+        self.control_open_loopback = ctl_auth.get("allow_unauthenticated_loopback", False)
         # TLS for the Control port: {cert: <fullchain.pem>, key: <key.pem>}; missing block -> plaintext (tests only)
         tls = r.get("control_tls") or {}
         self.control_tls = (tls.get("cert"), tls.get("key")) if tls.get("cert") and tls.get("key") else None

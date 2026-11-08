@@ -61,7 +61,7 @@ open residual scenarios; no acceptance is implied. The register maps proposed V1
 | ID | STRIDE | Threat, controls and next action |
 | --- | --- | --- |
 | TM-01 | S/E | Observe mode and IP/NAT trust allow broad inference. Enforce denies unknown clients even with an empty map. Use enforce, locked policy, separate tokens and TLS. P1 when exposed. |
-| TM-02 | S/E | A local reverse proxy can enter the unauthenticated loopback Control exception. Configure Control users even behind that proxy; test the deployment boundary. P1 if exposed this way. |
+| TM-02 | S/E | A local reverse proxy could enter the unauthenticated loopback Control exception. Since router 0.19.0 (ADR-0053) a control port without users answers 503 also on loopback; password-free loopback needs the explicit development switch. Deployment proxies still need Control users and TLS. |
 | TM-03 | T/E | Cross-site admin actions: custom header and Fetch Metadata reject simple forms, but not same-origin XSS or stolen admin credentials. Verify CORS/UI escaping and real browser behavior. P2. |
 | TM-04 | E/D/I | Concrete model names bypassed role-only restrictions by default. Since router 0.19.0 (ADR-0052) they need an explicit models:true; a missing setting means roles only and is named in a load-time warning. Listings still show concrete names. |
 | TM-05 | I | Cloud misclassification/false negatives. Client class is a floor, but privacy_check is an intentional exception; cloud:false is the stronger locality control. Test complete final payload and fallback. P1 with cloud. |

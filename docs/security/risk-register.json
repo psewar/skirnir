@@ -26,15 +26,17 @@
         "B2"
       ],
       "priority": "P1",
-      "status": "open",
+      "status": "mitigated",
       "scenario": "Proxy enters the unauthenticated loopback exception.",
-      "controls": "Network bindings without users deny access.",
-      "next_action": "Require Control users even behind a local proxy.",
+      "controls": "A control port without users answers 503, also on loopback (ADR-0053); unauthenticated loopback only with the boolean control_auth.allow_unauthenticated_loopback, a literal loopback listener and a loopback peer; a start warning names the state.",
+      "next_action": "Keep the regression in CI; deployments behind a proxy configure Control users and TLS.",
       "owner_role": "maintainer and operator",
       "test_refs": [
-        "test/selftest_security.py"
+        "test/selftest_security.py",
+        "test/selftest_config_load.py"
       ],
-      "validation_gap": "V2: verify actual proxy and local exception."
+      "validation_gap": "V2: a real reverse-proxy topology is not part of CI; the unit tests model its loopback peer.",
+      "evidence": "selftest_security: loopback peer without users is refused (503, handler not called) unless the switch is set; the switch does not open remote peers or a wildcard listener; the check fails against router 0.18.2."
     },
     {
       "id": "TM-03",
