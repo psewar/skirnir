@@ -42,7 +42,7 @@ decision-eval/eval-*.log
 decision-eval/results*/report.json
 decision-embed/models/
 
-# Standortspezifisches lebt im Ops-Ordner ausserhalb des Repos (skirnir-ops/, siehe deploy/ops_env.py) - falls es doch hier landet:
+# Standortspezifisches lebt im Ops-Ordner außerhalb des Repos (skirnir-ops/, siehe deploy/ops_env.py) - falls es doch hier landet:
 router/config.yaml
 router/config.yaml.*
 router/roles.yaml

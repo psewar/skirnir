@@ -63,7 +63,7 @@ models:
   qwen3-coder:30b: { weights_gib: 17.3, kv_gib_per_1k: 0.096 }
   granite4.2:8b:   { weights_gib: 4.95, kv_gib_per_1k: 0.158 }
   gpt-oss:20b:     { weights_gib: 11.95, kv_gib_per_1k: 0.002, capabilities: { structured: false } }   # Katalog-Override (Stufe 1)
-  "testcloud:mini":   { cloud: testcloud,  capabilities: { tools: true, vision: true, structured: true },  price_chf_per_m: { input: 1000, output: 10000 } }   # Stufe 5: 0.32 CHF je Fake-Aufruf
+  "testcloud:mini":   { cloud: testcloud,  capabilities: { tools: true, vision: true, structured: true },  price_chf_per_m: { input: 1000, output: 10000 } }   # Stufe 5: 0.32 je Fake-Aufruf
   "testclaude:sonnet": { cloud: testclaude, capabilities: { tools: true, vision: true, structured: false }, price_chf_per_m: { input: 3, output: 15 } }
 
 nodes:

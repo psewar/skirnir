@@ -2,41 +2,160 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "d4ace572af3e259d850e0df7fb6750cd845af05f",
-  "change_digest": "e7334440ae55b19d913b2f0ea0ee274f414684b2e81f246febb914937187ce9b",
+  "base_sha": "81b7e48721b3b6cfd3a917b49e18e19d80f75a74",
+  "change_digest": "ba747a1bdd68a38742750fa43458c31b569815b94969a699381246d495a6f499",
   "reviewed_paths": [
+    ".gitignore",
     "CHANGELOG.md",
-    "docs/adr/0048-restrict-cloud-provider-transport.md",
-    "docs/adr/0049-resume-full-security-review-coverage.md",
-    "docs/adr/README.md"
+    "README.de.md",
+    "README.md",
+    "agent/README.md",
+    "agent/config.example.yaml",
+    "agent/config.go",
+    "agent/config_test.go",
+    "agent/game_test.go",
+    "agent/main.go",
+    "agent/routes_test.go",
+    "agent/setup_windows.go",
+    "agent/updater.go",
+    "decision-embed/README.md",
+    "decision-embed/privacy/build_dataset.py",
+    "decision-eval/README.md",
+    "decision-eval/build_dataset.py",
+    "decision-jevlike/compose.yaml",
+    "decision-jevlike/requirements.txt",
+    "design/continuous-security-review.md",
+    "design/decision-engine.md",
+    "design/gpu-guard.md",
+    "design/memory-reliability.de.md",
+    "design/roadmap.md",
+    "design/routing-algorithm.md",
+    "design/shared-memory-interoperability.de.md",
+    "docs/adr/0051-agent-rejects-unknown-top-level-configuration-keys.md",
+    "docs/adr/README.md",
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
+    "monitoring/grafana/dashboards/skirnir.json",
+    "monitoring/render-monitoring.sh",
+    "rerank-server/README.md",
+    "router/config.example.yaml",
+    "router/render-env.sh",
+    "router/router.py",
+    "router/skirnir_router/admin.py",
+    "router/skirnir_router/auth.py",
+    "router/skirnir_router/cloud.py",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/config.py",
+    "router/skirnir_router/decision/capture.py",
+    "router/skirnir_router/fallback_observation.py",
+    "router/skirnir_router/ha.py",
+    "router/skirnir_router/metrics.py",
+    "router/skirnir_router/nodes.py",
+    "router/skirnir_router/ollamaupdate.py",
+    "router/skirnir_router/poll.py",
+    "router/skirnir_router/privacy.py",
+    "router/skirnir_router/proxy.py",
+    "router/skirnir_router/registry.py",
+    "router/skirnir_router/settings.py",
+    "router/ui.html",
+    "test/cpu_tier_bench.py",
+    "test/run_tests.py",
+    "test/selftest_anthropic_messages.py",
+    "test/selftest_availability.py",
+    "test/selftest_control_flow_admin.py",
+    "test/selftest_privacy_check.py",
+    "test/selftest_vram_real.py",
+    "test/test-config.yaml"
   ],
   "risk_ids": [
-    "TM-16"
+    "TM-03",
+    "TM-05",
+    "TM-08",
+    "TM-13",
+    "TM-15"
   ],
   "boundaries": [
+    "B2",
     "B6",
+    "B7",
+    "B8",
     "B9"
   ],
-  "summary": "Documentation only: the operator accepts ADR-0048 (final HTTPS destinations for cloud providers) and ADR-0049 (resume bounded full reviews across scheduled runs), both merged as proposed. Each ADR gets status accepted, date 2026-11-08, decision-maker operator and one closing sentence; the decision text is unchanged. The ADR index follows. The CHANGELOG links the published v0.25.2 release in its table row (date of release 2026-11-08, ADR-0048 referenced) and labels the development-tooling section as included in v0.25.2, with a stray blank-line pair removed. No code, workflow, checker, skill, threat model, register or configuration change.",
+  "summary": "Removes site-specific details and changes one agent behaviour. Agent 0.28.0 (ADR-0051, proposed): loadConfig refuses a configuration whose top-level mapping has a key no Config field reads (keys derived by reflection from the struct's YAML names, YAML merge keys allowed, nested keys still lenient); setup no longer renames the secret-store block from its pre-0.9.0 name. Traced: loadConfig callers (service start, check-config, setup probes in migrateLegacyInstall and setupUpgradeConfig, the updater's check-config of the new binary before the swap). A refused configuration stops the start, makes setup stop before it touches the service, and ends a self-update as a failed order with the old binary kept; no restart loop, no privilege or trust change, no new input source (the same local admin-owned file is parsed a second time into a yaml.Node, under the same yaml.v3 alias limits). Router 0.18.3: budget display texts (log lines, skip reason, HA problem texts, settings label, web UI I18N keys and placeholders, Grafana title) no longer name a currency; budget enforcement, fields, metric names and the HA sensor unit are unchanged; the UI change keeps the template structure and escaping (fmtCost formats a number only). Comments drop a personal name and a former device name; German prose, comments and UI strings use standard spelling (the privacy rule regex that accepts both spellings and the dataset templates' ASCII text are unchanged). Tests use documentation-range addresses with the same meaning (non-loopback remote, IPv4 anonymised). The privacy dataset builder's template lists changed; the committed data and the trained head are unchanged, so the runtime classifier (B7) is unchanged. docs/security/threat-model.de.md has spelling-only changes and needs the maintainer's explicit look as a policy document. No workflow, checker, skill, register or English threat-model change. No finding introduced.",
   "findings": [],
   "tests": [
     {
-      "command": "python test/check_adr_index.py",
+      "command": "cd agent && go test -count=1 ./...",
       "result": "passed",
-      "evidence": "ADR index ok: 50 ADRs."
+      "evidence": "ok github.com/psewar/skirnir/agent (Windows host), incl. TestConfigUnknownTopLevelKeyRejected and TestConfigExampleTopLevelKeysKnown."
     },
     {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "command": "go test -run TestConfigUnknown . with the unknown-key check disabled",
       "result": "passed",
-      "evidence": "Security evidence: 0 error(s)."
+      "evidence": "Negative control: the test failed (unknown block accepted) without the check and passed with it restored."
+    },
+    {
+      "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./...",
+      "result": "passed",
+      "evidence": "gofmt printed nothing; vet clean for host, windows and linux."
+    },
+    {
+      "command": "ruff check .",
+      "result": "passed",
+      "evidence": "All checks passed!"
+    },
+    {
+      "command": "python router/router.py --check router/config.example.yaml --pure",
+      "result": "passed",
+      "evidence": "configuration ok: 5 roles, 7 models in the catalog, 0 static nodes, client_auth enforce"
+    },
+    {
+      "command": "python test/check_adr_index.py",
+      "result": "passed",
+      "evidence": "ADR index ok: 51 ADRs"
+    },
+    {
+      "command": "python test/selftest_control_flow.py && python test/check_control_flow.py",
+      "result": "passed",
+      "evidence": "6 checker tests OK; control flow ok: 0 legacy findings in 0 files (baseline)"
+    },
+    {
+      "command": "every test/selftest_*.py listed in .github/workflows (42 files)",
+      "result": "passed",
+      "evidence": "All 42 exited 0, incl. selftest_availability, selftest_anthropic_messages, selftest_english_names, selftest_control_flow_admin, selftest_vram_real, selftest_privacy_check, selftest_threat_review, selftest_security."
+    },
+    {
+      "command": "python test/run_tests.py",
+      "result": "passed",
+      "evidence": "332 PASS, 0 failures; budget exhaustion reason 'monthly budget 1.90 exhausted', HA budget problem and decision-capture anonymisation of the documentation address verified."
     },
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s)."
+      "evidence": "Public-change scan: 0 finding(s)"
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "result": "passed",
+      "evidence": "Run after staging this record; see the PR description for the output."
+    },
+    {
+      "command": "go test ./... on Linux",
+      "result": "not_run",
+      "evidence": "Only a Windows host was available; Linux covered by GOOS=linux go vet only."
+    },
+    {
+      "command": "Windows setup (elevated) on a legacy installation",
+      "result": "not_run",
+      "evidence": "Needs an elevated session and an old installation; the changed paths were read and the probe behaviour follows from loadConfig, which the unit tests cover."
     }
   ],
   "limitations": [
-    "ADR-0049's ledger has not yet run on a scheduled full review; the first weekly run after the merge of #81 is due on 2026-11-09."
+    "Unknown nested keys are still ignored by the agent (deliberate scope of ADR-0051).",
+    "go test ran on Windows only; the elevated Windows setup flow was not executed.",
+    "The privacy dataset builder now differs from its committed data; a regenerated dataset needs retraining and a new evaluation against the hand-written test set before the head is replaced.",
+    "Identifiers, configuration keys, API fields and metric names that contain a currency code, the role name of the large tier, the HA sensor unit, the AHV rule of the privacy check and the training data were left unchanged on purpose.",
+    "A passing evidence check proves freshness and structure only, not that no vulnerability exists."
   ]
 }

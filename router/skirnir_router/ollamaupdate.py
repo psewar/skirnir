@@ -382,8 +382,8 @@ def agent_capable(agent_version):
 
 
 def _local(cfg, now):
-    """Time for the window: in `timezone` (e.g. Europe/Zurich), otherwise router local time. Containers often run on UTC -
-    2026-09-26 the first Ollama update ran at 06:58 Swiss time instead of the 02:00-05:00 window."""
+    """Time for the window: in `timezone` (e.g. Europe/Berlin), otherwise router local time. Containers often run on UTC -
+    2026-09-26 the first Ollama update ran at 06:58 local time instead of the 02:00-05:00 window."""
     tz = (cfg.get("timezone") or "").strip()
     if tz:
         import zoneinfo

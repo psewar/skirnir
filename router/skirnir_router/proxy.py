@@ -509,7 +509,7 @@ class _Relay:
             context_check.after_request(self.estimated_tokens, self.ptoks, self.ctx,
                                     {**(self.info or {}), "path": self.path, "request_id": self.req.request_id})
         admission.release(node)   # Stage 3: Space free -> wake up the highest-ranked waiter
-        log.info("done %s node=%s %.1fs%s", self.role["name"], node.name, elapsed, f" {cost:.4f} CHF" if cost else "")
+        log.info("done %s node=%s %.1fs%s", self.role["name"], node.name, elapsed, f" cost {cost:.4f}" if cost else "")
         fallback_observation.finish(self.obs_task, {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": self.req.request_id, "client": self.request.get("client"),
             "role": self.role["name"], "is_role": _is_role(self.role), "model": model, "node": node.name, "path": self.path,
@@ -875,7 +875,7 @@ class _Relay:
                 return await self._end_with_error(502, f"{self.node.name} aborted: {e}")
             # exception-ok: aiohttp's way to end a handler with 502 when no error event fits the client's format
             raise web.HTTPBadGateway(text=json.dumps({"error": f"{self.node.name} aborted: {e}"})) from e
-        if resp is None:   # leerer Stream: trotzdem sauber abschliessen
+        if resp is None:   # leerer Stream: trotzdem sauber abschließen
             resp = await self._open_stream()
         if self.managed_capture is not None:
             problem = await self.managed_turn.commit(self.managed_capture)

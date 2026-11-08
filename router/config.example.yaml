@@ -1,5 +1,5 @@
 # Skirnir - Beispielkonfiguration (Ziel auf dem Router-Host: /etc/skirnir-router/config.yaml)
-# Die Produktivkonfiguration liegt AUSSERHALB des Repos (Ops-Ordner, siehe deploy/ops_env.py); deploy.py rollt sie aus.
+# Die Produktivkonfiguration liegt NICHT im Repo, sondern im Ops-Ordner (siehe deploy/ops_env.py); deploy.py rollt sie aus.
 # Algorithmus: design/routing-algorithm.md
 
 router:
@@ -104,7 +104,7 @@ router:
     enabled: true                #   und werden als Stufe in genau die Rollen gelegt, die es duerfen. Kein Opt-in pro Client;
     default_data_class: personal #   ein Client nimmt sich aus per routing.execution: local oder clients.<c>.cloud: false.
     max_cloud_data_class: internal   # Datenklasse ist eine DEKLARATION (routing.data_class, sonst clients.<c>.data_class, sonst
-                                 #   default). Cloud nur bis einschliesslich dieser Klasse: mit den Vorgaben also nur, wenn der
+                                 #   default). Cloud nur bis einschließlich dieser Klasse: mit den Vorgaben also nur, wenn der
                                  #   Client 'internal' oder 'public' deklariert (siehe README).
     credential_scan: block       # Prompts mit erkennbaren Schluesseln/Passwoertern gehen nie in die Cloud
     privacy_check:               # Router 0.13.0 (privacy.py): Inhaltspruefung fuer Clients mit privacy_check: true
@@ -192,7 +192,7 @@ router:
     default_think: false         # OpenAI-Clients kennen kein think: false = kein unsichtbares Nachdenken (wie HA-AI-Tasks); null = Ollama-Default
   anthropic:                     # Anthropic-Messages-API: /v1/messages, /v1/messages/count_tokens (Claude Code:
     enabled: true                #   ANTHROPIC_BASE_URL=https://router.example.net:11434, Modell = Rolle wie code:latest)
-    keepalive_s: 15              # SSE-Ping, solange der Knoten noch am Prompt rechnet (Prefill bei grossem Kontext bis Minuten)
+    keepalive_s: 15              # SSE-Ping, solange der Knoten noch am Prompt rechnet (Prefill bei großem Kontext bis Minuten)
     think: auto                  # auto = wie der Client es verlangt (Claude Code: jeder Zug adaptiv), on/off = fest
   wol:
     wait_up_s: 90
@@ -273,16 +273,16 @@ modes:
     canary_clean_h: 24        # so lange muss er sie sauber fahren, bevor die anderen folgen
     # public_key: <base64>    # optional: Router prueft das Manifest vor dem Versand selbst
   upstream_window:            # Router 0.16.0: OpenAI-kompatibler Server (Strata) nur im Fenster oder auf Anfrage
-    enabled: false            #   an = ausserhalb haelt der Router den ungenutzten Server an, der Standby-Ollama bedient
+    enabled: false            #   an = außerhalb haelt der Router den ungenutzten Server an, der Standby-Ollama bedient
     window_start: "01:00"     #   (Agent mit tunnel.upstream_fallback); eine Anfrage an das Server-Modell startet ihn trotzdem
     window_end: "07:00"
-    timezone: ""              #   z. B. Europe/Zurich; leer = Ortszeit des Routers
-    idle_hold_s: 900          #   ausserhalb so lange ungenutzt, dann wieder anhalten
+    timezone: ""              #   z. B. Europe/Berlin; leer = Ortszeit des Routers
+    idle_hold_s: 900          #   außerhalb so lange ungenutzt, dann wieder anhalten
   ollama_update:              # Ollama-Update ueber den Router (Agent >= 0.12.0, Ollama als Kind des Agenten)
     enabled: true             # Versionspruefung + Rollout fuer Knoten mit Policy ollama_auto_update
     window_start: "02:00"     # Nachtfenster (Ortszeit des Routers); leer = jederzeit
     window_end: "05:00"
-    timezone: ""              # IANA-Name fuer das Fenster (z. B. Europe/Zurich); leer = Ortszeit des Routers
+    timezone: ""              # IANA-Name fuer das Fenster (z. B. Europe/Berlin); leer = Ortszeit des Routers
     canary: ""                # leer = der Kanarienvogel des Agent-Updates
     canary_clean_h: 24
     check_interval_h: 6
@@ -301,7 +301,7 @@ modes:
     max_wait_interactive_s: 60   # Wartebudget je Klasse (max_wait_s gilt fuer normal): ein Sprachbefehl nach einer Minute ist verloren,
     max_wait_batch_s: 1800       #   ein Nachtauftrag darf lange warten. Modelle ohne Parallelbetrieb: models.<m>.max_parallel: 1
 
-# Beispielwerte, gemessen auf einer RTX 5090 (KV f16, flash attention): /api/ps size_vram in GiB
+# Beispielwerte, gemessen auf einer 32-GB-GPU (KV f16, flash attention): /api/ps size_vram in GiB
 # bei num_ctx 8192 und 32768; kv_gib_per_1k = Differenz / 24.
 models:
   qwen3.6:35b-a3b:      # 20.59 @8k, 20.59 @32k, 20.61 @64k -> hybride Attention, KV vernachlässigbar
@@ -322,7 +322,8 @@ models:
   # big-moe-q2:
   #   weights_gib: 31
   #   capabilities: { tools: true, vision: false, structured: false, thinking: true }
-  # Stufe 5: Cloud-Modelle (kein VRAM, Preise in CHF je 1 Mio. Tokens fuer Budget/Usage; Listenpreise USD ~ CHF, Stand 2026-09).
+  # Stufe 5: Cloud-Modelle (kein VRAM, Preise je 1 Mio. Tokens fuer Budget/Usage, in der Waehrung der Budgets; der Router
+  # rechnet nicht um, die Endung _chf der Schluessel ist historisch. Beispielpreise: Listenpreise in USD, Stand 2026-09).
   # Nur ueber Rollen erreichbar, nicht als konkreter Modellname.
   "openai:gpt-5-mini":
     cloud: openai

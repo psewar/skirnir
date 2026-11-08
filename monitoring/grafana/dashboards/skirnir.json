@@ -92,7 +92,7 @@
      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"fillOpacity": 5, "lineWidth": 1}}, "overrides": []},
      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
      "targets": [{"refId": "A", "expr": "skirnir_perf_gen_tps", "legendFormat": "{{model}} @ {{node}}"}]},
-    {"id": 13, "type": "stat", "title": "Cloud spend this month (CHF)", "gridPos": {"h": 4, "w": 8, "x": 16, "y": 33},
+    {"id": 13, "type": "stat", "title": "Cloud spend this month", "gridPos": {"h": 4, "w": 8, "x": 16, "y": 33},
      "datasource": {"type": "prometheus", "uid": "skirnir-prom"},
      "fieldConfig": {"defaults": {"unit": "none", "decimals": 2}, "overrides": []},
      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "textMode": "value_and_name", "colorMode": "none"},

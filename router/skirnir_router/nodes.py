@@ -177,7 +177,7 @@ class Node(Breaker):
         self.vram_used_gib = None
         self.vram_total_reported_gib = None
         self.ollama_proc_gib = None
-        self.children_vram_gib = 0.0   # Agent >= 0.13.0: Grafikspeicher seiner Kinder ausser Ollama (STT per CUDA), gemeldet
+        self.children_vram_gib = 0.0   # Agent >= 0.13.0: Grafikspeicher seiner Kinder außer Ollama (STT per CUDA), gemeldet
         # Agent >= 0.17.0: Game and RAM as fact (poll.apply_heartbeat). game None = agent does not report it
         # (too old / Linux without detection) - then only foreign VRAM and GPU load apply as before.
         self.game = None              # {"running", "name", "via", ...} from agent

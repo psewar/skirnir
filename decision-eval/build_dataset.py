@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Representative Skirnir dataset for the Decision Engine: requests -> role (standard | large | assist | code).
 
-Source is templates from real operations (HA voice commands, Node-RED tasks, log triage, coding via agent frameworks,
-long analyses), each with placeholders and variants. Each template is a **group**: all variants of a template
+Source is synthetic templates for typical request types (HA voice commands, Node-RED tasks, log triage, coding via agent
+frameworks, long analyses), each with placeholders and variants. Each template is a **group**: all variants of a template
 land in the same split (train/validation/test), otherwise evaluation measures memorization instead of understanding (Section 9).
-Mixed German and English, Swiss spelling (ss instead of ß) as common in households.
+Mixed German and English; the German templates are written in ASCII (ae, oe, ue, ss for ä, ö, ü, ß).
 
     python build_dataset.py [--out data] [--seed 7] [--val 0.15] [--test 0.15]
 Writes data/{train,validation,test}.jsonl in Jevlike format ({context, options, label}) plus group/role per line and

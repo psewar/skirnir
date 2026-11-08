@@ -30,7 +30,7 @@ render(){ # $1 Secret-Key, $2 Zieldatei, $3 Eigentuemer-UID, $4 Container
   else
     rm -f "$TMP"
   fi
-  return 0   # set -e: ein &&-Rest mit Status 1 als letztes Kommando liess den ersten Lauf hier abbrechen (2026-09-25)
+  return 0   # set -e: ein &&-Rest mit Status 1 als letztes Kommando ließ den ersten Lauf hier abbrechen (2026-09-25)
 }
 render OLLAMA_ROUTER_UI_METRICS_PASS "$DIR/secrets/metrics.pass" 65534 skirnir-prometheus
 render GRAFANA_ADMIN_PASSWORD "$DIR/secrets/grafana_admin" "${GRAFANA_UID:-472}" skirnir-grafana

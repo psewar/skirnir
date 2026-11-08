@@ -41,8 +41,8 @@ _e("router.cloud.credential_scan", "choice", "Credential-Scan", "block = Prompts
 P = "router.cloud.providers.*."
 _e(P + "enabled", "bool", "aktiv", "deaktiviert = Anbieter faellt als Stufe weg", "Cloud-Anbieter", True,
    label_en="enabled", help_en="disabled = provider drops out as a tier")
-_e(P + "budget_month_chf", "float", "Budget CHF/Monat", "0 = kein Budget; erschoepft = Anbieter faellt als Stufe weg", "Cloud-Anbieter", 0, min=0, max=100000, step=0.5,
-   label_en="Budget CHF/month", help_en="0 = no budget; exhausted = provider drops out as a tier")
+_e(P + "budget_month_chf", "float", "Budget je Monat", "0 = kein Budget; erschoepft = Anbieter faellt als Stufe weg", "Cloud-Anbieter", 0, min=0, max=100000, step=0.5,
+   label_en="Budget per month", help_en="0 = no budget; exhausted = provider drops out as a tier")
 _e(P + "warn_at_percent", "int", "Warnung ab %", "HA-Problem 'Cloud <anbieter>: x % des Monatsbudgets'", "Cloud-Anbieter", 80, min=1, max=100,
    label_en="Warn from %", help_en="HA problem 'Cloud <provider>: x % of the monthly budget'")
 _e(P + "max_data_class", "choice", "Datenklasse max.", "eigene Obergrenze dieses Anbieters (leer = globale Grenze)", "Cloud-Anbieter", None, choices="data_classes", nullable=True,
@@ -140,7 +140,7 @@ _e("modes.ollama_update.release_url", "str", "Release-Quelle", "GitHub-API des n
 
 G = "OpenAI-Server"   # Router 0.16.0: an OpenAI-compatible server (Strata) only in a window or on request
 _e("modes.upstream_window.enabled", "bool", "Nur im Fenster oder auf Anfrage",
-   "an = ausserhalb des Fensters haelt der Router einen ungenutzten OpenAI-Server an, der Standby-Ollama bedient; eine Anfrage an das Modell des Servers startet ihn trotzdem. Nur fuer Knoten mit upstream_fallback",
+   "an = außerhalb des Fensters haelt der Router einen ungenutzten OpenAI-Server an, der Standby-Ollama bedient; eine Anfrage an das Modell des Servers startet ihn trotzdem. Nur fuer Knoten mit upstream_fallback",
    G, False, label_en="Only in the window or on request",
    help_en="on = outside the window the router holds an unused OpenAI server and the standby Ollama serves; a request for the server's model still starts it. Only for nodes with upstream_fallback")
 _e("modes.upstream_window.window_start", "str", "Fenster von (HH:MM)", "darf ueber Mitternacht gehen", G, "01:00",
@@ -149,8 +149,8 @@ _e("modes.upstream_window.window_end", "str", "Fenster bis (HH:MM)", "z. B. 01:0
    label_en="Window to (HH:MM)", help_en="e.g. 01:00 to 07:00")
 _e("modes.upstream_window.timezone", "str", "Zeitzone des Fensters", "IANA-Name, z. B. Europe/Zurich; leer = Ortszeit des Routers", G, "",
    label_en="Time zone of the window", help_en="IANA name, e.g. Europe/Zurich; empty = router local time")
-_e("modes.upstream_window.idle_hold_s", "float", "ausserhalb anhalten nach Leerlauf (s)",
-   "so lange muss das Modell des Servers ausserhalb des Fensters ungenutzt sein, bevor der Router ihn wieder anhaelt", G, 900, min=60, max=86400,
+_e("modes.upstream_window.idle_hold_s", "float", "außerhalb anhalten nach Leerlauf (s)",
+   "so lange muss das Modell des Servers außerhalb des Fensters ungenutzt sein, bevor der Router ihn wieder anhaelt", G, 900, min=60, max=86400,
    label_en="hold outside after idle (s)", help_en="the server's model must be unused this long outside the window before the router holds it again")
 
 G = "Busy-Erkennung"

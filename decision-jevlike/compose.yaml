@@ -1,6 +1,6 @@
 # Jevlike-Dienst neben dem Router auf router-host (LXC). Nur lokal erreichbar: 127.0.0.1:8081 -> Router-Konfiguration
 #   decision_engine.jevlike.endpoint: http://127.0.0.1:8081
-# Modelle liegen ausserhalb des Bildes unter /opt/skirnir-jevlike/models (Checkpoints + optional HF-Cache).
+# Modelle liegen außerhalb des Bildes unter /opt/skirnir-jevlike/models (Checkpoints + optional HF-Cache).
 services:
   jevlike:
     image: skirnir-jevlike

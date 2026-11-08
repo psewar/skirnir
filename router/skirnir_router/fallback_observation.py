@@ -1,6 +1,6 @@
 """Observation mode (0.6.7, decision_engine.observe_blocked): when a request waits for a busy model, the Decision Engine classifies it in the background and the decision log records whether a deeper free tier of the same role would have sufficed (event `decision_observe`). Routing remains unchanged.
 
-Background (kay, 2026-10-02): with max_parallel 1 (qwen3.8), requests queue behind minute-long agent requests. A short everyday query could often be answered by a free smaller model, but a programming task could not (benchmark: qwen3.8 19/20, others significantly lower). Before the router acts on this, a week of data should show how often this occurs, which classes are affected, how much wait time it saves, and whether the classifications are accurate.
+Background (2026-10-02): with max_parallel 1 (qwen3.8), requests queue behind minute-long agent requests. A short everyday query could often be answered by a free smaller model, but a programming task could not (benchmark: qwen3.8 19/20, others significantly lower). Before the router acts on this, a week of data should show how often this occurs, which classes are affected, how much wait time it saves, and whether the classifications are accurate.
 
 Only the engine's CPU chain (embed/tfidf/rules, 10-19 ms on the router host): the small LLM would run on the exact GPU being waited for. Runs as a separate task; the request does not wait for it.
 

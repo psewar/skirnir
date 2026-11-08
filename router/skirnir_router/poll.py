@@ -569,8 +569,8 @@ async def handle_heartbeat(request):
 
 
 def note_game_memory(node, b, now):
-    """Agent >= 0.17.0 reports a running game and RAM as a fact (kay's rule: report state instead of guessing from
-    side effects). Trigger 2026-10-04: Diablo IV + qwen3.8@196k -> RAM 94 %, free commit 1.8 GB, ~900 Hard
+    """Agent >= 0.17.0 reports a running game and RAM as a fact (the project's rule: report state instead of guessing
+    from side effects). Trigger 2026-10-04: Diablo IV + qwen3.8@196k -> RAM 94 %, free commit 1.8 GB, ~900 Hard
     Faults/s; the node stayed free because Diablo got little VRAM (no foreign VRAM) and the router didn't know RAM.
     If a block is missing, the agent doesn't report it (older, Linux without game detection): then old behavior remains."""
     g = b.get("game")

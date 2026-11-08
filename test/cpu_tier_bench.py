@@ -18,7 +18,7 @@ CTX = 8192
 LONG_PROMPT = ("Fasse den folgenden Text in drei Saetzen zusammen.\n\n" +
                ("Ein Smart Home besteht aus einer Hausautomation, mehreren Sprachsatelliten, einer lokalen Spracherkennung "
                 "und einem Skirnir-Router, der Anfragen an einen GPU-Rechner verteilt. Wird die GPU anderweitig gebraucht, "
-                "entlaedt der Router das grosse Modell und ein kleines Modell uebernimmt. ") * 60)
+                "entlaedt der Router das große Modell und ein kleines Modell uebernimmt. ") * 60)
 
 
 def post(path, body, timeout=900):

@@ -7,7 +7,8 @@ hand-written (test.jsonl, not generated here), so the reported numbers are about
 Personal = it carries or asks for something private about a person: health, money, credentials, relationships, law,
 contact data, where someone is or when someone is away, appointments, private lists and messages.
 Neutral = general knowledge, weather, cooking, units, time, jokes, and the state or control of devices and rooms.
-Names are invented and generic; nothing here comes from a real household.
+Names are invented and generic; nothing here comes from a real household. The committed data files predate the current
+city list and spelling: regenerating them changes their sentences, and the head must then be retrained.
 
     python build_dataset.py   -> data/train.jsonl, data/validation.jsonl
 """
@@ -31,11 +32,11 @@ S = {
     "secret": ["das WLAN-Passwort", "den PIN der Bankkarte", "das Passwort fürs E-Mail", "die Zugangsdaten fürs Bankkonto",
                "den Code der Alarmanlage", "das Passwort vom Laptop"],
     "list": ["Einkaufsliste", "Familienaufgaben", "Wunschliste", "Packliste", "To-do-Liste"],
-    "place": ["Arbeit", "Schule", "Ferien", "Spital", "Grossmutter", "Training", "Bahnhof"],
+    "place": ["Arbeit", "Schule", "Ferien", "Spital", "Großmutter", "Training", "Bahnhof"],
     "device": ["das Licht in der Küche", "die Stehlampe", "die Heizung im Bad", "den Fernseher", "die Kaffeemaschine",
                "die Storen im Wohnzimmer", "den Ventilator", "das Radio", "die Weihnachtsbeleuchtung", "den Staubsauger"],
     "room": ["Wohnzimmer", "Bad", "Schlafzimmer", "Büro", "Küche", "Keller", "Hobbyraum", "Garten", "Kinderzimmer"],
-    "city": ["Zürich", "Bern", "Basel", "Luzern", "Olten", "Aarau", "Lugano", "Genf"],
+    "city": ["Berlin", "Wien", "Hamburg", "München", "Köln", "Paris", "Rom", "London"],
     "dish": ["Risotto", "Rösti", "Zopf", "Lasagne", "Älplermagronen", "Birchermüesli", "Gulasch", "Apfelkuchen"],
     "topic": ["die Fotosynthese", "die Relativitätstheorie", "das Matterhorn", "den Gotthardtunnel", "die Römer",
               "schwarze Löcher", "den Klimawandel", "die Schweizer Bundesverfassung", "Vulkane"],
@@ -62,7 +63,7 @@ PERSONAL = [
     "Ruf {name} an.", "Wie ist die Nummer von {name}?", "Wo wohnt {name}?", "Schick {name} eine Nachricht, dass ich später komme.",
     "Was hat {name} mir geschrieben?", "Hat {name} angerufen?",
     "{person} und ich haben Streit, was soll ich machen?", "Ich glaube, {person} betrügt mich.", "Wie sage ich {person}, dass ich mich trennen will?",
-    "Wann ist die Gerichtsverhandlung von {person}?", "Muss ich wegen der Busse zur Polizei?", "Was schreibe ich dem Anwalt wegen der Scheidung?",
+    "Wann ist die Gerichtsverhandlung von {person}?", "Muss ich wegen der Buße zur Polizei?", "Was schreibe ich dem Anwalt wegen der Scheidung?",
     "Wie lange ist {person} schon krank?", "{person} ist schwanger, wann ist der Geburtstermin?", "Hat {person} morgen Therapie?",
     "Wann hat {name} Geburtstag?", "Wie alt ist {person}?", "Was wünscht sich {person} zum Geburtstag?",
     "Notiere, dass {person} {ill} hat.", "Wie viel wiegt {person} jetzt?", "Was hat der {doc} letzte Woche gesagt?",
@@ -76,13 +77,13 @@ NEUTRAL = [
     "Wie mache ich {dish}?", "Wie lange muss {dish} in den Ofen?", "Was brauche ich für {dish}?",
     "Rechne {unit} um.", "Wie viel sind {unit}?", "Was ist 17 mal 23?",
     "Stell einen Timer auf {num} Minuten.", "Wecke mich in {num} Minuten.", "Wie spät ist es?", "Welcher Tag ist heute?",
-    "Erklär mir {topic}.", "Was weisst du über {topic}?", "Wer hat {topic} entdeckt?",
+    "Erklär mir {topic}.", "Was weißt du über {topic}?", "Wer hat {topic} entdeckt?",
     "Spiel {music}.", "Mach die Musik leiser.", "Was läuft gerade im Radio?",
     "Erzähl mir einen Witz.", "Wie hoch ist der Säntis?", "Wann geht heute die Sonne unter?",
     "Wie viel Strom verbraucht die Wärmepumpe gerade?", "Wie voll ist der Akku vom Mähroboter?", "Ist die Waschmaschine fertig?",
     "Fahr die Storen im {room} runter.", "Starte den Staubsauger.", "Ist das Garagentor zu?",
     "Wie ist die Luftfeuchtigkeit im {room}?", "Wie viel Solarstrom produzieren wir gerade?", "Wann ist der nächste Vollmond?",
-    "Wie weit ist es von {city} nach Bern?", "Was ist die Hauptstadt von Kanada?", "Übersetze guten Morgen ins Italienische.",
+    "Wie weit ist es von {city} nach Prag?", "Was ist die Hauptstadt von Kanada?", "Übersetze guten Morgen ins Italienische.",
     "Wie schreibt man Rhythmus?", "Gib mir eine Idee für das Abendessen.", "Welche Zutaten passen zu {dish}?",
     "Wie funktioniert eine Wärmepumpe?", "Warum ist der Himmel blau?", "Wie viele Einwohner hat {city}?",
     "Wie viel wiegt {animal}?", "Wie alt wird {animal}?", "Was frisst {animal}?", "Wie schnell ist {animal}?",

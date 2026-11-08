@@ -99,16 +99,16 @@ def pick(candidates, tier, role):
     return erster
 
     # UPDATE 2026-09-04: "warm zuerst" ist jetzt GLOBAL Standard (modes.warm_first), latency_first pro Rolle nur
-    # noch Override. Gegenmassnahme gegen das Absinken der Liste: prewarm der Rang-1-Modelle bei online/busy->free.
+    # noch Override. Gegenmaßnahme gegen das Absinken der Liste: prewarm der Rang-1-Modelle bei online/busy->free.
     # latency_first: Kriterium 1 gilt sogar TIER-übergreifend:
     # ist irgendwo ein Modell eines niedrigeren Tiers bereits geladen und der
     # höhere Tier wäre nur per Kaltstart erreichbar, gewinnt das geladene Modell.
-    # Für Sprachbefehle zählt die Sekunde mehr als die Modellgrösse.
+    # Für Sprachbefehle zählt die Sekunde mehr als die Modellgröße.
 ```
 
 Eigenschaften:
-- Qualität vor Ort: Tier-Reihenfolge ist strikt (ausser bei `latency_first`). Ein kleines
-  Modell wird nur gewählt, wenn kein Knoten den grösseren Tier tragen kann. Bei `gross`
+- Qualität vor Ort: Tier-Reihenfolge ist strikt (außer bei `latency_first`). Ein kleines
+  Modell wird nur gewählt, wenn kein Knoten den größeren Tier tragen kann. Bei `gross`
   gibt es bewusst keinen kleinen Fallback -> 503 statt schlechter Triage.
 - Kontext wird nur nach unten angepasst, nie über den Client-Wert erhöht.
 - HA schickt pro Turn die volle Historie, daher keine Session-Affinität nötig.
@@ -137,7 +137,7 @@ def dispatch(node, tier, ctx):
 
 Weitere Endpunkte:
 ```
-GET  /api/tags     -> eine Zeile pro Rolle (exposed_as), Grösse/Details vom ersten Tier
+GET  /api/tags     -> eine Zeile pro Rolle (exposed_as), Größe/Details vom ersten Tier
 GET  /api/show     -> Rolle -> /api/show des ersten Tier-Modells auf irgendeinem Online-Knoten
                       (HA liest hier die Capabilities wie "tools"; deshalb müssen alle Tiers einer
                       Rolle dieselben capabilities haben, sonst Konfigurationsfehler beim Start)
@@ -176,7 +176,7 @@ Die Zahlen im Modellkatalog sind Platzhalter. Messvorschrift pro Modell, pro GPU
 2. ollama stop <model>; Chat mit options.num_ctx=32768 -> ollama ps -> size_vram = B
    kv_gb_per_1k = (B - A) / 24            # 24k Kontext Differenz
    weights_gb   = A - kv_gb_per_1k * 8
-3. Gegenprobe bei 65536 (auf der 5090): Vorhersage vs. size_vram, Abweichung < 5 %?
+3. Gegenprobe bei 65536 (auf der größten Karte): Vorhersage vs. size_vram, Abweichung < 5 %?
 ```
 Vorbedingung auf allen Knoten identisch: OLLAMA_KV_CACHE_TYPE=q8_0, OLLAMA_FLASH_ATTENTION=1.
 Wenn `size_vram` kleiner als `size` ist, läuft Partial-Offload -> Tier passt NICHT, auch

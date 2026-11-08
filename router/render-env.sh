@@ -35,7 +35,7 @@ done
 if [ ! -f "$OUT" ] || ! cmp -s "$TMP" "$OUT"; then
   mv "$TMP" "$OUT"; echo "$(date) $OUT aus dem Secret-Store aktualisiert"
   if [ "$RESTART" = 1 ] && systemctl is-active --quiet skirnir-router; then
-    systemctl restart --no-block skirnir-router && echo "skirnir-router Neustart angestossen (Secret geaendert)"
+    systemctl restart --no-block skirnir-router && echo "skirnir-router Neustart angestoßen (Secret geaendert)"
   fi
 else
   rm -f "$TMP"; echo "$(date) $OUT unveraendert"

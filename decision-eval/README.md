@@ -26,10 +26,10 @@ meinte, nur mit einem linearen Modell statt Jevlike an der Spitze.
 
 **Stufe 2 (2026-09-17 00:30):** `decision-embed/` - multilingual-e5-small (118 M Parameter) nach ONNX exportiert und dynamisch auf
 int8 quantisiert (448 -> 113 MB), Mean-Pooling, Softmax-Regression auf den 384-dim Vektoren (kNN und Mischung waren schlechter:
-0,879 / 0,917). int8 kostet keine Genauigkeit (fp32 0,924 vs int8 0,939 beim Kopftraining, Rauschen). Auf dem CT (4-Kern-Xeon,
+0,879 / 0,917). int8 kostet keine Genauigkeit (fp32 0,924 vs int8 0,939 beim Kopftraining, Rauschen). Auf dem Router-Host (4 CPU-Kerne,
 Container mit 4 Threads) 10-19 ms je Entscheidung inkl. HTTP, 456 MiB RAM. Schwaeche: die Fehler sind selbstbewusst
 (sicher-und-richtig 0,944 bei nur 6 % Fallback), darum gewinnt die Kaskade mit dem LLM wenig; kNN-Uneinigkeit als zweites
-Unsicherheitsmass waere der naechste Versuch.
+Unsicherheitsmaß waere der naechste Versuch.
 
 Befunde je Engine:
 - **tfidf** verwechselt noch `standard` mit `code` (6) und `gross` mit `standard`/`assist` (je 4): kurze Alltagsfragen ohne
@@ -40,7 +40,7 @@ Befunde je Engine:
 - **Kalibrierung:** Temperatur hilft der Byte-Variante kaum (0,137 -> 0,135), beim Frozen-Encoder etwas (0,195 -> 0,126); bei
   tfidf/rules findet die Rastersuche T = 0,5 (Verteilung zu flach) - alles Zeichen fuer zu wenige, zu gleichfoermige Daten.
 - **Vorbehalt Datensatz:** 1282 Beispiele aus 136 Vorlagen (Deutsch/Englisch, Smart-Home, Coding, Analysen, Alltag), Split nach
-  Vorlage. Vorlagen-Sprache ist sauberer als echter Verkehr; 97,7 % beim LLM heisst: der Satz ist fuer ein 35B-Modell leicht.
+  Vorlage. Vorlagen-Sprache ist sauberer als echter Verkehr; 97,7 % beim LLM heißt: der Satz ist fuer ein 35B-Modell leicht.
 
 **Stand Produktion (2026-09-17 00:30):** Kette `[embed, local_llm, tfidf, rules]`, Capture an fuer zwei Clients (Agenten-Framework, Node-RED) (anonymisiert, `/var/lib/skirnir-router/decisions.jsonl`; `build_dataset.py --capture` nimmt die `client`-Labels). Empfehlung: nach ein paar Wochen Capture
 (Agenten-Framework, Node-RED) den tfidf auf echten Daten neu trainieren, dann `[tfidf, local_llm, rules]` schalten und Stufe 2

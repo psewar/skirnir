@@ -126,7 +126,7 @@ add_node(FakeNode("gpu-desktop", ["qwen3.6:35b-a3b"], free=1.0, foreign=5.0, loa
 check("warm loaded model is no obstacle, even with full VRAM", S.blockers(NIGHT, None, 0) == [])
 
 # --- two nodes: one offline, one busy -> gpu_busy wins (resolves itself) ---
-add_node(FakeNode("mary", ["qwen3.6:35b-a3b"], st="offline"),
+add_node(FakeNode("node-c", ["qwen3.6:35b-a3b"], st="offline"),
        FakeNode("gpu-desktop", ["qwen3.6:35b-a3b"], st="busy", busy_reason="foreign_vram"))
 u = S.unavailable(NIGHT, None, 0)
 check("offline + busy -> gpu_busy, both listed as obstacle", u["code"] == S.GPU_BUSY and len(u["blockers"]) == 2, str(u))

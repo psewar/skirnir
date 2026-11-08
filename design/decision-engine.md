@@ -10,7 +10,7 @@ schwierige Faelle zu brauchen. Dieser Text haelt fest, was umgesetzt ist und wo 
 
 | Baustein | Ort | Kurz |
 |---|---|---|
-| Grundtypen | `router/ollama_router/decision/base.py` | `DecisionRequest`, `DecisionResult` (Verteilung, `model_probability`, `calibrated_confidence`, Engine, Modell, Latenz, Unsicherheit, Fallback-Spur), Unsicherheitsmasse, Temperatur-Skalierung |
+| Grundtypen | `router/ollama_router/decision/base.py` | `DecisionRequest`, `DecisionResult` (Verteilung, `model_probability`, `calibrated_confidence`, Engine, Modell, Latenz, Unsicherheit, Fallback-Spur), Unsicherheitsmaße, Temperatur-Skalierung |
 | Engines | `decision/rules.py`, `decision/tfidf.py`, `decision/jevlike.py`, `decision/local_llm.py` | Regeln (letzte Stufe), TF-IDF + Softmax-Regression (Stufe 1, 2026-09-17, im Prozess, <1 ms), Jevlike-Adapter (HTTP zu eigenem Prozess), kleines LLM ueber den eigenen Router mit erzwungenem JSON-Schema |
 | Kette + Fallback | `decision/__init__.py` (`Decider`) | erste sichere Engine gewinnt; unsicher = Abstand Top1/Top2, normierte Entropie, Mindest-p; alle unsicher -> letzte entscheidet (markiert `forced`), alle ausgefallen -> `default` |
 | Integration | `proxy._decide_role` | nur die Auto-Rolle (`auto:latest`) geht durch die Engine; Ergebnis ist eine bestehende Rolle, danach unveraenderter Weg (Stufen, Faehigkeiten, Verfuegbarkeit, Score). Antwort traegt `routing.decision` |
@@ -74,5 +74,5 @@ wertvollsten neuen Trainingsbeispiele.
 `decision-embed/`: multilingual-e5-small als ONNX int8 (113 MB) + Softmax-Kopf, Dienst mit demselben Protokoll wie Jevlike
 (Adapter `JevlikeEngine(name="embed")`), Container auf router-host (127.0.0.1:8082, 456 MiB). Test: 0,932 Top-1, 10-19 ms auf dem
 CT. Damit ist die CPU-gebundene, rein lokale Entscheidung moeglich (`embed -> tfidf -> rules` 0,909 ohne LLM). Der Kopf lernt
-in Sekunden neu, das Embedding-Modell bleibt - der Weg fuer echte Daten aus dem Capture. Offen: besseres Unsicherheitsmass
+in Sekunden neu, das Embedding-Modell bleibt - der Weg fuer echte Daten aus dem Capture. Offen: besseres Unsicherheitsmaß
 (kNN-Uneinigkeit), damit die Kaskade zum LLM greift, wo embed irrt.

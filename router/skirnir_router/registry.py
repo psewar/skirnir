@@ -124,7 +124,7 @@ class NodeRegistry:
             self.nodes[fp] = e
             log.info("node %s: new agent key %s... from %s -> awaiting approval", cand, fp[:16], remote)
             state.remember({"event": "node_pending", "node": cand, "fp": fp[:16]})
-        agentupdate.note_hello(e, facts or {})   # Versionswechsel merken, offenen Update-Auftrag abschliessen
+        agentupdate.note_hello(e, facts or {})   # Versionswechsel merken, offenen Update-Auftrag abschließen
         ollamaupdate.note_hello(e, facts or {})  # Ollama version from the registration, if the registry does not know it yet
         e["facts"] = facts or {}
         e["last_seen"], e["remote"], e["pubkey"] = now, remote, pub_b64
@@ -439,7 +439,7 @@ async def handle_node_action(request):
     if action == "update":   # Trigger agent update (agentupdate.py); force = also with running requests / same version
         ok, msg = await agentupdate.order_update(fp, "ui", force=bool(body.get("force")))
         return web.json_response({"ok": ok, "message": msg}, status=200 if ok else 409)
-    if action == "ollama-update":   # Ollama-Update anstossen (ollamaupdate.py, 0.3.0)
+    if action == "ollama-update":   # Ollama-Update anstoßen (ollamaupdate.py, 0.3.0)
         ok, msg = await ollamaupdate.order_update(fp, "ui", force=bool(body.get("force")))
         return web.json_response({"ok": ok, "message": msg}, status=200 if ok else 409)
     if action == "policy":

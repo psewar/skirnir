@@ -58,7 +58,7 @@ for what, body in (("settings is not a mapping", {"settings": ["x"]}),
                    ("max_parallel -1", {"models": {"m": {"weights_gib": 1, "max_parallel": -1}}}),
                    ("client IP invalid", {"clients": {"c1": {"ip": "999.1.1.1"}}}),
                    ("client requests_per_minute not a number", {"clients": {"c1": {"requests_per_minute": "viele"}}}),
-                   ("client name invalid", {"clients": {"Gross Name": {}}})):
+                   ("client name invalid", {"clients": {"Big Name": {}}})):
     p = admin._overrides_from_request(body)
     check(f"admin: {what} -> Problem 400", failed(p) and p.status == 400, msg(p))
 check("admin: Client with IP list", admin._client_spec("c1", {"ip": "192.0.2.1; 192.0.2.2"}) == {"ip": ["192.0.2.1", "192.0.2.2"]})
