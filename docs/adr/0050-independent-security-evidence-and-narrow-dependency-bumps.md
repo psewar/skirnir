@@ -1,6 +1,7 @@
 ---
-status: proposed
-date: 2026-11-06
+status: accepted
+date: 2026-11-08
+decision-makers: operator
 ---
 # Verify security evidence independently of pull-request code
 
@@ -17,3 +18,7 @@ The stricter exception favors manual review when the parser cannot establish tha
 Validate with a PR fixture that replaces its checker and deletes its workflow, a concurrent ref change and negative
 tests for action swaps, pin weakening, changed Go sources/checksums, added manifests and executable modes.
 Deployment details and administrator acceptance checks are in design/continuous-security-review.md.
+
+Proposed on 2026-11-06, accepted by the operator on 2026-11-08 after the rollout fixtures: the dedicated App published
+a passing `skirnir/trusted-security-review` status on a valid fixture and a failing one on a fixture that removed its
+PR-side evidence workflow and review record.

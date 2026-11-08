@@ -2,7 +2,7 @@
 
 ## Unreleased — development tooling
 
-- Run an independent pre-merge evidence check and restrict the Dependabot exemption to existing dependency versions (ADR-0050).
+- Run an independent pre-merge evidence check and restrict the Dependabot exemption to existing dependency versions (ADR-0050, accepted).
 
 
 - Weekly full security reviews resume from the previously reviewed chunks (ADR-0049).
