@@ -2,65 +2,45 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "5b97f09462ec253685aa867b92a66b1f44d1896b",
-  "change_digest": "9f373b4e58a2b02778df729ebb1e05f39e8b4eca3bbe62a40fe1b6aff272a7f6",
+  "base_sha": "10552e2760634f6e7a4ad51bb24f917f859cc0e9",
+  "change_digest": "8af0f8cbb5643bb00aadf6ca439deecb4925c5e679dc2a967638eb9dd8a956f3",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "agent/config.example.yaml",
-    "agent/updater.go",
-    "agent/updater_test.go",
-    "docs/adr/0054-agent-refuses-signed-downgrades.md",
-    "docs/adr/README.md",
-    "docs/security/risk-register.json",
-    "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md"
+    "monitoring/compose.yaml",
+    "monitoring/prometheus.yml.tmpl"
   ],
   "risk_ids": [
-    "TM-13"
+    "TM-15"
   ],
   "boundaries": [
-    "B8"
+    "B9"
   ],
-  "summary": "Agent 0.28.0 (same unreleased v0.26.0 as the configuration-key check of ADR-0051) refuses signed downgrades (ADR-0054, TM-13). Updater.verifyOrder compares the signed manifest version (after the Ed25519 check, never the unsigned order field alone) with the running release via downgradeRefusal; an older or non-release target is refused with errDowngrade and reported as update kind 'downgrade' through updateKind (no message parsing). update.allow_downgrade, a field of the existing update block in the node-local YAML and out of the router's reach, permits a deliberate rollback; it is a known field, so the strict top-level key check of ADR-0051 is unaffected. A local 'dev' build is not checked. Version parsing accepts only MAJOR.MINOR.PATCH digits (max 6 per field, no overflow). The router keeps retrying a refused order after 6 h (agentupdate.retry_after), which is benign. Signing-key rotation and recovery stay open, so TM-13 stays open in the register. Rebased onto main after #91 and #93; German texts follow main's spelling.",
-  "findings": [
-    {
-      "id": "TM-13",
-      "evidence": "agent 0.27.0 Updater.verifyOrder refused only the running version; any older validly signed manifest was installable.",
-      "resolution": "Anti-rollback implemented and tested (agent/updater.go, updater_test.go); signing-key rotation and recovery remain open, so the risk stays open.",
-      "disposition": "baseline"
-    }
-  ],
+  "summary": "Moves the monitoring Prometheus' 90-day retention from the deprecated --storage.tsdb.retention.time flag into prometheus.yml (storage.tsdb.retention.time), as the Prometheus 3.x docs direct. No port, bind address, user, volume, secret, scrape target, authentication or TLS setting changes. deploy_ct.py renders the template by replacing only __ROUTER_HOST__, so the new block reaches the host unchanged. The retention value is the same; with neither flag nor field Prometheus would fall back to 15 days, so the field is required, which the template now carries. No new trust boundary, route or credential path. Rebased onto main after #90-#92 without changing the monitoring change: only the base and the changelog row moved; the rebase was checked by the merging session (diff of compose.yaml and prometheus.yml.tmpl identical to the reviewed commit).",
+  "findings": [],
   "tests": [
-    {
-      "command": "cd agent && gofmt -l . && go vet ./... && go test -count=1 ./...",
-      "result": "passed",
-      "evidence": "gofmt clean, vet clean, ok github.com/psewar/skirnir/agent, including TestDowngradeRefusal and TestUpdaterVerifyOrderRefusesSignedDowngrade."
-    },
-    {
-      "command": "Negative check (before rebase): go test -run Downgrade with the previous agent/updater.go",
-      "result": "passed",
-      "evidence": "FAIL [build failed]: unknown field AllowDowngrade in struct literal of type UpdateCfg; the old updater has no downgrade protection."
-    },
-    {
-      "command": "ruff check .; python test/check_adr_index.py; python test/selftest_threat_review.py",
-      "result": "passed",
-      "evidence": "All checks passed; ADR index ok: 54 ADRs; threat review self-test completed."
-    },
-    {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
-      "result": "passed",
-      "evidence": "Security evidence: 0 error(s)."
-    },
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
       "evidence": "Public-change scan: 0 finding(s)."
+    },
+    {
+      "command": "ruff check .",
+      "result": "passed",
+      "evidence": "All checks passed!"
+    },
+    {
+      "command": "promtool check config on the rendered template (placeholder host name) inside a running prom/prometheus:v3.15.1 container",
+      "result": "passed",
+      "evidence": "SUCCESS: valid prometheus config file syntax."
+    },
+    {
+      "command": "Same storage.tsdb.retention block (time and size) deployed by the operator to a separate Prometheus v3.15.1 without the retention flags",
+      "result": "passed",
+      "evidence": "/api/v1/status/runtimeinfo reports storageRetention as configured in the file."
     }
   ],
   "limitations": [
-    "Agent tests ran on Windows locally; Linux and the Windows cross-build run in CI.",
-    "Signing-key rotation and recovery are not part of this change."
+    "deploy_ct.py was not run with this change; after the merge the operator checks /api/v1/status/runtimeinfo for storageRetention 90d.",
+    "Retention in the config file needs Prometheus 3.11 or later (earlier 3.x read the time with the wrong unit); this change must not be combined with a downgrade below 3.11."
   ]
 }

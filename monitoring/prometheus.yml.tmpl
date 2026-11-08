@@ -3,6 +3,12 @@ global:
   scrape_interval: 15s
   evaluation_interval: 30s
 
+# Retention, reloadable at runtime (replaces the deprecated --storage.tsdb.retention.time flag; needs Prometheus >= 3.11).
+storage:
+  tsdb:
+    retention:
+      time: 90d
+
 scrape_configs:
   - job_name: skirnir
     scheme: https
