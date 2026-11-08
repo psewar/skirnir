@@ -3,7 +3,7 @@
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
   "base_sha": "14673bd35926d5c3ccb281c2eefe3979f62148fe",
-  "change_digest": "a28303d8c072de29616fdf23b7e8ee227b0bfe660d4fe3a95e21922362c603b9",
+  "change_digest": "3fd9e806ef9c1fe3d66273106d884206232d7b0e29eec404dac0a4628eb24cad",
   "reviewed_paths": [
     ".github/dependabot.yml",
     ".github/workflows/ci.yml",
@@ -15,6 +15,7 @@
     "decision-jevlike/Dockerfile",
     "docs/adr/0055-pin-third-party-references-immutably.md",
     "docs/adr/0056-owner-only-router-files-and-log-canaries.md",
+    "docs/adr/0057-bound-unauthenticated-statistics-and-audit-volume.md",
     "docs/adr/README.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
@@ -29,17 +30,20 @@
     "router/skirnir_router/state.py",
     "test/check_pinned_references.py",
     "test/selftest_log_hygiene.py",
-    "test/selftest_pinned_references.py"
+    "test/selftest_pinned_references.py",
+    "test/selftest_security.py"
   ],
   "risk_ids": [
+    "TM-08",
     "TM-15",
     "TM-16"
   ],
   "boundaries": [
+    "B1",
     "B8",
     "B9"
   ],
-  "summary": "Supply-chain pinning (ADR-0055, TM-16). In ci.yml, live-memory.yml and security.yml every third-party action moves from its major tag to the commit SHA of the current release (checkout v7.0.1, setup-python v7.1.0, setup-go v7.0.0, upload-artifact v7.0.2; each SHA equals the current v7 tag, so behaviour is unchanged); threat-model.yml, threat-review.yml and trusted-security-gate.yml were already pinned and are untouched. govulncheck goes from @latest to v1.9.0 and pip-audit to ==2.10.1. pip-audit now also audits router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt and rerank-server/requirements.txt (all clean locally); the rerank server's exact pins are audited with --no-deps --disable-pip because they need Python >= 3.12 (numpy 2.5.4) while the job runs 3.11, so its transitive dependencies are not audited; decision-jevlike stays out because it installs a git dependency and an unpinned transformers stack (noted). monitoring/compose.yaml pins prom/prometheus:v3.15.1 and grafana/grafana:13.3.0 to their multi-arch index digests, verified equal to the RepoDigests of the containers running in the reference deployment, so a redeploy changes nothing. The decision-service Dockerfiles pin python:3.11-slim to its index digest. Dependabot gains docker-compose (/monitoring) and docker (decision services). test/check_pinned_references.py enforces the rule in CI (workflow actions, go install, pip tools, compose images, Dockerfile FROM) with a self-test of rejected and accepted forms. Permissions, triggers, secrets and job logic are unchanged; the ADR-0050 Dependabot exemption parser accepts the SHA-plus-version-comment form, so future action bumps keep that path. Workflow and review-policy changes should still be looked at by the maintainer. Stacked on that change: router 0.19.1 makes its files owner-only and adds a secret-canary test (ADR-0056, TM-15). common.open_private opens with O_CREAT mode 0600 and fchmods an existing file to 0600 where available; it replaces open() at all seven router write sites (audit log, journal append and compaction, registry, UI overrides with token hashes, save_json_file users such as metrics, fallback observations). Errors still surface as OSError to the same except OSError boundaries as before. The systemd unit adds UMask=0077. test/selftest_log_hygiene.py runs the real API and control apps in-process with canaries (wrong/valid client token, wrong/valid control password, a prompt on the Ollama and OpenAI paths, a token rotated through POST /admin/clients/<name>/token) and searches every captured log record, audit.jsonl, events.jsonl and roles.yaml after confirming the events were recorded; on POSIX it checks the 0600 modes and the tightening of a pre-existing 0644 file. Audit field content is unchanged (no prompts, no tokens; rotation logs only an 8-character hash prefix).",
+  "summary": "Supply-chain pinning (ADR-0055, TM-16). In ci.yml, live-memory.yml and security.yml every third-party action moves from its major tag to the commit SHA of the current release (checkout v7.0.1, setup-python v7.1.0, setup-go v7.0.0, upload-artifact v7.0.2; each SHA equals the current v7 tag, so behaviour is unchanged); threat-model.yml, threat-review.yml and trusted-security-gate.yml were already pinned and are untouched. govulncheck goes from @latest to v1.9.0 and pip-audit to ==2.10.1. pip-audit now also audits router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt and rerank-server/requirements.txt (all clean locally); the rerank server's exact pins are audited with --no-deps --disable-pip because they need Python >= 3.12 (numpy 2.5.4) while the job runs 3.11, so its transitive dependencies are not audited; decision-jevlike stays out because it installs a git dependency and an unpinned transformers stack (noted). monitoring/compose.yaml pins prom/prometheus:v3.15.1 and grafana/grafana:13.3.0 to their multi-arch index digests, verified equal to the RepoDigests of the containers running in the reference deployment, so a redeploy changes nothing. The decision-service Dockerfiles pin python:3.11-slim to its index digest. Dependabot gains docker-compose (/monitoring) and docker (decision services). test/check_pinned_references.py enforces the rule in CI (workflow actions, go install, pip tools, compose images, Dockerfile FROM) with a self-test of rejected and accepted forms. Permissions, triggers, secrets and job logic are unchanged; the ADR-0050 Dependabot exemption parser accepts the SHA-plus-version-comment form, so future action bumps keep that path. Workflow and review-policy changes should still be looked at by the maintainer. Stacked on that change: router 0.19.1 makes its files owner-only and adds a secret-canary test (ADR-0056, TM-15). common.open_private opens with O_CREAT mode 0600 and fchmods an existing file to 0600 where available; it replaces open() at all seven router write sites (audit log, journal append and compaction, registry, UI overrides with token hashes, save_json_file users such as metrics, fallback observations). Errors still surface as OSError to the same except OSError boundaries as before. The systemd unit adds UMask=0077. test/selftest_log_hygiene.py runs the real API and control apps in-process with canaries (wrong/valid client token, wrong/valid control password, a prompt on the Ollama and OpenAI paths, a token rotated through POST /admin/clients/<name>/token) and searches every captured log record, audit.jsonl, events.jsonl and roles.yaml after confirming the events were recorded; on POSIX it checks the 0600 modes and the tightening of a pre-existing 0644 file. Audit field content is unchanged (no prompts, no tokens; rotation logs only an 8-character hash prefix). Stacked further: bounded pre-authentication state (ADR-0057, TM-08). auth.client_auth_middleware now keeps unauthenticated sources in an insertion-ordered table refreshed on every hit and evicts the least recently seen beyond MAX_UNAUTH_SOURCES = 1024 (evictions counted, shown as unauthenticated_evicted in client_auth_view). _audit_unauth writes one auth_denied/auth_missing line per source and event kind every 300 s and at most 120 a minute over all sources (deque of timestamps); withheld lines are counted per source (suppressed) and globally (suppressed_all) and reported in the next written line. Before, enforce wrote a line for every refusal. The deny decision, status codes, per-source totals and the identified-client path (rate limit, inference refusal) are unchanged; audit field content stays free of tokens and prompts. The new structures are touched only on the unauthenticated path and are O(1) amortised per request.",
   "findings": [
     {
       "id": "TM-16",
@@ -51,6 +55,12 @@
       "id": "TM-15",
       "evidence": "Router 0.19.0 created audit.jsonl, events.jsonl and roles.yaml with the process umask (0644 observed under Linux in the negative check); the no-secrets rule for logs was untested.",
       "resolution": "Owner-only files in code and unit umask, CI canary test; rotation, backups and independent retention remain open, so TM-15 stays open.",
+      "disposition": "baseline"
+    },
+    {
+      "id": "TM-08",
+      "evidence": "Router 0.19.0: CLIENT_STATS['unauth'] grew one entry per source address without limit and enforce wrote an audit line per refusal (measured: 1324 sources -> 1325 entries, 1324 lines).",
+      "resolution": "Bounded table and throttled audit with counts; concurrency/time/byte/cost limits for authenticated traffic remain, so TM-08 stays open.",
       "disposition": "baseline"
     }
   ],
@@ -104,6 +114,21 @@
       "command": "Every `python test/...` and `python router/...` command of the router CI job, except integration/e2e; ruff; router.py --check config.example.yaml --pure; check_adr_index.py",
       "result": "passed",
       "evidence": "No failures; ADR index ok: 56 ADRs."
+    },
+    {
+      "command": "python test/selftest_security.py (TM-08 checks)",
+      "result": "passed",
+      "evidence": "PASS a repeating source writes one audit line per interval; PASS another event kind of the same source is written and reports what was withheld; PASS an address spray cannot grow the source table; PASS evicted sources are counted; PASS an address spray is capped by the per-minute audit budget; PASS lines withheld by the budget are counted; PASS the admin view reports evictions."
+    },
+    {
+      "command": "Behaviour comparison script (5 refusals of one source, spray of 1324 sources) against router/skirnir_router/auth.py old and new",
+      "result": "passed",
+      "evidence": "old: 5 lines, 1325 sources, 1324 lines; new: 1 line, 1024 sources, 119 lines (budget 120 incl. the first)."
+    },
+    {
+      "command": "python test/run_tests.py (end-to-end suite, local)",
+      "result": "passed",
+      "evidence": "rc=0, '0 failures: []', including the audit-log check for auth_missing, forbidden, rate_limited, auth_denied and client_auth_mode."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
