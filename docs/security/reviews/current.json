@@ -3,7 +3,7 @@
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
   "base_sha": "14673bd35926d5c3ccb281c2eefe3979f62148fe",
-  "change_digest": "8ecf71750216d233b441d4488543b51e9a613987cee105817b562bd4891e5605",
+  "change_digest": "ef8172fe5d264df2342a4e381cd700df0ad8c371aadb4b20ff334314b8673b6c",
   "reviewed_paths": [
     ".github/dependabot.yml",
     ".github/workflows/ci.yml",
@@ -29,7 +29,7 @@
     "B8",
     "B9"
   ],
-  "summary": "Supply-chain pinning (ADR-0055, TM-16). In ci.yml, live-memory.yml and security.yml every third-party action moves from its major tag to the commit SHA of the current release (checkout v7.0.1, setup-python v7.1.0, setup-go v7.0.0, upload-artifact v7.0.2; each SHA equals the current v7 tag, so behaviour is unchanged); threat-model.yml, threat-review.yml and trusted-security-gate.yml were already pinned and are untouched. govulncheck goes from @latest to v1.9.0 and pip-audit to ==2.10.1. pip-audit now also audits router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt and rerank-server/requirements.txt (all clean locally); the rerank server's exact pins are audited with --no-deps because they need Python >= 3.12 (numpy 2.5.4) while the job runs 3.11, so its transitive dependencies are not audited; decision-jevlike stays out because it installs a git dependency and an unpinned transformers stack (noted). monitoring/compose.yaml pins prom/prometheus:v3.15.1 and grafana/grafana:13.3.0 to their multi-arch index digests, verified equal to the RepoDigests of the containers running in the reference deployment, so a redeploy changes nothing. The decision-service Dockerfiles pin python:3.11-slim to its index digest. Dependabot gains docker-compose (/monitoring) and docker (decision services). test/check_pinned_references.py enforces the rule in CI (workflow actions, go install, pip tools, compose images, Dockerfile FROM) with a self-test of rejected and accepted forms. Permissions, triggers, secrets and job logic are unchanged; the ADR-0050 Dependabot exemption parser accepts the SHA-plus-version-comment form, so future action bumps keep that path. Workflow and review-policy changes should still be looked at by the maintainer.",
+  "summary": "Supply-chain pinning (ADR-0055, TM-16). In ci.yml, live-memory.yml and security.yml every third-party action moves from its major tag to the commit SHA of the current release (checkout v7.0.1, setup-python v7.1.0, setup-go v7.0.0, upload-artifact v7.0.2; each SHA equals the current v7 tag, so behaviour is unchanged); threat-model.yml, threat-review.yml and trusted-security-gate.yml were already pinned and are untouched. govulncheck goes from @latest to v1.9.0 and pip-audit to ==2.10.1. pip-audit now also audits router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt and rerank-server/requirements.txt (all clean locally); the rerank server's exact pins are audited with --no-deps --disable-pip because they need Python >= 3.12 (numpy 2.5.4) while the job runs 3.11, so its transitive dependencies are not audited; decision-jevlike stays out because it installs a git dependency and an unpinned transformers stack (noted). monitoring/compose.yaml pins prom/prometheus:v3.15.1 and grafana/grafana:13.3.0 to their multi-arch index digests, verified equal to the RepoDigests of the containers running in the reference deployment, so a redeploy changes nothing. The decision-service Dockerfiles pin python:3.11-slim to its index digest. Dependabot gains docker-compose (/monitoring) and docker (decision services). test/check_pinned_references.py enforces the rule in CI (workflow actions, go install, pip tools, compose images, Dockerfile FROM) with a self-test of rejected and accepted forms. Permissions, triggers, secrets and job logic are unchanged; the ADR-0050 Dependabot exemption parser accepts the SHA-plus-version-comment form, so future action bumps keep that path. Workflow and review-policy changes should still be looked at by the maintainer.",
   "findings": [
     {
       "id": "TM-16",
@@ -52,7 +52,7 @@
     {
       "command": "python -m pip_audit -r <file> (pip-audit 2.10.1) for router/requirements-session.txt, requirements-dev.txt, test/requirements-hindsight.txt, rerank-server/requirements.txt",
       "result": "passed",
-      "evidence": "No known vulnerabilities found (each). CI on Python 3.11 could not resolve rerank-server (numpy==2.5.4 needs >= 3.12); python -m pip_audit --no-deps -r rerank-server/requirements.txt: No known vulnerabilities found."
+      "evidence": "No known vulnerabilities found (each). CI on Python 3.11 could not resolve rerank-server (numpy==2.5.4 needs >= 3.12); python -m pip_audit --no-deps --disable-pip -r rerank-server/requirements.txt: No known vulnerabilities found. CI showed that --no-deps alone still dry-run installs the pins with pip; --disable-pip avoids that."
     },
     {
       "command": "Image digests: Docker Hub index digest lookup and docker image inspect RepoDigests of the running monitoring containers",
@@ -84,6 +84,6 @@
     "The new pip-audit loop and the docker/docker-compose Dependabot ecosystems are first exercised in CI and on GitHub.",
     "The decision-service images were not rebuilt with the pinned base image.",
     "decision-jevlike requirements are not audited (git dependency, unpinned transformers stack); hash-locked Python installs and release provenance remain open.",
-    "rerank-server: only its exact pins are audited (--no-deps), not their transitive dependencies."
+    "rerank-server: only its exact pins are audited (--no-deps --disable-pip), not their transitive dependencies."
   ]
 }

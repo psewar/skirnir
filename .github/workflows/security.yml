@@ -27,8 +27,8 @@ jobs:
             pip-audit -r "$f"
           done
           # The rerank server pins every package exactly and needs Python >= 3.12 (numpy); audit the pins as written
-          # instead of resolving them under this job's Python.
-          pip-audit --no-deps -r rerank-server/requirements.txt
+          # instead of resolving them under this job's Python (--no-deps alone still dry-run installs them with pip).
+          pip-audit --no-deps --disable-pip -r rerank-server/requirements.txt
   go-security:
     runs-on: ubuntu-latest
     defaults:
