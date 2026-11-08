@@ -86,6 +86,23 @@ async def main():
         check(cloud.request_block_reason(optout, {"messages": []}, "limited") is not None,
               "cloud:false blocks even public content and explicit cloud requests")
 
+    # TM-04 / ADR-0052: concrete model names need an explicit grant; a missing setting no longer means true.
+    concrete_role = {"name": "qwen-synthetic:7b", "exposed": "qwen-synthetic:7b"}
+    state.CFG.client_auth["clients"] = {"role-only": {"roles": ["*"]}, "granted": {"roles": ["*"], "models": True},
+                                        "truthy": {"roles": ["*"], "models": "yes"}}
+    for name, allowed, label in (("role-only", False, "missing models setting denies concrete names"),
+                                 ("granted", True, "models:true keeps concrete names"),
+                                 ("truthy", False, "only the boolean true grants concrete names"),
+                                 (state.INTERNAL_CLIENT, True, "the router's own UI client keeps concrete names")):
+        req = Request("/api/chat")
+        req["client"] = name
+        check((auth.client_allows(req, concrete_role, concrete=True) is None) is allowed, label)
+    parsed = SimpleNamespace()
+    check(config.Config._parse_client_auth(parsed, {"mode": "enforce", "clients": {"role-only": {"roles": ["*"]}}}) is None
+          and parsed.client_auth["clients"]["role-only"]["models"] is False, "config: missing models becomes false")
+    rejected = config.Config._parse_client_auth(SimpleNamespace(), {"mode": "enforce", "clients": {"bad": {"models": "yes"}}})
+    check(rejected is not None, "config: a non-boolean models value is rejected")
+
     registry._ENROLL.clear()
     state.REG = SimpleNamespace(nodes={})
     for i in range(registry.MAX_ENROLL_PER_IP):

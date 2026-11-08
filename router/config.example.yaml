@@ -162,6 +162,7 @@ router:
       # memory-service:
       #   ip: ["192.0.2.40"]
       #   rerank: true             # Recht auf POST /rerank; Standard false
+      #   models: true             # konkrete Modellnamen erlaubt; fehlt es = nur Rollen, der Router warnt (ADR-0052)
       #   inference: false         # nur POST /rerank und GET /info, alles andere 403 inference_disabled; Standard true.
       #                            # Ohne das darf der Client jede Rolle (roles fehlt = alle), der Router warnt beim Laden.
       home-assistant:            # HA-Ollama-Integration: API-Key im Eintrag -> "Authorization: Bearer <token>"

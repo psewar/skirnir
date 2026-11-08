@@ -155,7 +155,8 @@ class ManagedHarness(unittest.IsolatedAsyncioTestCase):
         cfg.session_store = SessionConfig(enabled=True)
         cfg.context_manager = ContextConfig(enabled=True, tail_messages=2)
         cfg.client_auth = {"mode": "observe", "audit_log": None, "clients": {name: {
-            "token_sha256": hashlib.sha256(name.encode()).hexdigest(), "session_projects": [PROJECT], "data_class": "personal"}
+            "token_sha256": hashlib.sha256(name.encode()).hexdigest(), "session_projects": [PROJECT], "data_class": "personal",
+            "models": True}   # the tests call a concrete model; ADR-0052 requires the explicit grant
             for name in ("client-a", "client-b")}}
         state.CFG = cfg
         self.sid = uuid4()
