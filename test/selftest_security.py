@@ -51,6 +51,20 @@ async def main():
     state.CFG.control_listen = "localhost:11435"
     denied = await auth.basic_auth_middleware(Request("/admin/state"), handler)
     check(denied.status == 503, "network-facing control without users is denied")
+    # TM-02 / ADR-0053: a local reverse proxy reaches a loopback listener from 127.0.0.1 too.
+    state.CFG.control_listen = "127.0.0.1:11435"
+    handler.reset_mock()
+    proxied = await auth.basic_auth_middleware(Request("/admin/state", remote="127.0.0.1"), handler)
+    check(proxied.status == 503 and handler.await_count == 0, "loopback without users is denied unless explicitly allowed")
+    state.CFG.control_open_loopback = True
+    check(await auth.basic_auth_middleware(Request("/admin/state", remote="127.0.0.1"), handler) == "allowed",
+          "explicit development switch allows unauthenticated loopback")
+    remote = await auth.basic_auth_middleware(Request("/admin/state", remote="192.0.2.30"), handler)
+    check(remote.status == 503, "development switch never opens the port to other addresses")
+    state.CFG.control_listen = "192.0.2.40:11435"   # any non-loopback listener
+    wide = await auth.basic_auth_middleware(Request("/admin/state", remote="127.0.0.1"), handler)
+    check(wide.status == 503, "development switch needs a literal loopback listener")
+    state.CFG.control_open_loopback = False
 
     req = SimpleNamespace(execution="auto", data_class="public", cloud_privacy=False, data_class_effective=None)
     state.CFG.client_auth["clients"] = {"member": {"data_class": "personal"}}

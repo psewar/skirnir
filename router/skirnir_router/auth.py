@@ -291,10 +291,12 @@ async def basic_auth_middleware(request, handler):
     if request.path.startswith("/v1/"):
         return await handler(request)
     if not state.CFG.control_users:
-        # Development without credentials is allowed only on an explicit loopback listener.
+        # ADR-0053: a local reverse proxy also arrives from loopback, so loopback alone is no identity. Unauthenticated
+        # development access needs control_auth.allow_unauthenticated_loopback and a literal loopback listener.
         listen = getattr(state.CFG, "control_listen", "")
         host = listen.rpartition(":")[0].strip("[]")
-        if host in ("127.0.0.1", "::1") and (request.remote or "") in ("127.0.0.1", "::1"):
+        if (getattr(state.CFG, "control_open_loopback", False) is True and host in ("127.0.0.1", "::1")
+                and (request.remote or "") in ("127.0.0.1", "::1")):
             return await handler(request)
         return web.json_response({"error": "control authentication is not configured"}, status=503)
     auth = request.headers.get("Authorization", "")

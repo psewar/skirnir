@@ -133,6 +133,7 @@ router:
         warn_at_percent: 80
         region: us
   control_auth:                  # Basic Auth fuer UI + /admin/*; Klartext im Secret-Store
+    # allow_unauthenticated_loopback: true   # NUR Entwicklung ohne users: Loopback ohne Anmeldung (ADR-0053); sonst 503
     users:
       admin: "pbkdf2:200000:54e400a7b83f03e36564355c2953bd2a:dec3e7feefd0cf085a3aebfa2f8f3b7e9482a950e8ebc6806d8430df64f5d8d9"   # Disabled example hash (no known password). Replace with: python3 router.py --hash '<passwort>'
       deploy: "pbkdf2:200000:54e400a7b83f03e36564355c2953bd2a:dec3e7feefd0cf085a3aebfa2f8f3b7e9482a950e8ebc6806d8430df64f5d8d9"   # Disabled example hash (no known password). Replace with: python3 router.py --hash '<passwort>'

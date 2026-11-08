@@ -2,41 +2,36 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "8a0c01cceebdde351bb1770b66b0368814b9e4c3",
-  "change_digest": "6d17f39dc68c2cf61f3da82ee1d8fddbdaa44f4e6639538817f8a61938338f48",
+  "base_sha": "e667e107bd081e8ad107bb139734c74daae9dff3",
+  "change_digest": "75456b71eb9ae8ab3fb4eaea292a81af99ca29eb37330048817f9d5c83e5f844",
   "reviewed_paths": [
     "CHANGELOG.md",
     "README.de.md",
     "README.md",
-    "design/routing-algorithm.md",
-    "docs/adr/0046-concrete-model-access-stays-permissive-by-default.md",
-    "docs/adr/0052-concrete-model-names-need-an-explicit-grant.md",
+    "docs/adr/0053-control-port-requires-users-even-on-loopback.md",
     "docs/adr/README.md",
-    "docs/security-review-2026-11-01.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
     "router/config.example.yaml",
-    "router/skirnir_router/admin.py",
+    "router/skirnir_router/app.py",
     "router/skirnir_router/auth.py",
-    "router/skirnir_router/common.py",
     "router/skirnir_router/config.py",
-    "test/selftest_context.py",
-    "test/selftest_memory.py",
+    "test/selftest_config_load.py",
     "test/selftest_security.py"
   ],
   "risk_ids": [
-    "TM-04"
+    "TM-02"
   ],
   "boundaries": [
-    "B1"
+    "B2"
   ],
-  "summary": "Router 0.19.0 makes concrete model names an explicit grant (ADR-0052, supersedes ADR-0046, closes SK-SEC-05 / TM-04). auth.client_allows now allows a concrete name only for the router's own UI client or when the client's models value is the boolean true; before, a missing value meant true. config._parse_client_auth rejects a non-boolean models value, stores false when it is missing and logs a warning naming the client unless it has inference: false. The admin client listing reports models as the boolean grant. Traced callers: both concrete-name decisions in proxy.py (lines 146 and 1054) go through client_allows with concrete = not a role, so Ollama, OpenAI-compatible and Anthropic paths share the check; unauthenticated requests in observe mode stay unrestricted as before (mode enforce + locked in the reference deployment, TM-01). UI-saved client fields still coerce models to bool (admin._client_spec), and UI-created clients without the field now get roles only. Model listings still show concrete names (information, not access). The memory, session and context self-tests call concrete models and now carry the explicit grant, which is the documented migration. Breaking for deployments relying on the old default; the changelog and warning name the fix. Rebased onto main after #93 (router 0.18.3, agent 0.28.0, ADR-0051 for agent configuration keys): this change now carries ADR-0052 and router 0.19.0; the v0.26.0 changelog row joins both; tests re-run on the rebased tree.",
+  "summary": "Router 0.19.0 (same unreleased v0.26.0 as ADR-0052): the control port requires users even on loopback (ADR-0053, TM-02). auth.basic_auth_middleware no longer serves loopback peers without users unless control_auth.allow_unauthenticated_loopback is the boolean true, the listener is literal 127.0.0.1 or ::1 and the peer is loopback; otherwise 503 before any handler or CSRF check. config validates the switch as a boolean (schema entry added) and app logs a start warning whenever no control users exist. The /v1/ tunnel path keeps its own Ed25519 authentication and is untouched. Breaking only for password-free development setups; the reference deployment configures control users and TLS. Rebased onto main after #90 and #93; German texts follow main's spelling.",
   "findings": [
     {
-      "id": "TM-04",
-      "evidence": "router 0.18.2 auth.client_allows: `if c.get(\"models\", True): return None` let a role-limited client without a models setting call any concrete model.",
-      "resolution": "Fixed: explicit boolean grant required (auth.py, config.py); selftest_security covers missing, true, non-boolean, UI client and configuration default; the new checks fail against the old code.",
+      "id": "TM-02",
+      "evidence": "router 0.18.x auth.basic_auth_middleware served any loopback peer on a loopback listener without users, which a local reverse proxy also is.",
+      "resolution": "Fixed: explicit boolean development switch required (auth.py, config.py, app.py warning); selftest_security covers a proxy-like loopback peer, the switch, a remote peer and a non-loopback listener; the check fails against the previous middleware.",
       "disposition": "fixed"
     }
   ],
@@ -44,22 +39,22 @@
     {
       "command": "python test/selftest_security.py",
       "result": "passed",
-      "evidence": "All PASS, including 'missing models setting denies concrete names', 'models:true keeps concrete names', 'only the boolean true grants concrete names', 'the router's own UI client keeps concrete names', 'config: missing models becomes false', 'config: a non-boolean models value is rejected'."
+      "evidence": "PASS loopback without users is denied unless explicitly allowed; PASS explicit development switch allows unauthenticated loopback; PASS development switch never opens the port to other addresses; PASS development switch needs a literal loopback listener."
     },
     {
-      "command": "Negative check: python test/selftest_security.py with router/skirnir_router/auth.py and config.py from origin/main (git stash)",
+      "command": "Negative check (before rebase): selftest_security.py against the previous middleware",
       "result": "passed",
-      "evidence": "rc=1, AssertionError: missing models setting denies concrete names; the new test detects the old default."
+      "evidence": "AttributeError at 'loopback without users is denied unless explicitly allowed': the old middleware returned the handler result."
     },
     {
-      "command": "Every `python test/...` and `python router/...` command of the router CI job (ci.yml), except integration/e2e",
+      "command": "python test/selftest_config_load.py",
       "result": "passed",
-      "evidence": "No failures, including selftest_context, selftest_memory, selftest_interoperability, selftest_sessions, selftest_rerank, selftest_config_load; router.py --check config.example.yaml --pure: configuration ok."
+      "evidence": "PASS control_auth.allow_unauthenticated_loopback defaults to false; PASS invalid (allow_unauthenticated_loopback not boolean): Problem."
     },
     {
-      "command": "ruff check . && python test/check_adr_index.py",
+      "command": "Every `python test/...` and `python router/...` command of the router CI job (ci.yml), except integration/e2e; ruff check .; check_adr_index.py",
       "result": "passed",
-      "evidence": "All checks passed; ADR index ok: 52 ADRs."
+      "evidence": "No failures; All checks passed; ADR index ok: 53 ADRs; router.py --check config.example.yaml --pure: configuration ok."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -73,8 +68,7 @@
     }
   ],
   "limitations": [
-    "PostgreSQL session-store integration and the nightly end-to-end suite were not run locally; CI runs the PostgreSQL job.",
-    "Deployments must add models: true where concrete names are needed before upgrading; the reference deployment already sets models explicitly for every client.",
-    "Per-client model allowlists and filtering concrete names out of listings for role-only clients are left open."
+    "A real reverse-proxy topology is not exercised in CI; the unit tests model its loopback peer.",
+    "PostgreSQL session-store integration and the nightly end-to-end suite were not run locally; CI runs the PostgreSQL job."
   ]
 }
