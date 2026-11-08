@@ -2,62 +2,51 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "91942a053ba9d299a98398daaf5f4650894e1ab4",
-  "change_digest": "95d54fa5fb3855bcec200223c1210be840b649f451e2518733a0494e9ebb4d76",
+  "base_sha": "32856d1c1d61822f1480d09178426660713228e3",
+  "change_digest": "8335309444cff98dcc2434257ef97f2af787fd413c177c6b400e6f9817d6965a",
   "reviewed_paths": [
-    "CHANGELOG.md",
-    "monitoring/compose.yaml",
-    "monitoring/deploy_ct.py",
-    "monitoring/README.md",
-    "monitoring/prometheus.yml.tmpl",
-    "monitoring/grafana/provisioning/datasources/prometheus.yaml",
-    "monitoring/grafana/provisioning/dashboards/skirnir.yaml",
-    "monitoring/grafana/dashboards/skirnir.json",
-    "docs/security/threat-model.md",
-    "docs/security/risk-register.json"
+    ".github/workflows/trusted-security-gate.yml"
   ],
   "risk_ids": [
-    "TM-15",
     "TM-16"
   ],
   "boundaries": [
     "B9"
   ],
-  "summary": "Only the two image tags of the monitoring stack change (Prometheus v3.5.0 -> v3.15.1, Grafana 12.2.0 -> 13.3.0) plus a changelog line. Ports, bind addresses, users, volumes, environment, secrets handling, health checks, provisioning and deploy_ct.py are unchanged. Traced the upstream release notes for both ranges: no removed flag or provisioning key that the stack uses; Prometheus 3.13 stops sending basic_auth on cross-host redirects of a target (stricter); Grafana 13 disables the numeric data source id APIs by default (the provisioned data source and dashboard use uid only), keeps sign-up and anonymous access as configured, and migrates dashboards and folders into unified storage on first start, which has no in-place downgrade. The changelog tells operators to copy grafana-data while Grafana is stopped before rolling out. No new trust boundary, route or credential path.",
+  "summary": "Dependabot bump of actions/create-github-app-token in the publisher job of the trusted security gate, from v2.2.2 (fee1f7d) to v3.3.0 (64ab729). Only the pinned commit and its version comment change; the step keeps a full commit SHA, the same inputs (app-id, private-key, permission-statuses: write), the same environment (security-gate-publisher), the same eligibility condition and the status-only use of the token. Verified upstream that 64ab729a6294000f5aa4a4bc0b73d1f32bc45510 is the commit of tag v3.3.0 and that action.yml at that commit still defines app-id, private-key and permission-statuses and runs on node24. The v3.0.0 breaking changes (proxy only via NODE_USE_ENV_PROXY, self-hosted runner v2.327.1 or later) do not apply: the job runs on GitHub-hosted ubuntu-latest without a proxy. app-id is deprecated in favour of client-id and only emits a warning. The narrow Dependabot exemption of ADR-0050 does not cover this file because its steps use the '- name:' then 'uses:' layout, which the conservative parser does not recognise; a full review is the intended path for the workflow that holds the gate's private key. No new trust boundary, permission, secret or network destination.",
   "findings": [
     {
       "id": "TM-16",
-      "evidence": "monitoring/compose.yaml references both images by mutable tag, not by digest; a re-pushed tag would change what deploy_ct.py starts.",
-      "resolution": "Pre-existing: the previous tags were mutable in the same way. This change does not introduce it; pinning by digest belongs to TM-16's next action (pin/lock).",
+      "evidence": "The publisher step hands the GitHub App private key to a third-party action; a compromised action release could misuse it within the installation's permissions.",
+      "resolution": "Pre-existing and unchanged in scope: the action stays pinned by full commit SHA (now the verified v3.3.0 commit), the minted token is limited to statuses: write and the job runs only from the default branch in the security-gate-publisher environment.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
+      "command": "gh api repos/actions/create-github-app-token/commits/v3.3.0 --jq .sha",
+      "result": "passed",
+      "evidence": "64ab729a6294000f5aa4a4bc0b73d1f32bc45510, identical to the pinned SHA."
+    },
+    {
+      "command": "Read action.yml of actions/create-github-app-token at 64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
+      "result": "passed",
+      "evidence": "Inputs app-id (deprecated, use client-id), private-key (required) and permission-statuses exist; runs using node24."
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "result": "passed",
+      "evidence": "Security evidence: 0 error(s)."
+    },
+    {
       "command": "python test/check_public_changes.py",
       "result": "passed",
       "evidence": "Public-change scan: 0 finding(s)."
-    },
-    {
-      "command": "Operator probe: copy of an existing grafana-data (taken with Grafana stopped) started once with grafana/grafana:12.2.0 and once with 13.3.0, no network, provisioning mounted read-only as in compose.yaml",
-      "result": "passed",
-      "evidence": "13.3.0 healthy after about 14 s; log 'Unified storage migrations completed successfully'; the same 22 dashboards (by uid), the same folder and the same data sources (name, type, uid) as 12.2.0; memory 262 MiB under the 768 MiB limit of that deployment (139 MiB with 12.2.0)."
-    },
-    {
-      "command": "Operator probe with HTTPS and the deployment's certificate: the compose health check command `wget -q --no-check-certificate -O /dev/null https://127.0.0.1:3000/api/health` inside grafana/grafana:13.3.0",
-      "result": "passed",
-      "evidence": "Succeeds; wget in the 13.3.0 image is still busybox, as in 12.2.0."
-    },
-    {
-      "command": "Prometheus v3.15.1 with the same flag style (retention flags, web.listen-address, remote-write receiver) and busybox wget health check, run by the operator in a separate stack",
-      "result": "passed",
-      "evidence": "Container healthy, /-/ready answered, rules and remote write working after the switch from v3.14.0; the prom/prometheus image of this repo was not started yet."
     }
   ],
   "limitations": [
-    "deploy_ct.py was not run with the new tags; the operator rolls out after the merge and keeps the grafana-data copy until the stack is healthy.",
-    "Grafana 13 memory with only this repository's dashboard was not measured; the probe used a larger dashboard set and stayed at 262 MiB, the stock limit here is 384 MiB.",
-    "--storage.tsdb.retention.time is marked deprecated in current Prometheus docs (still working in v3.15.1); moving retention into the config file is left for a later change.",
-    "No CI job starts the containers; image behaviour is covered only by the operator probes above."
+    "The trusted gate runs from the default branch, so the new action version is exercised only after the merge; the first PR afterwards shows whether the publisher still posts skirnir/trusted-security-review.",
+    "The action's source between v2.2.2 and v3.3.0 was not audited line by line; review relied on the release notes, the pinned commit and action.yml.",
+    "Moving from app-id to client-id needs a new repository variable and is left for a separate change."
   ]
 }
