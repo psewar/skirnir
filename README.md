@@ -760,3 +760,5 @@ night. During the day the standby Ollama serves and is prewarmed like any Ollama
   deliberate standby request at night does not switch back and forth.
 
 Cloud providers require the final HTTPS endpoint. HTTP is supported for explicitly allowlisted literal loopback addresses only. Provider redirects return an upstream error.
+
+<!-- disposable gate test -->
