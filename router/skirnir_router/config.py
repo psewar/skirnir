@@ -381,7 +381,14 @@ class Config:
             spec["token_sha256"] = th
             spec["ip"] = [str(x) for x in (spec.get("ip") or [])]
             spec["roles"] = [str(x) for x in (spec.get("roles") or ["*"])]
-            spec["models"] = bool(spec.get("models", True))
+            # ADR-0052: concrete model names only with an explicit grant. A missing key used to mean true (ADR-0046);
+            # warn so an operator sees which clients lost concrete names with this release.
+            if "models" in spec and type(spec["models"]) is not bool:
+                return invalid(f"client_auth.clients.{name}.models must be true or false")
+            if "models" not in spec and spec.get("inference", True) is not False:
+                log.warning("client_auth.clients.%s: no 'models' setting - concrete model names are denied (ADR-0052); "
+                            "set models: true to keep them", name)
+            spec["models"] = spec.get("models", False)
             # Permission for POST /rerank (rerank.py), default no. Detection also via ip: Hindsight TEI client sends no header.
             if type(spec.get("rerank", False)) is not bool:
                 return invalid(f"client_auth.clients.{name}.rerank must be true or false")

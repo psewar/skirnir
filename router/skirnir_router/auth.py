@@ -176,7 +176,8 @@ def client_allows(request, role, concrete):
         return None
     c = (client_auth_cfg().get("clients") or {}).get(name) or {}
     if concrete:
-        if c.get("models", True):
+        # ADR-0052: concrete names need an explicit grant; the router's own UI client keeps them.
+        if name == state.INTERNAL_CLIENT or c.get("models", False) is True:
             return None
         reason = f"client {name}: concrete model names not allowed (roles only)"
     else:

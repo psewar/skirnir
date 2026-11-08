@@ -60,7 +60,7 @@ def route(request):
     name = request.model
     if name in roles (über exposed_as):
         tiers = roles[name].tiers
-    elif expose_concrete_models and name in catalog:
+    elif expose_concrete_models and name in catalog:     # client needs models: true (ADR-0052)
         tiers = [ {model: name, num_ctx: request.num_ctx or default} ]
     else:
         return 404 {"error": "model 'X' not found"}          # Ollama-Fehlerformat

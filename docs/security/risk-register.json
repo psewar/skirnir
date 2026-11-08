@@ -60,15 +60,16 @@
         "B1"
       ],
       "priority": "P1",
-      "status": "open",
+      "status": "mitigated",
       "scenario": "Role-limited client chooses a concrete model.",
-      "controls": "models:false denies concrete model requests.",
-      "next_action": "Use explicit grants; migrate defaults separately.",
+      "controls": "Concrete model names need an explicit boolean models:true (ADR-0052); a missing setting means roles only and is named in a load-time warning; a non-boolean value is a configuration error.",
+      "next_action": "Consider per-client model allowlists; keep the grant tests in CI.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_security.py"
       ],
-      "validation_gap": "V4: full catalog and protocol coverage remains."
+      "validation_gap": "Model listings still show concrete names to role-only clients (information, not access). Both proxy call sites use auth.client_allows; protocol coverage relies on that shared check.",
+      "evidence": "selftest_security: missing setting, models:true, a truthy non-boolean, the UI client and the configuration default; the new checks fail against router 0.18.2 (missing setting denies concrete names)."
     },
     {
       "id": "TM-05",

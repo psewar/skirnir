@@ -134,9 +134,11 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
         cfg = config.Config(BASE, use_overrides=False)
         cfg.hindsight = HindsightConfig(enabled=True, allow_http_loopback=True, timeout_s=0.2, retention_enabled=True)
         cfg.client_auth = {"mode": "observe", "audit_log": None, "clients": {name: {
-            "token_sha256": hashlib.sha256(name.encode()).hexdigest(), "memory": policy(), "data_class": "personal"}
+            "token_sha256": hashlib.sha256(name.encode()).hexdigest(), "memory": policy(), "data_class": "personal",
+            "models": True}   # the tests call a concrete model; ADR-0052 requires the explicit grant
             for name in ("client-a", "client-b")}}
-        cfg.client_auth["clients"]["client-owned"] = {"token_sha256": hashlib.sha256(b"client-owned").hexdigest(), "memory": policy(owner="client")}
+        cfg.client_auth["clients"]["client-owned"] = {"token_sha256": hashlib.sha256(b"client-owned").hexdigest(), "memory": policy(owner="client"),
+                                                      "models": True}
         state.CFG = cfg
         self.calls, self.operations, self.upstream_bodies = [], {}, []
         self.failure_status, self.delay, self.bad_json, self.large_response = 0, 0, False, False

@@ -81,7 +81,7 @@ def clients_view():
         th = c.get("token_sha256") or ""
         out[name] = {"source": "config.yaml" if name in base else "ui", "has_token": bool(th), "token_prefix": th[:8],
                      "token_rotated": (ov.get(name) or {}).get("token_rotated") or c.get("token_rotated"), "created": c.get("created"),
-                     "ip": c.get("ip") or [], "roles": c.get("roles") or ["*"], "models": c.get("models", True),
+                     "ip": c.get("ip") or [], "roles": c.get("roles") or ["*"], "models": c.get("models") is True,
                      "requests_per_minute": c.get("requests_per_minute"), "max_priority": c.get("max_priority"),
                      "cloud": c.get("cloud", True), "data_class": c.get("data_class"), "note": c.get("note"),
                      "privacy_check": c.get("privacy_check") is True}   # config.yaml only (privacy.py), shown read-only

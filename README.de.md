@@ -171,7 +171,8 @@ roles:
   zusammen ins VRAM passen. Eine **Residenz-Regel** holt ein verdrängtes Rang-1-Modell zurück, wenn der Verdränger 5 min nicht
   mehr gefragt wurde – sonst bliebe „warm zuerst“ dauerhaft auf der Ausweichstufe hängen.
 - **Konkrete Modelle** (`qwen3-coder:30b`) sind weiter direkt aufrufbar (`expose_concrete_models`) und gehen 1:1 an einen Knoten,
-  der sie hat; sonst 404 wie bei Ollama.
+  der sie hat; sonst 404 wie bei Ollama. Ein Client braucht dafür `models: true`; ohne die Einstellung bekommt er nur Rollen,
+  und der Router warnt beim Laden (ADR-0052).
 - **Canary** (`roles.<r>.canary: {model, num_ctx, percent}`) leitet einen Anteil des Verkehrs auf einen Kandidaten, auch kalt.
   **Shadow** (`roles.<r>.shadow`) wiederholt einen Anteil der Anfragen nach der Antwort ohne Stream gegen ein zweites Modell auf
   einem freien Knoten; der Client merkt nichts, Tempo und Fehlerrate landen in der Statistik.
