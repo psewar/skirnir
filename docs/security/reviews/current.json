@@ -2,45 +2,35 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "10552e2760634f6e7a4ad51bb24f917f859cc0e9",
-  "change_digest": "8af0f8cbb5643bb00aadf6ca439deecb4925c5e679dc2a967638eb9dd8a956f3",
+  "base_sha": "1fd80da4cc29609ddbc166f3354e92855ca0e882",
+  "change_digest": "b7501815f12a16d16affd8e18df438c261e87a833721eb0821817e41673cd429",
   "reviewed_paths": [
-    "CHANGELOG.md",
-    "monitoring/compose.yaml",
-    "monitoring/prometheus.yml.tmpl"
+    "CHANGELOG.md"
   ],
   "risk_ids": [
-    "TM-15"
+    "TM-16"
   ],
   "boundaries": [
     "B9"
   ],
-  "summary": "Moves the monitoring Prometheus' 90-day retention from the deprecated --storage.tsdb.retention.time flag into prometheus.yml (storage.tsdb.retention.time), as the Prometheus 3.x docs direct. No port, bind address, user, volume, secret, scrape target, authentication or TLS setting changes. deploy_ct.py renders the template by replacing only __ROUTER_HOST__, so the new block reaches the host unchanged. The retention value is the same; with neither flag nor field Prometheus would fall back to 15 days, so the field is required, which the template now carries. No new trust boundary, route or credential path. Rebased onto main after #90-#92 without changing the monitoring change: only the base and the changelog row moved; the rebase was checked by the merging session (diff of compose.yaml and prometheus.yml.tmpl identical to the reviewed commit).",
+  "summary": "Documentation only: the v0.26.0 row of CHANGELOG.md links the published release (tag v0.26.0 at 1fd80da, router 0.19.0, agent 0.28.0; release assets checked against the build hashes). No code, workflow, checker, skill, threat model, register or configuration change. TM-16 is referenced because release artifacts are part of the supply chain; nothing about them changes here.",
   "findings": [],
   "tests": [
+    {
+      "command": "gh release view v0.26.0 --json targetCommitish,assets",
+      "result": "passed",
+      "evidence": "target 1fd80da4cc29609ddbc166f3354e92855ca0e882; asset digests sha256:2124b414... (linux) and sha256:974d34c3... (windows) equal the local build."
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "result": "passed",
+      "evidence": "Security evidence: 0 error(s)."
+    },
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
       "evidence": "Public-change scan: 0 finding(s)."
-    },
-    {
-      "command": "ruff check .",
-      "result": "passed",
-      "evidence": "All checks passed!"
-    },
-    {
-      "command": "promtool check config on the rendered template (placeholder host name) inside a running prom/prometheus:v3.15.1 container",
-      "result": "passed",
-      "evidence": "SUCCESS: valid prometheus config file syntax."
-    },
-    {
-      "command": "Same storage.tsdb.retention block (time and size) deployed by the operator to a separate Prometheus v3.15.1 without the retention flags",
-      "result": "passed",
-      "evidence": "/api/v1/status/runtimeinfo reports storageRetention as configured in the file."
     }
   ],
-  "limitations": [
-    "deploy_ct.py was not run with this change; after the merge the operator checks /api/v1/status/runtimeinfo for storageRetention 90d.",
-    "Retention in the config file needs Prometheus 3.11 or later (earlier 3.x read the time with the wrong unit); this change must not be combined with a downgrade below 3.11."
-  ]
+  "limitations": []
 }
