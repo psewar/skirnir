@@ -118,13 +118,14 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Pending-slot flood or compromised approved agent.",
-      "controls": "Ed25519 approval, bounded pending and per-IP admission.",
-      "next_action": "Verify fingerprints; test active-stream revocation.",
+      "controls": "Ed25519 approval, bounded pending and per-IP admission. A wire-level test over the real tunnel endpoint shows that revocation ends waiting and streaming requests with the reason 'revoked', tells the agent, closes the connection and removes the node; the revoked key is refused on reconnect; new keys beyond the per-address limit are refused with 1008 and not registered, while an approved key still connects.",
+      "next_action": "Out-of-band fingerprint verification before approval (operator procedure); plausibility checks on reports of an approved agent.",
       "owner_role": "maintainer and operator",
       "test_refs": [
+        "test/selftest_agent_revocation.py",
         "test/selftest_security.py"
       ],
-      "validation_gap": "V7: wire-level flood/revocation still required."
+      "validation_gap": "V7: enrollment flood and revocation of active streams are tested at the wire; fingerprint verification is an operator step and a compromised approved agent can still report false load or answers."
     },
     {
       "id": "TM-08",

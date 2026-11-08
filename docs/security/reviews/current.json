@@ -2,51 +2,44 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "532546b797e015ad8470202cc13bd2dbbc870475",
-  "change_digest": "c50386e2d704ff9919536932d2fa7d9ec51af29c563b2778d324f8ad5eba01ac",
+  "base_sha": "8ac9b2e1629ca0edf65fc0a4e686d5982f445bde",
+  "change_digest": "441eace7f4e2c38b06c1723d61c03a97b71830a397dc16c9be625bfaff5978a8",
   "reviewed_paths": [
+    ".github/workflows/ci.yml",
     "CHANGELOG.md",
     "docs/security/risk-register.json",
-    "test/selftest_memory.py",
-    "test/selftest_sessions.py"
+    "test/selftest_agent_revocation.py"
   ],
   "risk_ids": [
-    "TM-09"
+    "TM-07"
   ],
   "boundaries": [
-    "B1",
-    "B4",
-    "B5"
+    "B3"
   ],
-  "summary": "Test-only change for TM-09 (session and memory isolation). test/selftest_sessions.py gains route-inventory tests that enumerate every route under /v1/skirnir/sessions from the built API app (17+ method/template pairs): without credentials each answers 401 and no owner-scoped store method is called (health() from the store lifecycle is excluded by signature: only methods whose first parameter is owner count); with a valid client of the same project who does not own the session (store returns NOT_FOUND), no session-scoped route answers 2xx and every owner-scoped store call receives the authenticated caller. test/selftest_memory.py enumerates every route under /v1/skirnir/memory and /v1/skirnir/hindsight: under enforce all answer 401; under observe none answers 2xx and well-formed recall/retain requests reach the identity check and get 401; the memory backend and inference upstream receive no call. Observed behaviour, not a defect: under observe the memory handlers validate the body before checking identity, so a malformed body gets 400 instead of 401; no backend access happens either way. No router code, workflow, configuration or policy change.",
+  "summary": "Test-only change for TM-07 (agent enrollment and compromise). test/selftest_agent_revocation.py runs the control app in-process and connects to /v1/tunnel with a real aiohttp WebSocket client that signs challenge nonce + name + public key with an Ed25519 key, exactly like the agent's hello. It approves a pending key through registry.approve_node, opens two tunnel streams from the router side (one waiting for the response head, one with head and a body chunk already delivered by the test agent), revokes through registry.revoke_node and checks that both raise ClientError with the reason 'revoked', the agent receives status revoked before the close, the dynamic node leaves state.NODES and the registry entry is revoked. The revoked key reconnecting gets status revoked and a close, and never appears in state.PENDING or state.NODES. A second test sends MAX_ENROLL_PER_IP new keys from one address (pending), then one more: it is told to wait with the refusal, closed with 1008 and not written to the registry; an already approved key still connects. CI runs the test in the router job. No router code, configuration or policy change.",
   "findings": [
     {
-      "id": "TM-09",
-      "evidence": "Session/memory isolation was tested for selected routes only; a route added later had no automatic coverage.",
-      "resolution": "Route-inventory tests with fault-injection evidence; token/grant rotation, the gateway with the gateway enabled and deployment coverage remain, so TM-09 stays open.",
+      "id": "TM-07",
+      "evidence": "Revocation of active streams and the enrollment flood were covered by unit checks of enrollment_denial and an end-to-end check of routing/registry state only.",
+      "resolution": "Wire-level tests with fault-injection evidence; out-of-band fingerprint verification and plausibility of a compromised approved agent's reports remain, so TM-07 stays open.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_sessions.py",
+      "command": "python test/selftest_agent_revocation.py",
       "result": "passed",
-      "evidence": "Ran 22 tests, OK (incl. test_every_session_route_requires_identity and test_every_session_route_scopes_store_access_to_the_caller)."
+      "evidence": "Ran 2 tests, OK."
     },
     {
-      "command": "python test/selftest_memory.py",
+      "command": "Fault injection: revoke_node without tun.close_all('revoked') (registry.py, reverted)",
       "result": "passed",
-      "evidence": "Ran 41 tests, OK (incl. test_every_memory_route_requires_identity)."
+      "evidence": "FAIL: 'revoked' not found in 'tunnel synthetic-gpu: tunnel closed'."
     },
     {
-      "command": "Fault injection: session GET reads with a fixed owner 'alice' (session_api.py, reverted)",
+      "command": "Fault injection: handle_tunnel_v2 without the revoked-state refusal (registry.py, reverted)",
       "result": "passed",
-      "evidence": "FAIL for DELETE/GET /{session_id}, /checkpoints, /checkpoints/latest, ...: [('get', 'alice')]."
-    },
-    {
-      "command": "Fault injection: memory.scope_for treats an unauthenticated request as client-a (memory.py, reverted)",
-      "result": "passed",
-      "evidence": "FAIL observe recall 200 != 401 and retain 202 != 401 (plus the existing test_auth_and_client_owned_memory)."
+      "evidence": "FAIL: 'pending' != 'revoked'."
     },
     {
       "command": "ruff check .",
@@ -65,7 +58,7 @@
     }
   ],
   "limitations": [
-    "The memory-gateway routes are disabled in the memory harness (404 under observe); under enforce the middleware refuses them; their owner scoping with the gateway enabled is not part of this inventory.",
-    "Token and grant rotation and deployment checks are not covered."
+    "Ran on Windows locally; Linux runs in CI.",
+    "Fingerprint verification before approval is an operator procedure and not testable here."
   ]
 }
