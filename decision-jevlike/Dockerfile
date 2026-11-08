@@ -1,7 +1,7 @@
 # Jevlike-Dienst fuer Skirnir (Byte-Encoder-Variante, CPU). Bild ~1 GB wegen torch; laeuft auf dem Router-CT ohne GPU.
 # Bauen:   docker build -t skirnir-jevlike .
 # Starten: siehe compose.yaml (bindet nur 127.0.0.1:8081, Checkpoints als Volume, kein Netz zur Laufzeit noetig)
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
 ENV PYTHONUNBUFFERED=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 HF_HOME=/models/hf-cache
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
  && pip install --no-cache-dir numpy "git+https://github.com/vinnylarouge/jevlike@94f5fd1b0b11d52bbdfdf4e0ee6aa96b568f8452"

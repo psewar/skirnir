@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — development tooling
+
+- Third-party references are pinned (ADR-0055, TM-16): workflow actions to commit SHAs, `govulncheck` and `pip-audit` to versions, the monitoring images and the decision-service base images to digests (the running monitoring stack already used exactly these digests). `test/check_pinned_references.py` enforces it in CI; Dependabot also updates the image digests. `pip-audit` additionally audits the session-store, development, memory-test and rerank-server requirements.
+
 ## Development tooling (since v0.25.1, included in v0.25.2)
 
 - Run an independent pre-merge evidence check and restrict the Dependabot exemption to existing dependency versions (ADR-0050, accepted).

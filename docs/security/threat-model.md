@@ -75,7 +75,7 @@ open residual scenarios; no acceptance is implied. The register maps proposed V1
 | TM-13 | T/E | Compromised release/signing, valid old manifests and Ollama origin. Agent verifies signature/platform/hash and, since agent 0.28.0 (ADR-0054), refuses a signed version older than the running release unless the node allows a downgrade explicitly. Ollama uses a separate source/checksum trust model. Define rollback and key recovery. P2. |
 | TM-14 | E/I | Router/agent RCE has a wide host impact. Router remains root with systemd restrictions. Test service-account migration and privilege separation for updates/hardware. P2. |
 | TM-15 | I/R | Logs, query strings, MQTT and backups leak metadata; local audit can be altered. Audit intends to omit prompts/tokens. Add redaction/rotation, ACLs and independent audit retention. P2. |
-| TM-16 | T/E | Mutable dependencies/CI tags or release compromise. pip-audit, govulncheck and Dependabot exist; installed artifacts still require verification. Pin/lock, include optional packages and verify provenance. P2. |
+| TM-16 | T/E | Mutable dependencies/CI tags or release compromise. pip-audit (also on the optional requirement sets), govulncheck and Dependabot exist; since ADR-0055 actions are pinned to commit SHAs, tools to versions and images to digests, enforced in CI. Hash-locked Python installs and release provenance remain. P2. |
 
 ## Proposed acceptance checks
 

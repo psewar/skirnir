@@ -13,23 +13,31 @@ jobs:
   python-security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.11'
-      - run: python -m pip install -r router/requirements.txt pip-audit
+      - run: python -m pip install -r router/requirements.txt pip-audit==2.10.1
       - run: python test/selftest_security.py
       - name: Audit Python runtime dependencies
         run: pip-audit -r router/requirements.txt
+      - name: Audit optional Python dependencies (session store, development, memory tests, rerank server)
+        run: |
+          for f in router/requirements-session.txt requirements-dev.txt test/requirements-hindsight.txt; do
+            pip-audit -r "$f"
+          done
+          # The rerank server pins every package exactly and needs Python >= 3.12 (numpy); audit the pins as written
+          # instead of resolving them under this job's Python (--no-deps alone still dry-run installs them with pip).
+          pip-audit --no-deps --disable-pip -r rerank-server/requirements.txt
   go-security:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: agent
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: agent/go.mod
-      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
       - run: govulncheck ./...
