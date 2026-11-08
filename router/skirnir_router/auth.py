@@ -24,7 +24,12 @@ from .outcome import Problem
 # sha256 instead of PBKDF2: the check runs on every request; a slow hash would be self-sabotage here.
 # A wrong token does NOT fall back to IP - it is an error, not anonymity.
 EXEMPT_PATHS = {"/", "/api/version"}   # Health checks remain accessible without identity (smoke test, monitoring)
-_UNAUTH_AUDIT_EVERY_S = 300            # at most one audit line per source IP in this time (otherwise a poller floods the log)
+_UNAUTH_AUDIT_EVERY_S = 300            # at most one audit line per source IP and event kind in this time (a poller floods the log)
+# TM-08 / ADR-0057: refused unauthenticated requests must not grow memory or the audit log without bound.
+MAX_UNAUTH_SOURCES = 1024              # tracked unauthenticated sources, least recently seen evicted first
+UNAUTH_AUDIT_PER_MIN = 120             # audit lines for unauthenticated requests per minute, over all sources
+_UNAUTH_AUDIT_TIMES = deque()          # times of those lines in the last minute
+_UNAUTH_SUPPRESSED = [0]               # lines withheld by the global budget since the last written one
 _audit_failed = [False]
 
 
@@ -54,6 +59,40 @@ def audit(event, **fields):
                 log.warning("audit log %s not writable (%s) - events only in the journal", path, e)
                 _audit_failed[0] = True
     log.info("AUDIT %s", line)
+
+
+def _unauth_source(ip):
+    """Statistics entry of an unauthenticated source, kept most-recently-seen last; beyond MAX_UNAUTH_SOURCES the least
+    recently seen source is dropped (an address spray cannot grow memory). Evictions are counted."""
+    unauth = state.CLIENT_STATS["unauth"]
+    u = unauth.pop(ip, None) or {"total": 0, "bad_token": 0, "last_seen": 0.0, "user_agent": "", "last_path": "",
+                                 "last_audit": {}, "suppressed": 0}
+    unauth[ip] = u
+    while len(unauth) > MAX_UNAUTH_SOURCES:
+        unauth.pop(next(iter(unauth)))
+        state.CLIENT_STATS["unauth_evicted"] = state.CLIENT_STATS.get("unauth_evicted", 0) + 1
+    return u
+
+
+def _audit_unauth(u, event, ip, path, reason, now):
+    """One audit line per source and event kind per _UNAUTH_AUDIT_EVERY_S, and at most UNAUTH_AUDIT_PER_MIN lines a
+    minute over all sources. Withheld lines are counted and reported with the next written one (suppressed = this
+    source since its last line, suppressed_all = global budget), so the log shows that more happened without growing."""
+    last = u["last_audit"]
+    if now - last.get(event, 0.0) < _UNAUTH_AUDIT_EVERY_S:
+        u["suppressed"] += 1
+        return
+    while _UNAUTH_AUDIT_TIMES and _UNAUTH_AUDIT_TIMES[0] <= now - 60:
+        _UNAUTH_AUDIT_TIMES.popleft()
+    if len(_UNAUTH_AUDIT_TIMES) >= UNAUTH_AUDIT_PER_MIN:
+        u["suppressed"] += 1
+        _UNAUTH_SUPPRESSED[0] += 1
+        return
+    _UNAUTH_AUDIT_TIMES.append(now)
+    last[event] = now
+    audit(event, ip=ip, path=path, reason=reason, user_agent=u["user_agent"], suppressed=u["suppressed"],
+          suppressed_all=_UNAUTH_SUPPRESSED[0])
+    u["suppressed"], _UNAUTH_SUPPRESSED[0] = 0, 0
 
 
 def resolve_client(request):
@@ -119,17 +158,13 @@ async def client_auth_middleware(request, handler):
     name, via = resolve_client(request)
     if name is None:
         ip = request.remote or "?"
-        u = state.CLIENT_STATS["unauth"].setdefault(ip, {"total": 0, "bad_token": 0, "last_seen": 0.0, "user_agent": "",
-                                                          "last_path": "", "last_audit": 0.0})
+        u = _unauth_source(ip)
         u["total"] += 1
         u["last_seen"], u["last_path"], u["user_agent"] = now, request.path, request.headers.get("User-Agent", "")[:80]
         if via == "bad_token":
             u["bad_token"] += 1
         enforce = client_auth_mode() == "enforce"
-        if enforce or now - u["last_audit"] >= _UNAUTH_AUDIT_EVERY_S:
-            u["last_audit"] = now
-            audit("auth_denied" if enforce else "auth_missing", ip=ip, path=request.path,
-                  reason=via or "no_credentials", user_agent=u["user_agent"])
+        _audit_unauth(u, "auth_denied" if enforce else "auth_missing", ip, request.path, via or "no_credentials", now)
         if enforce:
             return _deny(request, 401, "authentication required")
         return await handler(request)
@@ -209,7 +244,10 @@ def client_auth_view():
         }
     for ip, u in state.CLIENT_STATS["unauth"].items():
         out["unauthenticated"][ip] = {"total": u["total"], "bad_token": u["bad_token"], "last_seen_s": round(now - u["last_seen"], 1),
-                                      "last_path": u["last_path"], "user_agent": u["user_agent"]}
+                                      "last_path": u["last_path"], "user_agent": u["user_agent"],
+                                      "audit_suppressed": u.get("suppressed", 0)}
+    out["unauthenticated_evicted"] = state.CLIENT_STATS.get("unauth_evicted", 0)
+    out["unauthenticated_limit"] = MAX_UNAUTH_SOURCES
     return out
 
 

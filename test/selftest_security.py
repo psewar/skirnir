@@ -117,6 +117,40 @@ async def main():
     rejected = config.Config._parse_client_auth(SimpleNamespace(), {"mode": "enforce", "clients": {"bad": {"models": "yes"}}})
     check(rejected is not None, "config: a non-boolean models value is rejected")
 
+    # TM-08 / ADR-0057: refused unauthenticated requests are bounded in memory and in the audit log.
+    written = []
+    real_audit = auth.audit
+    auth.audit = lambda event, **fields: written.append((event, fields))
+    try:
+        state.CFG.client_auth = {"mode": "enforce", "clients": {}}
+        state.CLIENT_STATS["unauth"].clear()
+        state.CLIENT_STATS.pop("unauth_evicted", None)
+        auth._UNAUTH_AUDIT_TIMES.clear()
+        auth._UNAUTH_SUPPRESSED[0] = 0
+        for _ in range(5):
+            await auth.client_auth_middleware(Request("/api/chat", remote="198.51.100.7"), handler)
+        check(len(written) == 1 and written[0][0] == "auth_denied", "a repeating source writes one audit line per interval")
+        check(state.CLIENT_STATS["unauth"]["198.51.100.7"]["total"] == 5, "refusals are still counted per source")
+        state.CFG.client_auth["mode"] = "observe"
+        state.CFG.client_auth["clients"] = {"known": {"token_sha256": hashlib.sha256(b"synthetic-known").hexdigest()}}
+        await auth.client_auth_middleware(Request("/api/chat", remote="198.51.100.7"), handler)
+        check(len(written) == 2 and written[1][0] == "auth_missing" and written[1][1]["suppressed"] == 4,
+              "another event kind of the same source is written and reports what was withheld")
+        state.CFG.client_auth = {"mode": "enforce", "clients": {}}
+        written.clear()
+        auth._UNAUTH_AUDIT_TIMES.clear()
+        spray = auth.MAX_UNAUTH_SOURCES + 300
+        for i in range(spray):
+            await auth.client_auth_middleware(Request("/api/chat", remote=f"2001:db8::{i:x}"), handler)
+        check(len(state.CLIENT_STATS["unauth"]) == auth.MAX_UNAUTH_SOURCES, "an address spray cannot grow the source table")
+        check(state.CLIENT_STATS["unauth_evicted"] >= 300, "evicted sources are counted")
+        check(len(written) == auth.UNAUTH_AUDIT_PER_MIN, "an address spray is capped by the per-minute audit budget")
+        check(auth._UNAUTH_SUPPRESSED[0] == spray - auth.UNAUTH_AUDIT_PER_MIN, "lines withheld by the budget are counted")
+        check(auth.client_auth_view()["unauthenticated_evicted"] >= 300, "the admin view reports evictions")
+    finally:
+        auth.audit = real_audit
+        state.CLIENT_STATS["unauth"].clear()
+
     registry._ENROLL.clear()
     state.REG = SimpleNamespace(nodes={})
     for i in range(registry.MAX_ENROLL_PER_IP):

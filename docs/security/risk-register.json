@@ -138,13 +138,14 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Pre-auth flood, long streams or parallel costly inference.",
-      "controls": "Client rate and enrollment limits.",
-      "next_action": "Bound pre-auth state, concurrency, time, bytes and cost.",
+      "controls": "Client rate and enrollment limits. Unauthenticated statistics capped at 1024 sources (LRU, evictions counted); their audit lines limited per source and event kind and by a global per-minute budget with withheld counts (ADR-0057).",
+      "next_action": "Concurrency, time, byte and cost bounds for authenticated and tunnel traffic; WebSocket handshake limits under load.",
       "owner_role": "maintainer and operator",
       "test_refs": [
-        "test/selftest_max_parallel.py"
+        "test/selftest_max_parallel.py",
+        "test/selftest_security.py"
       ],
-      "validation_gap": "V12: global hostile-load budgets and unauth state still open."
+      "validation_gap": "V12: pre-auth state and audit volume are bounded and unit-tested; hostile-load budgets for authenticated traffic remain open."
     },
     {
       "id": "TM-09",
