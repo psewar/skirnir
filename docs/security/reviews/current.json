@@ -2,77 +2,79 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "c6ee9acb64d86568e05f0fc8f127acd2bb2bccea",
-  "change_digest": "62b465346dbd53318557ef4a3747f08d7019a8feaf3875c7b1c1b374336788f3",
+  "base_sha": "0306e0255af0c934729451fb721e0c86dc1a177b",
+  "change_digest": "70823c941e61f821613477b20bda6359ab68eeb359145d6c70463a36d04d378c",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "design/routing-algorithm.md",
-    "docs/adr/0061-quiet-a-single-node-for-a-measurement.md",
+    "docs/adr/0062-log-unexpected-errors-without-their-message.md",
     "docs/adr/README.md",
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
     "router/skirnir_router/app.py",
     "router/skirnir_router/common.py",
-    "router/skirnir_router/nodes.py",
-    "router/skirnir_router/poll.py",
-    "router/skirnir_router/quiet.py",
-    "router/ui.html",
-    "test/selftest_quiet.py",
-    "router/skirnir_router/auth.py (basic_auth_middleware, CSRF check, inspected)",
-    "router/skirnir_router/registry.py (handle_node_action, registry_view, inspected)",
-    "router/skirnir_router/state.py (remember, journal, inspected)"
+    "router/skirnir_router/memory.py",
+    "router/skirnir_router/privacy.py",
+    "router/skirnir_router/unexpected.py",
+    "test/selftest_cloud_final_payload.py",
+    "test/selftest_isolation_rotation.py",
+    "test/selftest_log_hygiene_paths.py"
   ],
   "risk_ids": [
-    "TM-03",
-    "TM-08",
+    "TM-05",
+    "TM-09",
     "TM-15"
   ],
   "boundaries": [
-    "B2",
-    "B3",
+    "B1",
+    "B4",
+    "B5",
+    "B6",
+    "B7",
     "B9"
   ],
-  "summary": "Router 0.21.0 adds POST and DELETE /admin/nodes/{fp}/quiet on the control app. Traced: both routes are registered on the control app behind basic_auth_middleware (Basic Auth, then X-Skirnir-UI and Sec-Fetch-Site for non-GET /admin/*), before the generic node-action route. Input: until must be a finite number in the future and at most 12 h ahead; reason a string, non-printable characters replaced, whitespace folded, at most 200 characters, so it cannot inject lines into the log or journal. The node is looked up by fingerprint among approved, active registry entries only. The reason reaches /admin/state, events.jsonl (owner-only, ADR-0056) and the web UI, where it is HTML-escaped inside a title attribute. Effect: an authenticated admin can stop the router's unloading and prewarming on one node for up to 12 h; busy detection, routing, admission and auth are unchanged, and the same admin can already switch these settings globally via PUT /admin/config, so no privilege is added. The quiet lives in memory and ends on expiry or router restart. A rejected-case test drives the real control app: without credentials 401, without the CSRF header 403, and neither starts or ends a quiet. No dependency, deployment or workflow logic change besides one added self-test line in ci.yml.",
+  "summary": "Router 0.21.1 adds self-tests for three open P1 evidence gaps and fixes the two defects they found. TM-05: test/selftest_cloud_final_payload.py checks that memory is inserted before the cloud checks (proxy._prepare calls memory.prepare before _cloud_ordered, which takes cloud.request_block_reason on that body), that the credential scan finds a secret in an inserted fact, and that with the privacy exception the provider receives the final payload. Defect: memory.packed escapes non-ASCII characters, so privacy.user_texts passed escaped JSON to the rules and the classifier and a configured term such as a name with an umlaut in a recalled fact did not keep the request local. Fix: memory.unpacked_texts decodes the facts of a data message that starts with memory.NOTICE (json.loads guarded, a look-alike message stays plain text) and privacy.user_texts adds them; the model-facing format is unchanged. TM-09: test/selftest_isolation_rotation.py runs the router from a temporary configuration file with the gateway enabled, a mocked session store and a control user: every gateway route refuses requests without identity or with a wrong token, the same alias maps to a bank per client, a token rotation through POST /admin/clients/{name}/token refuses the old token on REST recall, gateway recall and session read while the new token works and another client is unaffected, and a read grant revoked in the file and reloaded refuses recall with 403 while the identity stays valid. TM-15: test/selftest_log_hygiene_paths.py puts canaries on automatic recall, curated and answer retention, memory and inference backend error bodies and the session API, and checks log records and the journal, with instrument checks. Defect: an unexpected session-store exception reached the log with its message through aiohttp's default handler. Fix (ADR-0062): unexpected.unexpected_error_middleware is the outermost middleware of both apps; it passes web.HTTPException, logs type, method, path, a reference and code locations without the message or chained exceptions, and answers a fixed 500 internal_error with the reference.",
   "findings": [
     {
-      "id": "TM-03",
-      "evidence": "The quiet reason is operator text shown in the UI node table.",
-      "resolution": "Rendered through esc() (escapes & < > and double quotes) in a double-quoted title attribute; control characters removed and length capped server-side. Same-origin XSS and stolen admin credentials remain the baseline risk of TM-03, not introduced here.",
+      "id": "TM-05",
+      "evidence": "A recalled fact 'Termin bei Frau Müller' with privacy term 'Müller' was sent to the cloud provider: the inserted data message carried 'M\\u00fcller'.",
+      "resolution": "privacy.user_texts reads inserted facts decoded; covered by selftest_cloud_final_payload. Classifier quality and tool results remain open.",
       "disposition": "baseline"
     },
     {
-      "id": "TM-08",
-      "evidence": "A quiet node keeps a model loaded that the safety net would otherwise unload, for at most 12 h.",
-      "resolution": "Only reachable by an authenticated admin who can already disable unload_on_busy globally; bounded by the 12 h maximum and router restart; busy detection keeps real traffic away. Availability impact for authenticated admins is the existing TM-08 residual.",
+      "id": "TM-09",
+      "evidence": "Gateway routes were only enumerated with the gateway disabled; rotation and revocation were untested.",
+      "resolution": "Tested with the gateway enabled, real token rotation and grant revocation by reload; no defect found. Deployment coverage remains.",
+      "disposition": "baseline"
+    },
+    {
+      "id": "TM-15",
+      "evidence": "A session-store exception text carrying a canary appeared in the log (aiohttp 'Error handling request' traceback).",
+      "resolution": "Last-resort middleware logs type and code locations only (ADR-0062); canaries on memory, session and backend error paths. Rotation and backups remain open.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_quiet.py",
+      "command": "python test/selftest_cloud_final_payload.py; python test/selftest_isolation_rotation.py; python test/selftest_log_hygiene_paths.py (WSL)",
       "result": "passed",
-      "evidence": "all passed: validation 400s, unknown fingerprint 404, pending 409, safety net / busy transition / prewarm / residency each with control and quiet case, expiry, HTTP 409 with would_unload, accept_unload, route order, unauthenticated 401 and missing X-Skirnir-UI 403 without state change."
+      "evidence": "6, 3 and 2 tests OK."
     },
     {
-      "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml",
+      "command": "Negative checks: selftest_cloud_final_payload before the privacy fix; selftest_log_hygiene_paths without the middleware",
       "result": "passed",
-      "evidence": "46 self-tests, none failed (before the rejected-case addition; selftest_quiet.py rerun after it)."
+      "evidence": "3 failures (term passed, classifier saw escaped JSON, provider called); 'store exception leaked into the log'."
     },
     {
-      "command": "python test/run_tests.py",
+      "command": "All python test/... commands of ci.yml (WSL) after rebase onto #108; check_control_flow; check_adr_index; ruff check .",
       "result": "passed",
-      "evidence": "First run 1 failure (Residency: rank-1 prewarmed again after evictor idle, timing); two further runs on this branch and one on main: 0 failures."
-    },
-    {
-      "command": "ruff check . ; python test/check_control_flow.py ; python test/check_adr_index.py ; python test/check_pinned_references.py",
-      "result": "passed",
-      "evidence": "All checks passed; control flow ok; ADR index ok: 61 ADRs; pinned references 0 findings."
+      "evidence": "No failures; ADR index ok: 62 ADRs; control flow ok; All checks passed."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
-      "evidence": "Run on this staged record before commit."
+      "evidence": "Security evidence: 0 error(s)."
     },
     {
       "command": "python test/check_public_changes.py",
@@ -81,8 +83,7 @@
     }
   ],
   "limitations": [
-    "Not exercised against a deployed router or a real agent; the router behaviour is covered by self-tests with recorded spawns and the end-to-end suite with fake nodes.",
-    "The quiet is not persisted: a router restart during a measurement ends it, and the safety net may then unload the measured model (stated in ADR-0061).",
-    "The UI badge was not rendered in a browser; escaping was checked in the source."
+    "The privacy classifier is stubbed; its quality on real text is not measured.",
+    "Code locations in the unexpected-error log include source lines, which are code, not data; the message itself is withheld and is lost for debugging."
   ]
 }

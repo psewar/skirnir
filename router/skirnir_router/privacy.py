@@ -120,7 +120,10 @@ class Verdict:
 
 
 def user_texts(body):
-    """What the user wrote: the text of every user message (chat) or the prompt (generate)."""
+    """What the user wrote: the text of every user message (chat) or the prompt (generate). A data message the router
+    inserted from memory (memory.packed) also yields its facts as readable text: the packed form escapes non-ASCII
+    characters, so a term like "Müller" in a fact would otherwise never match (TM-05)."""
+    from .memory import unpacked_texts   # late: memory imports modules that import this one
     out = []
     for m in body.get("messages") or []:
         if not isinstance(m, dict) or m.get("role") != "user":
@@ -128,6 +131,7 @@ def user_texts(body):
         c = m.get("content")
         if isinstance(c, str):
             out.append(c)
+            out += unpacked_texts(c)
         elif isinstance(c, list):
             out += [p.get("text") for p in c if isinstance(p, dict) and isinstance(p.get("text"), str)]
     if isinstance(body.get("prompt"), str):
