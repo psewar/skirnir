@@ -18,7 +18,6 @@ The LXC host's SSH host key is saved to <ops>/known_hosts on first connection an
 All site-specific details (LXC host, CT number, router hostname, secrets folder, production config, CT Secret Store
 access) come from the ops folder outside the repo, see ops_env.py. The repo only contains config.example.yaml.
 """
-import base64
 import hashlib
 import json
 import os
@@ -142,23 +141,14 @@ def curl_auth(url_and_args):
         OPS["UI_USER"], os.environ.get(OPS["UI_PASS_ENV"], ""))
 
 
-AGENT_BINARIES = [  # (filename in dist/, os, arch) - names as in the GitHub release
-    ("skirnir-agent.exe", "windows", "amd64"),
-    ("skirnir-agent-linux-amd64", "linux", "amd64"),
-]
+AGENT_BINARIES = agent_keys.AGENT_BINARIES   # (filename in dist/, os, arch); one list for deploy.py and agent_keys.py
 
 
 def agent_signing_key():
     """Operator key for agent manifests: Ed25519, raw (32-byte seed, base64) in the ops folder; the public part belongs in
     the agent configuration (update.public_key) and optionally in modes.agent_update.public_key. Never created here
     (ADR-0066): main() refuses --agent without a key before connecting; --create-agent-key makes the first one."""
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    path = os.path.join(ops_env.ops_dir(), agent_keys.KEY)
-    seed = base64.b64decode(open(path, encoding="utf-8").read().strip())
-    key = Ed25519PrivateKey.from_private_bytes(seed)
-    pub = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    return key, base64.b64encode(pub).decode()
+    return agent_keys.load_signing_key(ops_env.ops_dir())
 
 
 def check_authenticode(files):
@@ -216,12 +206,10 @@ def deploy_agent(c, dist_dir=None):
     for f in files:
         f["name"] = f["name"].replace("{v}", version)
     key, pub = agent_signing_key()
-    manifest = {"version": version, "generated": time.strftime("%Y-%m-%dT%H:%M:%S"), "files": [{k: v for k, v in f.items() if k != "_src"} for f in files]}
-    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    signature = base64.b64encode(key.sign(canonical)).decode()
+    signed = agent_keys.signed_manifest(key, version, [{k: v for k, v in f.items() if k != "_src"} for f in files])
     mpath = os.path.join(dist_dir, "manifest.json")
     with open(mpath, "w", encoding="utf-8") as fh:
-        json.dump({"manifest": manifest, "signature": signature}, fh, indent=1, ensure_ascii=False)
+        json.dump(signed, fh, indent=1, ensure_ascii=False)
     run(c, "mkdir -p /tmp/skirnir-agent")
     sftp = c.open_sftp()
     for f in files:
