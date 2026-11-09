@@ -383,10 +383,11 @@ class MemoryService:
             return FILTERED
         return self.operation(scope, event_id)
 
-    async def submit(self, scope, event_id, content, *, confirmed, provenance=None, shared_observations=False, context=None, timestamp=None):
+    async def submit(self, scope, event_id, content, *, confirmed, provenance=None, shared_observations=False, context=None, timestamp=None,
+                     session_id=None):
         if self.outbox is not None:
             from .memory_outbox import submit
-            return await submit(self, scope, event_id, content, confirmed, provenance, shared_observations, context, timestamp)
+            return await submit(self, scope, event_id, content, confirmed, provenance, shared_observations, context, timestamp, session_id)
         # Context and timestamp come only from the gateway, which requires the persistent outbox.
         return self.enqueue(scope, event_id, content, confirmed=confirmed, provenance=provenance)
 
@@ -655,6 +656,8 @@ async def prepare(request, path, body, req):
     if spec["retain"] and not service.cfg.retention_enabled:
         return denied("retention disabled")
     req.memory_scope = scope
+    if spec["retain"]:   # ADR-0076: the response names the operation, so its owner can delete what this answer adds
+        req.memory_operation = service.operation(scope, spec["event_id"])
     client = (auth.client_auth_cfg()["clients"].get(scope.principal) or {})
     classes = state.CFG.cloud["data_classes"]
     req.data_class = max((scope.data_class, req.data_class or state.CFG.cloud["default_data_class"],
@@ -719,6 +722,7 @@ class Capture:
         self.service = request.app.get(SERVICE_KEY)
         self.scope = req.memory_scope
         self.event_id = req.memory["event_id"]
+        self.session_id = req.session["id"] if req.session else None   # ADR-0076: links the operation to its session
         self.parts, self.size, self.done = [], 0, False
         self.invalid = bool(body.get("tools") or body.get("format") or any(
             m.get("role") in ("tool", "function") or m.get("tool_calls") for m in body.get("messages", [])))
@@ -767,6 +771,7 @@ class Capture:
         from .memory_gateway import provenance
         origin = provenance({}, self.scope.principal, confirmed=False)
         result = origin if failed(origin) else await self.service.submit(self.scope, self.event_id, "".join(self.parts),
-                                                                        confirmed=False, provenance=origin)
+                                                                        confirmed=False, provenance=origin,
+                                                                        session_id=self.session_id)
         if failed(result):
             count("retain", "not_queued")

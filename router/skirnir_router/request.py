@@ -138,6 +138,7 @@ class Routing:
         self.memory_context = None
         self.memory_items = []
         self.memory_state = None   # State of the recall (memory.Recall.state), as header X-Skirnir-Memory-State
+        self.memory_operation = None   # operation id an automatic retain of this answer uses (X-Skirnir-Memory-Operation)
         self.context_sensitive = False
         self.memory = None
         self.memory_scope = None
@@ -178,6 +179,8 @@ class Routing:
             d["data_class"] = self.data_class_effective
         if self.memory_state:
             d["memory_state"] = self.memory_state
+        if self.memory_operation:
+            d["memory_operation"] = self.memory_operation
         return d
 
 
@@ -266,6 +269,8 @@ def headers_for(info):
          "X-Skirnir-Tier": str(info["tier"]), "X-Skirnir-Warm": "1" if info["warm"] else "0"}
     if info.get("memory_state"):   # only for recall: a failure (even under fail_open) never looks like "no knowledge"
         h["X-Skirnir-Memory-State"] = info["memory_state"]
+    if info.get("memory_operation"):   # retained only if the answer qualifies; delete it via the memory operations API
+        h["X-Skirnir-Memory-Operation"] = info["memory_operation"]
     return h
 
 

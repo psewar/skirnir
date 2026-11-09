@@ -37,7 +37,8 @@ def resubmit_delay(cfg, attempt):
     return min(21600, cfg.upstream_backoff_s * 2 ** min(attempt - 1, 12))
 
 
-async def submit(service, scope, event_id, content, confirmed, provenance=None, shared_observations=False, context=None, timestamp=None):
+async def submit(service, scope, event_id, content, confirmed, provenance=None, shared_observations=False, context=None, timestamp=None,
+                 session_id=None):
     """Operation UUID admitted durably, or a Problem. `context` and `timestamp` (gateway retain, already checked there)
     are stored with the job but are not part of its fingerprint, so a replay with a newer send time is the same job."""
     operation = service.validate_retain(scope, event_id, content)
@@ -56,7 +57,8 @@ async def submit(service, scope, event_id, content, confirmed, provenance=None, 
     # Optional keys only when given: rows without them (also all rows admitted before) keep their shape and fingerprint.
     item = {key: value for key, value in (("context", context), ("timestamp", timestamp)) if value is not None}
     admitted = await service.outbox.outbox_put(UUID(operation), {**asdict(scope), "__bank": service.bank(scope)}, {**payload, **item}, digest(payload),
-                                               service.cfg.outbox_capacity, **({"owner_capacity": service.cfg.outbox_client_capacity} if service.cfg.outbox_client_capacity else {}))
+                                               service.cfg.outbox_capacity, **({"owner_capacity": service.cfg.outbox_client_capacity} if service.cfg.outbox_client_capacity else {}),
+                                               **({"session_id": UUID(session_id)} if session_id else {}))
     if failed(admitted):
         return admitted
     service.wakeup.set()

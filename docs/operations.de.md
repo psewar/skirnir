@@ -162,6 +162,24 @@ erzeugt einen neuen samt Protokoll, und jeder Knoten braucht `Set-UpdateKey.cmd 
 (unter Linux `update.public_key` von Hand setzen), bevor er wieder ein Release annimmt. Keines der Werkzeuge legt stillschweigend
 einen Schlüssel an: `create` (oder `deploy.py --create-agent-key`) ist nur für eine neue Installation.
 
+## Ein Backup zurückspielen
+
+Löschungen stehen ausserhalb der Datenbank, nur als IDs, in `deletions.jsonl` neben `config.yaml` (ADR-0076):
+
+1. **PostgreSQL zurückgespielt** (Session-Store und Memory-Outbox): den Router wie gewohnt starten. Bevor die Outbox etwas
+   sendet, wendet er das Journal erneut an; das Log nennt, wie viele Sessions und Operationen wieder da waren und erneut
+   gelöscht sind. `deletions.jsonl` nie älter als die Datenbank zurückspielen - aus dem Datenbank-Restore heraushalten.
+2. **Hindsight zurückgespielt**: Dokumente gelöschter Operationen sind wieder da. Seitenweise erneut löschen:
+
+   ```bash
+   curl -u admin -X POST https://<router>:11435/admin/memory/reconcile-deletions -H 'Content-Type: application/json' \
+     -d '{"after": "00000000-0000-0000-0000-000000000000", "limit": 500}'
+   ```
+
+   Mit `"after": <next>` wiederholen, bis `next` null ist. `unavailable` zählt Dokumente, für die Hindsight nicht
+   antwortete; später erneut laufen lassen.
+3. `skirnir_memory_deletions_stuck` beobachten: Löschungen, deren Job tot oder widerrufen endete, brauchen einen Blick.
+
 ## Namen
 
 Seit Router 0.2.0 / Agent 0.11.0 folgen die technischen Namen dem Produkt: Paket `skirnir_router`, Dienst und Pfade

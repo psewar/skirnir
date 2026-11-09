@@ -19,6 +19,8 @@ class SessionConfig:
     retention_days: int = 0
     archived_retention_days: int = 0
     maintenance_interval_s: int = 300
+    # ADR-0076: deleting a session (API or retention) also deletes the memory operations retained from its inference
+    delete_memory_with_session: bool = False
 
 
 def parse_session_config(raw):
@@ -36,6 +38,8 @@ def parse_session_config(raw):
         return invalid("handoff_key_env must name an environment variable")
     if type(values["enabled"]) is not bool:
         return invalid("session_store.enabled must be boolean")
+    if type(values["delete_memory_with_session"]) is not bool:
+        return invalid("session_store.delete_memory_with_session must be boolean")
     if not isinstance(values["dsn_env"], str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", values["dsn_env"]):
         return invalid("session_store.dsn_env must name an environment variable")
     for k in ("min_pool_size", "max_pool_size"):

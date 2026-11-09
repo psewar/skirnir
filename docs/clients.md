@@ -124,7 +124,8 @@ structured, `suffix` → insert. Capabilities come from Ollama's `/api/show`, co
 
 The response always carries the headers `X-Skirnir-Request-Id`, `-Node`, `-Model`, `-Tier`, `-Warm`; a request with memory
 recall also carries `X-Skirnir-Memory-State` (`available`, `bank_missing`, `query_filtered` or `unavailable[:<kind>]`, see
-[design/hindsight-memory.md](../design/hindsight-memory.md)). The `routing` block in the
+[design/hindsight-memory.md](../design/hindsight-memory.md)); a request whose answer may be retained carries
+`X-Skirnir-Memory-Operation` with the operation id to delete it later (ADR-0076). The `routing` block in the
 body (node, model, tier, `reason`, `skipped` with a reason per skipped tier, `candidates` with score, `queued_ms`, `decision`) is
 only included if the client itself sent a `routing` block – legacy clients see an unchanged body. For `/v1` it is in the
 `chat.completion` or in the last SSE chunk.

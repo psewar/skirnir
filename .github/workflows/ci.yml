@@ -42,6 +42,7 @@ jobs:
       - name: Python locks are consistent (ADR-0074)
         run: python test/selftest_pydeps.py && python tools/security/lock_requirements.py check
       - run: python test/selftest_sbom.py
+      - run: python test/selftest_deletion_lifecycle.py
       - run: python test/selftest_browser.py
       - run: python test/selftest_agent_revocation.py
       - run: python test/selftest_key_rotation.py
@@ -119,6 +120,7 @@ jobs:
       - run: pip install --require-hashes -r requirements-ci-lock.txt   # hash-locked (ADR-0074)
       - run: python test/integration_sessions.py
       - run: python test/integration_context.py
+      - run: python test/integration_deletion_lifecycle.py
       - run: python test/integration_interoperability.py
 
   go:

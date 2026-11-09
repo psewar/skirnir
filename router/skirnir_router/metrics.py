@@ -252,6 +252,8 @@ def render():
           [({"backend": k}, 1 if services.get(k) == "available" else 0) for k in ("session_store", "hindsight", "outbox")])
     gauge("skirnir_memory_outbox_oldest_seconds", "age of oldest active durable operation",
           [({}, services.get("outbox_oldest_seconds", 0))])
+    gauge("skirnir_memory_deletions_stuck", "deletions requested whose job is dead or revoked (ADR-0076): knowledge may remain",
+          [({}, services.get("outbox_stuck_deletions", 0))])
     gauge("skirnir_memory_outbox_jobs", "durable outbox counts, refreshed every ten seconds",
           [({"status": k}, (services.get("outbox_counts") or {}).get(k, 0)) for k in
            ("pending", "processing", "accepted", "completed", "dead", "revoked", "cancelled", "delete_pending", "deleted")])

@@ -788,7 +788,7 @@ class MemoryHttpTests(MemoryHarness):
     async def test_completed_capture_still_requires_non_cancelled_live_transport(self):
         scope = memory.scope_for_principal("client-a", PROJECT, write=True)
         request = SimpleNamespace(app={memory.SERVICE_KEY: self.service}, transport=MagicMock())
-        req = SimpleNamespace(memory_scope=scope, memory={"event_id": "cancelled"})
+        req = SimpleNamespace(memory_scope=scope, memory={"event_id": "cancelled"}, session=None)
         for outcome, closing in ((None, False), ("error", False), ("ok", True)):
             request.transport.is_closing.return_value = closing
             capture = memory.Capture(request, req, {"messages": []})

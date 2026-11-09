@@ -153,6 +153,24 @@ replace-lost "<reason>"` (or `deploy.py --replace-lost-agent-key "<reason>"`) cr
 `Set-UpdateKey.cmd -Step Replace -Key <new public key>` (on Linux: set `update.public_key` by hand) before it accepts a release
 again. Neither tool creates a key implicitly: `create` (or `deploy.py --create-agent-key`) is for a new installation only.
 
+## Restoring a backup
+
+Deletions are recorded outside the database, ids only, in `deletions.jsonl` next to `config.yaml` (ADR-0076):
+
+1. **PostgreSQL restored** (session store and memory outbox): start the router as usual. Before the memory outbox sends
+   anything it applies the journal again; the log says how many sessions and operations were back and are deleted again.
+   Restore `deletions.jsonl` never older than the database - keep it out of the database restore.
+2. **Hindsight restored**: documents of deleted memory operations are back. Delete them again, page by page:
+
+   ```bash
+   curl -u admin -X POST https://<router>:11435/admin/memory/reconcile-deletions -H 'Content-Type: application/json' \
+     -d '{"after": "00000000-0000-0000-0000-000000000000", "limit": 500}'
+   ```
+
+   Repeat with `"after": <next>` until `next` is null. `unavailable` counts documents Hindsight did not answer for; run
+   again later.
+3. Watch `skirnir_memory_deletions_stuck`: deletions whose job ended dead or revoked need a look.
+
 ## Names
 
 Since router 0.2.0 / agent 0.11.0 the technical names follow the product: package `skirnir_router`, service and paths

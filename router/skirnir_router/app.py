@@ -69,6 +69,7 @@ def build_apps():
     ctl = web.Application(middlewares=[unexpected_error_middleware, auth.basic_auth_middleware])
     ctl[context_ops.API_KEY] = api
     ctl.router.add_get("/admin/context", context_ops.handle)
+    ctl.router.add_post("/admin/memory/reconcile-deletions", context_ops.handle_reconcile_deletions)   # ADR-0076
     ctl.router.add_get("/", admin.handle_ui)
     ctl.router.add_get(r"/{name:(skirnir\.png|favicon\.png|favicon\.ico)}", admin.handle_asset)
     ctl.router.add_post("/v1/heartbeat/{node}", poll.handle_heartbeat)   # Heartbeat injection with heartbeat_token (tests, diagnostics)

@@ -225,12 +225,14 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Old outbox/backup resurrects data; session deletion leaves memory.",
-      "controls": "Outbox reauthorization, tombstones and selective deletion.",
-      "next_action": "Define lifecycle across all stores; test crash and restore.",
+      "controls": "Outbox reauthorization, tombstones and selective deletion. Deletion journal outside the database re-applied at start before the outbox sends; admin reconcile for a restored Hindsight; optional deletion of a session's retained memory; deletion requested in flight takes over; stuck-deletion gauge; bounded decision capture (ADR-0076).",
+      "next_action": "Operator: keep deletions.jsonl out of database restores; decide delete_memory_with_session and retention days; verify derived Hindsight observations disappear with their document (live test).",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_reliability.py",
-        "test/selftest_verified_delivery.py"
+        "test/selftest_verified_delivery.py",
+        "test/selftest_deletion_lifecycle.py",
+        "test/integration_deletion_lifecycle.py"
       ],
       "validation_gap": "V11: restore and backup policies require integration/operational tests."
     },
