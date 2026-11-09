@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "4adf5d7d4b94a88227fe4215677e3feed9495c04",
-  "change_digest": "fd75bd14e2909885849157c742b3671ab89df65415ad347a9885ff3b1e16ddc9",
+  "base_sha": "7cf82818799784fe60dbc59c352baa9061851acd",
+  "change_digest": "38b0d86e3eb7891fa105c02b7b438e6309afbc184a4c4e3682d4276fcca60e38",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
@@ -59,7 +59,7 @@
       "evidence": "No failures; ADR index ok: 63 ADRs; ALLE OK; All checks passed."
     },
     {
-      "command": "python tools/security/review.py check --base origin/security/p1-evidence --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -70,7 +70,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #109; the record is refreshed against main once #109 is merged.",
+    "Rebased onto main after #109 was merged.",
     "Per-client defaults were checked against three days of journal starts (highest: 14 starts in 30 s for one agent client), which bound but do not measure concurrency; the new peak gauge measures it."
   ]
 }
