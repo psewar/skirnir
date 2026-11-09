@@ -5,7 +5,8 @@
 Features come from router/skirnir_router/decision/tfidf.py (same function as in the Router). Model = JSON with vocabulary,
 IDF, weights, bias, classes, and metrics; the Router loads it via decision_engine.tfidf.model_path.
 Training: Full-batch gradient descent with L2 penalty, selecting the epoch with the best validation NLL (no overfitting
-to the test set). Then Top-1 on validation and test.
+to the test set). Then Top-1 on validation and test. The model records the digest of the data it was trained on
+(`data_sha256`, data_digest.py); test/check_training_data.py compares it with the committed data.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "router"))
+sys.path.insert(0, HERE)
+from data_digest import digest  # noqa: E402
 from skirnir_router.decision.tfidf import features  # noqa: E402
 
 DATA = os.path.join(HERE, "data")
@@ -91,7 +94,7 @@ def main():
     ap.add_argument("--l2", type=float, default=1e-5)
     ap.add_argument("--epochs", type=int, default=3000)   # Vollbatch-GD konvergiert langsam; 400 waren zu wenig (0,70 -> 0,85)
     ap.add_argument("--lr", type=float, default=1.0)
-    ap.add_argument("--name", default="skirnir-tfidf-v1")
+    ap.add_argument("--name", default="skirnir-tfidf-v2")   # v2: region-neutral data in standard spelling (ADR-0077)
     a = ap.parse_args()
     tr, va, te = load("train"), load("validation"), load("test")
     classes = list(tr[0]["options"])
@@ -109,7 +112,8 @@ def main():
     model = {"name": a.name, "classes": classes, "vocab": vocab, "idf": [round(v, 5) for v in idf],
              "weights": [[round(float(v), 5) for v in row] for row in w], "bias": [round(float(v), 5) for v in b],
              "features": "char 3-5 in-word + word uni/bigram + length bucket", "trained_at": time.strftime("%Y-%m-%d %H:%M"),
-             "n_train": len(tr), "validation_top1": round(acc_v, 4), "test_top1": round(acc_t, 4), "l2": a.l2, "best_epoch": ep}
+             "n_train": len(tr), "validation_top1": round(acc_v, 4), "test_top1": round(acc_t, 4), "l2": a.l2, "best_epoch": ep,
+             "data_sha256": digest(DATA)}
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     json.dump(model, open(a.out, "w", encoding="utf-8"), ensure_ascii=False)
     print(f"-> {a.out} ({os.path.getsize(a.out) / 1024:.0f} KB)")

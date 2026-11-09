@@ -2,24 +2,104 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "994330b4711bd5540b001aebf70e498093365861",
-  "change_digest": "61134b6d80462b02dad9064eaf539372af7f349acf762aacb3e1f15196f66eba",
+  "base_sha": "6bffa642f7d4306760c34d165024be2711f68787",
+  "change_digest": "92aaf9ec87d0250aba6959bf9525d3614f39c94de93e0ca3aee98c2dc328cdda",
   "reviewed_paths": [
-    "CHANGELOG.md"
+    ".github/workflows/ci.yml",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "decision-embed/README.md",
+    "decision-embed/embedder.py",
+    "decision-embed/privacy/build_dataset.py",
+    "decision-embed/privacy/data/test.jsonl",
+    "decision-embed/privacy/data/train.jsonl",
+    "decision-embed/privacy/data/validation.jsonl",
+    "decision-embed/privacy/folds.py",
+    "decision-embed/privacy/repeat_splits.py",
+    "decision-embed/privacy/train_privacy.py",
+    "decision-embed/server.py",
+    "decision-embed/train_head.py",
+    "decision-eval/README.md",
+    "decision-eval/build_dataset.py",
+    "decision-eval/data/summary.json",
+    "decision-eval/data/test.jsonl",
+    "decision-eval/data/train.jsonl",
+    "decision-eval/data/validation.jsonl",
+    "decision-eval/data_digest.py",
+    "decision-eval/repeat_splits.py",
+    "decision-eval/train_tfidf.py",
+    "deploy/deploy.py",
+    "design/decision-engine.md",
+    "design/decision-training-data.md",
+    "docs/adr/0038-content-check-before-a-cloud-tier-opt-in.md",
+    "docs/adr/0077-decision-training-data-is-neutral-and-checked-against-its-builders.md",
+    "docs/adr/0078-privacy-threshold-from-out-of-fold-scores.md",
+    "docs/adr/0079-compare-decision-models-over-repeated-template-splits.md",
+    "docs/adr/README.md",
+    "docs/configuration.de.md",
+    "docs/configuration.md",
+    "docs/reference.de.md",
+    "docs/reference.md",
+    "docs/security/threat-model.md",
+    "router/decision-tfidf.json",
+    "router/skirnir_router/admin.py",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/decision/__init__.py",
+    "router/skirnir_router/decision/tfidf.py",
+    "router/skirnir_router/privacy.py",
+    "test/check_training_data.py",
+    "test/run_tests.py",
+    "test/selftest_privacy_threshold.py",
+    "test/selftest_training_data.py"
   ],
   "risk_ids": [
+    "TM-05",
     "TM-16"
   ],
   "boundaries": [
+    "B7",
     "B9"
   ],
-  "summary": "Documentation only: CHANGELOG marks v0.31.0 as released (tag link and date in the table row) and the node-tools section as included in v0.31.0. No code, configuration or workflow change.",
-  "findings": [],
+  "summary": "Decision training data regenerated from neutral, grammatical templates (standard German spelling, nothing real), tf-idf router model retrained (skirnir-tfidf-v2, records data_sha256), router 0.25.1. New CI check test/check_training_data.py rebuilds both data sets, compares them with the committed files, checks spelling and the model's data digest; selftests cover the rejected cases. Privacy head training (decision-embed/privacy/train_privacy.py): embeddings one text at a time as the service computes them, threshold from out-of-fold scores over five template folds, head on all templates, default recall target 0.98, refuses too few templates, lowest threshold without evidence (ADR-0078, proposed). Traced B7: the router reads 'personal' and 'threshold' from POST /privacy (privacy.py), a configured router.cloud.privacy_check.threshold overrides the head's; the service (server.py, unchanged) loads the new privacy.json (same keys, extra result fields ignored) - verified on loopback: model skirnir-privacy-e5-small-v2, threshold 0.30. The tf-idf model keeps the keys load_model requires; the extra data_sha256 is ignored by the router. B9: two CI steps run repository stdlib scripts; no new dependency, action or secret. No router code path changed except VERSION; nothing was deployed.",
+  "findings": [
+    {
+      "id": "TM-05",
+      "evidence": "The privacy classifier has false negatives by design (B7). Over 20 template splits the earlier threshold procedure gave test recall 0.898 +/- 0.082 (worst 0.76) at target 0.98; the new one 0.964 +/- 0.012 (worst 0.96) at unchanged precision. The head written now (threshold 0.30) finds 50/50 personal test requests and flags 3/50 neutral ones; the head in use had 0.40, 50/50, 1/50.",
+      "resolution": "This change lowers the residual risk in expectation and makes the threshold stable; it does not remove it. Uncovered content (calendar entries, motion history) is documented as proposals. The rules layer and cloud:false remain the stronger controls. The retrained head reaches a router only when the operator deploys it.",
+      "disposition": "baseline"
+    },
+    {
+      "id": "TM-16",
+      "evidence": "The CI workflow gains two steps (selftest/check training data, selftest privacy threshold).",
+      "resolution": "They run scripts from the repository with the standard library only, install nothing, use no secret and no new action; the builders they start are repository code. Flagged for maintainer review as a workflow change.",
+      "disposition": "baseline"
+    }
+  ],
   "tests": [
     {
-      "command": "python test/check_adr_index.py",
+      "command": "python test/selftest_training_data.py && python test/check_training_data.py",
       "result": "passed",
-      "evidence": "ADR index ok."
+      "evidence": "ALL OK; Training data: 0 finding(s). Probed on a copy: stale data, ss spelling and a model without digest are reported."
+    },
+    {
+      "command": "python test/selftest_privacy_threshold.py",
+      "result": "passed",
+      "evidence": "ALL OK, including unreachable recall and no personal sentences -> lowest threshold, too few templates refused."
+    },
+    {
+      "command": "python test/run_tests.py",
+      "result": "passed",
+      "evidence": "332 passed, 0 failures (exit 0) on the final tree, among them /admin/decide: tfidf chooses code with model skirnir-tfidf-v2"
+    },
+    {
+      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check; python test/selftest_control_flow.py && python test/check_control_flow.py; python test/selftest_english_names.py",
+      "result": "passed",
+      "evidence": "All checks passed; configuration ok; ADR index ok: 79 ADRs; 0 pinned-reference findings; Python locks: 0 problem(s); control flow ok; ALLE OK."
+    },
+    {
+      "command": "decision-embed/server.py with the new privacy.json on 127.0.0.1, POST /privacy",
+      "result": "passed",
+      "evidence": "model skirnir-privacy-e5-small-v2, threshold 0.3; a calendar request 0.37 (stays local), a general question 0.08."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -33,6 +113,9 @@
     }
   ],
   "limitations": [
-    "Text change only."
+    "The embedding head and the privacy head are not in the repository and were not deployed; they were trained and measured locally on a CPU.",
+    "If router.cloud.privacy_check.threshold is set in a configuration, it overrides the new head's threshold; with the new head it should be null.",
+    "The privacy test set has 100 hand-written sentences and has now been looked at; a fresh one is proposed.",
+    "The end-to-end suite ran on Windows; CI runs the Python checks on Linux."
   ]
 }

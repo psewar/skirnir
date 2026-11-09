@@ -80,7 +80,7 @@ def main():
     tr, va, te = load("train"), load("validation"), load("test")
     classes = list(tr[0]["options"])
     t0 = time.time()
-    xtr, xva, xte = (emb.encode([r["context"] for r in rows]) if False else np.concatenate([emb.encode([r["context"] for r in rows[i:i + 32]]) for i in range(0, len(rows), 32)]) for rows in (tr, va, te))
+    xtr, xva, xte = (emb.encode_each([r["context"] for r in rows]) for rows in (tr, va, te))
     print(f"Embeddings {emb.name} ({emb.file}, dim {xtr.shape[1]}): {len(tr) + len(va) + len(te)} Texte in {time.time() - t0:.1f} s")
     ytr, yva, yte = (np.array([r["label"] for r in rows]) for rows in (tr, va, te))
     k = len(classes)

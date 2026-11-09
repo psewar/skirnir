@@ -167,6 +167,11 @@ Entwurf: [design/decision-engine.md](../design/decision-engine.md), Messreihe: [
 | `rules` | Stichwörter, deterministisch, Kette-Ende | 0,523 | 0,1 ms | im Router |
 | `jevlike` | [Jevlike](https://github.com/vinnylarouge/jevlike)-Adapter ([decision-jevlike/](../decision-jevlike/)); gebaut, gemessen, für feste Rollen nicht lohnend | 0,750 | 15 ms | eigener Dienst |
 
+Die Tabelle ist eine einzige Aufteilung des früheren Datensatzes (2026-09-17). Neu trainiert auf den neutralen Daten
+(Router 0.25.1, ADR-0077) und über 50 Aufteilungen der Vorlagen gemessen: tfidf 0,91 ± 0,06, embed 0,96 ± 0,03, im
+Rahmen der Streuung gleich wie vorher; eine einzelne Aufteilung verschiebt Top-1 allein um mehrere Punkte
+([design/decision-training-data.md](../design/decision-training-data.md)).
+
 Empfohlene Kette `[embed, local_llm, tfidf, rules]`: embed entscheidet in unter 20 ms, bei Unsicherheit (~6 % der Fälle) fragt
 der Router das LLM, fällt der GPU-Knoten aus, greifen tfidf und rules. Routing-Genauigkeit der Kette 0,947; rein auf CPU
 (`[embed, tfidf, rules]`) 0,909.

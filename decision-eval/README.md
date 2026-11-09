@@ -1,5 +1,11 @@
 # decision-eval - Datensatz, Training und Messreihe der Decision Engine
 
+> **Stand 2026-11-09:** Vorlagen und Daten sind neu erzeugt (Standardschreibweise, nichts Reales, jeder gefüllte Satz
+> grammatisch; ADR-0077), das tf-idf-Modell ist neu trainiert, `test/check_training_data.py` hält Vorlagen, Daten und
+> Modell in CI zusammen. Die Tabelle unten ist die Messung vom 2026-09-17 auf dem früheren Datensatz und einer einzigen
+> Aufteilung. Aktuelle Zahlen über 20 Aufteilungen (`repeat_splits.py`, ADR-0079), Messmethode und eine Analyse des
+> Datensatzes mit Vorschlägen: [design/decision-training-data.md](../design/decision-training-data.md).
+
 ## Ergebnis (2026-09-17, Testsatz 132 Beispiele aus ungesehenen Vorlagen-Gruppen, 1282 Beispiele gesamt)
 
 | Engine | Top-1 | Top-3 | sicher & richtig | Fallback-Rate | Latenz p50 / p95 | ECE | Wo gemessen |
@@ -51,7 +57,8 @@ Befunde je Engine:
 | Datei | Zweck |
 |---|---|
 | `build_dataset.py` | Vorlagen -> `data/{train,validation,test}.jsonl` (Jevlike-Format + `role`, `group`), Split je Rolle nach Gruppen, `--capture` mischt echte Client-Labels dazu |
-| `train_tfidf.py` | Stufe 1: TF-IDF + Softmax-Regression (numpy, 20 s) -> `router/decision-tfidf.json`, deploy.py legt es nach `/etc/skirnir-router/` |
+| `train_tfidf.py` | Stufe 1: TF-IDF + Softmax-Regression (numpy, 20 s) -> `router/decision-tfidf.json` mit dem Digest seiner Daten (`data_sha256`, `data_digest.py`), deploy.py legt es nach `/etc/skirnir-router/` |
+| `repeat_splits.py` | tf-idf oder Embedding-Kopf über 20 Aufteilungen: Mittel, Streuung, schlechtester Fall; `--paired` vergleicht eine Umformulierung auf derselben Aufteilung (ADR-0079) |
 | `train.py` | Jevlike-Training beider Varianten (`tiny`, `hf`) mit Skirnir-Parametern (Kontext 512), danach `jevlike-eval` |
 | `run_eval.py` | Messreihe: startet Jevlike-Dienste aus Checkpoints, fragt rules/local_llm ueber `/admin/decide`, rechnet Top-1/Top-3, Konfusion, p50/p95/p99, Fallback-Rate, ECE, Temperatur -> `results*/report.md`, `calibration.json` |
 | `results-router/` | rules + tfidf + local_llm gegen Produktion (2026-09-17 00:00) |

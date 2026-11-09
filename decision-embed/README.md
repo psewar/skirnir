@@ -5,7 +5,8 @@ auf int8 quantisiert (113 MB), Mean-Pooling, darauf eine Softmax-Regression fuer
 `decision-jevlike` (`POST /decide`, `GET /health`), im Router als Engine `embed`.
 
 Gemessen 2026-09-17 (decision-eval, 132 Testfaelle): **0,932 Top-1**, Fallback 6 %, auf dem Router-Host (4 CPU-Kerne)
-**10-19 ms** je Entscheidung, Container 456 MiB.
+**10-19 ms** je Entscheidung, Container 456 MiB. Stand 2026-11-09 (neutrale Daten, ADR-0077): über 50 Vorlagen-Aufteilungen
+0,962 ± 0,033 (vorher 0,955 ± 0,040); `train_head.py` bettet jetzt wie der Dienst einzeln ein.
 
 | Datei | Zweck |
 |---|---|
@@ -38,14 +39,23 @@ ohne `privacy.json` im Modellordner antwortet der Endpunkt 404 (der Router bleib
 |---|---|
 | `privacy/build_dataset.py` | Trainings- und Validierungssaetze aus Vorlagen; Aufteilung nach VORLAGE, nicht nach Satz |
 | `privacy/data/test.jsonl` | 100 frei formulierte Saetze (50/50), nicht aus Vorlagen - daran wird berichtet |
-| `privacy/train_privacy.py` | Logistische Regression + kNN, Schwelle auf der Validierung fuer `--recall` -> `models/e5-small/privacy.json` |
+| `privacy/train_privacy.py` | Logistische Regression + kNN auf einzeln berechneten Embeddings; Schwelle für `--recall` aus Out-of-fold-Werten über fünf Vorlagen-Faltungen (ADR-0078), Kopf auf allen Vorlagen -> `models/e5-small/privacy.json` |
+| `privacy/folds.py` | Faltungen und Schwellenwahl, nur Standardbibliothek (Selbsttest in CI) |
+| `privacy/repeat_splits.py` | Schwelle, Recall und Präzision über 20 Vorlagen-Aufteilungen, beide Schwellenverfahren (ADR-0079) |
 
 Gemessen 2026-10-23 (`--recall 0.98`, 644 Trainings-, 135 Validierungssaetze): Schwelle 0,40; Test 50/50 persoenliche erkannt,
 1 von 50 neutralen falsch markiert ("Wie viel Uhr ist es in New York?"); 2-5 ms je Anfrage auf der CPU. Vorbehalt: Test- und
 Trainingssaetze stammen vom selben Verfasser - echte Sprachanfragen koennen anders klingen. Der Router ergaenzt feste Regeln
 und schwaerzt den Hauskontext unabhaengig vom Klassifikator.
 
+**Stand 2026-11-09** (neutrale Daten, ADR-0077; Schwelle out-of-fold, ADR-0078; `--recall 0.98`): Schwelle 0,30; Test
+50/50 persönliche erkannt, 3 von 50 neutralen markiert. Über 20 Vorlagen-Aufteilungen lag der Recall mit dem früheren
+Verfahren bei 0,898 ± 0,082 (schlechteste Aufteilung 0,76), out-of-fold bei 0,964 ± 0,012 (schlechteste 0,96), bei gleicher Präzision (0,98); der Kopf vom 2026-10-23 stammte
+aus einer günstigen Aufteilung. Kopf und Rollen-Kopf liegen nicht im Repository: nach neuen Daten dort neu trainieren, wo
+der Dienst läuft (Befehle unten und oben), und den Dienst neu starten. Einzelheiten:
+[design/decision-training-data.md](../design/decision-training-data.md).
+
 ```bash
 ..\..\decision-jevlike\.venv\Scripts\python build_dataset.py
-..\..\decision-jevlike\.venv\Scripts\python train_privacy.py --recall 0.98
+..\..\decision-jevlike\.venv\Scripts\python train_privacy.py                  # --recall 0.98 ist der Standard
 ```
