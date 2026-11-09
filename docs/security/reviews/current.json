@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "25e7e54310d1f87ccd4ad9bf43d71119161fd79b",
-  "change_digest": "3f5eba10074443fad19e0b02d503837e5109f35ed8b3db59c807e6fc3df523f0",
+  "base_sha": "e544b2fbb09f574b1ab1e8a60ce588ed19e0a2a2",
+  "change_digest": "323f7031002327e4530df125f02d7ff991b72660581c003eb6bc582a339d8094",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
