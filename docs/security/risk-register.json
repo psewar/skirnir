@@ -233,15 +233,15 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Compromised release or old valid manifest.",
-      "controls": "Signed agent manifest and hash; separate Ollama source/checksum. Since agent 0.28.0 the agent refuses a signed version older than the running release (ADR-0054); deliberate rollback only with the node-local update.allow_downgrade switch. Since agent 0.29.0 several node-local keys can be trusted (update.public_keys) and deploy.py prepares and switches the signing key (ADR-0058).",
-      "next_action": "Practise a rotation in the deployment; keep the signing key offline from the router.",
+      "controls": "Signed agent manifest and hash; separate Ollama source/checksum. Since agent 0.28.0 the agent refuses a signed version older than the running release (ADR-0054); deliberate rollback only with the node-local update.allow_downgrade switch. Since agent 0.29.0 several node-local keys can be trusted (update.public_keys) and deploy.py prepares and switches the signing key (ADR-0058). A rotation has been practised once in the deployment: agent 0.29.1 was signed only with the new key and accepted by every node before the old key was removed.",
+      "next_action": "Keep the signing key offline from the router; define recovery for a lost signing key (nodes then need a node-local key change); keep the Ollama source check independent.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "agent/ollamaupdate_test.go",
         "agent/updater_test.go",
         "test/selftest_key_rotation.py"
       ],
-      "validation_gap": "V13: anti-rollback and key rotation are implemented and tested; a rotation has not yet been practised in the deployment."
+      "validation_gap": "V13: anti-rollback and key rotation are implemented, tested and practised once; recovery from a lost signing key is not defined yet."
     },
     {
       "id": "TM-14",
