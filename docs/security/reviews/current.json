@@ -2,46 +2,52 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "36f182f0620218a0e9c7483afa02e93545d13244",
-  "change_digest": "827af860d71a2199f673b62db43d78beb340c8a9c3c4b364e7e4efaf6d294cc2",
+  "base_sha": "0ed659f9c12a75e84372a78af122e8223b15527a",
+  "change_digest": "e516b55c036c740443c9e84409f46d53a361d67a91877705feab72fce2dad438",
   "reviewed_paths": [
+    ".gitattributes",
+    ".github/workflows/ci.yml",
     "CHANGELOG.md",
     "README.de.md",
     "README.md",
-    "deploy/agent_keys.py",
-    "deploy/deploy.py",
-    "docs/adr/0068-standalone-agent-key-and-release-tool.md",
+    "docs/adr/0069-router-install-script.md",
     "docs/adr/README.md",
-    "test/selftest_key_rotation.py"
+    "router/install.sh",
+    "test/selftest_install.py"
   ],
   "risk_ids": [
-    "TM-13"
+    "TM-14"
   ],
   "boundaries": [
-    "B8"
+    "B3"
   ],
-  "summary": "Operator tooling, no router or agent code change (ADR-0068). deploy/agent_keys.py becomes a standalone command line tool that needs only Python and cryptography: `--keys <dir>` (or SKIRNIR_OPS) with state, create, next, use-next, replace-lost and sign-release. New load_signing_key, release_files (release-asset name for the version, else the build name), signed_manifest (canonical JSON with sorted keys, compact separators, UTF-8, Ed25519 signature - the format the agent verifies) and sign_release (refuses without a key, with a version not matching N.N.N, without binaries, or when the output folder already holds manifest.json; copies the binaries under their release names and writes manifest.json into <dist>/publish or --out; prints where to copy them and the public key). main() refuses a missing or nonexistent key folder and unknown commands. deploy.py imports AGENT_BINARIES from agent_keys, signs with agent_keys.signed_manifest and loads the key with agent_keys.load_signing_key; an unused import was removed. The missing-key message names both the standalone and the deploy.py commands.",
+  "summary": "Operator tooling, no router code change (ADR-0069). New router/install.sh (bash, LF, executable): options --prefix, --config-dir, --check, and for packaging/tests --root DIR (no root, apt or systemctl), --no-venv and --os-release FILE. Before any change it refuses without root (unless --root), on a distribution whose ID/ID_LIKE is not debian/ubuntu, without Python >= 3.11, or with an incomplete source folder; unknown options are refused. Missing apt packages (python3, python3-venv, python3-aiohttp, python3-yaml, python3-cryptography, curl, jq) are installed, or only listed with --check or --root. Program files are staged in a mktemp folder below the prefix and swapped (the package folder renamed aside, then removed), bytecode caches are not copied, units are copied to /etc/systemd/system and systemd is reloaded; the configuration folder is created 0750 and never written. The venv uses --system-site-packages plus requirements-session.txt (includes requirements.txt with paho-mqtt<2) and is checked by importing the packages. With a configuration it runs router.py --check --files under setpriv --inh-caps=-all --bounding-set=-all (as the ADR-0044 unit runs) and --posture; a failing check refuses with the program files installed and the service untouched. Without one it names router.py --init. Last line STATE: installed | checked | refused. .gitattributes gains *.cmd text eol=crlf so Set-UpdateKey.cmd is checked out with CRLF.",
   "findings": [
     {
-      "id": "TM-13",
-      "evidence": "Key creation, rotation, recovery and release signing were reachable only through deploy.py, which loads the maintainer's deploy environment and paramiko at import.",
-      "resolution": "Standalone tool with one shared manifest implementation; tested by verifying the signature like the agent.",
+      "id": "TM-14",
+      "evidence": "A manual install had to create the venv and check the capability-less readability of configured files by hand; only the maintainer's deploy did both.",
+      "resolution": "install.sh performs and checks these steps; apt, systemctl and the venv are exercised only on a real machine.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_key_rotation.py (Windows and WSL)",
+      "command": "python test/selftest_install.py (WSL)",
       "result": "passed",
-      "evidence": "0 failure(s); on Linux 39 PASS plus the negative check: CLI without deploy environment, sign-release refusals, release-named files, signature verifies with the public key, a changed manifest does not, hashes and sizes match, deploy.py uses the shared code."
+      "evidence": "3 tests OK: layout, 0750 configuration folder, upgrade without leftovers, --check, refusals, valid --init configuration passes with posture, broken configuration refused with program files kept."
     },
     {
-      "command": "All python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names; check_control_flow; ruff check .",
+      "command": "Manual staging runs in WSL including the venv step without python3-venv",
       "result": "passed",
-      "evidence": "No failures; ADR index ok: 68 ADRs; ALLE OK; All checks passed."
+      "evidence": "venv step refused with 'python3 -m venv failed'; missing certificate files refused with the file names; STATE lines as documented."
     },
     {
-      "command": "python tools/security/review.py check --base origin/feat/guided-setup --head INDEX",
+      "command": "All python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names; ruff check .",
+      "result": "passed",
+      "evidence": "No failures; ADR index ok: 69 ADRs; ALLE OK; All checks passed."
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/feat/agent-keys-cli --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -52,7 +58,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #115; the record is refreshed against main once #115 is merged.",
-    "Copying the signed files to the router remains a manual or operator-specific step."
+    "Stacked on #116; the record is refreshed against main once the stack below is merged.",
+    "No shellcheck was available locally; apt-get, systemctl and the real venv path are not run in CI."
   ]
 }

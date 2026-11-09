@@ -503,7 +503,9 @@ Requirements: Debian 12 (or comparable) with Python 3.11, packages `python3-aioh
 `python3-paho-mqtt` for Home Assistant, `python3-uvloop` optional (on Windows the router runs with the default event loop).
 A TLS certificate for the router's hostname (e.g. Let's Encrypt) that the clients connect to.
 
-1. Copy `router/` to `/opt/skirnir-router/` (including the package `skirnir_router/`).
+On Debian or Ubuntu, one command installs or upgrades everything below (packages, program files, the venv, units, and a check of an existing configuration; ADR-0069): `sudo bash router/install.sh` from a clone or release, then `router.py --init` as in step 2. `--check` only reports. By hand:
+
+1. Copy `router/` to `/opt/skirnir-router/` (including the package `skirnir_router/`) and create the venv the unit runs: `python3 -m venv --system-site-packages /opt/skirnir-router/venv` and `/opt/skirnir-router/venv/bin/pip install -r /opt/skirnir-router/requirements-session.txt`.
 2. Easiest: `python3 /opt/skirnir-router/router.py --init /etc/skirnir-router --public-url https://<name>:11435` writes a first, safe configuration from [router/config.minimal.yaml](router/config.minimal.yaml) (asks the web UI password, generates a client token and shows it once; ADR-0067). Or copy [router/config.example.yaml](router/config.example.yaml) (the full reference) to `/etc/skirnir-router/config.yaml` (0600) and adapt:
    `public_url`, certificate paths, roles, catalogue, clients. Password hashes for the UI are generated with
    `python3 router.py --hash` (asks without echo); client hashes are the `sha256` of the token.

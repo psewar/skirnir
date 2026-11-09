@@ -36,6 +36,7 @@ jobs:
       - run: python test/selftest_client_limits.py
       - run: python test/selftest_posture.py
       - run: python test/selftest_init.py
+      - run: python test/selftest_install.py
       - run: python test/selftest_browser.py
       - run: python test/selftest_agent_revocation.py
       - run: python test/selftest_key_rotation.py
