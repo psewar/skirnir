@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "4d00cc4c494a28d8aacdf01f296a6992f933c123",
-  "change_digest": "ca86e2b63cf4a3b66ef8489efa9c2d83c328ab1af17a5589822722aa808d21e8",
+  "base_sha": "19a28e364ac88cda03770846e3c370751d1bb6e0",
+  "change_digest": "0bcb827f7e149120d4f75681896a1cd17a857ddfa7a2bb70de645e47f42bcb07",
   "reviewed_paths": [
     "CHANGELOG.md",
     "README.de.md",
@@ -59,7 +59,7 @@
       "evidence": "No failures; ADR index ok: 66 ADRs; ALLE OK; control flow ok; All checks passed."
     },
     {
-      "command": "python tools/security/review.py check --base origin/security/tm03-browser --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -70,7 +70,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #112; the record is refreshed against main once the stack below is merged.",
+    "Merged main after #109 to #112.",
     "Set-UpdateKey.ps1 is Windows-only; its administrator and service checks were not exercised in the test copy. Linux nodes edit the configuration by hand."
   ]
 }
