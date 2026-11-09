@@ -1,0 +1,109 @@
+name: Release provenance
+
+# Rebuilds the agent binaries of a release from its tag, the way the release build does (clean export of agent/, the Go
+# toolchain recorded in the published binary, CGO off, -trimpath, same ldflags), and compares them byte for byte with the
+# published assets (ADR-0075). Equal: GitHub attests the build provenance of exactly those bytes and their SBOMs, and the
+# CycloneDX SBOMs of the agent binaries and the router's Python requirements are attached to the release. Different: the
+# job fails with both hashes, and nothing is attested. Verify:  gh attestation verify <file> --repo psewar/skirnir
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to rebuild and attest (e.g. v0.31.0)
+        required: true
+
+permissions: {}
+
+jobs:
+  rebuild-and-attest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # attach the SBOMs to the release
+      id-token: write       # sign the attestations
+      attestations: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      - name: Download the published agent binaries
+        run: |
+          set -euo pipefail
+          mkdir -p published
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir published --pattern 'skirnir-agent-*'
+          ls -l published
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+      - name: Version and Go toolchain of the published binaries
+        id: meta
+        run: |
+          set -euo pipefail
+          lin=$(ls published/skirnir-agent-*-linux-amd64)
+          ver=$(basename "$lin" | sed -E 's/^skirnir-agent-([0-9]+\.[0-9]+\.[0-9]+)-linux-amd64$/\1/')
+          gov=$(go version "$lin" | awk '{print $2}')
+          case "$ver" in *[!0-9.]*|"") echo "unexpected asset name $lin"; exit 1 ;; esac
+          case "$gov" in go1.*) ;; *) echo "no Go version in $lin: $gov"; exit 1 ;; esac
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "go=${gov#go}" >> "$GITHUB_OUTPUT"
+          echo "router=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' router/skirnir_router/common.py)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ steps.meta.outputs.go }}
+      - name: Rebuild from the tag
+        env:
+          V: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          export GOFLAGS=-mod=mod CGO_ENABLED=0 GOTOOLCHAIN=local
+          go version
+          work=$(mktemp -d)
+          git archive HEAD agent | tar -x -C "$work"
+          mkdir -p "$GITHUB_WORKSPACE/rebuilt"
+          cd "$work/agent"
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$V" -o "$GITHUB_WORKSPACE/rebuilt/skirnir-agent-$V-windows-amd64.exe" .
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$V" -o "$GITHUB_WORKSPACE/rebuilt/skirnir-agent-$V-linux-amd64" .
+      - name: Compare with the published binaries byte for byte
+        run: |
+          set -euo pipefail
+          status=0
+          for f in published/skirnir-agent-*; do
+            n=$(basename "$f")
+            a=$(sha256sum "$f" | cut -d' ' -f1)
+            b=$(sha256sum "rebuilt/$n" 2>/dev/null | cut -d' ' -f1 || true)
+            if [ "$a" = "$b" ]; then echo "identical $n $a"; else echo "DIFFERENT $n published=$a rebuilt=${b:-missing}"; status=1; fi
+          done
+          exit $status
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+      - name: SBOMs (CycloneDX)
+        env:
+          RV: ${{ steps.meta.outputs.router }}
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes -r requirements-ci-lock.txt
+          python tools/security/sbom.py agent --out-dir sbom rebuilt/skirnir-agent-*
+          python tools/security/sbom.py router --version "$RV" --out "sbom/skirnir-router-$RV.cdx.json"
+      - name: Attest build provenance of the identical binaries
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: rebuilt/skirnir-agent-*
+      - name: Attest the Windows binary's SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: rebuilt/skirnir-agent-${{ steps.meta.outputs.version }}-windows-amd64.exe
+          sbom-path: sbom/skirnir-agent-${{ steps.meta.outputs.version }}-windows-amd64.cdx.json
+      - name: Attest the Linux binary's SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: rebuilt/skirnir-agent-${{ steps.meta.outputs.version }}-linux-amd64
+          sbom-path: sbom/skirnir-agent-${{ steps.meta.outputs.version }}-linux-amd64.cdx.json
+      - name: Attach the SBOMs to the release
+        run: gh release upload "$TAG" sbom/*.cdx.json --repo "$GITHUB_REPOSITORY" --clobber

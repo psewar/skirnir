@@ -1,0 +1,216 @@
+"""Hash-locked Python requirements (ADR-0074, TM-16): write, check and verify the lock files.
+
+Two locks:
+  router/requirements-lock.txt   what pip may install into the router's venv on top of the distribution's packages
+                                 (router/skirnir_router/pydeps.py decides which entries a host needs)
+  requirements-ci-lock.txt       everything CI installs for the router, the tests and the tools (Linux, CPython 3.11)
+
+    python tools/security/lock_requirements.py pin --lock router/requirements-lock.txt asyncpg==0.32.0 ...
+    python tools/security/lock_requirements.py resolve --out requirements-ci-lock.txt -r requirements-dev.txt ...
+    python tools/security/lock_requirements.py check                 offline: both locks well formed and consistent
+    python tools/security/lock_requirements.py verify-pypi           network: every hash is PyPI's, no version yanked
+
+pin and resolve take every sha256 PyPI publishes for the pinned version (wheels for all platforms and the sdist), so one
+lock serves every supported host; pip accepts an artifact only if its hash is listed. resolve lets pip choose the versions
+for Linux x86_64, CPython 3.11, wheels only, and writes them with all their hashes.
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import urllib.request
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, "router", "skirnir_router"))
+import pydeps  # noqa: E402
+
+ROUTER_LOCK = "router/requirements-lock.txt"
+ROUTER_REQS = "router/requirements-session.txt"
+CI_LOCK = "requirements-ci-lock.txt"
+CI_REQS = ("requirements-dev.txt", "test/requirements-hindsight.txt", "router/requirements-session.txt")
+PYTHONS = ("3.11", "3.12", "3.13", "3.14")
+CI_PYTHON = "3.11"
+
+
+def pypi(name, version):
+    """(sorted sha256 list, requires_dist, yanked) of one release from PyPI's JSON API."""
+    url = f"https://pypi.org/pypi/{name}/{version}/json"
+    with urllib.request.urlopen(url, timeout=30) as r:   # network: failures surface to the caller as they are
+        data = json.load(r)
+    files = data.get("urls") or []
+    return (sorted({f["digests"]["sha256"] for f in files}), data["info"].get("requires_dist") or [],
+            any(f.get("yanked") for f in files))
+
+
+def linux_env(py):
+    return {"python_version": py, "python_full_version": py + ".0", "sys_platform": "linux", "platform_system": "Linux",
+            "os_name": "posix", "platform_machine": "x86_64", "implementation_name": "cpython",
+            "platform_python_implementation": "CPython", "extra": ""}
+
+
+def needed_deps(requires_dist, pythons=PYTHONS):
+    """Canonical names of dependencies without extras that apply on Linux for any of the given Python versions."""
+    out = set()
+    for spec in requires_dist:
+        r = pydeps.Requirement(spec)
+        if r.marker is None or any(r.marker.evaluate(linux_env(py)) for py in pythons):
+            out.add(pydeps.canonicalize_name(r.name))
+    return out
+
+
+def write_lock(path, entries, header):
+    lines = [f"# {h}" for h in header] + [""]
+    for key in sorted(entries):
+        e = entries[key]
+        lines.append(f"{e['name']}=={e['version']} \\")
+        lines += [f"    --hash=sha256:{h}" + (" \\" if i < len(e["hashes"]) - 1 else "") for i, h in enumerate(e["hashes"])]
+    with open(os.path.join(ROOT, path), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def load(path):
+    full = os.path.join(ROOT, path)
+    if not os.path.exists(full):
+        return {}, []
+    return pydeps.read_lock(open(full, encoding="utf-8").read())
+
+
+def cmd_pin(a):
+    entries, bad = load(a.lock)
+    if bad:
+        return f"{a.lock}: malformed lines {bad}"
+    for spec in a.specs:
+        name, sep, version = spec.partition("==")
+        if not sep or not version:
+            return f"{spec}: give name==version"
+        hashes, requires, yanked = pypi(name, version)
+        if yanked or not hashes:
+            return f"{spec}: yanked or without files on PyPI"
+        entries[pydeps.canonicalize_name(name)] = {"name": name, "version": version, "hashes": hashes,
+                                                   "requires": requires}
+    for e in entries.values():
+        requires = e.get("requires")
+        if requires is None:
+            requires = pypi(e["name"], e["version"])[1]
+        missing = needed_deps(requires) - set(entries)
+        if missing:
+            return f"{e['name']} {e['version']} needs {sorted(missing)} on a supported Python - pin them in the same lock"
+    write_lock(a.lock, entries, [
+        "Hash-locked packages pip may install into the router's venv on top of the distribution (ADR-0074).",
+        "router/skirnir_router/pydeps.py picks the entries a host lacks; install: pip install --require-hashes --no-deps.",
+        f"Generated by tools/security/lock_requirements.py pin; do not edit by hand. Refresh: python "
+        f"tools/security/lock_requirements.py pin --lock {a.lock} <name>==<version> ..."])
+    print(f"{a.lock}: {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} written")
+    return None
+
+
+def cmd_resolve(a):
+    if not sys.platform.startswith("linux"):
+        return "resolve runs on Linux only: pip evaluates environment markers (sys_platform) for the running system"
+    with tempfile.TemporaryDirectory() as tmp:
+        report = os.path.join(tmp, "report.json")
+        cmd = [sys.executable, "-m", "pip", "install", "--dry-run", "--ignore-installed", "--quiet", "--report", report,
+               "--only-binary=:all:", "--python-version", CI_PYTHON, "--implementation", "cp", "--abi", "cp311",
+               "--platform", "manylinux_2_28_x86_64", "--platform", "manylinux_2_17_x86_64", "--platform",
+               "manylinux2014_x86_64", "--target", os.path.join(tmp, "t")]
+        for r in a.requirements:
+            cmd += ["-r", os.path.join(ROOT, r)]
+        run = subprocess.run(cmd, capture_output=True, text=True)
+        if run.returncode != 0:
+            return f"pip could not resolve: {run.stderr.strip()[-600:]}"
+        items = json.load(open(report, encoding="utf-8"))["install"]
+    entries = {}
+    for it in items:
+        name, version = it["metadata"]["name"], it["metadata"]["version"]
+        hashes, _, yanked = pypi(name, version)
+        if yanked:
+            return f"{name} {version} is yanked on PyPI"
+        entries[pydeps.canonicalize_name(name)] = {"name": name, "version": version, "hashes": hashes}
+    write_lock(a.out, entries, [
+        f"Hash-locked CI dependencies (Linux x86_64, CPython {CI_PYTHON}, wheels only; ADR-0074).",
+        "Install: pip install --require-hashes -r " + a.out,
+        "Generated by tools/security/lock_requirements.py resolve; do not edit by hand. Refresh: python "
+        f"tools/security/lock_requirements.py resolve --out {a.out} " + " ".join(f"-r {r}" for r in a.requirements)])
+    print(f"{a.out}: {len(entries)} packages written")
+    return None
+
+
+def check_lock(path, reqs_files, env, need_all):
+    """Problems of one lock: malformed lines, entries without hashes, pins that miss a requirement's specifier, and (for
+    the CI lock) top-level requirements without an entry."""
+    problems = []
+    entries, bad = load(path)
+    if not entries and not bad:
+        return [f"{path}: missing or empty"]
+    problems += [f"{path}: malformed line {b!r}" for b in bad]
+    for e in entries.values():
+        if not e["hashes"]:
+            problems.append(f"{path}: {e['name']} has no --hash")
+    reqs = []
+    for f in reqs_files:
+        reqs += pydeps.read_requirements(os.path.join(ROOT, f))
+    for r in reqs:
+        if r.marker is not None and not r.marker.evaluate(env):
+            continue
+        e = entries.get(pydeps.canonicalize_name(r.name))
+        if e is None:
+            if need_all:
+                problems.append(f"{path}: {r} has no entry")
+            continue
+        if not pydeps.meets(r, e["version"]):
+            problems.append(f"{path}: {e['name']}=={e['version']} does not meet {r}")
+    return problems
+
+
+def cmd_check(_a):
+    problems = check_lock(ROUTER_LOCK, [ROUTER_REQS], linux_env(PYTHONS[0]), need_all=False)
+    problems += check_lock(CI_LOCK, list(CI_REQS), linux_env(CI_PYTHON), need_all=True)
+    problems = list(dict.fromkeys(problems))
+    for p in problems:
+        print(p)
+    print(f"Python locks: {len(problems)} problem(s)")
+    return "lock check failed" if problems else None
+
+
+def cmd_verify_pypi(_a):
+    problems = []
+    for path in (ROUTER_LOCK, CI_LOCK):
+        entries, _ = load(path)
+        for e in entries.values():
+            hashes, _, yanked = pypi(e["name"], e["version"])
+            foreign = set(e["hashes"]) - set(hashes)
+            if foreign:
+                problems.append(f"{path}: {e['name']}=={e['version']} lists {len(foreign)} hash(es) PyPI does not publish")
+            if yanked:
+                problems.append(f"{path}: {e['name']}=={e['version']} is yanked on PyPI")
+    for p in problems:
+        print(p)
+    print(f"PyPI verification: {len(problems)} problem(s)")
+    return "PyPI verification failed" if problems else None
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = p.add_subparsers(dest="command", required=True)
+    s = sub.add_parser("pin")
+    s.add_argument("--lock", default=ROUTER_LOCK)
+    s.add_argument("specs", nargs="+")
+    s = sub.add_parser("resolve")
+    s.add_argument("--out", default=CI_LOCK)
+    s.add_argument("-r", dest="requirements", action="append", default=None)
+    sub.add_parser("check")
+    sub.add_parser("verify-pypi")
+    a = p.parse_args(argv)
+    if a.command == "resolve" and not a.requirements:
+        a.requirements = list(CI_REQS)
+    err = {"pin": cmd_pin, "resolve": cmd_resolve, "check": cmd_check, "verify-pypi": cmd_verify_pypi}[a.command](a)
+    if err:
+        print(err, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

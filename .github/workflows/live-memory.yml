@@ -44,7 +44,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.11'
-      - run: pip install -r router/requirements-session.txt -r test/requirements-hindsight.txt
+      - run: pip install --require-hashes -r requirements-ci-lock.txt   # hash-locked (ADR-0074)
       - name: Start isolated Hindsight with synthetic extraction only
         env:
           LIVE_IMAGE: ${{ inputs.image }}

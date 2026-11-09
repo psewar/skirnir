@@ -22,6 +22,15 @@ LEGACY_NODE_ID = "ollama_router"    # up to Router 0.1.9
 LEGACY_BASE = "ollama-router"       # altes base_topic
 
 
+def new_client(mod, client_id):
+    """MQTT client for paho-mqtt 1.x and 2.x. 2.x requires the callback API version as first argument and has
+    CallbackAPIVersion; VERSION1 keeps the callback signatures this module uses (Debian 13 ships 2.x, ADR-0074)."""
+    api = getattr(mod, "CallbackAPIVersion", None)
+    if api is not None:
+        return mod.Client(api.VERSION1, client_id=client_id, clean_session=True)
+    return mod.Client(client_id=client_id, clean_session=True)
+
+
 def _usage_today_fields():
     from . import metrics   # late, to avoid import cycles
     t = metrics.usage_totals(metrics.usage_today())
@@ -165,7 +174,7 @@ class HAPublisher:
         key = self.cfg.get("password_env", "MQTT_PASSWORD")
         pw = read_env_value(self.cfg["password_file"], key) if self.cfg.get("password_file") else None   # raw, as registry.read_mqtt_password
         pw = pw or os.environ.get(key) or self.cfg.get("password")
-        c = mqtt.Client(client_id=self.cfg.get("client_id", "skirnir-router"), clean_session=True)
+        c = new_client(mqtt, self.cfg.get("client_id", "skirnir-router"))
         if self.cfg.get("username"):
             c.username_pw_set(self.cfg["username"], pw)
         if self.cfg.get("tls"):

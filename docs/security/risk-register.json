@@ -303,17 +303,21 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Mutable dependencies/actions or compromised build.",
-      "controls": "pip-audit on runtime and optional requirement sets, govulncheck and Dependabot (actions, Go, monitoring compose, decision-service Dockerfiles). Third-party actions pinned to commit SHAs, tools to versions, images and base images to digests, enforced by test/check_pinned_references.py (ADR-0055). Default-branch PR verification on an isolated hosted runner, App-bound merge status and same-dependency bump checks.",
-      "next_action": "Hash-locked Python installs; SBOM and provenance for release artifacts.",
+      "controls": "pip-audit on runtime and optional requirement sets, govulncheck and Dependabot (actions, Go, monitoring compose, decision-service Dockerfiles). Third-party actions pinned to commit SHAs, tools to versions, images and base images to digests, enforced by test/check_pinned_references.py (ADR-0055). Default-branch PR verification on an isolated hosted runner, App-bound merge status and same-dependency bump checks. Router hosts install pip packages only from router/requirements-lock.txt with --require-hashes --no-deps on top of distribution packages; CI installs requirements-ci-lock.txt; both locks are audited and compared with PyPI (ADR-0074). Release provenance: the agent is rebuilt from the tag and attested with SBOMs only if byte-identical (ADR-0075).",
+      "next_action": "Refresh the Python locks regularly (no Dependabot support for them); consider signing the router source archive; extend the rebuild to releases whose agent came from an earlier commit.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         ".github/workflows/security.yml",
         "test/check_pinned_references.py",
         "test/selftest_pinned_references.py",
         "test/selftest_threat_review.py",
-        "test/selftest_trusted_gate.py"
+        "test/selftest_trusted_gate.py",
+        "test/selftest_pydeps.py",
+        "test/selftest_sbom.py",
+        "tools/security/lock_requirements.py",
+        ".github/workflows/release-provenance.yml"
       ],
-      "validation_gap": "V14: Python application requirements are version ranges without hashes; release artifact provenance remains open."
+      "validation_gap": "V14: lock freshness depends on a manual refresh; distribution packages follow the distribution's updates; provenance covers the agent binaries, the router is released as source."
     }
   ]
 }
