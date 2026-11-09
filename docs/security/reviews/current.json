@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "22b9749d2a600315a9cf0fc227df37c30b89f58c",
-  "change_digest": "edba082d192948c3454a6dea82da540f6119352f829d6bca052f32eacf984625",
+  "base_sha": "82143548f9df55a0bf09bee055a9924490cb2461",
+  "change_digest": "84dc5541bdaf22cfb7c1310359f839d532f955c9cf6879f89abb5a83e750138f",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     ".github/workflows/live-memory.yml",
@@ -85,7 +85,7 @@
       "evidence": "All checks passed; 0 pinned-reference findings; ADR index ok: 75 ADRs."
     },
     {
-      "command": "python tools/security/review.py check --base origin/fix/tm14-privilege-paths --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -99,6 +99,6 @@
     "The provenance workflow runs only on a published release or by dispatch; its first real run is the next release (or a dispatch for v0.30.0).",
     "The CI lock was resolved with a Python 3.13 interpreter targeting 3.11 (pip --python-version); pip checks Requires-Python for the target, markers use the running Linux system.",
     "Dependabot does not refresh the locks; freshness depends on manual refresh, CVEs surface through pip-audit.",
-    "Stacked on the TM-14 PR."
+    "Merged main after the PRs below it."
   ]
 }
