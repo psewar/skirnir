@@ -2,61 +2,31 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "19a28e364ac88cda03770846e3c370751d1bb6e0",
-  "change_digest": "0bcb827f7e149120d4f75681896a1cd17a857ddfa7a2bb70de645e47f42bcb07",
+  "base_sha": "79d1bdccc2c2300a059ce60bd1cf2f4c22844298",
+  "change_digest": "d9a9294c1ea1141162608e591f8ade051d94aeb09a3cc6f2ea79797720cea85b",
   "reviewed_paths": [
-    "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "agent/Set-UpdateKey.cmd",
-    "agent/Set-UpdateKey.ps1",
-    "deploy/agent_keys.py",
-    "deploy/deploy.py",
-    "docs/adr/0066-explicit-agent-key-creation-and-lost-key-recovery.md",
-    "docs/adr/README.md",
-    "docs/security/risk-register.json",
-    "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md",
-    "test/selftest_key_rotation.py"
+    "CHANGELOG.md"
   ],
   "risk_ids": [
-    "TM-13",
-    "TM-07"
+    "TM-13"
   ],
   "boundaries": [
-    "B8",
-    "B3"
+    "B8"
   ],
-  "summary": "Operator tooling and documentation, no router or agent code change (ADR-0066). Defect: deploy.py agent_signing_key created a new Ed25519 signing key whenever agent-update.key was missing, so a lost key silently became a new one, releases were signed with it and every node refused them; the file was also written before its mode was tightened. Now deploy/agent_keys.py has signing_key_state (present with public key, or missing with both ways), create_agent_key (first key, refuses if a signing or prepared key exists; O_EXCL 0600), and replace_lost_agent_key(reason) (refuses without a reason of at least 8 characters, while the key exists, or while a prepared next key exists; writes the new key 0600 and agent-update.recovery-<time>.txt with time, reason and public key only; prints the node step). deploy.py main refuses --agent without a key before connect(), offers --create-agent-key and --replace-lost-agent-key, and agent_signing_key only loads. New agent/Set-UpdateKey.ps1 and Set-UpdateKey.cmd (execution-policy wrapper): node-local Add, Complete, Replace and Check of update.public_key/public_keys, with administrator, service, agent >= 0.29.0 and key-format checks before acting (format checked by pattern before decoding), backup, check-config with the installed binary, service restart and rollback; .NET file I/O for Windows PowerShell 5.1. README (EN/DE): rotation and recovery steps, and comparing the UI fingerprint with skirnir-agent identity before approving a node (TM-07).",
+  "summary": "Changelog only: the v0.29.0 row (router 0.22.2, agent 0.29.1) links the published release, created with the release tool on the merge commit of #113 with the agent 0.29.1 binaries. No code or configuration change.",
   "findings": [
     {
       "id": "TM-13",
-      "evidence": "A missing agent-update.key was silently replaced by a new key in deploy.py --agent; lost-key recovery was undefined.",
-      "resolution": "Explicit first-key and recorded lost-key steps; --agent refuses without a key; node script in the repository. Recovery is not yet practised in the deployment.",
-      "disposition": "baseline"
-    },
-    {
-      "id": "TM-07",
-      "evidence": "Fingerprint verification before approval was asked for but not described.",
-      "resolution": "README procedure with skirnir-agent identity; plausibility checks of approved agents remain.",
+      "evidence": "The v0.29.0 row was marked unreleased.",
+      "resolution": "Row links the release; content unchanged.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_key_rotation.py (Windows and WSL)",
+      "command": "gh release view v0.29.0 (target and assets, checked by the release tool)",
       "result": "passed",
-      "evidence": "0 failure(s); 27 PASS on Linux including owner-only modes of first, next and replacement keys."
-    },
-    {
-      "command": "agent/Set-UpdateKey.ps1 under Windows PowerShell 5.1 with the agent 0.29.1 binary and check-config (admin and service checks replaced in a test copy)",
-      "result": "passed",
-      "evidence": "Check, Add, repeated Add (current), Complete, Complete without Add refused, Replace (also with another key listed), invalid key refused; no BOM, CRLF kept."
-    },
-    {
-      "command": "All python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names; check_control_flow; ruff check .",
-      "result": "passed",
-      "evidence": "No failures; ADR index ok: 66 ADRs; ALLE OK; control flow ok; All checks passed."
+      "evidence": "Target 79d1bdc (merge of #113), assets skirnir-agent-0.29.1-linux-amd64 and skirnir-agent-0.29.1-windows-amd64.exe."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -69,8 +39,5 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": [
-    "Merged main after #109 to #112.",
-    "Set-UpdateKey.ps1 is Windows-only; its administrator and service checks were not exercised in the test copy. Linux nodes edit the configuration by hand."
-  ]
+  "limitations": []
 }
