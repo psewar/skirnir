@@ -48,13 +48,14 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Cross-site admin request or same-origin compromise.",
-      "controls": "Non-simple header and Fetch Metadata checks.",
-      "next_action": "Test browser/CORS and UI escaping.",
+      "controls": "Non-simple header and Fetch Metadata checks. Since router 0.22.2 (ADR-0065) inline-handler values go through js() (JSON string literal, HTML-escaped), esc() escapes the single quote, the control port sends a CSP (connect-src 'self', frame-ancestors 'none', no foreign code) and X-Frame-Options DENY, both ports nosniff and no referrer, and no CORS header.",
+      "next_action": "Move inline handlers to addEventListener and drop 'unsafe-inline'; segment admin access.",
       "owner_role": "maintainer and operator",
       "test_refs": [
+        "test/selftest_browser.py",
         "test/selftest_security.py"
       ],
-      "validation_gap": "V3: real browser tests still required."
+      "validation_gap": "V3: headers, CORS and handler escaping are tested in CI and were checked once in a real browser; inline markup injection under 'unsafe-inline' is not excluded."
     },
     {
       "id": "TM-04",

@@ -16,6 +16,7 @@ from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metric
 from . import decision, fallback_observation, memory, quiet, rerank, session_api, context_ops
 from .unexpected import unexpected_error_middleware
 from . import posture
+from . import browser_headers
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 from .outcome import failed
 
@@ -95,6 +96,7 @@ def build_apps():
     ctl.router.add_get("/metrics", admin.handle_metrics)     # Stage 4: Prometheus (Basic Auth like /admin)
     ctl.router.add_post("/admin/measure", perf.handle_measure)
     ctl.router.add_post("/admin/bench", perf.handle_bench)
+    browser_headers.install(api, ctl)   # ADR-0065 (TM-03)
     return api, ctl
 
 
