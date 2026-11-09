@@ -42,6 +42,7 @@ jobs:
       - run: python test/selftest_children_vram.py
       - run: python test/selftest_ollama_push.py
       - run: python test/selftest_game_prewarm.py
+      - run: python test/selftest_quiet.py
       - run: python test/selftest_power.py
       - run: python test/selftest_standby_switch.py
       - run: python test/selftest_upstream_window.py

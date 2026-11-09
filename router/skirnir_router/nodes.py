@@ -172,6 +172,11 @@ class Node(Breaker):
         self.sensors = None   # Extra sensors from heartbeat (Agent >= 0.6.0), dict or None
         self.guard = None     # GPU-Schutz laut Agent (>= 0.7.0): state, limit_w, target_w, problem, reason, warnings (guard_english)
         self.draining_until = 0.0   # Agent update running: no new requests to this node until done
+        # 0.21.0, quiet for a measurement (ADR-0061, quiet.py): until quiet_until the router neither unloads nor prewarms
+        # on this node; busy detection stays on. 0.0 = not quiet. In memory only, a router restart ends it.
+        self.quiet_until = 0.0
+        self.quiet_since = 0.0
+        self.quiet_reason = ""
         self.guard_ts = 0.0
         self.vram_free_gib = None
         self.vram_used_gib = None
@@ -531,9 +536,21 @@ class Node(Breaker):
         reserve, desktop baseline and foreign memory."""
         return self.vram_total_gib - state.CFG.reserve.get(self.state, 1.0) - self.baseline_gib() - self.foreign_vram_gib()
 
+    def quiet(self, now):
+        """Is the node quiet for a measurement (ADR-0061)? Then the router unloads and prewarms nothing here."""
+        return now < self.quiet_until
+
+    def quiet_view(self, now):
+        """Quiet as a fact for /admin/state and the UI; None while the node is not quiet."""
+        if not self.quiet(now):
+            return None
+        return {"until": self.quiet_until, "since": self.quiet_since, "reason": self.quiet_reason,
+                "remaining_s": round(self.quiet_until - now, 1)}
+
     def snapshot(self, now):
         return {
             "state": self.state, "busy_reason": self.busy_reason,
+            "quiet": self.quiet_view(now),   # 0.21.0 (ADR-0061)
             "power": self.power, "power_since": self.power_since,
             # 0.15.0: models reachable by switching to the standby Ollama (UI marks them; empty = no switch possible)
             "standby_models": sorted(self.standby_models - set(self.models)) if self.can_switch_to_standby else [],

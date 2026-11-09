@@ -13,7 +13,7 @@ import sys
 from aiohttp import ClientSession, web
 
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
-from . import decision, fallback_observation, memory, rerank, session_api, context_ops
+from . import decision, fallback_observation, memory, quiet, rerank, session_api, context_ops
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 from .outcome import failed
 
@@ -75,6 +75,8 @@ def build_apps():
     ctl.router.add_get("/admin/ollama-update", ollamaupdate.handle_status)        # Latest Ollama version, window, pending nodes
     ctl.router.add_post("/admin/ollama-update/check", ollamaupdate.handle_check)  # Version check now
     ctl.router.add_get("/admin/nodes", registry.handle_nodes)
+    ctl.router.add_post("/admin/nodes/{fp}/quiet", quiet.handle_start)     # 0.21.0: quiet for a measurement (ADR-0061)
+    ctl.router.add_delete("/admin/nodes/{fp}/quiet", quiet.handle_end)
     ctl.router.add_post("/admin/nodes/{fp}/{action}", registry.handle_node_action)
     ctl.router.add_delete("/admin/nodes/{fp}", registry.handle_node_delete)
     ctl.router.add_get("/admin/state", admin.handle_state)

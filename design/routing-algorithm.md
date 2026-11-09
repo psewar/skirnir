@@ -50,6 +50,21 @@ für jedes geladene Modell m auf node:
         POST node/api/generate {model: m, keep_alive: 0}    # entlädt sofort
 ```
 
+Messruhe je Knoten (Router 0.21.0, ADR-0061, `router/skirnir_router/quiet.py`): Ein Prüfstand, der Modelle direkt über
+Ollama lädt, setzt `POST /admin/nodes/{fp}/quiet {"until": <epoch s>, "reason": "..."}`. Bis `until` gilt für diesen
+Knoten:
+```
+busy_unload_check, Übergang -> busy   entlädt nichts (Logzeile mit Grund, einmal je unload_on_busy_interval_s)
+prewarm, residency_check              übersprungen (Logzeile mit Grund)
+Belegt-Erkennung                       unverändert: das Messmodell macht den Knoten busy, echter Verkehr bleibt weg
+Ende                                   until vorbei (tick_loop) oder DELETE /admin/nodes/{fp}/quiet;
+                                       DELETE lehnt mit 409 + would_unload ab, solange busy und das Sicherheitsnetz
+                                       dann entlüde, ausser mit {"accept_unload": true}
+nach dem Ende                          free -> einmal prewarm (Grund quiet_end); busy -> Sicherheitsnetz wie sonst
+```
+Der Zustand steht in `/admin/state` (`nodes.<name>.quiet`) und im Journal (`quiet`, `quiet_end`); er lebt nur im
+Speicher, ein Router-Neustart beendet ihn.
+
 ## 2. Auswahl pro Anfrage
 
 Eingang: `POST /api/chat | /api/generate | /api/embed`, Body mit `model`, optional
