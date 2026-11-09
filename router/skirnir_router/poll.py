@@ -5,7 +5,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import agentupdate, nodes, ollamaupdate, openai_node, perf, state
+from . import agentupdate, nodes, ollamaupdate, openai_node, perf, quiet, state
 from .common import GIB, log, read_json
 
 NODE_FAULTS = (ClientError, asyncio.TimeoutError, OSError, ValueError)   # Netz, Tunnel, Ollamas JSON (ValueError)
@@ -96,14 +96,23 @@ def busy_unload_check(node, now):
     request that started before busy) is unloaded retroactively. Time-based (unload_on_busy_interval_s), hence also from
     tick_loop every second - ran after every poll until 0.3.8; with Ollama push, data would only arrive on change."""
     if node.state == "busy" and state.CFG.unload_on_busy and now - node.last_busy_unload >= state.CFG.unload_on_busy_interval_s:
-        if node.speaks_openai:   # sizes are 0 there (memory counts as agent child): every loaded model counts
-            big = openai_node.holdable(node) if node.upstream_releasable else []
-        else:
-            big = [m for m, gib in node.loaded.items() if gib >= 0.5 and not any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models)]
+        big = busy_unloadable(node)
+        if big and node.quiet(now):
+            # 0.21.0 (ADR-0061): a measurement holds the card on purpose; once per interval, so the journal shows it
+            node.last_busy_unload = now
+            log.info("node %s busy, but %s loaded -> not unloading: quiet (%s)", node.name, ", ".join(big), node.quiet_reason)
+            return
         if big:
             node.last_busy_unload = now
             log.info("node %s busy, but %s loaded -> unloading", node.name, ", ".join(big))
             state.spawn(unload_big_models(node))
+
+
+def busy_unloadable(node):
+    """The loaded models the busy safety net would unload on this node (also the fact the quiet end reports)."""
+    if node.speaks_openai:   # sizes are 0 there (memory counts as agent child): every loaded model counts
+        return openai_node.holdable(node) if node.upstream_releasable else []
+    return [m for m, gib in node.loaded.items() if gib >= 0.5 and not any(node.same_blob(m, ok) for ok in state.CFG.busy_ok_models)]
 
 
 async def fetch_version(node):
@@ -189,7 +198,9 @@ def evaluate(node, now):
             log.info("node %s -> busy (%s util=%s foreign=%.1fGiB)", node.name, node.busy_reason,
                      node.gpu_util, node.foreign_vram_gib())
             state.remember({"event": "busy", "node": node.name, "reason": node.busy_reason})
-            if state.CFG.unload_on_busy:
+            if state.CFG.unload_on_busy and node.quiet(now):
+                log.info("node %s busy -> not unloading: quiet (%s)", node.name, node.quiet_reason)
+            elif state.CFG.unload_on_busy:
                 state.spawn(unload_big_models(node))
     elif node.state == "busy":
         node.calm_since = node.calm_since or now
@@ -273,6 +284,10 @@ async def prewarm(node, delay, reason, since=None):
         # 2026-10-01: during an Ollama update, prewarm loaded qwen3.8 (131k), which the release ended 30 s later
         log.info("prewarm on %s dropped (%s): update running", node.name, reason)
         return
+    if node.quiet(time.time()):
+        # 0.21.0 (ADR-0061): a measurement runs; the quiet end prewarms once if the node is free then
+        log.info("prewarm on %s skipped (%s): quiet (%s)", node.name, reason, node.quiet_reason)
+        return
     # Let the heartbeat judge first. A freshly (re)started router initially holds every reachable node
     # as free; on 2026-09-06, it thus loaded qwen3.6 into VRAM occupied by a game (overflow into Shared Memory,
     # game stuttered). Wait until GPU data is available and no foreign VRAM is present; without agent, continue after the hold window.
@@ -345,8 +360,8 @@ async def prewarm(node, delay, reason, since=None):
         finally:
             node.finish_load(m)
     await poll_node(node)
-    if node.state == "busy" and state.CFG.unload_on_busy:
-        # became busy during loading (race with unload_on_busy): evict immediately
+    if node.state == "busy" and state.CFG.unload_on_busy and not node.quiet(time.time()):
+        # became busy during loading (race with unload_on_busy): evict immediately; not if quiet began meanwhile
         log.info("prewarm on %s: node went busy while loading, unloading again", node.name)
         await unload_big_models(node)
 
@@ -478,6 +493,11 @@ def residency_check(node, now):
     room = node.vram_total_gib - cfg.reserve.get("free", 1.0) - sum(node.loaded_size(m) for m, _ in rank1 if node.is_loaded(m))
     if not any(cfg.need_gib(m, ctx, node) <= room for m, ctx in missing):
         return
+    if node.quiet(now):
+        # 0.21.0 (ADR-0061): the "displacer" is the measured model; once per residency_check_s
+        log.info("node %s quiet (%s): rank 1 %s missing next to %s -> no residency prewarm", node.name, node.quiet_reason,
+                 ", ".join(m for m, _ in missing), ", ".join(displacers))
+        return
     log.info("node %s: rank 1 %s displaced by %s, unused for >%ds -> prewarm", node.name,
              ", ".join(m for m, _ in missing), ", ".join(displacers), int(cfg.residency_idle_s))
     state.spawn(prewarm(node, 0, "residency"))
@@ -529,6 +549,7 @@ async def tick_loop():
     while True:
         now = time.time()
         for n in state.NODES.values():
+            quiet.expire(n, now)
             evaluate(n, now)
             residency_check(n, now)
             busy_unload_check(n, now)

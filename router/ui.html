@@ -354,6 +354,8 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "kein Knoten kann dieses Modell gerade bedienen": "no node can serve this model right now",
   "schläft": "asleep",
   "schläft seit {t} (vom Agenten gemeldet)": "asleep since {t} (reported by the agent)",
+  "Messruhe": "quiet",
+  "Messruhe bis {u} ({r}): kein Entladen, kein Vorwärmen": "quiet until {u} ({r}): no unloading, no prewarming",
   "KEIN TLS": "NO TLS",
   "Client-Auth": "Client auth",
   "keine Cloud-Anbieter konfiguriert (router.cloud)": "no cloud providers configured (router.cloud)",
@@ -661,8 +663,10 @@ function renderNodes() {
     const last = `${n.inflight} / ${n.max_inflight ?? '?'}${waiting[name] ? ` · <span class="warn">${waiting[name]} ${t('wartend')}</span>` : ''}`;
     // Router 0.14.0: sleep as reported by the agent (power.go); nothing shown while the agent never reported it
     const slp = n.power === 'asleep' ? ` <span class="muted" title="${t('schläft seit {t} (vom Agenten gemeldet)', { t: n.power_since ? new Date(n.power_since * 1000).toLocaleString() : '?' })}">💤 ${t('schläft')}</span>` : '';
+    // Router 0.21.0 (ADR-0061): quiet for a measurement - the router neither unloads nor prewarms on this node
+    const qt = n.quiet ? ` <span class="badge half_open" title="${t('Messruhe bis {u} ({r}): kein Entladen, kein Vorwärmen', { u: new Date(n.quiet.until * 1000).toLocaleString(), r: esc(n.quiet.reason) })}">🔇 ${t('Messruhe')}</span>` : '';
     tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(name)}</b><div class="muted">${esc(n.gpu || '')} ${n.wol ? '· WOL' : ''}</div></td>
-      <td><span class="state ${n.state}">${n.state}</span>${slp}${brk}${grd}<div class="muted">${esc(n.busy_reason || '')}</div></td>
+      <td><span class="state ${n.state}">${n.state}</span>${qt}${slp}${brk}${grd}<div class="muted">${esc(n.busy_reason || '')}</div></td>
       <td>${gpu}</td><td>${vram}</td><td>${last}</td>
       <td>${Object.entries(n.loaded).map(([m, g]) => `<div class="loaded">${esc(m)} <span class="muted">${g} GiB</span></div>`).join('') || '<span class="muted">–</span>'}</td>
       <td>${models}</td></tr>`);
