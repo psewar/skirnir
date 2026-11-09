@@ -97,7 +97,7 @@ class PolicyTests(unittest.TestCase):
 
 class SharedGatewayTests(MemoryHarness):
     def shared(self):
-        state.CFG.memory_scopes = {"example-team": {"data_class": "personal", "allow_cloud": False}}
+        state.CFG.memory_scopes = {"example-team": {"data_class": "personal", "allow_cloud": False, "writers": ("client-a", "client-b")}}
         for name in ("client-a", "client-b"):
             spec = policy()
             spec["projects"][SHARED] = {**spec["projects"][PROJECT], "scope": "example-team", "delete": True}

@@ -63,7 +63,7 @@ SCHEMA = {
         "ollama_poll_s": None, "heartbeat_interval_s": None, "heartbeat_stale_s": None, "offline_after_misses": None,
         "agent_missing_problem_s": None, "ram_spill_problem_gib": None, "expose_concrete_models": None, "request_timeout_s": None,
         "toolcall_rescue": None,
-        "memory_scopes": {"*": {"data_class": None, "allow_cloud": None}},
+        "memory_scopes": {"*": {"data_class": None, "allow_cloud": None, "writers": None}},
         "hindsight": {k: None for k in HindsightConfig.__dataclass_fields__},
         "context_manager": {k: None for k in ContextConfig.__dataclass_fields__},
         "session_store": {k: None for k in SessionConfig.__dataclass_fields__},
@@ -279,7 +279,11 @@ class Config:
             setattr(self, attr, value)
         if self.hindsight.outbox_enabled and not (self.hindsight.enabled and self.session_store.enabled):
             return invalid("persistent memory outbox requires enabled hindsight and session_store")
-        for client in self.client_auth["clients"].values():
+        for alias, shared in self.memory_scopes.items():
+            unknown = [w for w in shared["writers"] if w not in self.client_auth["clients"]]
+            if unknown:
+                return invalid(f"memory_scopes.{alias}.writers names an unknown client: {unknown[0]}")
+        for principal, client in self.client_auth["clients"].items():
             sources = client.get("session_handoff_from", [])
             if not isinstance(sources, list) or any(not isinstance(v, str) or v not in self.client_auth["clients"] for v in sources):
                 return invalid("session_handoff_from must list configured principals")
@@ -295,6 +299,10 @@ class Config:
                     if grant["allow_private_addresses"] and shared["allow_cloud"]:
                         # another client of the shared bank could take its addresses into cloud inference
                         return invalid("allow_private_addresses requires a shared scope with allow_cloud false")
+                    if grant["write"] and principal not in shared["writers"]:
+                        # ADR-0060: writing into a shared scope needs both sides, the client's grant and the scope's list
+                        return invalid(f"client {principal} may write memory scope {grant['scope']} only if "
+                                       f"memory_scopes.{grant['scope']}.writers lists it")
         self.mqtt = c.get("mqtt") or None   # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
         self._parse_wol(r.get("wol") or {})
         for step in (lambda: self._parse_modes(c["modes"]), lambda: self._parse_models(c.get("models") or {})):

@@ -35,6 +35,9 @@ router:
     # Derived from it unless set (design/hindsight-memory.md, "One setting"): recall_max_tokens (Hindsight budget),
     # max_response_bytes, recall_max_facts (no count cut). Each recall reports limited_by.
   memory_scopes: {}             # server-controlled shared scopes; private HMAC IDs stay unchanged
+  # e.g. {team: {data_class: personal, allow_cloud: false, writers: [agent-a]}}: only listed clients may hold a write
+  # grant on the scope (ADR-0060). A grant's recall_into_tools: true lets automatic recall reach requests that carry
+  # tools; otherwise they get skipped:tools (ADR-0059).
   # Optional POST /rerank (TEI) on a node's reranker via the agent tunnel route "rerank"; see design/rerank.md.
   # No node usable -> 424 rerank_unavailable without Retry-After (callers fall back to their own reranker at once).
   # Callers also need the client right rerank: true (client_auth.clients.<name>.rerank). The same right opens GET /info

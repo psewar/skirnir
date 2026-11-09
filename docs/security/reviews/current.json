@@ -2,31 +2,63 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "9922e73878c281e1d625062dfef09022f8471c91",
-  "change_digest": "131d62da77ab91c3609c73037401dd7a556235e0f3eec64765d56e11e9c4696f",
+  "base_sha": "ef98ce8e0492ec6bdbb922d95bcd2b387002c0ce",
+  "change_digest": "761754520b3ab8277340026410f1d6dfecdad2dac11e2b7d2747b206ace41352",
   "reviewed_paths": [
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "design/hindsight-memory.md",
+    "design/shared-memory-interoperability.de.md",
+    "design/shared-memory-interoperability.md",
+    "docs/adr/0059-no-automatic-recall-into-requests-with-tools.md",
+    "docs/adr/0060-shared-memory-scopes-name-their-writers.md",
+    "docs/adr/README.md",
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
+    "router/config.example.yaml",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/config.py",
+    "router/skirnir_router/memory.py",
+    "router/skirnir_router/memory_config.py",
+    "router/skirnir_router/shared_config.py",
+    "test/selftest_interoperability.py",
+    "test/selftest_memory.py"
   ],
   "risk_ids": [
-    "TM-13"
+    "TM-10"
   ],
   "boundaries": [
-    "B8"
+    "B5"
   ],
-  "summary": "Changelog only, no code or configuration change. v0.27.0 was released from f818efa with agent 0.29.0, matching the changelog at that tag; the row now links the release and names agent 0.29.0 again. Agent 0.29.1 (same code, first manifest signed with the rotated key) becomes the new row v0.27.1. The development-tooling heading records that the pinning item shipped in v0.26.1 and the rest in v0.27.0.",
+  "summary": "Router 0.20.0 narrows two paths for shared-memory poisoning (TM-10). ADR-0060: router.memory_scopes.<scope>.writers lists the clients that may write a shared scope; shared_config.parse_scopes validates it (list, at most 64 distinct nonempty names without control characters), config.py refuses an unknown writer name and any write grant on the scope whose client is not listed, naming client and scope; absent or empty means nobody may write. memory.scope_for_principal checks the list again for every write, so a live policy cannot widen it; reading and deletion are unchanged. ADR-0059: memory.prepare skips automatic recall when the request body carries a nonempty tools list (native, OpenAI and Anthropic shapes after conversion) and the project grant does not set recall_into_tools: true; the state skipped:tools is reported in X-Skirnir-Memory-State and the journal and counted. recall_into_tools is a boolean in PROJECT_FIELDS (schema derived) that requires read. Explicit recall APIs are unchanged. Breaking for configurations that grant writes on a shared scope: they must add writers; the documentation, example config, changelog, threat model and risk register describe it.",
   "findings": [
     {
-      "id": "TM-13",
-      "evidence": "After #104 the changelog named agent 0.29.1 for v0.27.0, while the published v0.27.0 release carries agent 0.29.0.",
-      "resolution": "Published tag left unchanged; the changelog follows the release and v0.27.1 carries agent 0.29.1.",
+      "id": "TM-10",
+      "evidence": "Automatic recall inserted shared facts, possibly written by another client, into requests that offered tools; any client grant with write on a shared scope made that client a writer without a change on the scope.",
+      "resolution": "Recall into tool requests only by explicit grant opt-in, and two-sided writer rights checked at load and per request. A listed writer can still plant false facts and an opted-in client depends on its own tool confirmation, so TM-10 stays open.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "gh release view v0.27.0 (target and assets)",
+      "command": "python test/selftest_memory.py (WSL, router venv)",
       "result": "passed",
-      "evidence": "Target f818efa, assets skirnir-agent-0.29.0-linux-amd64 and skirnir-agent-0.29.0-windows-amd64.exe."
+      "evidence": "Ran 45 tests OK, incl. test_no_automatic_recall_into_a_request_with_tools_unless_the_grant_opts_in, test_writing_a_shared_scope_needs_the_scopes_writer_list_at_runtime, test_shared_scope_names_its_writers, test_recall_into_tools_is_an_explicit_boolean_that_needs_read."
+    },
+    {
+      "command": "Negative check: test/selftest_memory.py against the previous router code (git stash of router/)",
+      "result": "passed",
+      "evidence": "FAILED (failures=15, errors=1): the new tests detect the missing checks."
+    },
+    {
+      "command": "All python test/... commands of ci.yml (WSL) plus check_pinned_references, selftest_pinned_references, selftest_english_names, check_adr_index, selftest_threat_review (Windows); ruff check .",
+      "result": "passed",
+      "evidence": "No failures; ADR index ok: 60 ADRs; All checks passed."
+    },
+    {
+      "command": "router.py --check --pure against a configuration with and without writers",
+      "result": "passed",
+      "evidence": "With writers: configuration ok. Without: 'client ... may write memory scope ... only if memory_scopes....writers lists it' (rc 2)."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -40,6 +72,7 @@
     }
   ],
   "limitations": [
-    "The v0.27.1 link resolves once the release is created on the merge commit of this change."
+    "The router cannot see whether a client confirms tool calls; an opted-in client's tool behavior is outside unit-test coverage.",
+    "A listed writer is trusted to write correct facts; the list limits who may write, not what."
   ]
 }
