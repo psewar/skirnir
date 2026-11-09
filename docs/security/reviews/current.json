@@ -3,7 +3,7 @@
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
   "base_sha": "4adf5d7d4b94a88227fe4215677e3feed9495c04",
-  "change_digest": "34fdb1c93ec3c2b001f10d173b90690d2ed5bdab0e97c4f07d9e7693e566e9c5",
+  "change_digest": "fd75bd14e2909885849157c742b3671ab89df65415ad347a9885ff3b1e16ddc9",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
@@ -21,7 +21,8 @@
     "router/skirnir_router/config.py",
     "router/skirnir_router/metrics.py",
     "router/skirnir_router/settings.py",
-    "test/selftest_client_limits.py"
+    "test/selftest_client_limits.py",
+    "test/selftest_security.py"
   ],
   "risk_ids": [
     "TM-08"
