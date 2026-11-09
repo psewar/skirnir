@@ -2,68 +2,75 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "5bf5f82ab6f3ac5101c20b375d74c361416c979e",
-  "change_digest": "e25992fbca8331cceb962c2263c771970b1b4f2240fde6d8455508184ca6712d",
+  "base_sha": "90cdec9eccc9db96739335f53fdbbc8997dca451",
+  "change_digest": "da23ac66db2421e66aeea3c59fd9306721360490c3adf73d8e1b17ec601cfcb3",
   "reviewed_paths": [
+    "AGENTS.md",
     "CHANGELOG.md",
     "README.de.md",
     "README.md",
-    "agent/app.go",
-    "agent/config.example.yaml",
-    "agent/config.go",
-    "agent/main.go",
-    "agent/routertls.go",
-    "agent/routertls_test.go",
-    "agent/setup_linux.go",
-    "agent/setup_linux_test.go",
-    "agent/setup_other.go",
-    "agent/skirnir-agent.service",
-    "agent/tunnel.go",
-    "agent/updater.go",
-    "docs/adr/0070-linux-agent-setup-and-private-router-ca.md",
-    "docs/adr/README.md"
+    "docs/adr/0071-documentation-layout-quick-start-and-docs-twins.md",
+    "docs/adr/README.md",
+    "docs/clients.de.md",
+    "docs/clients.md",
+    "docs/configuration.de.md",
+    "docs/configuration.md",
+    "docs/install-agent.de.md",
+    "docs/install-agent.md",
+    "docs/install-router.de.md",
+    "docs/install-router.md",
+    "docs/operations.de.md",
+    "docs/operations.md",
+    "docs/reference.de.md",
+    "docs/reference.md",
+    "docs/troubleshooting.de.md",
+    "docs/troubleshooting.md",
+    "router/config.minimal.yaml",
+    "router/skirnir_router/setup_init.py"
   ],
   "risk_ids": [
-    "TM-07",
-    "TM-14"
+    "TM-01",
+    "TM-03",
+    "TM-11"
   ],
   "boundaries": [
-    "B3",
-    "B8"
+    "B1",
+    "B2",
+    "B3"
   ],
-  "summary": "Agent 0.30.0 (ADR-0070). New routertls.go: routerTLSConfig(caFile) returns nil for an empty value (Go defaults with the system store, as before), otherwise a tls.Config with RootCAs = system pool (or an empty pool where none exists) plus the PEM certificates of the file and MinVersion TLS 1.2; hostname verification is unchanged; an unreadable file or one without a certificate is an error. RouterCfg gains ca_file; Config.validate calls routerTLSConfig so check-config and the start refuse an unusable file; app.go sets the result on the tunnel (websocket.Dialer TLSClientConfig) and the updater (download http.Client Transport with ProxyFromEnvironment). New setup_linux.go (build tag linux; setup_other.go now !windows && !linux): `setup [--router] [--update-key] [--ca-file] [--root]` refuses without root (unless --root), with a router URL not starting https://, an update key that is not 32 bytes base64, or an unusable CA file; writes the configuration only if none exists, owner-only with O_EXCL, with identity.dir /var/lib/skirnir-agent/identity, logging.dir /var/log/skirnir-agent and tunnel upstream on loopback; creates both folders 0700; copies os.Executable() to /usr/local/bin/skirnir-agent via a temporary file and rename; writes the go:embed unit; validates with loadConfig; without --root runs systemctl daemon-reload and enable --now; prints the fingerprint comparison step and STATE: installed. The unit's comments and description are English. The agent usage text is English and lists game (it said spiel).",
+  "summary": "Documentation restructure (ADR-0071) plus one path alignment. README.md and README.de.md are rewritten to about 215 lines each: what it is, architecture, a quick start (dev environment without GPU, router via install.sh and router.py --init, GPU node with Ollama on loopback and the agent setup on Windows/Linux, approval after comparing skirnir-agent identity, first request with curl on the OpenAI and native Ollama APIs, Home Assistant), concepts, security essentials (enforce and locked, one token per client, TLS on both ports, firewall 11435, Ollama on loopback, fingerprint comparison, --posture before rollouts, capability-less root and readable key files, no passwords on the command line), links, development, license. New docs/install-router, install-agent, configuration, clients, operations, troubleshooting and reference, each with a .de.md twin, hold the moved README sections; content present in only one language is now in both; outdated statements are corrected (versions, modes.score instead of scheduler.score, the shipped decision engine chain, setup instead of Install-Service.ps1, TLS only when configured with api_tls default false, 401/403/429/413 reasons, the game verb, release asset names, StateDirectory, repo layout). AGENTS.md: README and every docs twin stay in step; the Names link points to docs/operations.md. Code change: router/config.minimal.yaml and setup_init.py (template markers) use /etc/skirnir-router/certs/ for control_tls, the path skirnir-router-cert.path watches and config.example.yaml uses; before, --init wrote /etc/skirnir-router/tls/ and certificate renewal would not have restarted the router.",
   "findings": [
     {
-      "id": "TM-07",
-      "evidence": "Nodes could reach a router with a private certificate only by installing that CA system-wide; Linux nodes had no setup and the README did not ask to compare fingerprints there.",
-      "resolution": "router.ca_file scoped to the router connection; Linux setup ends with the fingerprint comparison step.",
+      "id": "TM-03",
+      "evidence": "The README called all links TLS although api_tls defaults to false and the control port is plaintext without control_tls; --init used a certificate path the renewal unit does not watch.",
+      "resolution": "Security essentials state what to set; --init and the minimal configuration use the watched path.",
       "disposition": "baseline"
     },
     {
-      "id": "TM-14",
-      "evidence": "The Linux unit makes /etc read-only while the default key folder lived under /etc, and its writable folders had to pre-exist.",
-      "resolution": "setup places key and logs under /var and creates them 0700.",
+      "id": "TM-11",
+      "evidence": "Binding Ollama to loopback on nodes was stated as a fact, not as an operator step.",
+      "resolution": "Quick start and install-agent make OLLAMA_HOST=127.0.0.1 an explicit step.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "go vet ./... (windows and GOOS=linux); go test -count=1 ./... on Windows and Linux (WSL)",
+      "command": "Link and anchor check over README*.md and docs/*.md; heading structure of every EN/DE pair; maintainer-environment word list; flags named next to router.py, install.sh, agent_keys.py and setup",
       "result": "passed",
-      "evidence": "ok on both; new TestRouterTLSConfigInputs, TestTunnelDialTrustsOnlyWithCAFile, TestUpdateDownloadTrustsOnlyWithCAFile, TestConfigRefusesUnusableCAFile, TestLinuxSetupStaged, TestLinuxSetupRefusals ran (-v)."
+      "evidence": "All relative links and anchors resolve, pairs have the same heading structure, no environment names; one false positive (setup_init next to --init)."
     },
     {
-      "command": "go run . check-config --config config.example.yaml",
+      "command": "python test/selftest_init.py; all python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names",
       "result": "passed",
-      "evidence": "ok: the example with the commented ca_file still loads."
+      "evidence": "OK; no failures; ADR index ok: 71 ADRs; ALLE OK."
     },
     {
-      "command": "All python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names; ruff check .",
+      "command": "Facts checked against code: requirements-dev.txt exists, X-Skirnir-Node/-Model/-Tier headers (request.py), test-cert.pem created by run_tests.py, --init defaults",
       "result": "passed",
-      "evidence": "No failures; ADR index ok: 70 ADRs; ALLE OK; All checks passed."
+      "evidence": "All present as described."
     },
     {
-      "command": "python tools/security/review.py check --base origin/feat/router-install --head INDEX",
+      "command": "python tools/security/review.py check --base origin/feat/agent-linux-setup-ca --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -74,7 +81,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #117; the record is refreshed against main once the stack below is merged.",
-    "systemctl enable --now runs only on a real Linux node; the staged test does not exercise it. A CA file on a node must be protected like the configuration."
+    "Stacked on #118; the record is refreshed against main once the stack below is merged.",
+    "The commands were not run on a fresh Debian host or GPU node; the Home Assistant menu path is standard knowledge, not tested here."
   ]
 }

@@ -25,8 +25,8 @@ EXAMPLE_HASH = hashlib.sha256(b"changeme").hexdigest()
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 MARKERS = {
     "public_url": "  public_url: https://router.example.net:11435   # REPLACE: the name your nodes and browser use to reach this router\n",
-    "cert": "    cert: /etc/skirnir-router/tls/fullchain.pem\n",
-    "key": "    key: /etc/skirnir-router/tls/privkey.pem\n",
+    "cert": "    cert: /etc/skirnir-router/certs/fullchain.pem\n",
+    "key": "    key: /etc/skirnir-router/certs/privkey.pem\n",
     "users": '    users: {}                      # REPLACE: {admin: "<hash from: python3 router.py --hash>"}; without users the port answers 503\n',
     "client": "      my-client:                   # one entry per client application; give each its own token\n",
     "token": f'        token_sha256: "{EXAMPLE_HASH}"   # REPLACE: sha256 of the token ("changeme" here)\n',
