@@ -18,13 +18,15 @@ The LXC host's SSH host key is saved to <ops>/known_hosts on first connection an
 All site-specific details (LXC host, CT number, router hostname, secrets folder, production config, CT Secret Store
 access) come from the ops folder outside the repo, see ops_env.py. The repo only contains config.example.yaml.
 """
+import base64
 import hashlib
+import io
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
+import tarfile
 import time
 
 import paramiko
@@ -229,15 +231,29 @@ def deploy_agent(c, dist_dir=None):
     print(f"Agent {version} stored ({len(files)} file(s)). Public key for the agents' update.public_key: {pub}")
 
 
+def _venv_bundle():
+    """base64 of a tar with what the venv step needs before the router files are swapped: pydeps.py and the requirement
+    files. It reaches the container on stdin (ADR-0074)."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for name, src in (("pydeps.py", os.path.join(PKG_DIR, "pydeps.py")),
+                          *((n, os.path.join(ROUTER_DIR, n)) for n in ("requirements.txt", "requirements-session.txt",
+                                                                       "requirements-lock.txt"))):
+            tar.add(src, arcname=name)
+    return base64.b64encode(buf.getvalue()).decode() + "\n"
+
+
 def _venv_command():
-    """Shell command (in CT) that creates or updates /opt/skirnir-router/venv and ends with 'venv ok <asyncpg-version>'."""
-    specs = [line.strip() for line in open(os.path.join(ROUTER_DIR, "requirements-session.txt"), encoding="utf-8")
-             if line.strip() and not line.lstrip().startswith(("#", "-"))]
+    """Shell command (in CT) that creates or updates /opt/skirnir-router/venv and ends with 'venv ok <asyncpg-version>'.
+    Reads _venv_bundle() on stdin. Packages the distribution lacks come only from requirements-lock.txt with hashes."""
     venv = "/opt/skirnir-router/venv"
     # Refresh package lists only when installation is actually needed (stale lists point to remote .deb versions)
     return ("set -e; dpkg -s python3-venv >/dev/null 2>&1 || { apt-get update -q >/dev/null && apt-get install -y -q python3-venv >/dev/null; }; "
             f"[ -x {venv}/bin/python ] || python3 -m venv --system-site-packages {venv}; "
-            f"{venv}/bin/python -m pip install -q --disable-pip-version-check " + " ".join(shlex.quote(s) for s in specs) + "; "
+            "D=$(mktemp -d); trap 'rm -rf $D' EXIT; base64 -d | tar -x -C $D; "
+            f"{venv}/bin/python $D/pydeps.py plan --requirements $D/requirements-session.txt --lock $D/requirements-lock.txt > $D/plan.txt; "
+            f"if [ -s $D/plan.txt ]; then {venv}/bin/python -m pip install -q --disable-pip-version-check --require-hashes --no-deps -r $D/plan.txt; fi; "
+            f"{venv}/bin/python $D/pydeps.py verify --requirements $D/requirements-session.txt; "
             f"{venv}/bin/python -c 'import aiohttp, yaml, asyncpg; print(\"venv ok\", asyncpg.__version__)'")
 
 
@@ -296,7 +312,7 @@ def main():
         # Provide router Python BEFORE file swap (fail-closed: if it fails, the old router continues running unchanged).
         # venv with system packages (apt: aiohttp, yaml, cryptography) plus pip dependencies of optional layers from
         # router/requirements-session.txt - Debian 12 offers asyncpg only in 0.27, required is >= 0.29.
-        rc, out, err = run(c, ct_exec(_venv_command()), timeout=600)
+        rc, out, err = run(c, ct_exec(_venv_command()), timeout=600, stdin=_venv_bundle())
         print(out.strip().splitlines()[-1] if out.strip() else err.strip()[-300:])
         if rc != 0 or "venv ok" not in out:
             print("Aborted: router venv not ready - nothing rolled out, the old router keeps running")

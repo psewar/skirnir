@@ -17,7 +17,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.11'
-      - run: python -m pip install -r router/requirements.txt pip-audit==2.10.1
+      - run: python -m pip install --require-hashes -r requirements-ci-lock.txt   # hash-locked (ADR-0074)
+      - run: python -m pip install pip-audit==2.10.1
       - run: python test/selftest_security.py
       - name: Audit Python runtime dependencies
         run: pip-audit -r router/requirements.txt
@@ -29,6 +30,12 @@ jobs:
           # The rerank server pins every package exactly and needs Python >= 3.12 (numpy); audit the pins as written
           # instead of resolving them under this job's Python (--no-deps alone still dry-run installs them with pip).
           pip-audit --no-deps --disable-pip -r rerank-server/requirements.txt
+      - name: Audit the hash-locked sets as written (ADR-0074)
+        run: |
+          pip-audit --require-hashes --disable-pip -r router/requirements-lock.txt
+          pip-audit --require-hashes --disable-pip -r requirements-ci-lock.txt
+      - name: Every locked hash is one PyPI publishes, no locked version is yanked
+        run: python tools/security/lock_requirements.py verify-pypi
   go-security:
     runs-on: ubuntu-latest
     defaults:

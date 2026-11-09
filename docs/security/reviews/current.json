@@ -2,23 +2,19 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "605418b6214d7a1e95bb54e5df74c806f7a56cfb",
-  "change_digest": "02d634499aa17b00821de28144306401025a6812a763cac926b1ce6b40a6d7d2",
+  "base_sha": "22b9749d2a600315a9cf0fc227df37c30b89f58c",
+  "change_digest": "edba082d192948c3454a6dea82da540f6119352f829d6bca052f32eacf984625",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
+    ".github/workflows/live-memory.yml",
+    ".github/workflows/release-provenance.yml",
+    ".github/workflows/security.yml",
+    "AGENTS.md",
     "CHANGELOG.md",
-    "agent/config.example.yaml",
-    "agent/ollamaupdate.go",
-    "agent/ollamaupdate_test.go",
-    "agent/passthrough.go",
-    "agent/passthrough_test.go",
-    "agent/routes_test.go",
-    "agent/tunnel.go",
     "deploy/deploy.py",
-    "docs/adr/0073-close-router-paths-to-host-privileges.md",
+    "docs/adr/0074-hash-locked-python-installs.md",
+    "docs/adr/0075-release-provenance-by-reproducible-rebuild.md",
     "docs/adr/README.md",
-    "docs/install-agent.de.md",
-    "docs/install-agent.md",
     "docs/install-router.de.md",
     "docs/install-router.md",
     "docs/operations.de.md",
@@ -26,66 +22,70 @@
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "monitoring/render-monitoring.sh",
+    "requirements-ci-lock.txt",
     "router/install.sh",
-    "router/render-env.conf.example",
-    "router/render-env.sh",
-    "router/skirnir-router-cert.service",
-    "router/skirnir-router-secrets-refresh.service",
-    "router/skirnir-router-secrets.service",
-    "router/skirnir-router.service",
+    "router/requirements-lock.txt",
+    "router/requirements.txt",
     "router/skirnir_router/common.py",
-    "test/selftest_privilege_paths.py"
+    "router/skirnir_router/ha.py",
+    "router/skirnir_router/pydeps.py",
+    "test/selftest_pydeps.py",
+    "test/selftest_sbom.py",
+    "tools/security/lock_requirements.py",
+    "tools/security/sbom.py"
   ],
   "risk_ids": [
-    "TM-14",
-    "TM-13",
-    "TM-11"
+    "TM-16",
+    "TM-13"
   ],
   "boundaries": [
-    "B3",
-    "B6",
-    "B8"
+    "B8",
+    "B9"
   ],
-  "summary": "Router 0.23.1 / agent 0.31.0, ADR-0073. (1) render-env.sh and render-monitoring.sh source their secret-store access only from /etc/skirnir-router-secrets/render-env.conf (overridable for tests only via RENDER_ENV_* environment variables, which the units do not set); before sourcing it or SECRET_STORE_AUTH_FILE they resolve the path with readlink -f and refuse (render nothing, exit 0) when it lies under /etc/skirnir-router, /var/lib/skirnir-router or /var/log/skirnir-router, when the file or its folder is not owned by uid 0, or is group/other writable; the old location is never read. deploy.py pushes the access file to the new folder (install -d -m 0700) and removes the old copy; install.sh creates the folder and moves an existing old file. The router unit adds ReadOnlyPaths=-/etc/skirnir-router/certs and InaccessiblePaths=-/etc/skirnir-router-secrets; the secrets, refresh and cert helper units add NoNewPrivileges, PrivateTmp, ProtectHome, kernel protections, RestrictSUIDSGID, LockPersonality and UMask where it does not affect their job. (2) Agent tunnel: requests without a configured route reach the upstream only for an exact allow-list of inference, listing and version paths with their methods; anything else gets 403 path_not_allowed_on_node and a log line, without an upstream call. The existing route test changed accordingly (/rerank without a route is refused instead of forwarded). (3) Ollama update orders older than the installed version (live /api/version, else the binary's version) or not a plain release are refused before any download unless ollama_update.allow_downgrade is set; an unknown installed version keeps the previous behaviour.",
+  "summary": "Router 0.24.0, ADR-0074 and ADR-0075. Hash-locked Python: router/requirements-lock.txt (asyncpg 0.32.0, uvloop 0.23.0, paho-mqtt 2.1.0 with every SHA-256 PyPI publishes) and requirements-ci-lock.txt (31 packages, Linux CPython 3.11, resolved by pip, hashed from PyPI). New router/skirnir_router/pydeps.py (stdlib + packaging or pip's vendored copy, no package imports) plans the lock entries for requirements the interpreter does not meet and venv copies that differ from the lock, refuses unmet-and-unlocked, out-of-range, unhashed and malformed entries, and verifies afterwards. install.sh runs plan, pip install --require-hashes --no-deps of the plan, verify; it adds python3-paho-mqtt and python3-uvloop to the apt packages and copies the lock. deploy.py sends pydeps.py and the requirement files as a base64 tar on stdin to the venv step (before the swap) and installs the same way; shlex import removed. ha.py builds the MQTT client with CallbackAPIVersion.VERSION1 on paho-mqtt 2.x (capability check, no exception), so requirements.txt allows paho-mqtt>=1.6.1. New tools/security/lock_requirements.py (pin with dependency-closure refusal for Python 3.11-3.14 on Linux, resolve on Linux only, offline check, verify-pypi). CI jobs and live-memory install the CI lock with --require-hashes; the security workflow installs it, audits both locks with pip-audit --require-hashes --disable-pip and runs verify-pypi. Release provenance: new .github/workflows/release-provenance.yml (permissions contents/id-token/attestations write only in its job; tag passed through env, quoted) downloads the release's agent assets, reads version from the names and the Go toolchain from their build info, rebuilds from git archive of the tag with the release flags and GOTOOLCHAIN=local, compares SHA-256, and only on identity attests provenance (attest-build-provenance v4.2.2) and the SBOMs (attest-sbom v4.1.0, SHA-pinned) and uploads the SBOMs. New tools/security/sbom.py writes deterministic CycloneDX 1.6 (RFC 4122 uuid5 serial). Docs EN/DE (install-router, operations: verifying a release), AGENTS.md (lock commands and refresh rule), threat model and register TM-16, CHANGELOG.",
   "findings": [
     {
-      "id": "TM-14",
-      "evidence": "The router runs as uid 0 without capabilities with /etc/skirnir-router writable; owner bits let it rewrite the root-owned render-env.conf, which the daily secrets timer sources with full root; the same applied to render-monitoring.sh.",
-      "resolution": "The access file moves to a root-only folder the router unit cannot see; both renderers refuse files in router-writable paths or with loose ownership/modes before sourcing.",
+      "id": "TM-16",
+      "evidence": "Production deploys installed asyncpg>=0.29,<1 from PyPI by range without hashes; CI installed every requirement file by range.",
+      "resolution": "Hash-locked overlay planned per host and a hashed CI lock; refusal when a requirement cannot be met from the distribution or the lock; audits and PyPI comparison weekly and on PRs.",
       "disposition": "fixed"
     },
     {
-      "id": "TM-14",
-      "evidence": "Tunnel.handle forwarded every path without a configured route to Ollama, including /api/pull, /api/create, /api/delete and /api/blobs, on nodes where Ollama runs as LocalSystem.",
-      "resolution": "Exact allow-list in the agent; CI checks it covers every path the router sends and none it forbids.",
+      "id": "TM-16",
+      "evidence": "Agent binaries are built on the operator workstation; nothing linked the published bytes to the tagged source, and there was no SBOM.",
+      "resolution": "CI rebuild from the tag with byte comparison; provenance and SBOM attestations only for identical bytes; SBOM assets on the release. The operator signature remains the update trust anchor; no key enters CI.",
       "disposition": "fixed"
     },
     {
       "id": "TM-13",
-      "evidence": "The router chose any Ollama version for an update order; only the archive checksum was verified.",
-      "resolution": "Downgrade and pre-release refusal unless ollama_update.allow_downgrade, like the agent's own update.",
-      "disposition": "fixed"
+      "evidence": "The new workflow holds contents: write and id-token: write.",
+      "resolution": "Only on release publication or manual dispatch by maintainers, in one job, no pull_request trigger, persist-credentials false, the tag only through env and quoted, actions pinned to SHAs.",
+      "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_privilege_paths.py (WSL)",
+      "command": "python test/selftest_pydeps.py (Windows and Linux); python test/selftest_sbom.py; python tools/security/lock_requirements.py check",
       "result": "passed",
-      "evidence": "all passed; a mutation that removed the auth-file check made it fail (1 failure)."
+      "evidence": "all passed; Python locks: 0 problem(s)."
     },
     {
-      "command": "go vet ./... && go test -count=1 ./... (agent, WSL)",
+      "command": "pydeps plan/verify against the production router venv through deploy.py's stdin bundle (read-only, nothing installed)",
       "result": "passed",
-      "evidence": "ok; TestPassthroughOnlyInferencePaths, TestPassthroughAllowsNoModelManagement, TestOllamaDowngradeRefused, TestTunnelRoutes ran."
+      "evidence": "plan lines: 0; pydeps verify: 6 of 6 requirements met."
     },
     {
-      "command": "all python test/... commands of ci.yml and security.yml (WSL); check_pinned_references, selftest_pinned_references, check_control_flow, check_adr_index, selftest_english_names (Windows)",
+      "command": "python tools/security/sbom.py agent on the published 0.30.0 Linux binary (WSL, Go 1.27.3)",
       "result": "passed",
-      "evidence": "No failures except the two git-based checks under WSL (worktree path), which pass on Windows; ADR index ok: 73 ADRs."
+      "evidence": "7 components, sha256 7b11b8d818d8 (matches the release asset)."
     },
     {
-      "command": "python tools/security/review.py check --base origin/feat/ollama-loopback --head INDEX",
+      "command": "ruff check .; check_pinned_references; selftest_pinned_references; check_control_flow; check_adr_index; selftest_english_names; YAML parse of the changed workflows",
+      "result": "passed",
+      "evidence": "All checks passed; 0 pinned-reference findings; ADR index ok: 75 ADRs."
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/fix/tm14-privilege-paths --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -96,8 +96,9 @@
     }
   ],
   "limitations": [
-    "The unit directives were not started under systemd here; the rollout verifies them on the router host (secrets service run, write probe in the router's mount namespace).",
-    "The router still runs as root; a dedicated user, the Linux agent unit and a LocalSystem child from a user-writable path remain open under TM-14.",
-    "Stacked on the Ollama loopback script PR."
+    "The provenance workflow runs only on a published release or by dispatch; its first real run is the next release (or a dispatch for v0.30.0).",
+    "The CI lock was resolved with a Python 3.13 interpreter targeting 3.11 (pip --python-version); pip checks Requires-Python for the target, markers use the running Linux system.",
+    "Dependabot does not refresh the locks; freshness depends on manual refresh, CVEs surface through pip-audit.",
+    "Stacked on the TM-14 PR."
   ]
 }

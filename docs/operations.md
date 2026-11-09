@@ -102,6 +102,23 @@ An agent refuses a signed version older than the one it runs (update kind `downg
 release binary is Authenticode-signed after the build (`agent/sign.ps1`; `deploy.py --agent` refuses an unsigned binary once a
 signing thumbprint is configured).
 
+## Verifying a release
+
+When a release is published, the workflow *Release provenance* rebuilds the agent binaries from the tag (clean export of
+`agent/`, the Go toolchain recorded in the published binary, CGO off, `-trimpath`) and compares them byte for byte with
+the release assets. Only if they are identical does GitHub attest their build provenance, and the release gets CycloneDX
+SBOMs: one per agent binary (Go toolchain, modules with `go.sum` hashes, build settings) and one for the router's Python
+requirements (`skirnir-router-<version>.cdx.json`). A difference fails the workflow with both hashes (ADR-0075). To check
+a downloaded binary:
+
+```bash
+gh attestation verify skirnir-agent-<version>-windows-amd64.exe --repo psewar/skirnir
+```
+
+The operator's Ed25519 signature on the update manifest stays the trust anchor of the agents' self-update; the
+attestation shows that the published bytes come from the tagged source. For an earlier release, start the workflow by
+hand with its tag.
+
 ## Ollama updates
 
 Router 0.3.0, agent 0.12.0. Once Ollama runs as a child of the agent service, the tray app's own updater no longer applies (it

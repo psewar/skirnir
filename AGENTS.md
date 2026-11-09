@@ -59,12 +59,17 @@ ruff check .                                                   # lint (ruff.toml
 python router/router.py --check router/config.example.yaml --pure   # configuration schema
 python test/check_adr_index.py                                 # ADR index is current
 python test/check_pinned_references.py                         # actions, tools and images pinned (ADR-0055)
+python tools/security/lock_requirements.py check               # Python locks consistent (ADR-0074)
 python test/selftest_control_flow.py && python test/check_control_flow.py   # explicit control flow (below)
 python test/selftest_<topic>.py                                # the self-tests your change touches
 python test/run_tests.py       # end-to-end suite, ~3 min; needs the loopback ports 21434/21435 and 210xx free
 python test/check_public_changes.py                            # public-data scan of your added lines
 ```
 
+- Python dependencies are hash-locked (ADR-0074). A change to `router/requirements*.txt`, `requirements-dev.txt` or
+  `test/requirements-hindsight.txt` refreshes the locks in the same PR: `lock_requirements.py pin --lock
+  router/requirements-lock.txt <name>==<version> ...` for what the router may install on top of the distribution, and
+  `lock_requirements.py resolve` (on Linux) for `requirements-ci-lock.txt`; never edit a lock by hand.
 - PostgreSQL integrations (`test/integration_sessions.py`, `integration_context.py`, `integration_interoperability.py`)
   run when `SKIRNIR_TEST_SESSION_DSN` points to a disposable test database.
 - Agent (Go, in `agent/`): `gofmt -l .` must print nothing; `go vet ./...` also with `GOOS=windows`; `go test ./...`

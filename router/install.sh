@@ -20,7 +20,7 @@ ROOT=""
 CHECK_ONLY=0
 NO_VENV=0
 OS_RELEASE=/etc/os-release
-PACKAGES="python3 python3-venv python3-aiohttp python3-yaml python3-cryptography curl jq"
+PACKAGES="python3 python3-venv python3-aiohttp python3-yaml python3-cryptography python3-paho-mqtt python3-uvloop curl jq"
 
 refuse() { echo "$1"; echo "STATE: refused"; exit 2; }
 
@@ -93,7 +93,7 @@ STAGE="$(mktemp -d "$DEST/.install.XXXXXX")" || refuse "cannot stage in $DEST"
 cp -R "$SRC/skirnir_router" "$STAGE/skirnir_router" && find "$STAGE/skirnir_router" -name '__pycache__' -prune -exec rm -rf {} + \
   || refuse "copying the package failed"
 for f in router.py ui.html skirnir.png favicon.png config.example.yaml config.minimal.yaml decision-tfidf.json \
-         render-env.sh render-env.conf.example requirements.txt requirements-session.txt install.sh; do
+         render-env.sh render-env.conf.example requirements.txt requirements-session.txt requirements-lock.txt install.sh; do
   [ -e "$SRC/$f" ] && cp "$SRC/$f" "$STAGE/$f"
 done
 rm -rf "$DEST/skirnir_router.old"
@@ -122,8 +122,18 @@ echo "Program files: $DEST (version $(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$DEST
 PY=python3
 if [ "$NO_VENV" -eq 0 ]; then
   [ -x "$VENV/bin/python" ] || python3 -m venv --system-site-packages "$VENV" || refuse "python3 -m venv failed"
-  "$VENV/bin/python" -m pip install -q --disable-pip-version-check -r "$DEST/requirements-session.txt" \
-    || refuse "pip could not install the router's requirements into $VENV"
+  # Only what the distribution lacks, and only from the hash-locked file (ADR-0074): pydeps.py plans, pip checks hashes.
+  PLAN="$(mktemp)" || refuse "cannot create a temporary file"
+  "$VENV/bin/python" "$DEST/skirnir_router/pydeps.py" plan --requirements "$DEST/requirements-session.txt" \
+    --lock "$DEST/requirements-lock.txt" > "$PLAN" \
+    || { rm -f "$PLAN"; refuse "the venv needs Python packages that neither the distribution nor requirements-lock.txt provides (above)"; }
+  if [ -s "$PLAN" ]; then
+    "$VENV/bin/python" -m pip install -q --disable-pip-version-check --require-hashes --no-deps -r "$PLAN" \
+      || { rm -f "$PLAN"; refuse "pip could not install the locked packages into $VENV"; }
+  fi
+  rm -f "$PLAN"
+  "$VENV/bin/python" "$DEST/skirnir_router/pydeps.py" verify --requirements "$DEST/requirements-session.txt" \
+    || refuse "the venv does not meet router/requirements-session.txt"
   "$VENV/bin/python" -c 'import aiohttp, yaml, cryptography, paho.mqtt' || refuse "the venv cannot import the router's packages"
   PY="$VENV/bin/python"
   echo "Python environment: $VENV"

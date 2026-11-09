@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
-      - run: pip install -r requirements-dev.txt -r test/requirements-hindsight.txt
+      - run: pip install --require-hashes -r requirements-ci-lock.txt   # hash-locked (ADR-0074)
       - run: ruff check .
       - run: python router/router.py --check router/config.example.yaml --pure
       - name: ADR index (docs/adr, ADR-0001)
@@ -39,6 +39,9 @@ jobs:
       - run: python test/selftest_install.py
       - run: pwsh -NoProfile -File test/selftest_ollama_loopback.ps1
       - run: python test/selftest_privilege_paths.py
+      - name: Python locks are consistent (ADR-0074)
+        run: python test/selftest_pydeps.py && python tools/security/lock_requirements.py check
+      - run: python test/selftest_sbom.py
       - run: python test/selftest_browser.py
       - run: python test/selftest_agent_revocation.py
       - run: python test/selftest_key_rotation.py
@@ -113,7 +116,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
-      - run: pip install -r router/requirements-session.txt
+      - run: pip install --require-hashes -r requirements-ci-lock.txt   # hash-locked (ADR-0074)
       - run: python test/integration_sessions.py
       - run: python test/integration_context.py
       - run: python test/integration_interoperability.py
@@ -162,7 +165,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
-      - run: pip install -r requirements-dev.txt
+      - run: pip install --require-hashes -r requirements-ci-lock.txt   # hash-locked (ADR-0074)
       - run: python test/run_tests.py
         continue-on-error: true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

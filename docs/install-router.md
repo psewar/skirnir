@@ -12,7 +12,7 @@ TLS certificate, the firewall, secrets, the optional decision engine and the com
 |---|---|
 | Operating system | Debian 12 or Ubuntu (or comparable; `install.sh` supports Debian and Ubuntu, elsewhere follow [Manual installation](#manual-installation)). A container is fine. On Windows the router runs with the default event loop (development). |
 | Python | 3.11 or newer |
-| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `curl`, `jq` (`install.sh` installs missing ones). `paho-mqtt` (Home Assistant) and `uvloop` (optional, faster event loop) come into the venv from `router/requirements.txt`; on a system without the venv use `python3-paho-mqtt` and `python3-uvloop`. |
+| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installs missing ones). What the distribution lacks or ships too old (on Debian 12: `asyncpg` for the session store) comes into the venv only from the hash-locked `router/requirements-lock.txt` (ADR-0074). |
 | Ports | **11434** for clients (Ollama, OpenAI and Anthropic APIs), **11435** for the agents' tunnel, the web UI, `/admin/*` and `/metrics` |
 | Name and certificate | A DNS name that clients and nodes use (`<name>`, e.g. `router.example.net`) and a TLS certificate for it, see [TLS certificate](#tls-certificate) |
 
@@ -30,8 +30,10 @@ Before changing anything the script checks: root, Debian/Ubuntu, Python 3.11 or 
 1. installs missing packages with `apt`,
 2. replaces the program files in `/opt/skirnir-router` (`router.py`, the package `skirnir_router/`, `ui.html`, the example
    configurations, `decision-tfidf.json`, `render-env.sh` …),
-3. creates the venv `/opt/skirnir-router/venv` (`--system-site-packages`) and installs `requirements-session.txt` into it
-   (`paho-mqtt<2` also where the distribution ships 2.x),
+3. creates the venv `/opt/skirnir-router/venv` (`--system-site-packages`); `skirnir_router/pydeps.py` lists the
+   requirements of `requirements-session.txt` the distribution does not meet, and pip installs exactly those from
+   `requirements-lock.txt` with `--require-hashes --no-deps` - pinned versions, every artifact checked against its
+   SHA-256; an unmet requirement without a lock entry stops the install (ADR-0074),
 4. copies the systemd units to `/etc/systemd/system/` and runs `systemctl daemon-reload`,
 5. never touches the configuration: without `/etc/skirnir-router/config.yaml` it prints the `--init` command as the next step;
    with one it checks it as the service will read it (`router.py --check --files` without capabilities, then `--posture`)

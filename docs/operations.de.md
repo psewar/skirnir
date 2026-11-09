@@ -107,6 +107,23 @@ braucht `update.allow_downgrade: true` in der Konfiguration des Knotens
 die Release-Binary nach dem Build Authenticode-signiert (`agent/sign.ps1`; `deploy.py --agent` verweigert eine unsignierte
 Binary, sobald ein Signier-Thumbprint konfiguriert ist).
 
+## Ein Release prüfen
+
+Wird ein Release veröffentlicht, baut der Workflow *Release provenance* die Agent-Binaries aus dem Tag nach (sauberer
+Export von `agent/`, die im veröffentlichten Binary vermerkte Go-Version, CGO aus, `-trimpath`) und vergleicht sie Byte
+für Byte mit den Release-Dateien. Nur wenn sie gleich sind, bestätigt GitHub ihre Herkunft (Attestierung), und das Release
+bekommt CycloneDX-SBOMs: eine je Agent-Binary (Go-Version, Module mit `go.sum`-Hash, Build-Einstellungen) und eine für die
+Python-Abhängigkeiten des Routers (`skirnir-router-<version>.cdx.json`). Ein Unterschied lässt den Workflow mit beiden
+Hashes scheitern (ADR-0075). Ein heruntergeladenes Binary prüfen:
+
+```bash
+gh attestation verify skirnir-agent-<version>-windows-amd64.exe --repo psewar/skirnir
+```
+
+Vertrauensanker des Agent-Selbstupdates bleibt die Ed25519-Signatur des Betreibers am Update-Manifest; die Attestierung
+zeigt, dass die veröffentlichten Bytes aus dem getaggten Quelltext stammen. Für ein früheres Release den Workflow von
+Hand mit dessen Tag starten.
+
 ## Ollama-Updates
 
 Router 0.3.0, Agent 0.12.0. Läuft Ollama als Kind des Agent-Dienstes, greift der Updater der Tray-App nicht mehr (er läuft
