@@ -2,24 +2,15 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "7288c446930e30c6cc9fa71a92dc7fc19d320635",
-  "change_digest": "e1c48f861733fd76228ced7f14d2970e9ca89ecd4e141982d6c6ac92197aa35d",
+  "base_sha": "f818efac860a220be1fe39cba7703e121f313763",
+  "change_digest": "e6e0a41413eda4f5f4d4eca12c84e683761318e388b2f7aff38519564240ee1b",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
     "CHANGELOG.md",
     "README.de.md",
     "README.md",
-    "agent/config.example.yaml",
-    "agent/updater.go",
-    "agent/updater_test.go",
-    "deploy/agent_keys.py",
-    "deploy/deploy.py",
-    "docs/adr/0058-rotate-the-agent-signing-key-with-several-trusted-keys.md",
-    "docs/adr/README.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md",
-    "test/selftest_key_rotation.py"
+    "docs/security/threat-model.md"
   ],
   "risk_ids": [
     "TM-13"
@@ -27,35 +18,25 @@
   "boundaries": [
     "B8"
   ],
-  "summary": "Agent 0.29.0 can trust several operator keys so the signing key can be rotated (ADR-0058, TM-13). UpdateCfg gains public_keys (node-local YAML only; the router provisioning never writes it). trustedKeys() decodes public_key plus public_keys and refuses the whole set if any entry is not a 32-byte Ed25519 key, naming its position, so a typo cannot silently shrink the trusted set; with no key the order is refused as before. verifyOrder accepts the manifest if the signature verifies under any trusted key (signedByAny), then applies the unchanged manifest, version, downgrade (ADR-0054) and file checks; the refusal text 'Manifest-Signatur ungueltig' used by the end-to-end suite is kept. deploy.py gains --new-agent-key and --use-next-agent-key, implemented in the new deploy/agent_keys.py: step 1 refuses without a current key or with a pending next key and creates agent-update.next.key with O_EXCL and mode 0600; step 2 refuses without a prepared key, keeps the old key as agent-update.retired-<time>.key and moves the next key into place; both run offline in the ops folder before any SSH connection. The router's optional single-key self-check is unchanged and documented as switched together with the signing key.",
+  "summary": "Documentation only, no code or configuration change. Records that the signing-key rotation of ADR-0058 has been practised once in a two-node deployment: the new public key was added to update.public_keys on every node, signing was switched with deploy.py --use-next-agent-key, agent 0.29.1 (same source as 0.29.0, only the version string differs) was signed only with the new key and installed by every node, and only then was the old key removed from the nodes. CHANGELOG v0.27.0 now names agent 0.29.1; README (EN/DE) adds the proof step before removing the old key; threat model (EN/DE) and the TM-13 register entry state that the rotation is practised. TM-13 stays open because recovery from a lost signing key and the independent Ollama source check remain.",
   "findings": [
     {
       "id": "TM-13",
-      "evidence": "Agent 0.28.0 trusted exactly one update.public_key, so replacing the signing key required changing every node and the key at the same moment.",
-      "resolution": "Several node-local trusted keys and two self-checking deploy steps; a rotation has not been practised in the deployment yet, so TM-13 stays open.",
+      "evidence": "The previous record left TM-13 open because a rotation had not been practised in the deployment.",
+      "resolution": "Rotation practised once; the remaining gap is recovery from a lost signing key, recorded as next_action and validation_gap. Status stays open.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "cd agent && gofmt -l . && go vet ./... && go test -count=1 ./...",
+      "command": "Deployment: both nodes report agent 0.29.1 after an update whose manifest was signed only with the new key; after removing the old key both reconnected",
       "result": "passed",
-      "evidence": "ok github.com/psewar/skirnir/agent, incl. TestUpdaterAcceptsAnyConfiguredKeyForRotation (old+new accepted, unlisted refused, old refused after removal, public_keys alone, invalid entry reported as 'Eintrag 1')."
+      "evidence": "Router node list: both nodes connected, update state done, running 0.29.1."
     },
     {
-      "command": "Negative check: go test -run Rotation against the previous agent/updater.go (git stash)",
+      "command": "python -c json.load(docs/security/risk-register.json)",
       "result": "passed",
-      "evidence": "build failed: unknown field PublicKeys in struct literal of type UpdateCfg (single-key updater)."
-    },
-    {
-      "command": "python test/selftest_key_rotation.py",
-      "result": "passed",
-      "evidence": "10 PASS, 0 failure(s): refusals without current/prepared key, second prepare refused, switch, retired key kept, no double switch."
-    },
-    {
-      "command": "ruff check .; check_adr_index.py; check_pinned_references.py; selftest_english_names.py; YAML parse of ci.yml",
-      "result": "passed",
-      "evidence": "All checks passed; ADR index ok: 58 ADRs; 0 findings; ALLE OK; yaml ok."
+      "evidence": "Register parses; TM-13 status open."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -69,8 +50,6 @@
     }
   ],
   "limitations": [
-    "Agent tests ran on Windows locally; Linux and the cross-build run in CI.",
-    "The 0600 mode of the next key is checked only on POSIX; the deploy steps were not run against the real ops folder.",
-    "The router's optional modes.agent_update.public_key self-check still takes a single key."
+    "The deployment proof is operational evidence from one two-node installation and is not reproduced in CI; the code path is covered by agent/updater_test.go and test/selftest_key_rotation.py."
   ]
 }
