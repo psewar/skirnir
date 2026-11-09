@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "a55e1120e6f23479dcf0d14004270ae9725dbab2",
-  "change_digest": "d6cc0a481bdcd8505657b77ffd7a0e26dcc9083d2f0d351bc18ac39648d1a21d",
+  "base_sha": "27a1647c0a60260f598ec97d4e38625a26439aa8",
+  "change_digest": "cf9185cf18a5410ff8366fea8d8d7e867223b668cd0cd45255fad474a4928ba5",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
@@ -56,7 +56,7 @@
       "evidence": "No failures; ADR index ok: 64 ADRs; ALLE OK; All checks passed."
     },
     {
-      "command": "python tools/security/review.py check --base origin/security/tm08-client-limits --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -67,7 +67,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #110; the record is refreshed against main once #109 and #110 are merged.",
+    "Merged main after #109 and #110.",
     "The report reads only the router configuration and the session DSN's TLS mode; it cannot see a backend host's listening addresses or egress."
   ]
 }
