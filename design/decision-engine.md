@@ -76,3 +76,9 @@ wertvollsten neuen Trainingsbeispiele.
 CT. Damit ist die CPU-gebundene, rein lokale Entscheidung moeglich (`embed -> tfidf -> rules` 0,909 ohne LLM). Der Kopf lernt
 in Sekunden neu, das Embedding-Modell bleibt - der Weg fuer echte Daten aus dem Capture. Offen: besseres Unsicherheitsmaß
 (kNN-Uneinigkeit), damit die Kaskade zum LLM greift, wo embed irrt.
+
+## Nachtrag 2026-11-09: Trainingsdaten
+
+Vorlagen und Daten in Standardschreibweise und ohne Reales neu erzeugt, Modelle neu trainiert, Vergleich über 20
+Aufteilungen statt einer, Privacy-Schwelle out-of-fold: [decision-training-data.md](decision-training-data.md)
+(ADR-0077 bis ADR-0079).

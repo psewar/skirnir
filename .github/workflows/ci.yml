@@ -31,6 +31,10 @@ jobs:
       - run: python test/selftest_trusted_gate.py
       - name: Third-party references are pinned (ADR-0055)
         run: python test/selftest_pinned_references.py && python test/check_pinned_references.py
+      - name: Decision training data matches its builders and the model (ADR-0077)
+        run: python test/selftest_training_data.py && python test/check_training_data.py
+      - name: Privacy threshold folds (ADR-0078)
+        run: python test/selftest_privacy_threshold.py
       - run: python test/selftest_log_hygiene.py
       - run: python test/selftest_log_hygiene_paths.py
       - run: python test/selftest_client_limits.py

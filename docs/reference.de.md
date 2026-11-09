@@ -197,7 +197,7 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 | `router/requirements.txt`, `router/requirements-session.txt` | Laufzeit-Abhängigkeiten (die zweite ergänzt den optionalen Session-Speicher) |
 | `router/decision-tfidf.json` | trainiertes TF-IDF-Modell der Auto-Rolle |
 | `agent/` | Agent für die GPU-Knoten (Go 1.27, Windows-Dienst / Linux-Binary), `Install-Service.ps1`, `Set-UpdateKey.cmd`, `sign.ps1`, eigenes README |
-| `decision-eval/` | Datensatz-Generator (136 Vorlagen, 1282 Beispiele, Gruppen-Split), Trainer für TF-IDF und Jevlike, Auswertung (Top-1, Kalibrierung, Ketten), Ergebnisse |
+| `decision-eval/` | Datensatz-Generator (127 Vorlagen, 1216 Beispiele, Gruppen-Split; geprüft von `test/check_training_data.py`), Trainer für TF-IDF und Jevlike, Auswertung (Top-1, Kalibrierung, Ketten, wiederholte Aufteilungen), Ergebnisse |
 | `decision-embed/` | Stufe 2 der Auto-Rolle: ONNX-Export, Kopf-Training, Dienst, Container |
 | `decision-jevlike/` | Jevlike-Dienst (Prototyp, gemessen, nicht produktiv) |
 | `rerank-server/` | Optionaler Cross-Encoder-Reranker mit TEI-Protokoll `/rerank` auf OpenVINO (Intel-iGPU, CPU, NPU), als Kind des Agenten für einen Gedächtnisdienst wie Hindsight; eigenes README |

@@ -1,644 +1,594 @@
-{"text": "Schick Sophie eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Wie ist die Nummer von Lea?", "label": 1}
-{"text": "Fahr die Storen im Bad runter.", "label": 0}
-{"text": "Spiel etwas Ruhiges.", "label": 0}
-{"text": "Schick Anna eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Wie spät ist es jetzt in Island?", "label": 0}
-{"text": "Ich glaube, meine Freundin betrügt mich.", "label": 1}
-{"text": "Wie lange ist Frau Keller schon krank?", "label": 1}
-{"text": "Ist es im Küche wärmer als im Wohnzimmer?", "label": 0}
-{"text": "Mach den Ventilator aus.", "label": 0}
-{"text": "Hat Jonas angerufen?", "label": 1}
-{"text": "Was frisst eine Biene?", "label": 0}
-{"text": "Wie viel sind 2 Pfund in Kilo?", "label": 0}
-{"text": "Auf welchen Wochentag fällt Ostern?", "label": 0}
-{"text": "Wie viele Einwohner hat Aarau?", "label": 0}
-{"text": "Was hilft gegen Rückenschmerzen? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Wie sage ich Frau Keller, dass ich mich trennen will?", "label": 1}
-{"text": "Wie warm ist es im Büro?", "label": 0}
-{"text": "Hat Noah angerufen?", "label": 1}
-{"text": "Um wie viel Uhr ist meine Frau heute gegangen?", "label": 1}
-{"text": "Wann sind wir alle in den Ferien weg?", "label": 1}
-{"text": "Wie viele Einwohner hat Genf?", "label": 0}
-{"text": "Wie lange ist mein Partner schon krank?", "label": 1}
-{"text": "Welche Sprache spricht man in Kanada?", "label": 0}
-{"text": "Hat Anna morgen Therapie?", "label": 1}
-{"text": "meine Freundin und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Wann hat Lukas Geburtstag?", "label": 1}
-{"text": "Wie viel wiegt eine Katze?", "label": 0}
-{"text": "Wie viel Strom braucht der Tumbler gerade?", "label": 0}
-{"text": "Hat Mia angerufen?", "label": 1}
-{"text": "Auf welchen Wochentag fällt Weihnachten?", "label": 0}
-{"text": "Erinnere mich, die Antibiotika zu nehmen.", "label": 1}
-{"text": "Opa hat Corona, was soll ich tun?", "label": 1}
-{"text": "Hat mein Bruder morgen Therapie?", "label": 1}
-{"text": "Wo ist meine Schwester gerade?", "label": 1}
-{"text": "Wann ist die Gerichtsverhandlung von mein Partner?", "label": 1}
-{"text": "Ich glaube, mein Mann betrügt mich.", "label": 1}
-{"text": "Ich glaube, meine Frau betrügt mich.", "label": 1}
-{"text": "Übersetze guten Morgen ins Italienische.", "label": 0}
-{"text": "Was ist die Hauptstadt von Brasilien?", "label": 0}
-{"text": "Fahr die Storen im Schlafzimmer runter.", "label": 0}
-{"text": "Was weisst du über die Relativitätstheorie?", "label": 0}
-{"text": "Fahr die Storen im Büro runter.", "label": 0}
-{"text": "Spiel Klassik.", "label": 0}
-{"text": "Wie viel Rente bekommt meine Mutter?", "label": 1}
-{"text": "Wann kommt Opa von der Arbeit zurück?", "label": 1}
-{"text": "Wann wird der Lohn überwiesen?", "label": 1}
-{"text": "Wann ist die Gerichtsverhandlung von mein Vater?", "label": 1}
-{"text": "Wann wird der Erbe überwiesen?", "label": 1}
-{"text": "Was hilft gegen Grippe? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Erzähl mir etwas über die Geschichte von Olten.", "label": 0}
-{"text": "Rechne 20 Euro in Franken um.", "label": 0}
-{"text": "Lies mir die Packliste vor.", "label": 1}
-{"text": "Was steht auf der Wunschliste?", "label": 1}
-{"text": "Wer hat das Matterhorn entdeckt?", "label": 0}
-{"text": "Was ist 30 Prozent von 250?", "label": 0}
-{"text": "Wie viel Strom verbraucht die Wärmepumpe gerade?", "label": 0}
-{"text": "Ist das Licht im Wohnzimmer noch an?", "label": 0}
-{"text": "Wo ist mein Bruder gerade?", "label": 1}
-{"text": "Auf welchen Wochentag fällt die nächste Sonnenfinsternis?", "label": 0}
-{"text": "Was verdient meine Tochter?", "label": 1}
-{"text": "Um wie viel Uhr ist Lukas heute gegangen?", "label": 1}
-{"text": "Wie lange ist meine Frau schon krank?", "label": 1}
-{"text": "Was hat Herr Brunner mir geschrieben?", "label": 1}
-{"text": "Wie schnell ist ein Murmeltier?", "label": 0}
-{"text": "Ist mein Partner schon zu Hause?", "label": 1}
-{"text": "Ist das Garagentor zu?", "label": 0}
-{"text": "Was ist 5 Prozent von 250?", "label": 0}
-{"text": "mein Bruder ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Was hilft gegen einen Bandscheibenvorfall? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Ruf Herr Brunner an.", "label": 1}
-{"text": "Wie mache ich Risotto?", "label": 0}
-{"text": "Wie warm ist es im Küche?", "label": 0}
-{"text": "Stell die Heizung im Garten auf 23 Grad.", "label": 0}
-{"text": "Schick Frau Keller eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Wie weit ist es von Bern nach Bern?", "label": 0}
-{"text": "Was frisst eine Schnecke?", "label": 0}
-{"text": "Hat Lukas angerufen?", "label": 1}
-{"text": "Fahr die Storen im Hobbyraum runter.", "label": 0}
-{"text": "Wie sage ich meine Freundin, dass ich mich trennen will?", "label": 1}
-{"text": "Mach die Kaffeemaschine aus.", "label": 0}
-{"text": "Was ist die Hauptstadt von Mexiko?", "label": 0}
-{"text": "Wie viel Rente bekommt meine Tochter?", "label": 1}
-{"text": "Schalte die Storen im Wohnzimmer ein.", "label": 0}
-{"text": "Wie ist die Luftqualität in Bern?", "label": 0}
-{"text": "Wie viele Einwohner hat Bern?", "label": 0}
-{"text": "Wie schnell ist ein Elefant?", "label": 0}
-{"text": "Wie viele Einwohner hat Luzern?", "label": 0}
-{"text": "Um wie viel Uhr ist mein Sohn heute gegangen?", "label": 1}
-{"text": "Wie wird das Wetter morgen in Zürich?", "label": 0}
-{"text": "Was verdient Anna?", "label": 1}
-{"text": "Woher kommt das Wort Gemütlichkeit?", "label": 0}
-{"text": "Wann ist die Gerichtsverhandlung von meine Mutter?", "label": 1}
-{"text": "Ist das Licht im Keller noch an?", "label": 0}
-{"text": "Wer hat den Gotthardtunnel entdeckt?", "label": 0}
-{"text": "Spiel Jazz.", "label": 0}
-{"text": "Welche Zutaten passen zu Rösti?", "label": 0}
-{"text": "Ist es im Hobbyraum wärmer als im Wohnzimmer?", "label": 0}
-{"text": "Wie viel wiegt Frau Keller jetzt?", "label": 1}
-{"text": "Wie buchstabiert man Serendipität?", "label": 0}
-{"text": "Wie ist die Nummer von Mia?", "label": 1}
-{"text": "Erzähl mir etwas über die Geschichte von Luzern.", "label": 0}
-{"text": "Wie viel wiegt ein Pinguin?", "label": 0}
-{"text": "Was läuft gerade im Radio?", "label": 0}
-{"text": "Hat meine Frau morgen Therapie?", "label": 1}
-{"text": "Ich glaube, meine Schwester betrügt mich.", "label": 1}
-{"text": "Wann wird der Hypothek überwiesen?", "label": 1}
-{"text": "Ich glaube, Opa betrügt mich.", "label": 1}
-{"text": "Erzähl mir einen Witz.", "label": 0}
-{"text": "Wie viel wiegt der Nachbar jetzt?", "label": 1}
-{"text": "Wie spät ist es jetzt in Norwegen?", "label": 0}
-{"text": "Wie viel Rente bekommt meine Freundin?", "label": 1}
-{"text": "Wie mache ich Apfelkuchen?", "label": 0}
-{"text": "Stell die Heizung im Kinderzimmer auf 21 Grad.", "label": 0}
-{"text": "Wie wird das Wetter morgen in Bern?", "label": 0}
-{"text": "Wann kommt meine Tochter von der Arbeit zurück?", "label": 1}
-{"text": "Welche Sprache spricht man in Mexiko?", "label": 0}
-{"text": "Rechne 2 Pfund in Kilo um.", "label": 0}
-{"text": "Stell die Heizung im Küche auf 22 Grad.", "label": 0}
-{"text": "Wann wird der Gehalt überwiesen?", "label": 1}
-{"text": "Wann hat Sophie Geburtstag?", "label": 1}
-{"text": "Frau Keller hat Rückenschmerzen, was soll ich tun?", "label": 1}
-{"text": "Schalte das Licht in der Küche ein.", "label": 0}
-{"text": "Wie voll ist der Akku vom Mähroboter?", "label": 0}
-{"text": "Wo wohnt Noah?", "label": 1}
-{"text": "Schalte die Kaffeemaschine ein.", "label": 0}
-{"text": "Was schreibe ich dem Anwalt wegen der Scheidung?", "label": 1}
-{"text": "Wie lange ist Oma schon krank?", "label": 1}
-{"text": "Mach den Fernseher aus.", "label": 0}
-{"text": "Was hilft gegen eine Depression? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Lies mir die To-do-Liste vor.", "label": 1}
-{"text": "Was brauche ich für Zopf?", "label": 0}
-{"text": "Wann muss ich die Steuern bezahlen und wie viel?", "label": 1}
-{"text": "Erklär mir Vulkane.", "label": 0}
-{"text": "Welche Sprache spricht man in Brasilien?", "label": 0}
-{"text": "Wo wohnt Anna?", "label": 1}
-{"text": "Wie viel Rente bekommt mein Bruder?", "label": 1}
-{"text": "Stell die Heizung im Garten auf 21 Grad.", "label": 0}
-{"text": "Wie viele Einwohner hat Olten?", "label": 0}
-{"text": "Ruf Lukas an.", "label": 1}
-{"text": "Um wie viel Uhr ist meine Freundin heute gegangen?", "label": 1}
-{"text": "Wann war mein Vater zuletzt zu Hause?", "label": 1}
-{"text": "Wie warm ist es im Keller?", "label": 0}
-{"text": "meine Freundin hat Corona, was soll ich tun?", "label": 1}
-{"text": "Welche Zutaten passen zu Apfelkuchen?", "label": 0}
-{"text": "meine Mutter ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Wie schnell ist eine Biene?", "label": 0}
-{"text": "Wann wird der Steuererklärung überwiesen?", "label": 1}
-{"text": "Wie schnell ist ein Wal?", "label": 0}
-{"text": "Wann ist der Sommeranfang?", "label": 0}
-{"text": "Stell einen Timer auf 30 Minuten.", "label": 0}
-{"text": "Was brauche ich für Rösti?", "label": 0}
-{"text": "meine Tochter hat eine Allergie, was soll ich tun?", "label": 1}
-{"text": "Um wie viel Uhr ist mein Mann heute gegangen?", "label": 1}
-{"text": "Was hilft gegen eine Allergie? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Was verdient mein Mann?", "label": 1}
-{"text": "Speichere die Zugangsdaten fürs Bankkonto als 4711.", "label": 1}
-{"text": "Hat Elias angerufen?", "label": 1}
-{"text": "Was wünscht sich meine Schwester zum Geburtstag?", "label": 1}
-{"text": "Wann war meine Frau zuletzt zu Hause?", "label": 1}
-{"text": "Schalte die Weihnachtsbeleuchtung ein.", "label": 0}
-{"text": "Wie wird das Wetter morgen in Basel?", "label": 0}
-{"text": "Wann hat Jonas Geburtstag?", "label": 1}
-{"text": "Hat Sophie angerufen?", "label": 1}
-{"text": "Woher kommt das Wort Algorithmus?", "label": 0}
-{"text": "mein Mann und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Wer ist alles im Haus?", "label": 1}
-{"text": "Wie wird das Wetter morgen in Genf?", "label": 0}
-{"text": "Wecke mich in 15 Minuten.", "label": 0}
-{"text": "Was ist 15 Prozent von 250?", "label": 0}
-{"text": "Wie weit ist es von Basel nach Bern?", "label": 0}
-{"text": "Wann ist die Gerichtsverhandlung von meine Freundin?", "label": 1}
-{"text": "Muss ich wegen der Busse zur Polizei?", "label": 1}
-{"text": "Frau Keller ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Welche Sprache spricht man in Ägypten?", "label": 0}
-{"text": "Was bedeutet Fernweh?", "label": 0}
-{"text": "Erzähl mir etwas über die Geschichte von Genf.", "label": 0}
-{"text": "Was hat Sophie mir geschrieben?", "label": 1}
-{"text": "Opa hat eine Allergie, was soll ich tun?", "label": 1}
-{"text": "Was brauche ich für Birchermüesli?", "label": 0}
-{"text": "Wie warm ist es im Schlafzimmer?", "label": 0}
-{"text": "Ich glaube, meine Tochter betrügt mich.", "label": 1}
-{"text": "Wie schnell ist eine Schnecke?", "label": 0}
-{"text": "Mach die Storen im Wohnzimmer aus.", "label": 0}
-{"text": "Wer hat die Römer entdeckt?", "label": 0}
-{"text": "Wie ist die Nummer von Noah?", "label": 1}
-{"text": "Schick Lea eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Erzähl mir etwas über die Geschichte von Lugano.", "label": 0}
-{"text": "Wie spät ist es jetzt in Brasilien?", "label": 0}
-{"text": "Wo ist Frau Keller gerade?", "label": 1}
-{"text": "Was verdient meine Schwester?", "label": 1}
-{"text": "Erzähl mir etwas über die Geschichte von Zürich.", "label": 0}
-{"text": "Wie weit ist es von Lugano nach Bern?", "label": 0}
-{"text": "meine Mutter hat Bluthochdruck, was soll ich tun?", "label": 1}
-{"text": "mein Partner ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Woher kommt das Wort Photon?", "label": 0}
-{"text": "Was hat Frau Keller mir geschrieben?", "label": 1}
-{"text": "Was bedeutet Allmend?", "label": 0}
-{"text": "Rechne 5 Meilen in Kilometer um.", "label": 0}
-{"text": "Mach das Radio aus.", "label": 0}
-{"text": "Was weisst du über die Fotosynthese?", "label": 0}
-{"text": "Erklär mir den Gotthardtunnel.", "label": 0}
-{"text": "Wie warm ist es im Garten?", "label": 0}
-{"text": "Welche Zutaten passen zu Birchermüesli?", "label": 0}
-{"text": "Wie lange muss Risotto in den Ofen?", "label": 0}
-{"text": "Wo wohnt Herr Brunner?", "label": 1}
-{"text": "Was verdient meine Freundin?", "label": 1}
-{"text": "Spiel Radio SRF 3.", "label": 0}
-{"text": "Was ist 17 mal 23?", "label": 0}
-{"text": "Um wie viel Uhr ist Opa heute gegangen?", "label": 1}
-{"text": "Hat mein Vater morgen Therapie?", "label": 1}
-{"text": "Hat Frau Keller angerufen?", "label": 1}
-{"text": "Ist der Saugroboter schon fertig?", "label": 0}
-{"text": "Welche Zutaten passen zu Risotto?", "label": 0}
-{"text": "Ist das Licht im Bad noch an?", "label": 0}
-{"text": "Was bedeutet Algorithmus?", "label": 0}
-{"text": "Lies mir die Einkaufsliste vor.", "label": 1}
-{"text": "Wie sage ich mein Mann, dass ich mich trennen will?", "label": 1}
-{"text": "Wo ist mein Partner gerade?", "label": 1}
-{"text": "Ist mein Mann schon zu Hause?", "label": 1}
-{"text": "Wecke mich in 10 Minuten.", "label": 0}
-{"text": "Wann ist die Gerichtsverhandlung von meine Schwester?", "label": 1}
-{"text": "Mach die Musik leiser.", "label": 0}
-{"text": "Starte den Staubsauger.", "label": 0}
-{"text": "Ruf Mia an.", "label": 1}
-{"text": "Wie weit ist es von Luzern nach Bern?", "label": 0}
-{"text": "Wann hat Herr Brunner Geburtstag?", "label": 1}
-{"text": "Wie lange muss Zopf in den Ofen?", "label": 0}
-{"text": "Wo wohnt Sophie?", "label": 1}
-{"text": "Erklär mir das Matterhorn.", "label": 0}
-{"text": "Wann hat Frau Keller Geburtstag?", "label": 1}
-{"text": "mein Bruder und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Erinnere mich, die Schlaftabletten zu nehmen.", "label": 1}
-{"text": "Erinnere mich, Ibuprofen zu nehmen.", "label": 1}
-{"text": "Schick Lukas eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Wie viele Einwohner hat Basel?", "label": 0}
-{"text": "Wo ist mein Sohn gerade?", "label": 1}
-{"text": "Wie buchstabiert man Photon?", "label": 0}
-{"text": "Was weisst du über den Klimawandel?", "label": 0}
-{"text": "Wie mache ich Birchermüesli?", "label": 0}
-{"text": "Wie viel habe ich diesen Monat ausgegeben?", "label": 1}
-{"text": "meine Schwester ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Wie viel Strom braucht der Backofen gerade?", "label": 0}
-{"text": "Stell die Heizung im Schlafzimmer auf 23 Grad.", "label": 0}
-{"text": "Wie buchstabiert man Föhn?", "label": 0}
-{"text": "Schalte die Heizung im Bad ein.", "label": 0}
-{"text": "Ist meine Mutter schon zu Hause?", "label": 1}
-{"text": "Wecke mich in 45 Minuten.", "label": 0}
-{"text": "Erzähl mir etwas über die Geschichte von Basel.", "label": 0}
-{"text": "Wie sage ich meine Mutter, dass ich mich trennen will?", "label": 1}
-{"text": "Wie viel wiegt mein Vater jetzt?", "label": 1}
-{"text": "Ist der Backofen schon fertig?", "label": 0}
-{"text": "Wie sage ich meine Schwester, dass ich mich trennen will?", "label": 1}
-{"text": "Stell die Heizung im Büro auf 22 Grad.", "label": 0}
-{"text": "Wie viel Strom braucht der Geschirrspüler gerade?", "label": 0}
-{"text": "Was brauche ich für Risotto?", "label": 0}
-{"text": "Oma ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Ist Lukas schon zu Hause?", "label": 1}
-{"text": "Auf welchen Wochentag fällt der Nationalfeiertag?", "label": 0}
-{"text": "Wie viel wiegt ein Elefant?", "label": 0}
-{"text": "Ist die Waschmaschine fertig?", "label": 0}
-{"text": "Erklär mir die Römer.", "label": 0}
-{"text": "Was hat Jonas mir geschrieben?", "label": 1}
-{"text": "Wie lange ist mein Vater schon krank?", "label": 1}
-{"text": "Wie buchstabiert man Allmend?", "label": 0}
-{"text": "Welche Sprache spricht man in Norwegen?", "label": 0}
-{"text": "Wie mache ich Rösti?", "label": 0}
-{"text": "Schick Jonas eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Was wünscht sich mein Bruder zum Geburtstag?", "label": 1}
-{"text": "meine Tochter und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Wann ist Weihnachten?", "label": 0}
-{"text": "Wie sage ich Lukas, dass ich mich trennen will?", "label": 1}
-{"text": "Schalte die Stehlampe ein.", "label": 0}
-{"text": "Was verdient Opa?", "label": 1}
-{"text": "Was frisst eine Katze?", "label": 0}
-{"text": "Wie ist die Nummer von Frau Keller?", "label": 1}
-{"text": "Wann war Anna zuletzt zu Hause?", "label": 1}
-{"text": "Auf welchen Wochentag fällt Pfingsten?", "label": 0}
-{"text": "Wann war Frau Keller zuletzt zu Hause?", "label": 1}
-{"text": "Wann war meine Mutter zuletzt zu Hause?", "label": 1}
-{"text": "Schalte den Fernseher ein.", "label": 0}
-{"text": "Ist es im Büro wärmer als im Wohnzimmer?", "label": 0}
-{"text": "Wie viele Einwohner hat Zürich?", "label": 0}
-{"text": "Wie viel wiegt ein Wal?", "label": 0}
-{"text": "Wie spät ist es?", "label": 0}
-{"text": "Stell einen Timer auf 5 Minuten.", "label": 0}
-{"text": "Wie buchstabiert man Algorithmus?", "label": 0}
-{"text": "mein Vater und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Wer hat schwarze Löcher entdeckt?", "label": 0}
-{"text": "Erinnere mich, die Pille zu nehmen.", "label": 1}
-{"text": "Was bedeutet Zeitgeist?", "label": 0}
-{"text": "Wie funktioniert eine Wärmepumpe?", "label": 0}
-{"text": "Welche Zutaten passen zu Gulasch?", "label": 0}
-{"text": "Wie schnell ist ein Adler?", "label": 0}
-{"text": "Erzähl mir etwas über die Geschichte von Bern.", "label": 0}
-{"text": "Was wünscht sich mein Vater zum Geburtstag?", "label": 1}
-{"text": "Was bedeutet Gemütlichkeit?", "label": 0}
-{"text": "Wer hat die Schweizer Bundesverfassung entdeckt?", "label": 0}
-{"text": "meine Tochter hat Corona, was soll ich tun?", "label": 1}
-{"text": "Wie viele Einwohner hat Lugano?", "label": 0}
-{"text": "Ist das Licht im Küche noch an?", "label": 0}
-{"text": "Was hat Elias mir geschrieben?", "label": 1}
-{"text": "Welche Zutaten passen zu Zopf?", "label": 0}
-{"text": "Wie warm ist es im Bad?", "label": 0}
-{"text": "Wer hat die Fotosynthese entdeckt?", "label": 0}
-{"text": "Hat meine Mutter morgen Therapie?", "label": 1}
-{"text": "Wie sage ich mein Vater, dass ich mich trennen will?", "label": 1}
-{"text": "Wie lange muss Rösti in den Ofen?", "label": 0}
-{"text": "Ist es im Wohnzimmer wärmer als im Wohnzimmer?", "label": 0}
-{"text": "Wann ist die Gerichtsverhandlung von meine Tochter?", "label": 1}
-{"text": "Wann ist der Nationalfeiertag?", "label": 0}
-{"text": "Was steht auf der Familienaufgaben?", "label": 1}
-{"text": "Was wünscht sich Anna zum Geburtstag?", "label": 1}
-{"text": "Welche Zutaten passen zu Älplermagronen?", "label": 0}
-{"text": "Ruf Sophie an.", "label": 1}
-{"text": "Was steht auf der To-do-Liste?", "label": 1}
-{"text": "Wie viel wiegt meine Tochter jetzt?", "label": 1}
-{"text": "Wie weit ist es von Olten nach Bern?", "label": 0}
-{"text": "Wo ist mein Mann gerade?", "label": 1}
-{"text": "Wann war meine Freundin zuletzt zu Hause?", "label": 1}
-{"text": "Ist mein Vater schon zu Hause?", "label": 1}
-{"text": "meine Frau hat Diabetes, was soll ich tun?", "label": 1}
-{"text": "Speichere das Passwort fürs E-Mail als 4711.", "label": 1}
-{"text": "Wie weit ist es von Zürich nach Bern?", "label": 0}
-{"text": "Ist das Licht im Kinderzimmer noch an?", "label": 0}
-{"text": "Wie lange ist meine Tochter schon krank?", "label": 1}
-{"text": "Wann hat Lea Geburtstag?", "label": 1}
-{"text": "Wer hat die Relativitätstheorie entdeckt?", "label": 0}
-{"text": "Hat meine Schwester morgen Therapie?", "label": 1}
-{"text": "Hat Anna angerufen?", "label": 1}
-{"text": "Erinnere mich, das Insulin zu nehmen.", "label": 1}
-{"text": "Stell die Heizung im Hobbyraum auf 21 Grad.", "label": 0}
-{"text": "Was ist die Hauptstadt von Island?", "label": 0}
-{"text": "Was ist 45 Prozent von 250?", "label": 0}
-{"text": "Ist gerade jemand zu Hause?", "label": 1}
-{"text": "Welche Lichter sind gerade an?", "label": 0}
-{"text": "Wann war Lukas zuletzt zu Hause?", "label": 1}
-{"text": "Wie viel wiegt Anna jetzt?", "label": 1}
-{"text": "meine Schwester und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Wie lange ist der Nachbar schon krank?", "label": 1}
-{"text": "meine Frau und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Wann ist die Gerichtsverhandlung von Anna?", "label": 1}
-{"text": "Wie sage ich der Nachbar, dass ich mich trennen will?", "label": 1}
-{"text": "Welche Sprache spricht man in Australien?", "label": 0}
-{"text": "Wie spät ist es jetzt in Mexiko?", "label": 0}
-{"text": "Wann wird der Schulden überwiesen?", "label": 1}
-{"text": "Mach die Stehlampe aus.", "label": 0}
-{"text": "Stell die Heizung im Kinderzimmer auf 20 Grad.", "label": 0}
-{"text": "Fahr die Storen im Garten runter.", "label": 0}
-{"text": "Was frisst ein Wal?", "label": 0}
-{"text": "Ist meine Frau schon zu Hause?", "label": 1}
-{"text": "Ruf Anna an.", "label": 1}
-{"text": "Welche Zutaten passen zu Lasagne?", "label": 0}
-{"text": "Ist Anna schon zu Hause?", "label": 1}
-{"text": "Wann kommt der Nachbar von der Spital zurück?", "label": 1}
-{"text": "Was wünscht sich Lukas zum Geburtstag?", "label": 1}
-{"text": "Was brauche ich für Apfelkuchen?", "label": 0}
-{"text": "Wann ist die Gerichtsverhandlung von mein Mann?", "label": 1}
-{"text": "Wie ist die Nummer von Jonas?", "label": 1}
-{"text": "Wann geht heute die Sonne unter?", "label": 0}
-{"text": "Welche Sprache spricht man in Island?", "label": 0}
-{"text": "Spiel Rockmusik.", "label": 0}
-{"text": "Was hat Noah mir geschrieben?", "label": 1}
-{"text": "Was wünscht sich mein Sohn zum Geburtstag?", "label": 1}
-{"text": "Fahr die Storen im Keller runter.", "label": 0}
-{"text": "Wie viel Rente bekommt mein Vater?", "label": 1}
-{"text": "Schick Elias eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Wann ist Ostern?", "label": 0}
-{"text": "Woher kommt das Wort Serendipität?", "label": 0}
-{"text": "Schick Mia eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Wann kommt meine Mutter von der Spital zurück?", "label": 1}
-{"text": "Was brauche ich für Gulasch?", "label": 0}
-{"text": "Speichere den Code der Alarmanlage als 4711.", "label": 1}
-{"text": "Wie viel Solarstrom produzieren wir gerade?", "label": 0}
-{"text": "Wie viel wiegt Lukas jetzt?", "label": 1}
-{"text": "Wie lange muss Birchermüesli in den Ofen?", "label": 0}
-{"text": "Stell einen Timer auf 45 Minuten.", "label": 0}
-{"text": "Ich glaube, mein Bruder betrügt mich.", "label": 1}
-{"text": "der Nachbar ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Ruf Noah an.", "label": 1}
-{"text": "Wann ist die Gerichtsverhandlung von meine Frau?", "label": 1}
-{"text": "mein Mann ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Stell einen Timer auf 20 Minuten.", "label": 0}
-{"text": "Wie wird das Wetter morgen in Aarau?", "label": 0}
-{"text": "Wann kommt Anna von der Schule zurück?", "label": 1}
-{"text": "Wecke mich in 5 Minuten.", "label": 0}
-{"text": "Ruf Elias an.", "label": 1}
-{"text": "Wann ist die Gerichtsverhandlung von Frau Keller?", "label": 1}
-{"text": "Was frisst ein Adler?", "label": 0}
-{"text": "Stell einen Timer auf 10 Minuten.", "label": 0}
-{"text": "Wie viel wiegt mein Mann jetzt?", "label": 1}
-{"text": "Wie viel Rente bekommt mein Partner?", "label": 1}
-{"text": "Wie viel Rente bekommt Lukas?", "label": 1}
-{"text": "Wie sage ich Oma, dass ich mich trennen will?", "label": 1}
-{"text": "Wo ist meine Freundin gerade?", "label": 1}
-{"text": "Ruf Lea an.", "label": 1}
-{"text": "Spiel die Charts.", "label": 0}
-{"text": "Wann war mein Mann zuletzt zu Hause?", "label": 1}
-{"text": "Wo wohnt Lukas?", "label": 1}
-{"text": "Was hilft gegen Migräne? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Was hat Anna mir geschrieben?", "label": 1}
-{"text": "Welche Sprache spricht man in Japan?", "label": 0}
-{"text": "Was wünscht sich meine Mutter zum Geburtstag?", "label": 1}
-{"text": "Was weisst du über schwarze Löcher?", "label": 0}
-{"text": "Ist das Licht im Büro noch an?", "label": 0}
-{"text": "Wann ist die Gerichtsverhandlung von mein Sohn?", "label": 1}
-{"text": "Wo wohnt Jonas?", "label": 1}
-{"text": "Was hilft gegen Diabetes? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Was verdient der Nachbar?", "label": 1}
-{"text": "Wie sage ich meine Tochter, dass ich mich trennen will?", "label": 1}
-{"text": "Was weisst du über das Matterhorn?", "label": 0}
-{"text": "Wie wird das Wetter morgen in Lugano?", "label": 0}
-{"text": "Wie ist die Nummer von Lukas?", "label": 1}
-{"text": "Wie viel Rente bekommt meine Schwester?", "label": 1}
-{"text": "Ist es im Keller wärmer als im Wohnzimmer?", "label": 0}
-{"text": "Ruf Jonas an.", "label": 1}
-{"text": "Wann ist die nächste Sonnenfinsternis?", "label": 0}
-{"text": "Was ist die Hauptstadt von Kanada?", "label": 0}
-{"text": "mein Sohn ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Spiel Mani Matter.", "label": 0}
-{"text": "Ist der Tumbler schon fertig?", "label": 0}
-{"text": "Wie mache ich Zopf?", "label": 0}
-{"text": "Wie lange ist meine Schwester schon krank?", "label": 1}
-{"text": "Rechne 100 Fahrenheit in Celsius um.", "label": 0}
-{"text": "Ist der Geschirrspüler schon fertig?", "label": 0}
-{"text": "meine Mutter und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Wie viel wiegt mein Partner jetzt?", "label": 1}
-{"text": "Wann war mein Sohn zuletzt zu Hause?", "label": 1}
-{"text": "Anna und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Wo wohnt Elias?", "label": 1}
-{"text": "Woher kommt das Wort Föhn?", "label": 0}
-{"text": "Schick Noah eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Ich glaube, mein Sohn betrügt mich.", "label": 1}
-{"text": "Speichere den PIN der Bankkarte als 4711.", "label": 1}
-{"text": "Um wie viel Uhr ist mein Partner heute gegangen?", "label": 1}
-{"text": "Wann kommt mein Mann von der Schule zurück?", "label": 1}
-{"text": "Um wie viel Uhr ist Anna heute gegangen?", "label": 1}
-{"text": "Wann hat Noah Geburtstag?", "label": 1}
-{"text": "Wann war meine Tochter zuletzt zu Hause?", "label": 1}
-{"text": "Was hat Lukas mir geschrieben?", "label": 1}
-{"text": "Wecke mich in 20 Minuten.", "label": 0}
-{"text": "Wie ist die Luftqualität in Genf?", "label": 0}
-{"text": "Stell die Heizung im Büro auf 21 Grad.", "label": 0}
-{"text": "Ist das Licht im Schlafzimmer noch an?", "label": 0}
-{"text": "Was ist die Hauptstadt von Norwegen?", "label": 0}
-{"text": "Ist Oma schon zu Hause?", "label": 1}
-{"text": "Wie viel sind 20 Euro in Franken?", "label": 0}
-{"text": "Wann kommt mein Partner von der Training zurück?", "label": 1}
-{"text": "Wie buchstabiert man Fernweh?", "label": 0}
-{"text": "Was frisst ein Murmeltier?", "label": 0}
-{"text": "Schick Herr Brunner eine Nachricht, dass ich später komme.", "label": 1}
-{"text": "Hat Lukas morgen Therapie?", "label": 1}
-{"text": "Schalte den Ventilator ein.", "label": 0}
-{"text": "Was ist 10 Prozent von 250?", "label": 0}
-{"text": "Wie lange muss Apfelkuchen in den Ofen?", "label": 0}
-{"text": "Wie ist die Luftqualität in Luzern?", "label": 0}
-{"text": "Was ist 20 Prozent von 250?", "label": 0}
-{"text": "Was verdient Frau Keller?", "label": 1}
-{"text": "Wie mache ich Älplermagronen?", "label": 0}
-{"text": "Wo ist meine Frau gerade?", "label": 1}
-{"text": "Ist es im Garten wärmer als im Wohnzimmer?", "label": 0}
-{"text": "Wann kommt mein Sohn von der Training zurück?", "label": 1}
-{"text": "Erklär mir schwarze Löcher.", "label": 0}
-{"text": "Wie schreibt man Rhythmus?", "label": 0}
-{"text": "Ist die Waschmaschine schon fertig?", "label": 0}
-{"text": "Wie warm ist es im Kinderzimmer?", "label": 0}
-{"text": "der Nachbar und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Hat Lea angerufen?", "label": 1}
-{"text": "Wann kommt Oma von der Grossmutter zurück?", "label": 1}
-{"text": "Wie spät ist es jetzt in Australien?", "label": 0}
-{"text": "Auf welchen Wochentag fällt der Sommeranfang?", "label": 0}
-{"text": "Ist die Wärmepumpe schon fertig?", "label": 0}
-{"text": "Wie viel wiegt meine Mutter jetzt?", "label": 1}
-{"text": "Was wünscht sich meine Tochter zum Geburtstag?", "label": 1}
-{"text": "Was bedeutet Photon?", "label": 0}
-{"text": "Wer hat den Klimawandel entdeckt?", "label": 0}
-{"text": "Wie warm ist es im Hobbyraum?", "label": 0}
-{"text": "der Nachbar hat Rückenschmerzen, was soll ich tun?", "label": 1}
-{"text": "Wie viel Rente bekommt der Nachbar?", "label": 1}
-{"text": "Wie wird das Wetter morgen in Luzern?", "label": 0}
-{"text": "Mach die Heizung im Bad aus.", "label": 0}
-{"text": "Hat Herr Brunner angerufen?", "label": 1}
-{"text": "Was hat Mia mir geschrieben?", "label": 1}
-{"text": "Um wie viel Uhr ist mein Vater heute gegangen?", "label": 1}
-{"text": "Schalte den Staubsauger ein.", "label": 0}
-{"text": "Lies mir die Wunschliste vor.", "label": 1}
-{"text": "Wo wohnt Lea?", "label": 1}
-{"text": "Wie sage ich mein Bruder, dass ich mich trennen will?", "label": 1}
-{"text": "Wer hat Vulkane entdeckt?", "label": 0}
-{"text": "Wie buchstabiert man Gemütlichkeit?", "label": 0}
-{"text": "Ist mein Bruder schon zu Hause?", "label": 1}
-{"text": "Wie lange muss Älplermagronen in den Ofen?", "label": 0}
-{"text": "Warum ist der Himmel blau?", "label": 0}
-{"text": "Wann hat Anna Geburtstag?", "label": 1}
-{"text": "Was frisst ein Elefant?", "label": 0}
-{"text": "Wie lange ist meine Freundin schon krank?", "label": 1}
-{"text": "Wie ist die Nummer von Elias?", "label": 1}
-{"text": "Ist es im Bad wärmer als im Wohnzimmer?", "label": 0}
-{"text": "Wie viel Rente bekommt Oma?", "label": 1}
-{"text": "Stell die Heizung im Schlafzimmer auf 21 Grad.", "label": 0}
-{"text": "Wie viel wiegt meine Frau jetzt?", "label": 1}
-{"text": "Ist das Licht im Hobbyraum noch an?", "label": 0}
-{"text": "Was wünscht sich mein Mann zum Geburtstag?", "label": 1}
-{"text": "Was steht auf der Einkaufsliste?", "label": 1}
-{"text": "Rechne 3 Tassen in Milliliter um.", "label": 0}
-{"text": "Was weisst du über Vulkane?", "label": 0}
-{"text": "Wie lange ist mein Sohn schon krank?", "label": 1}
-{"text": "Wie spät ist es jetzt in Japan?", "label": 0}
-{"text": "Wie spät ist es jetzt in Ägypten?", "label": 0}
-{"text": "Stell die Heizung im Schlafzimmer auf 22 Grad.", "label": 0}
-{"text": "Wie ist die Nummer von Sophie?", "label": 1}
-{"text": "Ich glaube, meine Mutter betrügt mich.", "label": 1}
-{"text": "Wie ist die Luftqualität in Zürich?", "label": 0}
-{"text": "Um wie viel Uhr ist meine Tochter heute gegangen?", "label": 1}
-{"text": "Woher kommt das Wort Fernweh?", "label": 0}
-{"text": "Wie viel wiegt eine Schnecke?", "label": 0}
-{"text": "Was bedeutet Föhn?", "label": 0}
-{"text": "Was steht auf der Packliste?", "label": 1}
-{"text": "Wann wird der Kreditkartenabrechnung überwiesen?", "label": 1}
-{"text": "Was ist die Hauptstadt von Ägypten?", "label": 0}
-{"text": "Wie warm ist es im Wohnzimmer?", "label": 0}
-{"text": "Wie wird das Wetter morgen in Olten?", "label": 0}
-{"text": "Wie mache ich Lasagne?", "label": 0}
-{"text": "Wie viel sind 3 Tassen in Milliliter?", "label": 0}
-{"text": "Wann ist die Gerichtsverhandlung von Lukas?", "label": 1}
-{"text": "Wie sage ich mein Sohn, dass ich mich trennen will?", "label": 1}
-{"text": "Was weisst du über den Gotthardtunnel?", "label": 0}
-{"text": "Wann kommt mein Mann von der Ferien zurück?", "label": 1}
-{"text": "Ich glaube, Oma betrügt mich.", "label": 1}
-{"text": "Wie ist die Nummer von Herr Brunner?", "label": 1}
-{"text": "Ist meine Schwester schon zu Hause?", "label": 1}
-{"text": "Wie lange ist Anna schon krank?", "label": 1}
-{"text": "Wann kommt mein Mann von der Spital zurück?", "label": 1}
-{"text": "Speichere das WLAN-Passwort als 4711.", "label": 1}
-{"text": "Ist das Haus abgeschlossen, wenn alle weg sind?", "label": 1}
-{"text": "Was verdient meine Mutter?", "label": 1}
-{"text": "Ich glaube, Lukas betrügt mich.", "label": 1}
-{"text": "Erzähl mir etwas über die Geschichte von Aarau.", "label": 0}
-{"text": "Was wünscht sich Oma zum Geburtstag?", "label": 1}
-{"text": "Wie mache ich Gulasch?", "label": 0}
-{"text": "Wie ist die Luftqualität in Lugano?", "label": 0}
-{"text": "Rechne 1 Liter in Gallonen um.", "label": 0}
-{"text": "Wie spät ist es jetzt in Kanada?", "label": 0}
-{"text": "Wo ist meine Mutter gerade?", "label": 1}
-{"text": "Wie ist die Nummer von Anna?", "label": 1}
-{"text": "Wann wird der Kontostand überwiesen?", "label": 1}
-{"text": "Hat mein Sohn morgen Therapie?", "label": 1}
-{"text": "Ist meine Freundin schon zu Hause?", "label": 1}
-{"text": "Wo wohnt Mia?", "label": 1}
-{"text": "Lukas ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Hat Opa morgen Therapie?", "label": 1}
-{"text": "Was verdient mein Vater?", "label": 1}
-{"text": "Was hilft gegen Corona? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Wie ist die Luftqualität in Aarau?", "label": 0}
-{"text": "Was ist die Hauptstadt von Australien?", "label": 0}
-{"text": "Wo ist mein Vater gerade?", "label": 1}
-{"text": "Was verdient meine Frau?", "label": 1}
-{"text": "Wie viel sind 5 Meilen in Kilometer?", "label": 0}
-{"text": "Stell einen Timer auf 25 Minuten.", "label": 0}
-{"text": "Ist es im Schlafzimmer wärmer als im Wohnzimmer?", "label": 0}
-{"text": "Ist das Licht im Garten noch an?", "label": 0}
-{"text": "Was frisst ein Pinguin?", "label": 0}
-{"text": "Was hat Lea mir geschrieben?", "label": 1}
-{"text": "Erklär mir die Schweizer Bundesverfassung.", "label": 0}
-{"text": "Erinnere mich, das Blutdruckmittel zu nehmen.", "label": 1}
-{"text": "Wann hat Mia Geburtstag?", "label": 1}
-{"text": "Was wünscht sich meine Freundin zum Geburtstag?", "label": 1}
-{"text": "Wann war mein Bruder zuletzt zu Hause?", "label": 1}
-{"text": "Wo ist Anna gerade?", "label": 1}
-{"text": "Fahr die Storen im Küche runter.", "label": 0}
-{"text": "Wecke mich in 30 Minuten.", "label": 0}
-{"text": "Fahr die Storen im Kinderzimmer runter.", "label": 0}
-{"text": "Speichere das Passwort vom Laptop als 4711.", "label": 1}
-{"text": "Stell einen Timer auf 15 Minuten.", "label": 0}
-{"text": "Woher kommt das Wort Zeitgeist?", "label": 0}
-{"text": "Wie viel sind 100 Fahrenheit in Celsius?", "label": 0}
-{"text": "Woher kommt das Wort Allmend?", "label": 0}
-{"text": "Wann war Opa zuletzt zu Hause?", "label": 1}
-{"text": "Wie buchstabiert man Zeitgeist?", "label": 0}
-{"text": "Oma hat einen Bandscheibenvorfall, was soll ich tun?", "label": 1}
-{"text": "Lukas und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Erklär mir die Fotosynthese.", "label": 0}
-{"text": "Ist es im Kinderzimmer wärmer als im Wohnzimmer?", "label": 0}
-{"text": "Erinnere mich, Antidepressiva zu nehmen.", "label": 1}
-{"text": "Was brauche ich für Älplermagronen?", "label": 0}
-{"text": "Wo wohnt Frau Keller?", "label": 1}
-{"text": "Wie viel wiegt ein Murmeltier?", "label": 0}
-{"text": "mein Sohn hat Migräne, was soll ich tun?", "label": 1}
-{"text": "Wie weit ist es von Aarau nach Bern?", "label": 0}
-{"text": "Wo ist meine Tochter gerade?", "label": 1}
-{"text": "Wie lange muss Lasagne in den Ofen?", "label": 0}
-{"text": "Wann ist Pfingsten?", "label": 0}
-{"text": "Wie ist die Luftqualität in Olten?", "label": 0}
-{"text": "Ruf Frau Keller an.", "label": 1}
-{"text": "Um wie viel Uhr ist mein Bruder heute gegangen?", "label": 1}
-{"text": "Was ist 25 Prozent von 250?", "label": 0}
-{"text": "Wie schnell ist ein Pinguin?", "label": 0}
-{"text": "Wie viel wiegt Oma jetzt?", "label": 1}
-{"text": "Wie lange ist mein Mann schon krank?", "label": 1}
-{"text": "Wann hat Elias Geburtstag?", "label": 1}
-{"text": "Wie schnell ist eine Katze?", "label": 0}
-{"text": "Mach das Licht in der Küche aus.", "label": 0}
-{"text": "meine Freundin ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Wann kommt meine Frau von der Training zurück?", "label": 1}
-{"text": "Wecke mich in 25 Minuten.", "label": 0}
-{"text": "Ist meine Tochter schon zu Hause?", "label": 1}
-{"text": "Schalte das Radio ein.", "label": 0}
-{"text": "Was wünscht sich Opa zum Geburtstag?", "label": 1}
-{"text": "Wie lange muss Gulasch in den Ofen?", "label": 0}
-{"text": "mein Vater ist schwanger, wann ist der Geburtstermin?", "label": 1}
-{"text": "Was weisst du über die Römer?", "label": 0}
-{"text": "Wie viel Rente bekommt mein Sohn?", "label": 1}
-{"text": "Wie viel Rente bekommt Opa?", "label": 1}
-{"text": "Wie viel Strom braucht der Saugroboter gerade?", "label": 0}
-{"text": "Wie weit ist es von Genf nach Bern?", "label": 0}
-{"text": "Wie ist die Luftqualität in Basel?", "label": 0}
-{"text": "Lies mir die Familienaufgaben vor.", "label": 1}
-{"text": "Was ist die Hauptstadt von Japan?", "label": 0}
-{"text": "meine Schwester hat Bluthochdruck, was soll ich tun?", "label": 1}
-{"text": "Was verdient Oma?", "label": 1}
-{"text": "Ich glaube, der Nachbar betrügt mich.", "label": 1}
-{"text": "Was brauche ich für Lasagne?", "label": 0}
-{"text": "Mach den Staubsauger aus.", "label": 0}
-{"text": "Um wie viel Uhr ist meine Schwester heute gegangen?", "label": 1}
-{"text": "Erklär mir den Klimawandel.", "label": 0}
-{"text": "Fahr die Storen im Wohnzimmer runter.", "label": 0}
-{"text": "Hat mein Partner morgen Therapie?", "label": 1}
-{"text": "Wie viel wiegt ein Adler?", "label": 0}
-{"text": "Wie viel Strom braucht die Waschmaschine gerade?", "label": 0}
-{"text": "Stell die Heizung im Küche auf 21 Grad.", "label": 0}
-{"text": "Wie viel Strom braucht die Wärmepumpe gerade?", "label": 0}
-{"text": "Wie viel wiegt Opa jetzt?", "label": 1}
-{"text": "Was bedeutet Serendipität?", "label": 0}
-{"text": "Mach die Weihnachtsbeleuchtung aus.", "label": 0}
-{"text": "Hat meine Freundin morgen Therapie?", "label": 1}
-{"text": "Hat Oma morgen Therapie?", "label": 1}
-{"text": "Wie viel wiegt eine Biene?", "label": 0}
-{"text": "Opa und ich haben Streit, was soll ich machen?", "label": 1}
-{"text": "Was hilft gegen Bluthochdruck? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Erklär mir die Relativitätstheorie.", "label": 0}
-{"text": "Wie viel sind 1 Liter in Gallonen?", "label": 0}
-{"text": "Was hilft gegen Fieber? Ich habe das seit einer Woche.", "label": 1}
-{"text": "Was ist die Hauptstadt von Kanada?", "label": 0}
-{"text": "Was weisst du über die Schweizer Bundesverfassung?", "label": 0}
+{"text": "Wie hoch ist der Mount Everest?", "label": 0, "group": "5b63431959"}
+{"text": "Schalte das Licht in der Küche ein.", "label": 0, "group": "07fbf1eabc"}
+{"text": "Welche Sprache spricht man in Japan?", "label": 0, "group": "bf9ac531d4"}
+{"text": "Wann kommt Anna aus der Schule zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Was wünscht sich mein Mann zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Was ist die Hauptstadt von Kanada?", "label": 0, "group": "c3c63bc2a0"}
+{"text": "Was ist 30 Prozent von 250?", "label": 0, "group": "abda713092"}
+{"text": "Erzähl mir einen Witz, in dem eine Biene vorkommt.", "label": 0, "group": "f6220d3e7e"}
+{"text": "Wo ist mein Bruder gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Was hat Mia mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Schalte das Radio ein.", "label": 0, "group": "07fbf1eabc"}
+{"text": "Wie lange läuft der Saugroboter noch?", "label": 0, "group": "c3397327c7"}
+{"text": "Wie viel wiegt eine Biene?", "label": 0, "group": "8f1d8a816f"}
+{"text": "Hat Elias angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Was verdient Anna?", "label": 1, "group": "b82078fb43"}
+{"text": "Wie viel Rente bekommt mein Bruder?", "label": 1, "group": "d7bf333f10"}
+{"text": "Erinnere mich, die Antibiotika zu nehmen.", "label": 1, "group": "918cb55280"}
+{"text": "Wie lange läuft der Geschirrspüler noch?", "label": 0, "group": "c3397327c7"}
+{"text": "Wo ist meine Schwester gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Wann war meine Freundin zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Wo ist meine Tochter gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Wie viel wiegt meine Freundin jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Wie buchstabiert man Zeitgeist?", "label": 0, "group": "5af1875b60"}
+{"text": "Wie lange braucht man für Risotto?", "label": 0, "group": "1ec6c24e47"}
+{"text": "Meine Tochter ist schwanger, wann ist der Geburtstermin?", "label": 1, "group": "af2cf05f68"}
+{"text": "Was wünscht sich meine Freundin zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Hat Anna angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Wie viel wiegt meine Mutter jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Lies mir die Einkaufsliste vor.", "label": 1, "group": "e999cdb69f"}
+{"text": "Welche Sprache spricht man in Norwegen?", "label": 0, "group": "bf9ac531d4"}
+{"text": "Ist meine Frau schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Wie mache ich Gemüsesuppe?", "label": 0, "group": "89dc2628cd"}
+{"text": "Wie buchstabiert man Weltschmerz?", "label": 0, "group": "5af1875b60"}
+{"text": "Wie buchstabiert man Serendipität?", "label": 0, "group": "5af1875b60"}
+{"text": "Was ist die Hauptstadt von Norwegen?", "label": 0, "group": "c3c63bc2a0"}
+{"text": "Stell einen Timer auf 20 Minuten.", "label": 0, "group": "ae7ff5cb6f"}
+{"text": "Wie lange ist Frau Schmidt schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Erzähl mir etwas über die Geschichte von Köln.", "label": 0, "group": "5c7bd8773f"}
+{"text": "Was ist die Hauptstadt von Mexiko?", "label": 0, "group": "c3c63bc2a0"}
+{"text": "Was brauche ich für Lasagne?", "label": 0, "group": "84c320ec85"}
+{"text": "Wie viel wiegt mein Sohn jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Wann wird mein Lohn überwiesen?", "label": 1, "group": "19d6f35e65"}
+{"text": "Was hat Anna mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Wann muss mein Partner vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Was ist 5 Prozent von 250?", "label": 0, "group": "abda713092"}
+{"text": "Mein Partner will sich trennen, wie sagen wir es den Kindern?", "label": 1, "group": "fcca55acdb"}
+{"text": "Was frisst ein Pinguin?", "label": 0, "group": "5cd3dadee4"}
+{"text": "Was weißt du über Vulkane?", "label": 0, "group": "cd5696a71e"}
+{"text": "Wie viel Rente bekommt meine Schwester?", "label": 1, "group": "d7bf333f10"}
+{"text": "Wie lange braucht man für Gemüsesuppe?", "label": 0, "group": "1ec6c24e47"}
+{"text": "Wann wird die Steuerrückzahlung überwiesen?", "label": 1, "group": "19d6f35e65"}
+{"text": "Wie buchstabiert man Algorithmus?", "label": 0, "group": "5af1875b60"}
+{"text": "Wie viel Strom verbraucht die Wärmepumpe gerade?", "label": 0, "group": "e432bdf095"}
+{"text": "Hat Jonas angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Wecke mich in 30 Minuten.", "label": 0, "group": "0bdc88b1bb"}
+{"text": "Wie alt wird ein Adler?", "label": 0, "group": "564f3db32e"}
+{"text": "Wann war meine Schwester zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Erzähl mir etwas über die Geschichte von Hamburg.", "label": 0, "group": "5c7bd8773f"}
+{"text": "Warum ist der Himmel blau?", "label": 0, "group": "93d22c78d1"}
+{"text": "Lea ist schwanger, wann ist der Geburtstermin?", "label": 1, "group": "af2cf05f68"}
+{"text": "Auf welchen Wochentag fällt die nächste Sonnenfinsternis?", "label": 0, "group": "0d27f68a81"}
+{"text": "Woher kommt das Wort Zeitgeist?", "label": 0, "group": "a6dcee6e45"}
+{"text": "Was verdient der Nachbar?", "label": 1, "group": "b82078fb43"}
+{"text": "Wie buchstabiert man Wanderlust?", "label": 0, "group": "5af1875b60"}
+{"text": "Was steht auf der Wunschliste?", "label": 1, "group": "0d39f28925"}
+{"text": "Was hilft gegen Grippe? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Wecke mich in 15 Minuten.", "label": 0, "group": "0bdc88b1bb"}
+{"text": "Wie viel Rente bekommt meine Frau?", "label": 1, "group": "d7bf333f10"}
+{"text": "Wecke mich in 10 Minuten.", "label": 0, "group": "0bdc88b1bb"}
+{"text": "Wie buchstabiert man Photon?", "label": 0, "group": "5af1875b60"}
+{"text": "Stell einen Timer auf 10 Minuten.", "label": 0, "group": "ae7ff5cb6f"}
+{"text": "Wie schnell ist ein Elefant?", "label": 0, "group": "45d7188264"}
+{"text": "Wie viel wiegt ein Eichhörnchen?", "label": 0, "group": "8f1d8a816f"}
+{"text": "Was hat Jonas mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Wie ist die Nummer von Lea?", "label": 1, "group": "5218fcd851"}
+{"text": "Fahr die Rollläden im Keller runter.", "label": 0, "group": "46e104b6ec"}
+{"text": "Wann muss mein Bruder vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Wo wohnt Noah?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Meine Tochter hat eine Allergie, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Ist Anna schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Welche Zutaten passen zu Gulasch?", "label": 0, "group": "047c4fbd60"}
+{"text": "Was läuft gerade im Radio?", "label": 0, "group": "df3e277ee7"}
+{"text": "Ist mein Mann schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Wann war der Nachbar zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Wann hat Lea Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Schalte den Ventilator ein.", "label": 0, "group": "07fbf1eabc"}
+{"text": "Wie schnell ist eine Biene?", "label": 0, "group": "45d7188264"}
+{"text": "Wie viel wiegt ein Pinguin?", "label": 0, "group": "8f1d8a816f"}
+{"text": "Wie ist die Nummer von Sophie?", "label": 1, "group": "5218fcd851"}
+{"text": "Was steht auf der To-do-Liste?", "label": 1, "group": "0d39f28925"}
+{"text": "Übersetze guten Morgen ins Italienische.", "label": 0, "group": "ae7b2c52d4"}
+{"text": "Welche Zutaten passen zu Lasagne?", "label": 0, "group": "047c4fbd60"}
+{"text": "Wie viel sind 2 Pfund in Kilo?", "label": 0, "group": "8e8d37eeb8"}
+{"text": "Stell die Heizung im Keller auf 23 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Schick Noah eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Wann muss meine Mutter vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Was brauche ich für Kartoffelsalat?", "label": 0, "group": "84c320ec85"}
+{"text": "Wie ist die Nummer von Lukas?", "label": 1, "group": "5218fcd851"}
+{"text": "Frau Schmidt hat Rückenschmerzen, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Was ist die Wurzel aus 20?", "label": 0, "group": "2e840749fd"}
+{"text": "Wann muss Oma vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Ist mein Partner schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Was verdient Oma?", "label": 1, "group": "b82078fb43"}
+{"text": "Was ist die Wurzel aus 25?", "label": 0, "group": "2e840749fd"}
+{"text": "Was brauche ich für Müsli?", "label": 0, "group": "84c320ec85"}
+{"text": "Wie viel Strom braucht die Wärmepumpe gerade?", "label": 0, "group": "77bdcbc1c9"}
+{"text": "Wann ist Ostern?", "label": 0, "group": "51df6e215e"}
+{"text": "Wie buchstabiert man Gemütlichkeit?", "label": 0, "group": "5af1875b60"}
+{"text": "Was steht auf der Einkaufsliste?", "label": 1, "group": "0d39f28925"}
+{"text": "Hat Mia angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Erzähl mir etwas über die Geschichte von Rom.", "label": 0, "group": "5c7bd8773f"}
+{"text": "Wie viel wiegt eine Schnecke?", "label": 0, "group": "8f1d8a816f"}
+{"text": "Wann kommt mein Mann aus der Schule zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Wie ist die Nummer von Anna?", "label": 1, "group": "5218fcd851"}
+{"text": "Wie viel wiegt meine Schwester jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Was bedeutet Weltschmerz?", "label": 0, "group": "e06a6154af"}
+{"text": "Stell die Heizung im Hobbyraum auf 19 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Wie viel Rente bekommt mein Vater?", "label": 1, "group": "d7bf333f10"}
+{"text": "Was schreibe ich dem Anwalt wegen der Scheidung?", "label": 1, "group": "956591212a"}
+{"text": "Was wünscht sich mein Bruder zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Was wünscht sich mein Sohn zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Ist es im Wohnzimmer wärmer als draußen?", "label": 0, "group": "9649178ef9"}
+{"text": "Wie viel sind 5 Meilen in Kilometer?", "label": 0, "group": "8e8d37eeb8"}
+{"text": "Wann muss meine Tochter vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Mein Partner und ich haben Streit, was soll ich machen?", "label": 1, "group": "cb0c88c0c6"}
+{"text": "Was hilft gegen Rückenschmerzen? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Auf welchen Wochentag fällt Pfingsten?", "label": 0, "group": "0d27f68a81"}
+{"text": "Wie lange ist Anna schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Hat mein Vater morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Brauche ich heute einen Schirm?", "label": 0, "group": "de70672fdb"}
+{"text": "Wo wohnt Anna?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Meine Partnerin will sich trennen, wie sagen wir es den Kindern?", "label": 1, "group": "fcca55acdb"}
+{"text": "Lies mir die Packliste vor.", "label": 1, "group": "e999cdb69f"}
+{"text": "Wo ist mein Sohn gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Ist Oma schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Was weißt du über die Fotosynthese?", "label": 0, "group": "cd5696a71e"}
+{"text": "Woher kommt das Wort Fernweh?", "label": 0, "group": "a6dcee6e45"}
+{"text": "Wie ist die Nummer von Mia?", "label": 1, "group": "5218fcd851"}
+{"text": "Fahr die Rollläden im Hobbyraum runter.", "label": 0, "group": "46e104b6ec"}
+{"text": "Wie schnell ist ein Adler?", "label": 0, "group": "45d7188264"}
+{"text": "Meine Partnerin und ich haben Streit, was soll ich machen?", "label": 1, "group": "cb0c88c0c6"}
+{"text": "Wie lange läuft die Waschmaschine noch?", "label": 0, "group": "c3397327c7"}
+{"text": "Erinnere mich, Ibuprofen zu nehmen.", "label": 1, "group": "918cb55280"}
+{"text": "Wann ist der Sommeranfang?", "label": 0, "group": "51df6e215e"}
+{"text": "Wie schnell ist ein Wal?", "label": 0, "group": "45d7188264"}
+{"text": "Auf welchen Wochentag fällt die Zeitumstellung?", "label": 0, "group": "0d27f68a81"}
+{"text": "Wo ist Frau Schmidt gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Wecke mich in 45 Minuten.", "label": 0, "group": "0bdc88b1bb"}
+{"text": "Erinnere mich, das Blutdruckmittel zu nehmen.", "label": 1, "group": "918cb55280"}
+{"text": "Speichere den Code der Alarmanlage als 4711.", "label": 1, "group": "173fc07d17"}
+{"text": "Wie weit ist es von Paris nach Prag?", "label": 0, "group": "575f41554d"}
+{"text": "Um wie viel Uhr ist Oma heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Was verdient mein Sohn?", "label": 1, "group": "b82078fb43"}
+{"text": "Um wie viel Uhr ist Frau Schmidt heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Was ist die Hauptstadt von Japan?", "label": 0, "group": "c3c63bc2a0"}
+{"text": "Erzähl mir einen Witz, in dem ein Elefant vorkommt.", "label": 0, "group": "f6220d3e7e"}
+{"text": "Was hat Noah mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Was weißt du über den Eiffelturm?", "label": 0, "group": "cd5696a71e"}
+{"text": "Wie viel Strom braucht der Wäschetrockner gerade?", "label": 0, "group": "77bdcbc1c9"}
+{"text": "Wo ist meine Freundin gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Wo wohnt Lea?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Ist es im Büro wärmer als draußen?", "label": 0, "group": "9649178ef9"}
+{"text": "Meine Freundin hat Corona, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Wie schnell ist ein Pinguin?", "label": 0, "group": "45d7188264"}
+{"text": "Erzähl mir etwas über die Geschichte von London.", "label": 0, "group": "5c7bd8773f"}
+{"text": "Wie spät ist es jetzt in Ägypten?", "label": 0, "group": "3c3c32dd74"}
+{"text": "Wann muss Lukas vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Ist meine Tochter schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Wie mache ich Apfelkuchen?", "label": 0, "group": "89dc2628cd"}
+{"text": "Meine Frau ist schwanger, wann ist der Geburtstermin?", "label": 1, "group": "af2cf05f68"}
+{"text": "Meine Freundin will sich trennen, wie sagen wir es den Kindern?", "label": 1, "group": "fcca55acdb"}
+{"text": "Wie spät ist es jetzt in Japan?", "label": 0, "group": "3c3c32dd74"}
+{"text": "Wie viel wiegt ein Elefant?", "label": 0, "group": "8f1d8a816f"}
+{"text": "Meine Mutter hat Bluthochdruck, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Wo ist Anna gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Was bedeutet Wanderlust?", "label": 0, "group": "e06a6154af"}
+{"text": "Wie ist die Luftqualität in Hamburg?", "label": 0, "group": "a14bf6c0ef"}
+{"text": "Wie lange ist der Nachbar schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Was ist 25 Prozent von 250?", "label": 0, "group": "abda713092"}
+{"text": "Woher kommt das Wort Gemütlichkeit?", "label": 0, "group": "a6dcee6e45"}
+{"text": "Welche Sprache spricht man in Island?", "label": 0, "group": "bf9ac531d4"}
+{"text": "Wie mache ich Pfannkuchen?", "label": 0, "group": "89dc2628cd"}
+{"text": "Hat meine Freundin morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Was bedeutet Photon?", "label": 0, "group": "e06a6154af"}
+{"text": "Wie alt wird ein Pinguin?", "label": 0, "group": "564f3db32e"}
+{"text": "Ich glaube, meine Partnerin betrügt mich.", "label": 1, "group": "a213238f1a"}
+{"text": "Ist die Waschmaschine schon fertig?", "label": 0, "group": "bd039f3442"}
+{"text": "Wie viele Tage hat der Februar in einem Schaltjahr?", "label": 0, "group": "446617c35e"}
+{"text": "Fahr die Rollläden in der Küche runter.", "label": 0, "group": "46e104b6ec"}
+{"text": "Was wünscht sich Opa zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Wie ist die Luftqualität in München?", "label": 0, "group": "a14bf6c0ef"}
+{"text": "Ich glaube, meine Frau betrügt mich.", "label": 1, "group": "a213238f1a"}
+{"text": "Hat Opa morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Schalte den Staubsauger ein.", "label": 0, "group": "07fbf1eabc"}
+{"text": "Welche Zutaten passen zu Risotto?", "label": 0, "group": "047c4fbd60"}
+{"text": "Wie viele Einwohner hat Köln?", "label": 0, "group": "8bb9b2d293"}
+{"text": "Auf welchen Wochentag fällt Ostern?", "label": 0, "group": "0d27f68a81"}
+{"text": "Was hat Frau Weber mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Wo ist meine Mutter gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Auf welchen Wochentag fällt Weihnachten?", "label": 0, "group": "0d27f68a81"}
+{"text": "Wie alt wird ein Elefant?", "label": 0, "group": "564f3db32e"}
+{"text": "Wie lange braucht man für Pfannkuchen?", "label": 0, "group": "1ec6c24e47"}
+{"text": "Fahr die Rollläden im Büro runter.", "label": 0, "group": "46e104b6ec"}
+{"text": "Wie weit ist es von Wien nach Prag?", "label": 0, "group": "575f41554d"}
+{"text": "Mia ist schwanger, wann ist der Geburtstermin?", "label": 1, "group": "af2cf05f68"}
+{"text": "Erinnere mich, die Schlaftabletten zu nehmen.", "label": 1, "group": "918cb55280"}
+{"text": "Wann muss Anna vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Erzähl mir einen Witz, in dem eine Schnecke vorkommt.", "label": 0, "group": "f6220d3e7e"}
+{"text": "Erzähl mir einen Witz, in dem eine Katze vorkommt.", "label": 0, "group": "f6220d3e7e"}
+{"text": "Wie lange läuft der Backofen noch?", "label": 0, "group": "c3397327c7"}
+{"text": "Wie viele Einwohner hat Paris?", "label": 0, "group": "8bb9b2d293"}
+{"text": "Erzähl mir einen Witz, in dem ein Wal vorkommt.", "label": 0, "group": "f6220d3e7e"}
+{"text": "Was frisst ein Elefant?", "label": 0, "group": "5cd3dadee4"}
+{"text": "Schick Anna eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Wann hat Sophie Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Mein Freund will sich trennen, wie sagen wir es den Kindern?", "label": 1, "group": "fcca55acdb"}
+{"text": "Was wünscht sich meine Frau zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Wann wird die Rente überwiesen?", "label": 1, "group": "19d6f35e65"}
+{"text": "Wann muss meine Schwester vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Wie ist die Luftfeuchtigkeit im Hobbyraum?", "label": 0, "group": "61efafaeb3"}
+{"text": "Was hilft gegen eine Depression? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Erzähl mir etwas über die Geschichte von Paris.", "label": 0, "group": "5c7bd8773f"}
+{"text": "Was weißt du über die Pyramiden von Gizeh?", "label": 0, "group": "cd5696a71e"}
+{"text": "Ist mein Bruder schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Wie viel Rente bekommt der Nachbar?", "label": 1, "group": "d7bf333f10"}
+{"text": "Wie voll ist der Akku vom Mähroboter?", "label": 0, "group": "2b2459d936"}
+{"text": "Ruf Sophie an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Hat meine Mutter morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Was ist die Wurzel aus 15?", "label": 0, "group": "2e840749fd"}
+{"text": "Wann muss Opa vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Wie weit ist es von Köln nach Prag?", "label": 0, "group": "575f41554d"}
+{"text": "Wo wohnt Sophie?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Ruf Anna an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Wie weit ist es von München nach Prag?", "label": 0, "group": "575f41554d"}
+{"text": "Was hat Elias mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Ruf Lea an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Ruf Mia an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Was weißt du über die Relativitätstheorie?", "label": 0, "group": "cd5696a71e"}
+{"text": "Was brauche ich für Gulasch?", "label": 0, "group": "84c320ec85"}
+{"text": "Hat mein Partner morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Schick Mia eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Regnet es heute noch?", "label": 0, "group": "00be98b245"}
+{"text": "Wie ist die Luftfeuchtigkeit im Kinderzimmer?", "label": 0, "group": "61efafaeb3"}
+{"text": "Meine Partnerin ist schwanger, wann ist der Geburtstermin?", "label": 1, "group": "af2cf05f68"}
+{"text": "Wie ist die Luftfeuchtigkeit im Büro?", "label": 0, "group": "61efafaeb3"}
+{"text": "Welche Sprache spricht man in Mexiko?", "label": 0, "group": "bf9ac531d4"}
+{"text": "Wie buchstabiert man Fernweh?", "label": 0, "group": "5af1875b60"}
+{"text": "Mach die Musik leiser.", "label": 0, "group": "a1dd412f41"}
+{"text": "Wann ist Pfingsten?", "label": 0, "group": "51df6e215e"}
+{"text": "Was bedeutet Fernweh?", "label": 0, "group": "e06a6154af"}
+{"text": "Wie viele Einwohner hat London?", "label": 0, "group": "8bb9b2d293"}
+{"text": "Wann wird das Kindergeld überwiesen?", "label": 1, "group": "19d6f35e65"}
+{"text": "Wie viel wiegt Anna jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Hat Sophie angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Erzähl mir etwas über die Geschichte von Wien.", "label": 0, "group": "5c7bd8773f"}
+{"text": "Meine Frau hat Diabetes, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Was steht auf der Packliste?", "label": 1, "group": "0d39f28925"}
+{"text": "Wie ist die Luftqualität in Paris?", "label": 0, "group": "a14bf6c0ef"}
+{"text": "Um wie viel Uhr ist Opa heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Gib mir eine Idee für das Abendessen.", "label": 0, "group": "f600d944a3"}
+{"text": "Wie viel wiegt mein Partner jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Was bedeutet Gemütlichkeit?", "label": 0, "group": "e06a6154af"}
+{"text": "Was wünscht sich meine Tochter zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Hat Lukas angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Erinnere mich, das Insulin zu nehmen.", "label": 1, "group": "918cb55280"}
+{"text": "Wann war meine Tochter zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Wann sind wir alle im Urlaub?", "label": 1, "group": "5eb56f2d09"}
+{"text": "Schalte die Stehlampe ein.", "label": 0, "group": "07fbf1eabc"}
+{"text": "Was verdient meine Schwester?", "label": 1, "group": "b82078fb43"}
+{"text": "Wie viel Solarstrom produzieren wir gerade?", "label": 0, "group": "c57d2572e5"}
+{"text": "Hat meine Tochter morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Mein Mann und ich haben Streit, was soll ich machen?", "label": 1, "group": "cb0c88c0c6"}
+{"text": "Wie lange ist meine Tochter schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Wann muss meine Frau vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Ist es im Kinderzimmer wärmer als draußen?", "label": 0, "group": "9649178ef9"}
+{"text": "Wie viel Rente bekommt meine Tochter?", "label": 1, "group": "d7bf333f10"}
+{"text": "Was frisst ein Wal?", "label": 0, "group": "5cd3dadee4"}
+{"text": "Stell die Heizung im Schlafzimmer auf 19 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Fahr die Rollläden im Kinderzimmer runter.", "label": 0, "group": "46e104b6ec"}
+{"text": "Ist meine Mutter schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Ruf Noah an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Schalte die Weihnachtsbeleuchtung ein.", "label": 0, "group": "07fbf1eabc"}
+{"text": "Ist meine Freundin schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Wann kommt Oma vom Arzt zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Wie viel Rente bekommt meine Freundin?", "label": 1, "group": "d7bf333f10"}
+{"text": "Wie mache ich Risotto?", "label": 0, "group": "89dc2628cd"}
+{"text": "Wie lange ist mein Bruder schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Wie ist die Nummer von Noah?", "label": 1, "group": "5218fcd851"}
+{"text": "Was weißt du über schwarze Löcher?", "label": 0, "group": "cd5696a71e"}
+{"text": "Was weißt du über den Klimawandel?", "label": 0, "group": "cd5696a71e"}
+{"text": "Was hat Lukas mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Wie viel Rente bekommt mein Sohn?", "label": 1, "group": "d7bf333f10"}
+{"text": "Fahr die Rollläden im Bad runter.", "label": 0, "group": "46e104b6ec"}
+{"text": "Wann war Opa zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Schick Sophie eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Starte den Staubsauger.", "label": 0, "group": "619824e40f"}
+{"text": "Wie weit ist es von Hamburg nach Prag?", "label": 0, "group": "575f41554d"}
+{"text": "Schick Lea eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Wann kommt mein Mann aus dem Krankenhaus zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Welche Sprache spricht man in Kanada?", "label": 0, "group": "bf9ac531d4"}
+{"text": "Speichere die PIN der Bankkarte als 4711.", "label": 1, "group": "173fc07d17"}
+{"text": "Fahr die Rollläden im Gästezimmer runter.", "label": 0, "group": "46e104b6ec"}
+{"text": "Wie ist die Luftqualität in Berlin?", "label": 0, "group": "a14bf6c0ef"}
+{"text": "Ist es im Keller wärmer als draußen?", "label": 0, "group": "9649178ef9"}
+{"text": "Wie spät ist es jetzt in Brasilien?", "label": 0, "group": "3c3c32dd74"}
+{"text": "Wann muss mein Vater vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Wann hat Elias Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Ruf Jonas an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Wie lange ist mein Vater schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Wann hat Lukas Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Wecke mich in 25 Minuten.", "label": 0, "group": "0bdc88b1bb"}
+{"text": "Was brauche ich für Gemüsesuppe?", "label": 0, "group": "84c320ec85"}
+{"text": "Wann kommt mein Sohn vom Training zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Wie viel sind 1 Liter in Gallonen?", "label": 0, "group": "8e8d37eeb8"}
+{"text": "Wie ist die Luftqualität in Wien?", "label": 0, "group": "a14bf6c0ef"}
+{"text": "Welche Zutaten passen zu Apfelkuchen?", "label": 0, "group": "047c4fbd60"}
+{"text": "Um wie viel Uhr ist meine Frau heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Wie lange braucht man für Lasagne?", "label": 0, "group": "1ec6c24e47"}
+{"text": "Wie viel Rente bekommt Frau Schmidt?", "label": 1, "group": "d7bf333f10"}
+{"text": "Wann war mein Vater zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Wie ist die Luftqualität in Rom?", "label": 0, "group": "a14bf6c0ef"}
+{"text": "Wie lange ist mein Mann schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Wie alt wird ein Eichhörnchen?", "label": 0, "group": "564f3db32e"}
+{"text": "Ruf Frau Schmidt an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Fahr die Rollläden im Wohnzimmer runter.", "label": 0, "group": "46e104b6ec"}
+{"text": "Schalte die Leselampe im Wohnzimmer ein.", "label": 0, "group": "07fbf1eabc"}
+{"text": "Wo wohnt Frau Weber?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Was hilft gegen Migräne? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Was ist die Wurzel aus 30?", "label": 0, "group": "2e840749fd"}
+{"text": "Wie viel Rente bekommt mein Partner?", "label": 1, "group": "d7bf333f10"}
+{"text": "Welche Sprache spricht man in Brasilien?", "label": 0, "group": "bf9ac531d4"}
+{"text": "Anna ist schwanger, wann ist der Geburtstermin?", "label": 1, "group": "af2cf05f68"}
+{"text": "Wie spät ist es jetzt in Mexiko?", "label": 0, "group": "3c3c32dd74"}
+{"text": "Was frisst ein Eichhörnchen?", "label": 0, "group": "5cd3dadee4"}
+{"text": "Um wie viel Uhr ist Anna heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Muss ich wegen des Bußgelds zur Polizei?", "label": 1, "group": "e112c4d9be"}
+{"text": "Wie ist die Nummer von Jonas?", "label": 1, "group": "5218fcd851"}
+{"text": "Wann war Lukas zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Ruf Frau Weber an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Wann ist Weihnachten?", "label": 0, "group": "51df6e215e"}
+{"text": "Wann hat Noah Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Wie viele Einwohner hat München?", "label": 0, "group": "8bb9b2d293"}
+{"text": "Erzähl mir etwas über die Geschichte von Berlin.", "label": 0, "group": "5c7bd8773f"}
+{"text": "Ich glaube, meine Freundin betrügt mich.", "label": 1, "group": "a213238f1a"}
+{"text": "Was verdient meine Mutter?", "label": 1, "group": "b82078fb43"}
+{"text": "Stell die Heizung im Kinderzimmer auf 23 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Ich glaube, mein Freund betrügt mich.", "label": 1, "group": "a213238f1a"}
+{"text": "Wo wohnt Frau Schmidt?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Stell einen Timer auf 15 Minuten.", "label": 0, "group": "ae7ff5cb6f"}
+{"text": "Was bedeutet Serendipität?", "label": 0, "group": "e06a6154af"}
+{"text": "Welche Zutaten passen zu Kartoffelsalat?", "label": 0, "group": "047c4fbd60"}
+{"text": "Wie viele Einwohner hat Berlin?", "label": 0, "group": "8bb9b2d293"}
+{"text": "Stell die Heizung im Büro auf 22 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Wann kommt mein Partner vom Training zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Welche Lichter sind gerade an?", "label": 0, "group": "45c4c4a769"}
+{"text": "Was frisst eine Biene?", "label": 0, "group": "5cd3dadee4"}
+{"text": "Schalte den Fernseher ein.", "label": 0, "group": "07fbf1eabc"}
+{"text": "Was hat Lea mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Stell einen Timer auf 45 Minuten.", "label": 0, "group": "ae7ff5cb6f"}
+{"text": "Was wünscht sich Anna zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Wann kommt der Nachbar aus dem Krankenhaus zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Wann kommt meine Frau vom Training zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Was frisst eine Schnecke?", "label": 0, "group": "5cd3dadee4"}
+{"text": "Um wie viel Uhr ist mein Vater heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Schick Jonas eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Wie viel wiegt mein Mann jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Ist es in der Küche wärmer als draußen?", "label": 0, "group": "9649178ef9"}
+{"text": "Stell einen Timer auf 5 Minuten.", "label": 0, "group": "ae7ff5cb6f"}
+{"text": "Was frisst eine Katze?", "label": 0, "group": "5cd3dadee4"}
+{"text": "Woher kommt das Wort Weltschmerz?", "label": 0, "group": "a6dcee6e45"}
+{"text": "Wo ist mein Partner gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Ist gerade jemand zu Hause?", "label": 1, "group": "bfd412e23e"}
+{"text": "Wie alt wird eine Katze?", "label": 0, "group": "564f3db32e"}
+{"text": "Wie viel wiegt Oma jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Was brauche ich für Apfelkuchen?", "label": 0, "group": "84c320ec85"}
+{"text": "Ich glaube, mein Partner betrügt mich.", "label": 1, "group": "a213238f1a"}
+{"text": "Meine Frau und ich haben Streit, was soll ich machen?", "label": 1, "group": "cb0c88c0c6"}
+{"text": "Wann kommt mein Mann aus dem Urlaub zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Wie schnell ist eine Katze?", "label": 0, "group": "45d7188264"}
+{"text": "Welche Sprache spricht man in Ägypten?", "label": 0, "group": "bf9ac531d4"}
+{"text": "Was verdient meine Tochter?", "label": 1, "group": "b82078fb43"}
+{"text": "Wie viel Rente bekommt Lukas?", "label": 1, "group": "d7bf333f10"}
+{"text": "Woher kommt das Wort Serendipität?", "label": 0, "group": "a6dcee6e45"}
+{"text": "Wie lange braucht man für Apfelkuchen?", "label": 0, "group": "1ec6c24e47"}
+{"text": "Der Nachbar hat Rückenschmerzen, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Wann war Oma zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Wie mache ich Kartoffelsalat?", "label": 0, "group": "89dc2628cd"}
+{"text": "Was ist die Hauptstadt von Island?", "label": 0, "group": "c3c63bc2a0"}
+{"text": "Was hat Frau Schmidt mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Stell die Heizung im Kinderzimmer auf 20 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Ist es im Schlafzimmer wärmer als draußen?", "label": 0, "group": "9649178ef9"}
+{"text": "Lies mir die To-do-Liste vor.", "label": 1, "group": "e999cdb69f"}
+{"text": "Wo wohnt Mia?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Wie lange ist Lukas schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Wie spät ist es jetzt in Australien?", "label": 0, "group": "3c3c32dd74"}
+{"text": "Ist meine Schwester schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Wie viel wiegt meine Tochter jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Speichere das Passwort fürs E-Mail-Konto als 4711.", "label": 1, "group": "173fc07d17"}
+{"text": "Hat mein Sohn morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Wie ist die Nummer von Frau Weber?", "label": 1, "group": "5218fcd851"}
+{"text": "Was weißt du über die Gewaltenteilung?", "label": 0, "group": "cd5696a71e"}
+{"text": "Ist das Haus abgeschlossen, wenn alle weg sind?", "label": 1, "group": "57b077c892"}
+{"text": "Wie viel sind 3 Tassen in Milliliter?", "label": 0, "group": "8e8d37eeb8"}
+{"text": "Wie spät ist es jetzt in Kanada?", "label": 0, "group": "3c3c32dd74"}
+{"text": "Stell einen Timer auf 25 Minuten.", "label": 0, "group": "ae7ff5cb6f"}
+{"text": "Wann muss ich die Steuern bezahlen und wie viel?", "label": 1, "group": "34b3da3a5a"}
+{"text": "Lies mir die Aufgabenliste vor.", "label": 1, "group": "e999cdb69f"}
+{"text": "Hat mein Mann morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Woher kommt das Wort Photon?", "label": 0, "group": "a6dcee6e45"}
+{"text": "Was ist 17 mal 23?", "label": 0, "group": "f80d8d58fa"}
+{"text": "Wie ist die Nummer von Frau Schmidt?", "label": 1, "group": "5218fcd851"}
+{"text": "Wann kommt Opa von der Arbeit zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Wie viel Strom braucht der Backofen gerade?", "label": 0, "group": "77bdcbc1c9"}
+{"text": "Wie schnell ist ein Eichhörnchen?", "label": 0, "group": "45d7188264"}
+{"text": "Meine Freundin und ich haben Streit, was soll ich machen?", "label": 1, "group": "cb0c88c0c6"}
+{"text": "Wie lange läuft der Wäschetrockner noch?", "label": 0, "group": "c3397327c7"}
+{"text": "Fahr die Rollläden im Schlafzimmer runter.", "label": 0, "group": "46e104b6ec"}
+{"text": "Wie lange ist meine Mutter schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Schalte die Kaffeemaschine ein.", "label": 0, "group": "07fbf1eabc"}
+{"text": "Wann war mein Partner zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Wie viel wiegt ein Wal?", "label": 0, "group": "8f1d8a816f"}
+{"text": "Erzähl mir einen Witz, in dem ein Pinguin vorkommt.", "label": 0, "group": "f6220d3e7e"}
+{"text": "Wie ist die Luftqualität in Köln?", "label": 0, "group": "a14bf6c0ef"}
+{"text": "Was ist 10 Prozent von 250?", "label": 0, "group": "abda713092"}
+{"text": "Was brauche ich für Risotto?", "label": 0, "group": "84c320ec85"}
+{"text": "Stell die Heizung im Hobbyraum auf 22 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Was ist die Hauptstadt von Australien?", "label": 0, "group": "c3c63bc2a0"}
+{"text": "Meine Tochter hat Corona, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Wie ist die Luftqualität in London?", "label": 0, "group": "a14bf6c0ef"}
+{"text": "Was hilft gegen Corona? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Wie schnell ist eine Schnecke?", "label": 0, "group": "45d7188264"}
+{"text": "Erzähl mir einen Witz.", "label": 0, "group": "2e59dc32ff"}
+{"text": "Wann muss meine Freundin vor Gericht?", "label": 1, "group": "28dd4fd866"}
+{"text": "Wie lange ist Opa schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Meine Schwester ist schwanger, wann ist der Geburtstermin?", "label": 1, "group": "af2cf05f68"}
+{"text": "Hat meine Schwester morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Was ist 45 Prozent von 250?", "label": 0, "group": "abda713092"}
+{"text": "Wer ist alles im Haus?", "label": 1, "group": "d87f239e7d"}
+{"text": "Was ist die Wurzel aus 10?", "label": 0, "group": "2e840749fd"}
+{"text": "Wie viel Strom braucht der Geschirrspüler gerade?", "label": 0, "group": "77bdcbc1c9"}
+{"text": "Speichere die Zugangsdaten fürs Bankkonto als 4711.", "label": 1, "group": "173fc07d17"}
+{"text": "Wann kommt meine Mutter aus dem Krankenhaus zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Wo ist meine Frau gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Wie viel habe ich diesen Monat ausgegeben?", "label": 1, "group": "0f8734371e"}
+{"text": "Wie weit ist es von London nach Prag?", "label": 0, "group": "575f41554d"}
+{"text": "Erzähl mir etwas über die Geschichte von München.", "label": 0, "group": "5c7bd8773f"}
+{"text": "Um wie viel Uhr ist meine Mutter heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Wann ist die Zeitumstellung?", "label": 0, "group": "51df6e215e"}
+{"text": "Was steht auf der Aufgabenliste?", "label": 1, "group": "0d39f28925"}
+{"text": "Opa hat eine Allergie, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Wecke mich in 5 Minuten.", "label": 0, "group": "0bdc88b1bb"}
+{"text": "Hat Lea angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Hat Frau Schmidt angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Wie viel Strom braucht die Waschmaschine gerade?", "label": 0, "group": "77bdcbc1c9"}
+{"text": "Wie ist die Luftfeuchtigkeit im Bad?", "label": 0, "group": "61efafaeb3"}
+{"text": "Wann hat Mia Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Schick Lukas eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Wie ist die Luftfeuchtigkeit im Schlafzimmer?", "label": 0, "group": "61efafaeb3"}
+{"text": "Meine Freundin ist schwanger, wann ist der Geburtstermin?", "label": 1, "group": "af2cf05f68"}
+{"text": "Wie viele Einwohner hat Rom?", "label": 0, "group": "8bb9b2d293"}
+{"text": "Wann ist der nächste Vollmond?", "label": 0, "group": "a584c28fc8"}
+{"text": "Was ist 15 Prozent von 250?", "label": 0, "group": "abda713092"}
+{"text": "Hat Oma morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Was frisst ein Adler?", "label": 0, "group": "5cd3dadee4"}
+{"text": "Was bedeutet Zeitgeist?", "label": 0, "group": "e06a6154af"}
+{"text": "Um wie viel Uhr ist meine Tochter heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Wann wird die Miete überwiesen?", "label": 1, "group": "19d6f35e65"}
+{"text": "Ist der Geschirrspüler schon fertig?", "label": 0, "group": "bd039f3442"}
+{"text": "Was hilft gegen Diabetes? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Was ist die Wurzel aus 5?", "label": 0, "group": "2e840749fd"}
+{"text": "Wo wohnt Jonas?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Woher kommt das Wort Wanderlust?", "label": 0, "group": "a6dcee6e45"}
+{"text": "Wo ist mein Mann gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Wo wohnt Lukas?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Wo wohnt Elias?", "label": 1, "group": "1eaa0b5370"}
+{"text": "Hat Frau Weber angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Was hilft gegen einen Bandscheibenvorfall? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Was wünscht sich Frau Schmidt zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Stell die Heizung in der Küche auf 19 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Wie lange braucht man für Gulasch?", "label": 0, "group": "1ec6c24e47"}
+{"text": "Was ist die Hauptstadt von Ägypten?", "label": 0, "group": "c3c63bc2a0"}
+{"text": "Opa hat Corona, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Hat Noah angerufen?", "label": 1, "group": "2fee27b116"}
+{"text": "Hat Anna morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Was weißt du über die Römer?", "label": 0, "group": "cd5696a71e"}
+{"text": "Stell die Heizung im Bad auf 21 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Um wie viel Uhr ist mein Mann heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Welche Zutaten passen zu Müsli?", "label": 0, "group": "047c4fbd60"}
+{"text": "Wie alt wird eine Biene?", "label": 0, "group": "564f3db32e"}
+{"text": "Wie viel Strom braucht der Saugroboter gerade?", "label": 0, "group": "77bdcbc1c9"}
+{"text": "Stell einen Timer auf 30 Minuten.", "label": 0, "group": "ae7ff5cb6f"}
+{"text": "Wie lange ist mein Partner schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Wie lange ist mein Sohn schon krank?", "label": 1, "group": "25fa0f8147"}
+{"text": "Was verdient meine Freundin?", "label": 1, "group": "b82078fb43"}
+{"text": "Wie weit ist es von Berlin nach Prag?", "label": 0, "group": "575f41554d"}
+{"text": "Wie lange braucht man für Müsli?", "label": 0, "group": "1ec6c24e47"}
+{"text": "Ist Lukas schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Wann hat Jonas Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Erinnere mich, die Pille zu nehmen.", "label": 1, "group": "918cb55280"}
+{"text": "Schick Frau Schmidt eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Wie mache ich Gulasch?", "label": 0, "group": "89dc2628cd"}
+{"text": "Schick Elias eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Mein Freund und ich haben Streit, was soll ich machen?", "label": 1, "group": "cb0c88c0c6"}
+{"text": "Wann wird das Gehalt überwiesen?", "label": 1, "group": "19d6f35e65"}
+{"text": "Wie ist die Luftfeuchtigkeit im Keller?", "label": 0, "group": "61efafaeb3"}
+{"text": "Wecke mich in 20 Minuten.", "label": 0, "group": "0bdc88b1bb"}
+{"text": "Wie viel wiegt Lukas jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Was brauche ich für Pfannkuchen?", "label": 0, "group": "84c320ec85"}
+{"text": "Wann hat Frau Schmidt Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Um wie viel Uhr ist meine Freundin heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Wie viel wiegt der Nachbar jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Speichere das WLAN-Passwort als 4711.", "label": 1, "group": "173fc07d17"}
+{"text": "Welche Zutaten passen zu Pfannkuchen?", "label": 0, "group": "047c4fbd60"}
+{"text": "Erzähl mir einen Witz, in dem ein Adler vorkommt.", "label": 0, "group": "f6220d3e7e"}
+{"text": "Was ist die Hauptstadt von Kanada?", "label": 0, "group": "0be92a13b6"}
+{"text": "Ist der Saugroboter schon fertig?", "label": 0, "group": "bd039f3442"}
+{"text": "Stell die Heizung im Keller auf 20 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Ist der Wäschetrockner schon fertig?", "label": 0, "group": "bd039f3442"}
+{"text": "Oma hat einen Bandscheibenvorfall, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Meine Frau will sich trennen, wie sagen wir es den Kindern?", "label": 1, "group": "fcca55acdb"}
+{"text": "Wie viel wiegt ein Adler?", "label": 0, "group": "8f1d8a816f"}
+{"text": "Welcher Tag ist heute?", "label": 0, "group": "97f69bcf6c"}
+{"text": "Erinnere mich, Antidepressiva zu nehmen.", "label": 1, "group": "918cb55280"}
+{"text": "Wie ist die Luftfeuchtigkeit im Wohnzimmer?", "label": 0, "group": "61efafaeb3"}
+{"text": "Schick Frau Weber eine Nachricht, dass ich später komme.", "label": 1, "group": "d9d52b24e7"}
+{"text": "Mein Sohn hat Migräne, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Was bedeutet Algorithmus?", "label": 0, "group": "e06a6154af"}
+{"text": "Wo ist mein Vater gerade?", "label": 1, "group": "c34347e9fd"}
+{"text": "Ist das Garagentor zu?", "label": 0, "group": "058675a72e"}
+{"text": "Wann ist die nächste Sonnenfinsternis?", "label": 0, "group": "51df6e215e"}
+{"text": "Ruf Elias an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Stell die Heizung im Hobbyraum auf 23 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Erzähl mir einen Witz, in dem ein Eichhörnchen vorkommt.", "label": 0, "group": "f6220d3e7e"}
+{"text": "Was verdient meine Frau?", "label": 1, "group": "b82078fb43"}
+{"text": "Hat Lukas morgen Therapie?", "label": 1, "group": "2f1d96cb6d"}
+{"text": "Wie viel wiegt mein Vater jetzt?", "label": 1, "group": "962d206694"}
+{"text": "Wie lange braucht man für Kartoffelsalat?", "label": 0, "group": "1ec6c24e47"}
+{"text": "Wann hat Anna Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Wann kommt meine Tochter von der Arbeit zurück?", "label": 1, "group": "8a82588efd"}
+{"text": "Wie funktioniert eine Wärmepumpe?", "label": 0, "group": "2dfcac3931"}
+{"text": "Ist mein Vater schon zu Hause?", "label": 1, "group": "b60a3c6cd5"}
+{"text": "Ist es im Bad wärmer als draußen?", "label": 0, "group": "9649178ef9"}
+{"text": "Wie viel Rente bekommt Oma?", "label": 1, "group": "d7bf333f10"}
+{"text": "Wie ist die Luftfeuchtigkeit in der Küche?", "label": 0, "group": "61efafaeb3"}
+{"text": "Wann hat Frau Weber Geburtstag?", "label": 1, "group": "96a88ae6eb"}
+{"text": "Wie alt wird ein Wal?", "label": 0, "group": "564f3db32e"}
+{"text": "Wann war meine Mutter zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Wann war mein Sohn zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Wie spät ist es jetzt in Norwegen?", "label": 0, "group": "3c3c32dd74"}
+{"text": "Was ist die Wurzel aus 45?", "label": 0, "group": "2e840749fd"}
+{"text": "Lies mir die Wunschliste vor.", "label": 1, "group": "e999cdb69f"}
+{"text": "Meine Schwester hat Bluthochdruck, was soll ich tun?", "label": 1, "group": "e589282678"}
+{"text": "Um wie viel Uhr ist der Nachbar heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Mein Mann will sich trennen, wie sagen wir es den Kindern?", "label": 1, "group": "fcca55acdb"}
+{"text": "Wie ist die Luftfeuchtigkeit im Gästezimmer?", "label": 0, "group": "61efafaeb3"}
+{"text": "Wie mache ich Lasagne?", "label": 0, "group": "89dc2628cd"}
+{"text": "Ist es im Hobbyraum wärmer als draußen?", "label": 0, "group": "9649178ef9"}
+{"text": "Wie viele Einwohner hat Wien?", "label": 0, "group": "8bb9b2d293"}
+{"text": "Welche Sprache spricht man in Australien?", "label": 0, "group": "bf9ac531d4"}
+{"text": "Was wünscht sich mein Partner zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Ist die Wärmepumpe schon fertig?", "label": 0, "group": "bd039f3442"}
+{"text": "Wie viel sind 100 Fahrenheit in Celsius?", "label": 0, "group": "8e8d37eeb8"}
+{"text": "Was verdient Frau Schmidt?", "label": 1, "group": "b82078fb43"}
+{"text": "Wie mache ich Müsli?", "label": 0, "group": "89dc2628cd"}
+{"text": "Was wünscht sich der Nachbar zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Was wünscht sich mein Vater zum Geburtstag?", "label": 1, "group": "72217cc6e5"}
+{"text": "Ist der Backofen schon fertig?", "label": 0, "group": "bd039f3442"}
+{"text": "Ich glaube, mein Mann betrügt mich.", "label": 1, "group": "a213238f1a"}
+{"text": "Was hilft gegen Bluthochdruck? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Wie viel wiegt eine Katze?", "label": 0, "group": "8f1d8a816f"}
+{"text": "Wie weit ist es von Rom nach Prag?", "label": 0, "group": "575f41554d"}
+{"text": "Was hilft gegen Fieber? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Auf welchen Wochentag fällt der Sommeranfang?", "label": 0, "group": "0d27f68a81"}
+{"text": "Wie alt wird eine Schnecke?", "label": 0, "group": "564f3db32e"}
+{"text": "Was ist die Hauptstadt von Brasilien?", "label": 0, "group": "c3c63bc2a0"}
+{"text": "Was hat Sophie mir geschrieben?", "label": 1, "group": "3ed892b6c4"}
+{"text": "Was hilft gegen eine Allergie? Ich habe das seit einer Woche.", "label": 1, "group": "3864a8bbe9"}
+{"text": "Woher kommt das Wort Algorithmus?", "label": 0, "group": "a6dcee6e45"}
+{"text": "Wie lange läuft die Wärmepumpe noch?", "label": 0, "group": "c3397327c7"}
+{"text": "Um wie viel Uhr ist meine Schwester heute gegangen?", "label": 1, "group": "2d095b71f7"}
+{"text": "Speichere das Passwort vom Laptop als 4711.", "label": 1, "group": "173fc07d17"}
+{"text": "Wie ist die Nummer von Elias?", "label": 1, "group": "5218fcd851"}
+{"text": "Ist es im Gästezimmer wärmer als draußen?", "label": 0, "group": "9649178ef9"}
+{"text": "Was verdient mein Mann?", "label": 1, "group": "b82078fb43"}
+{"text": "Welche Zutaten passen zu Gemüsesuppe?", "label": 0, "group": "047c4fbd60"}
+{"text": "Wie viele Einwohner hat Hamburg?", "label": 0, "group": "8bb9b2d293"}
+{"text": "Stell die Heizung im Schlafzimmer auf 22 Grad.", "label": 0, "group": "44878365f8"}
+{"text": "Wie viel sind 20 Euro in Dollar?", "label": 0, "group": "8e8d37eeb8"}
+{"text": "Ruf Lukas an.", "label": 1, "group": "0300b7d51d"}
+{"text": "Wie spät ist es jetzt in Island?", "label": 0, "group": "3c3c32dd74"}
+{"text": "Was verdient Opa?", "label": 1, "group": "b82078fb43"}
+{"text": "Wann war mein Bruder zuletzt zu Hause?", "label": 1, "group": "3659f34d21"}
+{"text": "Was ist 20 Prozent von 250?", "label": 0, "group": "abda713092"}
+{"text": "Schalte die Heizung im Bad ein.", "label": 0, "group": "07fbf1eabc"}

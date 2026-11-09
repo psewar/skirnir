@@ -167,6 +167,11 @@ Design: [design/decision-engine.md](../design/decision-engine.md) (German), meas
 | `rules` | keywords, deterministic, end of chain | 0.523 | 0.1 ms | in the router |
 | `jevlike` | [Jevlike](https://github.com/vinnylarouge/jevlike) adapter ([decision-jevlike/](../decision-jevlike/)); built, measured, not worth it for fixed roles | 0.750 | 15 ms | own service |
 
+The table is one split of the earlier data set (2026-09-17). Retrained on the neutral data (router 0.25.1, ADR-0077)
+and measured over 50 splits of the templates: tfidf 0.91 ± 0.06, embed 0.96 ± 0.03, the same as before within the
+spread; one split alone moves top-1 by several points
+([design/decision-training-data.md](../design/decision-training-data.md)).
+
 Recommended chain `[embed, local_llm, tfidf, rules]`: embed decides in under 20 ms, when uncertain (~6 % of cases) the router asks
 the LLM, and if the GPU node is down, tfidf and rules take over. Routing accuracy of the chain 0.947; CPU only
 (`[embed, tfidf, rules]`) 0.909.

@@ -201,7 +201,7 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 | `router/requirements.txt`, `router/requirements-session.txt` | Runtime dependencies (the second adds the optional session store) |
 | `router/decision-tfidf.json` | trained TF-IDF model of the auto role |
 | `agent/` | Agent for the GPU nodes (Go 1.27, Windows service / Linux binary), `Install-Service.ps1`, `Set-UpdateKey.cmd`, `sign.ps1`, own README (German) |
-| `decision-eval/` | Dataset generator (136 templates, 1282 examples, group split), trainers for TF-IDF and Jevlike, evaluation (top-1, calibration, chains), results |
+| `decision-eval/` | Dataset generator (127 templates, 1216 examples, group split; checked by `test/check_training_data.py`), trainers for TF-IDF and Jevlike, evaluation (top-1, calibration, chains, repeated splits), results |
 | `decision-embed/` | Stage 2 of the auto role: ONNX export, head training, service, container |
 | `decision-jevlike/` | Jevlike service (prototype, measured, not in production) |
 | `rerank-server/` | Optional cross-encoder reranker with the TEI `/rerank` protocol on OpenVINO (Intel iGPU, CPU, NPU), run as an agent child for a memory service such as Hindsight; own README |

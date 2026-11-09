@@ -1,135 +1,161 @@
-{"text": "Was ist die Wurzel aus 5?", "label": 0}
-{"text": "Was hat der Physiotherapeuten letzte Woche gesagt?", "label": 1}
-{"text": "Was hat mein Partner auf die Familienaufgaben geschrieben?", "label": 1}
-{"text": "Wie ist die Luftfeuchtigkeit im Garten?", "label": 0}
-{"text": "Wie lautet den PIN der Bankkarte?", "label": 1}
-{"text": "Was kann man in Olten unternehmen?", "label": 0}
-{"text": "Hat meine Freundin ihre Tabletten genommen?", "label": 1}
-{"text": "Hat meine Frau ihre Tabletten genommen?", "label": 1}
-{"text": "Wie hoch ist mein Steuererklärung?", "label": 1}
-{"text": "Was ist die Wurzel aus 20?", "label": 0}
-{"text": "Sag mir das Passwort fürs E-Mail.", "label": 1}
-{"text": "Wann ist mein Termin beim Kinderarzt?", "label": 1}
-{"text": "Sag mir einen Witz über ein Pinguin.", "label": 0}
-{"text": "Was ist die Wurzel aus 15?", "label": 0}
-{"text": "Was kann man in Aarau unternehmen?", "label": 0}
-{"text": "Sag mir einen Witz über eine Biene.", "label": 0}
-{"text": "Hat mein Bruder ihre Tabletten genommen?", "label": 1}
-{"text": "Wie ist die Luftfeuchtigkeit im Küche?", "label": 0}
-{"text": "Wie alt ist meine Schwester?", "label": 1}
-{"text": "Was hat der Hausarzt letzte Woche gesagt?", "label": 1}
-{"text": "Wie ist die Luftfeuchtigkeit im Hobbyraum?", "label": 0}
-{"text": "Regnet es heute noch?", "label": 0}
-{"text": "Wann ist der nächste Vollmond?", "label": 0}
-{"text": "Notiere, dass meine Mutter einen Bandscheibenvorfall hat.", "label": 1}
-{"text": "Was hat der Psychiater letzte Woche gesagt?", "label": 1}
-{"text": "Was hat der Zahnarzt letzte Woche gesagt?", "label": 1}
-{"text": "Sag mir den Code der Alarmanlage.", "label": 1}
-{"text": "Wie lange läuft der Saugroboter noch?", "label": 0}
-{"text": "Wann ist mein Termin beim Physiotherapeuten?", "label": 1}
-{"text": "Notiere, dass Opa Corona hat.", "label": 1}
-{"text": "Wie lautet die Zugangsdaten fürs Bankkonto?", "label": 1}
-{"text": "Gib mir eine Idee für das Abendessen.", "label": 0}
-{"text": "Hat Oma ihre Tabletten genommen?", "label": 1}
-{"text": "Wie lange läuft die Waschmaschine noch?", "label": 0}
-{"text": "Wie alt wird ein Pinguin?", "label": 0}
-{"text": "Hat mein Vater ihre Tabletten genommen?", "label": 1}
-{"text": "Wann ist mein Termin beim Hausarzt?", "label": 1}
-{"text": "Was hat meine Mutter auf die Wunschliste geschrieben?", "label": 1}
-{"text": "Notiere, dass Frau Keller Fieber hat.", "label": 1}
-{"text": "Was hat der Frauenarzt letzte Woche gesagt?", "label": 1}
-{"text": "Notiere, dass meine Tochter Migräne hat.", "label": 1}
-{"text": "Sag mir einen Witz über eine Schnecke.", "label": 0}
-{"text": "Was hat der Hautarzt letzte Woche gesagt?", "label": 1}
-{"text": "Was hat mein Partner auf die Wunschliste geschrieben?", "label": 1}
-{"text": "Wie alt wird eine Schnecke?", "label": 0}
-{"text": "Hat mein Mann ihre Tabletten genommen?", "label": 1}
-{"text": "Sag mir einen Witz über ein Wal.", "label": 0}
-{"text": "Was hat mein Vater auf die Familienaufgaben geschrieben?", "label": 1}
-{"text": "Wie alt wird eine Katze?", "label": 0}
-{"text": "Wie alt ist mein Partner?", "label": 1}
-{"text": "Was hat mein Vater auf die Packliste geschrieben?", "label": 1}
-{"text": "Wie hoch ist mein Erbe?", "label": 1}
-{"text": "Wie alt ist Frau Keller?", "label": 1}
-{"text": "Notiere, dass der Nachbar eine Depression hat.", "label": 1}
-{"text": "Was ist die Wurzel aus 30?", "label": 0}
-{"text": "Wie ist die Luftfeuchtigkeit im Bad?", "label": 0}
-{"text": "Wie alt ist meine Mutter?", "label": 1}
-{"text": "Was hat meine Schwester auf die To-do-Liste geschrieben?", "label": 1}
-{"text": "Wie alt ist Oma?", "label": 1}
-{"text": "Sag mir einen Witz über ein Adler.", "label": 0}
-{"text": "Wann ist mein Termin beim Psychiater?", "label": 1}
-{"text": "Hat der Nachbar ihre Tabletten genommen?", "label": 1}
-{"text": "Was kann man in Zürich unternehmen?", "label": 0}
-{"text": "Wie alt ist der Nachbar?", "label": 1}
-{"text": "Wie lautet das Passwort fürs E-Mail?", "label": 1}
-{"text": "Wie viele Tage hat der Februar in einem Schaltjahr?", "label": 0}
-{"text": "Was hat der Kinderarzt letzte Woche gesagt?", "label": 1}
-{"text": "Sag mir einen Witz über ein Murmeltier.", "label": 0}
-{"text": "Sag mir das Passwort vom Laptop.", "label": 1}
-{"text": "Wie lange läuft die Wärmepumpe noch?", "label": 0}
-{"text": "Wie lautet den Code der Alarmanlage?", "label": 1}
-{"text": "Sag mir das WLAN-Passwort.", "label": 1}
-{"text": "Sag mir einen Witz über eine Katze.", "label": 0}
-{"text": "Wie hoch ist mein Schulden?", "label": 1}
-{"text": "Was hat meine Frau auf die Wunschliste geschrieben?", "label": 1}
-{"text": "Was hat mein Vater auf die Einkaufsliste geschrieben?", "label": 1}
-{"text": "Was ist die Wurzel aus 45?", "label": 0}
-{"text": "Was kann man in Luzern unternehmen?", "label": 0}
-{"text": "Sag mir den PIN der Bankkarte.", "label": 1}
-{"text": "Wann ist mein Termin beim Frauenarzt?", "label": 1}
-{"text": "Wie hoch ist mein Kontostand?", "label": 1}
-{"text": "Notiere, dass Anna Fieber hat.", "label": 1}
-{"text": "Wie alt wird ein Wal?", "label": 0}
-{"text": "Was hat meine Freundin auf die Einkaufsliste geschrieben?", "label": 1}
-{"text": "Wie hoch ist mein Hypothek?", "label": 1}
-{"text": "Was kann man in Basel unternehmen?", "label": 0}
-{"text": "Wie alt ist Lukas?", "label": 1}
-{"text": "Wie ist die Luftfeuchtigkeit im Wohnzimmer?", "label": 0}
-{"text": "Wie alt ist Opa?", "label": 1}
-{"text": "Notiere, dass mein Mann Bluthochdruck hat.", "label": 1}
-{"text": "Wie lange läuft der Tumbler noch?", "label": 0}
-{"text": "Notiere, dass mein Bruder Bluthochdruck hat.", "label": 1}
-{"text": "Wie hoch ist mein Kreditkartenabrechnung?", "label": 1}
-{"text": "Wie lange läuft der Geschirrspüler noch?", "label": 0}
-{"text": "Wie hoch ist mein Lohn?", "label": 1}
-{"text": "Was ist die Wurzel aus 25?", "label": 0}
-{"text": "Wie ist die Luftfeuchtigkeit im Kinderzimmer?", "label": 0}
-{"text": "Wann ist mein Termin beim Hautarzt?", "label": 1}
-{"text": "Wie ist die Luftfeuchtigkeit im Büro?", "label": 0}
-{"text": "Sag mir einen Witz über ein Elefant.", "label": 0}
-{"text": "Was kann man in Lugano unternehmen?", "label": 0}
-{"text": "Wie alt wird eine Biene?", "label": 0}
-{"text": "Hat Lukas ihre Tabletten genommen?", "label": 1}
-{"text": "Was ist die Wurzel aus 10?", "label": 0}
-{"text": "Was kann man in Bern unternehmen?", "label": 0}
-{"text": "Was hat mein Bruder auf die Einkaufsliste geschrieben?", "label": 1}
-{"text": "Sag mir die Zugangsdaten fürs Bankkonto.", "label": 1}
-{"text": "Wie ist die Luftfeuchtigkeit im Keller?", "label": 0}
-{"text": "Welcher Tag ist heute?", "label": 0}
-{"text": "Notiere, dass Oma Migräne hat.", "label": 1}
-{"text": "Hat meine Mutter ihre Tabletten genommen?", "label": 1}
-{"text": "Wann ist mein Termin beim Zahnarzt?", "label": 1}
-{"text": "Wie alt ist meine Freundin?", "label": 1}
-{"text": "Wie hoch ist mein Gehalt?", "label": 1}
-{"text": "Was kann man in Genf unternehmen?", "label": 0}
-{"text": "Wie alt wird ein Elefant?", "label": 0}
-{"text": "Notiere, dass meine Frau Corona hat.", "label": 1}
-{"text": "Hat Anna ihre Tabletten genommen?", "label": 1}
-{"text": "Notiere, dass Oma Diabetes hat.", "label": 1}
-{"text": "Wie alt ist mein Bruder?", "label": 1}
-{"text": "Notiere, dass meine Freundin Bluthochdruck hat.", "label": 1}
-{"text": "Wie alt ist meine Tochter?", "label": 1}
-{"text": "Brauche ich heute einen Schirm?", "label": 0}
-{"text": "Wie alt wird ein Adler?", "label": 0}
-{"text": "Wie lange läuft der Backofen noch?", "label": 0}
-{"text": "Wie alt ist mein Sohn?", "label": 1}
-{"text": "Was hat meine Frau auf die Familienaufgaben geschrieben?", "label": 1}
-{"text": "Wie ist die Luftfeuchtigkeit im Schlafzimmer?", "label": 0}
-{"text": "Was hat meine Tochter auf die To-do-Liste geschrieben?", "label": 1}
-{"text": "Hat meine Tochter ihre Tabletten genommen?", "label": 1}
-{"text": "Wie lautet das WLAN-Passwort?", "label": 1}
-{"text": "Wie lautet das Passwort vom Laptop?", "label": 1}
-{"text": "Wie alt wird ein Murmeltier?", "label": 0}
-{"text": "Hat Opa ihre Tabletten genommen?", "label": 1}
-{"text": "Wie hoch ist der Säntis?", "label": 0}
+{"text": "Erzähl mir drei Fakten über die Relativitätstheorie.", "label": 0, "group": "d136fa515b"}
+{"text": "Wie wird das Wetter morgen in Rom?", "label": 0, "group": "f77eb81340"}
+{"text": "Wie hoch ist der Kredit?", "label": 1, "group": "082ea05afa"}
+{"text": "Rechne 100 Fahrenheit in Celsius um.", "label": 0, "group": "4439140ed6"}
+{"text": "Was hat meine Tochter auf die To-do-Liste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Ist das Licht im Büro noch an?", "label": 0, "group": "7201dbce36"}
+{"text": "Wie warm ist es im Büro?", "label": 0, "group": "e9a1e722db"}
+{"text": "Sag mir das WLAN-Passwort.", "label": 1, "group": "e61da67968"}
+{"text": "Wie hoch ist die Kreditkartenabrechnung?", "label": 1, "group": "082ea05afa"}
+{"text": "Ist das Licht im Wohnzimmer noch an?", "label": 0, "group": "7201dbce36"}
+{"text": "Wie schreibt man Rhythmus?", "label": 0, "group": "4722668ccf"}
+{"text": "Wie warm ist es im Keller?", "label": 0, "group": "e9a1e722db"}
+{"text": "Was hat mein Vater auf die Einkaufsliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Wie wird das Wetter morgen in Wien?", "label": 0, "group": "f77eb81340"}
+{"text": "Wie wird das Wetter morgen in Paris?", "label": 0, "group": "f77eb81340"}
+{"text": "Spiel die Charts.", "label": 0, "group": "d02c051097"}
+{"text": "Ich brauche das Passwort fürs E-Mail-Konto.", "label": 1, "group": "250a766191"}
+{"text": "Was hat mein Partner auf die Wunschliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Notiere, dass Opa Migräne hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Notiere, dass Lukas eine Depression hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Ich brauche die PIN der Bankkarte.", "label": 1, "group": "250a766191"}
+{"text": "Ist das Licht im Hobbyraum noch an?", "label": 0, "group": "7201dbce36"}
+{"text": "Wann ist mein Termin beim Hautarzt?", "label": 1, "group": "0c1c11347a"}
+{"text": "Erzähl mir drei Fakten über die Römer.", "label": 0, "group": "d136fa515b"}
+{"text": "Erklär mir den Klimawandel.", "label": 0, "group": "333168f901"}
+{"text": "Wie hoch ist die Hypothek?", "label": 1, "group": "082ea05afa"}
+{"text": "Rechne 2 Pfund in Kilo um.", "label": 0, "group": "4439140ed6"}
+{"text": "Hat mein Bruder die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Erzähl mir drei Fakten über schwarze Löcher.", "label": 0, "group": "d136fa515b"}
+{"text": "Notiere, dass Oma eine Depression hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Mach den Ventilator aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Ist das Licht im Kinderzimmer noch an?", "label": 0, "group": "7201dbce36"}
+{"text": "Wie warm ist es im Wohnzimmer?", "label": 0, "group": "e9a1e722db"}
+{"text": "Erklär mir die Pyramiden von Gizeh.", "label": 0, "group": "333168f901"}
+{"text": "Erzähl mir drei Fakten über die Pyramiden von Gizeh.", "label": 0, "group": "d136fa515b"}
+{"text": "Mach die Leselampe im Wohnzimmer aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Notiere, dass meine Frau Corona hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Wann ist mein Termin beim Kinderarzt?", "label": 1, "group": "0c1c11347a"}
+{"text": "Notiere, dass meine Freundin Rückenschmerzen hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Was hat der Frauenarzt letzte Woche gesagt?", "label": 1, "group": "e1ebabdbcc"}
+{"text": "Was hat der Augenarzt letzte Woche gesagt?", "label": 1, "group": "e1ebabdbcc"}
+{"text": "Wie hoch ist mein Lohn?", "label": 1, "group": "082ea05afa"}
+{"text": "Erzähl mir drei Fakten über die Gewaltenteilung.", "label": 0, "group": "d136fa515b"}
+{"text": "Wie alt ist mein Partner?", "label": 1, "group": "2adf571c1a"}
+{"text": "Sag mir den Code der Alarmanlage.", "label": 1, "group": "e61da67968"}
+{"text": "Wie alt ist meine Frau?", "label": 1, "group": "2adf571c1a"}
+{"text": "Sag mir die PIN der Bankkarte.", "label": 1, "group": "e61da67968"}
+{"text": "Ich brauche das Passwort vom Laptop.", "label": 1, "group": "250a766191"}
+{"text": "Was hat der Zahnarzt letzte Woche gesagt?", "label": 1, "group": "e1ebabdbcc"}
+{"text": "Ich brauche den Code der Alarmanlage.", "label": 1, "group": "250a766191"}
+{"text": "Hat meine Freundin die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Was kann man in Berlin unternehmen?", "label": 0, "group": "96483572df"}
+{"text": "Hat Opa die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Wie hoch ist mein Kontostand?", "label": 1, "group": "082ea05afa"}
+{"text": "Was hat mein Vater auf die Aufgabenliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Erzähl mir drei Fakten über den Klimawandel.", "label": 0, "group": "d136fa515b"}
+{"text": "Was hat mein Vater auf die Packliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Was kann man in London unternehmen?", "label": 0, "group": "96483572df"}
+{"text": "Mach das Licht in der Küche aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Erklär mir Vulkane.", "label": 0, "group": "333168f901"}
+{"text": "Was kann man in München unternehmen?", "label": 0, "group": "96483572df"}
+{"text": "Wie alt ist mein Vater?", "label": 1, "group": "2adf571c1a"}
+{"text": "Wie wird das Wetter morgen in London?", "label": 0, "group": "f77eb81340"}
+{"text": "Ist das Licht in der Küche noch an?", "label": 0, "group": "7201dbce36"}
+{"text": "Was hat mein Bruder auf die Einkaufsliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Spiel die Beatles.", "label": 0, "group": "d02c051097"}
+{"text": "Wie warm ist es in der Küche?", "label": 0, "group": "e9a1e722db"}
+{"text": "Wie warm ist es im Schlafzimmer?", "label": 0, "group": "e9a1e722db"}
+{"text": "Wie wird das Wetter morgen in Berlin?", "label": 0, "group": "f77eb81340"}
+{"text": "Wie hoch ist mein Gehalt?", "label": 1, "group": "082ea05afa"}
+{"text": "Was kann man in Rom unternehmen?", "label": 0, "group": "96483572df"}
+{"text": "Notiere, dass meine Freundin Bluthochdruck hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Was kann man in Hamburg unternehmen?", "label": 0, "group": "96483572df"}
+{"text": "Wie wird das Wetter morgen in Köln?", "label": 0, "group": "f77eb81340"}
+{"text": "Rechne 5 Meilen in Kilometer um.", "label": 0, "group": "4439140ed6"}
+{"text": "Wie alt ist meine Mutter?", "label": 1, "group": "2adf571c1a"}
+{"text": "Erklär mir die Gewaltenteilung.", "label": 0, "group": "333168f901"}
+{"text": "Spiel etwas Ruhiges.", "label": 0, "group": "d02c051097"}
+{"text": "Was hat meine Schwester auf die To-do-Liste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Mach den Fernseher aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Notiere, dass mein Sohn Diabetes hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Mach den Staubsauger aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Ist die Waschmaschine fertig?", "label": 0, "group": "baefd553f8"}
+{"text": "Hat mein Vater die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Mach die Stehlampe aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Was hat der Hausarzt letzte Woche gesagt?", "label": 1, "group": "e1ebabdbcc"}
+{"text": "Wie hoch ist die Steuernachzahlung?", "label": 1, "group": "082ea05afa"}
+{"text": "Spiel Rockmusik.", "label": 0, "group": "d02c051097"}
+{"text": "Erklär mir schwarze Löcher.", "label": 0, "group": "333168f901"}
+{"text": "Was hat meine Freundin auf die Einkaufsliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Erzähl mir drei Fakten über Vulkane.", "label": 0, "group": "d136fa515b"}
+{"text": "Wie hoch ist das Erbe?", "label": 1, "group": "082ea05afa"}
+{"text": "Wie alt ist Anna?", "label": 1, "group": "2adf571c1a"}
+{"text": "Wann ist mein Termin beim Frauenarzt?", "label": 1, "group": "0c1c11347a"}
+{"text": "Erklär mir den Eiffelturm.", "label": 0, "group": "333168f901"}
+{"text": "Wie alt ist Oma?", "label": 1, "group": "2adf571c1a"}
+{"text": "Hat mein Mann die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Ist das Licht im Gästezimmer noch an?", "label": 0, "group": "7201dbce36"}
+{"text": "Ist das Licht im Keller noch an?", "label": 0, "group": "7201dbce36"}
+{"text": "Hat meine Mutter die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Notiere, dass mein Bruder einen Bandscheibenvorfall hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Notiere, dass Opa eine Depression hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Was hat der Psychiater letzte Woche gesagt?", "label": 1, "group": "e1ebabdbcc"}
+{"text": "Was kann man in Wien unternehmen?", "label": 0, "group": "96483572df"}
+{"text": "Wie alt ist mein Bruder?", "label": 1, "group": "2adf571c1a"}
+{"text": "Notiere, dass meine Tochter Bluthochdruck hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Mach die Kaffeemaschine aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Was hat mein Partner auf die Aufgabenliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Spiel Klassik.", "label": 0, "group": "d02c051097"}
+{"text": "Erklär mir die Römer.", "label": 0, "group": "333168f901"}
+{"text": "Wie warm ist es im Bad?", "label": 0, "group": "e9a1e722db"}
+{"text": "Wann geht heute die Sonne unter?", "label": 0, "group": "0af2addef8"}
+{"text": "Mach das Radio aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Wie warm ist es im Hobbyraum?", "label": 0, "group": "e9a1e722db"}
+{"text": "Ist das Licht im Bad noch an?", "label": 0, "group": "7201dbce36"}
+{"text": "Ich brauche die Zugangsdaten fürs Bankkonto.", "label": 1, "group": "250a766191"}
+{"text": "Wann ist mein Termin beim Augenarzt?", "label": 1, "group": "0c1c11347a"}
+{"text": "Ich brauche das WLAN-Passwort.", "label": 1, "group": "250a766191"}
+{"text": "Ist das Licht im Schlafzimmer noch an?", "label": 0, "group": "7201dbce36"}
+{"text": "Was hat meine Frau auf die Aufgabenliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Wie warm ist es im Kinderzimmer?", "label": 0, "group": "e9a1e722db"}
+{"text": "Notiere, dass mein Vater Migräne hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Mach die Heizung im Bad aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Spiel Jazz.", "label": 0, "group": "d02c051097"}
+{"text": "Wann ist mein Termin beim Hausarzt?", "label": 1, "group": "0c1c11347a"}
+{"text": "Wie alt ist meine Tochter?", "label": 1, "group": "2adf571c1a"}
+{"text": "Mach die Weihnachtsbeleuchtung aus.", "label": 0, "group": "a871d18ab4"}
+{"text": "Hat der Nachbar die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Wie wird das Wetter morgen in München?", "label": 0, "group": "f77eb81340"}
+{"text": "Erklär mir die Fotosynthese.", "label": 0, "group": "333168f901"}
+{"text": "Wann ist mein Termin beim Psychiater?", "label": 1, "group": "0c1c11347a"}
+{"text": "Erzähl mir drei Fakten über die Fotosynthese.", "label": 0, "group": "d136fa515b"}
+{"text": "Erklär mir die Relativitätstheorie.", "label": 0, "group": "333168f901"}
+{"text": "Was hat der Hautarzt letzte Woche gesagt?", "label": 1, "group": "e1ebabdbcc"}
+{"text": "Sag mir das Passwort vom Laptop.", "label": 1, "group": "e61da67968"}
+{"text": "Rechne 1 Liter in Gallonen um.", "label": 0, "group": "4439140ed6"}
+{"text": "Rechne 3 Tassen in Milliliter um.", "label": 0, "group": "4439140ed6"}
+{"text": "Rechne 20 Euro in Dollar um.", "label": 0, "group": "4439140ed6"}
+{"text": "Spiel ein Hörbuch.", "label": 0, "group": "d02c051097"}
+{"text": "Wie alt ist mein Sohn?", "label": 1, "group": "2adf571c1a"}
+{"text": "Notiere, dass mein Sohn Corona hat.", "label": 1, "group": "07a325ce65"}
+{"text": "Hat Oma die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Wie spät ist es?", "label": 0, "group": "076a678614"}
+{"text": "Erzähl mir drei Fakten über den Eiffelturm.", "label": 0, "group": "d136fa515b"}
+{"text": "Was hat meine Mutter auf die Wunschliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Was hat meine Frau auf die Wunschliste geschrieben?", "label": 1, "group": "128abb2148"}
+{"text": "Was kann man in Köln unternehmen?", "label": 0, "group": "96483572df"}
+{"text": "Wie wird das Wetter morgen in Hamburg?", "label": 0, "group": "f77eb81340"}
+{"text": "Wie alt ist Frau Schmidt?", "label": 1, "group": "2adf571c1a"}
+{"text": "Wie alt ist meine Freundin?", "label": 1, "group": "2adf571c1a"}
+{"text": "Wie warm ist es im Gästezimmer?", "label": 0, "group": "e9a1e722db"}
+{"text": "Wann ist mein Termin beim Zahnarzt?", "label": 1, "group": "0c1c11347a"}
+{"text": "Sag mir das Passwort fürs E-Mail-Konto.", "label": 1, "group": "e61da67968"}
+{"text": "Sag mir die Zugangsdaten fürs Bankkonto.", "label": 1, "group": "e61da67968"}
+{"text": "Hat Anna die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Was hat der Kinderarzt letzte Woche gesagt?", "label": 1, "group": "e1ebabdbcc"}
+{"text": "Hat meine Tochter die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Hat Lukas die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Hat meine Frau die Tabletten schon genommen?", "label": 1, "group": "b7b59b932c"}
+{"text": "Wie alt ist mein Mann?", "label": 1, "group": "2adf571c1a"}
+{"text": "Was kann man in Paris unternehmen?", "label": 0, "group": "96483572df"}

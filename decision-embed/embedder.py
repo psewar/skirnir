@@ -50,3 +50,9 @@ class Embedder:
         pooled /= np.clip(np.linalg.norm(pooled, axis=1, keepdims=True), 1e-9, None)
         self.dim = pooled.shape[1]
         return pooled.astype(np.float32)
+
+    def encode_each(self, texts: list[str]) -> np.ndarray:
+        """One text per call, as the service (server.py) embeds a request. The int8 model quantizes its activations
+        per batch, so a vector computed in a batch differs slightly from the one the service computes for the same text
+        (cosine 0.99 to 0.996 on the privacy test set); training and evaluation use the service's vectors."""
+        return np.concatenate([self.encode([t]) for t in texts]) if texts else np.zeros((0, self.dim or 0), dtype=np.float32)

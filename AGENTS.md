@@ -48,6 +48,11 @@ A pull request is complete when it contains, as far as they apply:
   configuration (`router/config.example.yaml`, `agent/config.example.yaml`) and, if the web UI may change it at runtime,
   `EDITABLE` in `router/skirnir_router/settings.py`. New options default to off or to the previous behaviour; an
   existing configuration must keep working without edits, or the change is marked breaking.
+- **Training data.** A change to a template or slot list in `decision-eval/build_dataset.py` or
+  `decision-embed/privacy/build_dataset.py` regenerates the data and retrains the models trained on it in the same pull
+  request (`router/decision-tfidf.json` in the repository; the embedding and privacy heads where the service runs), and
+  quotes the numbers over repeated splits before and after (`repeat_splits.py`, ADR-0079). Templates use the standard
+  German spelling and name nothing real (ADR-0077); `test/check_training_data.py` checks data, spelling and model.
 
 ## Running the checks
 
@@ -60,6 +65,7 @@ python router/router.py --check router/config.example.yaml --pure   # configurat
 python test/check_adr_index.py                                 # ADR index is current
 python test/check_pinned_references.py                         # actions, tools and images pinned (ADR-0055)
 python tools/security/lock_requirements.py check               # Python locks consistent (ADR-0074)
+python test/check_training_data.py                             # decision data = its builders, spelling, model (ADR-0077)
 python test/selftest_control_flow.py && python test/check_control_flow.py   # explicit control flow (below)
 python test/selftest_<topic>.py                                # the self-tests your change touches
 python test/run_tests.py       # end-to-end suite, ~3 min; needs the loopback ports 21434/21435 and 210xx free

@@ -1,5 +1,5 @@
 {
- "total": 1282,
+ "total": 1216,
  "options": [
   "standard",
   "gross",
@@ -7,40 +7,40 @@
   "code"
  ],
  "per_role": {
-  "standard": 293,
-  "gross": 378,
-  "assist": 302,
-  "code": 309
+  "standard": 267,
+  "gross": 362,
+  "assist": 286,
+  "code": 301
  },
  "groups": 127,
  "splits": {
   "train": {
-   "n": 961,
+   "n": 884,
    "per_role": {
-    "standard": 194,
-    "gross": 258,
-    "assist": 247,
-    "code": 262
+    "standard": 182,
+    "gross": 297,
+    "assist": 181,
+    "code": 224
    },
    "groups": 89
   },
   "validation": {
-   "n": 189,
+   "n": 156,
    "per_role": {
-    "standard": 62,
-    "gross": 84,
-    "assist": 22,
-    "code": 21
+    "standard": 34,
+    "gross": 33,
+    "assist": 50,
+    "code": 39
    },
    "groups": 19
   },
   "test": {
-   "n": 132,
+   "n": 176,
    "per_role": {
-    "standard": 37,
-    "gross": 36,
-    "assist": 33,
-    "code": 26
+    "standard": 51,
+    "gross": 32,
+    "assist": 55,
+    "code": 38
    },
    "groups": 19
   }
