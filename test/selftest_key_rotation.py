@@ -3,6 +3,7 @@
 Step 1 refuses without a current key and when a next key is already prepared; step 2 refuses without a prepared key,
 makes the next key the signing key and keeps the old one as retired. Runs in a temporary folder, no SSH."""
 import base64
+import hashlib
 import contextlib
 import io
 import os
@@ -122,5 +123,70 @@ main_source = deploy_source[deploy_source.index("def main():"):]
 check("deploy.py --agent checks the key before connecting", main_source.index("signing_key_state(") < main_source.index("connect()"))
 signing = deploy_source[deploy_source.index("def agent_signing_key():"):deploy_source.index("def check_authenticode(")]
 check("deploy.py never creates a signing key implicitly", "generate()" not in signing and "open(path, \"w\"" not in signing)
+# ADR-0068: agent_keys.py is a standalone CLI (no deploy environment, no SSH) that can also sign a release by hand.
+import json  # noqa: E402
+import subprocess  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey  # noqa: E402
+from cryptography.exceptions import InvalidSignature  # noqa: E402
+
+CLI = os.path.join(HERE, "..", "deploy", "agent_keys.py")
+
+
+def cli(*args):
+    env = {k: v for k, v in os.environ.items() if k != "SKIRNIR_OPS"}
+    return subprocess.run([sys.executable, CLI, *args], capture_output=True, text=True, encoding="utf-8", env={**env, "PYTHONUTF8": "1"})
+
+
+keys = tempfile.mkdtemp(prefix="skirnir-keys-cli-")
+try:
+    r = cli("state")
+    check("the CLI refuses without a key folder", r.returncode == 2 and "--keys" in r.stdout, r.stdout)
+    r = cli("--keys", keys, "create")
+    check("the CLI creates the first key without a deploy environment", r.returncode == 0, r.stdout + r.stderr)
+    pub = agent_keys._public_of(read(os.path.join(keys, "agent-update.key")))
+    r = cli("--keys", keys, "state")
+    check("state reports the public key", r.returncode == 0 and pub in r.stdout, r.stdout)
+    dist = os.path.join(keys, "dist")
+    os.makedirs(dist)
+    for name, content in (("skirnir-agent.exe", b"synthetic windows build"), ("skirnir-agent-linux-amd64", b"synthetic linux build")):
+        with open(os.path.join(dist, name), "wb") as f:
+            f.write(content)
+    for args, label in ((("sign-release", dist), "without --version"), (("sign-release", dist, "--version", "v1"), "a malformed version"),
+                        (("sign-release", os.path.join(keys, "empty"), "--version", "9.9.9"), "without binaries")):
+        os.makedirs(os.path.join(keys, "empty"), exist_ok=True)
+        r = cli("--keys", keys, *args)
+        check(f"sign-release refuses {label}", r.returncode == 2, r.stdout)
+    r = cli("--keys", keys, "sign-release", dist, "--version", "9.9.9")
+    out = os.path.join(dist, "publish")
+    check("sign-release writes manifest and release-named files", r.returncode == 0 and sorted(os.listdir(out)) ==
+          ["manifest.json", "skirnir-agent-9.9.9-linux-amd64", "skirnir-agent-9.9.9-windows-amd64.exe"], r.stdout + str(os.listdir(out) if os.path.isdir(out) else ""))
+    signed = json.load(open(os.path.join(out, "manifest.json"), encoding="utf-8"))
+    canonical = json.dumps(signed["manifest"], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    verified = True
+    try:
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(pub)).verify(base64.b64decode(signed["signature"]), canonical)
+    except InvalidSignature:  # exception-ok: cryptography signals a bad signature only by raising it
+        verified = False
+    check("the manifest signature verifies with the public key, as the agent checks it", verified)
+    tampered = json.dumps({**signed["manifest"], "version": "9.9.10"}, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    rejected = False
+    try:
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(pub)).verify(base64.b64decode(signed["signature"]), tampered)
+    except InvalidSignature:  # exception-ok: the expected outcome of the negative check
+        rejected = True
+    check("instrument: a changed manifest does not verify", rejected)
+    sums = {e["name"]: (e["sha256"], e["size"]) for e in signed["manifest"]["files"]}
+    linux = open(os.path.join(out, "skirnir-agent-9.9.9-linux-amd64"), "rb").read()
+    check("hash and size of each file are in the manifest", signed["manifest"]["version"] == "9.9.9"
+          and sums.get("skirnir-agent-9.9.9-linux-amd64") == (hashlib.sha256(linux).hexdigest(), len(linux)), sums)
+    r = cli("--keys", keys, "sign-release", dist, "--version", "9.9.9")
+    check("sign-release refuses to overwrite a manifest", r.returncode == 2, r.stdout)
+    r = cli("--keys", keys, "bogus")
+    check("an unknown command is refused", r.returncode == 2, r.stdout)
+finally:
+    shutil.rmtree(keys, ignore_errors=True)
+check("deploy.py signs with the shared manifest code", "agent_keys.signed_manifest(" in deploy_source
+      and "key.sign(" not in deploy_source)
+
 print(f"{len(FAILS)} failure(s)")
 sys.exit(1 if FAILS else 0)

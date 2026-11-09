@@ -2,67 +2,46 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "4c11ac872aae2ce747f198c5751c390fbb697911",
-  "change_digest": "bf2492c9dccb2f996501b3405bb729cf810410296cf69ab3ce1717e11e3015b4",
+  "base_sha": "36f182f0620218a0e9c7483afa02e93545d13244",
+  "change_digest": "827af860d71a2199f673b62db43d78beb340c8a9c3c4b364e7e4efaf6d294cc2",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
     "CHANGELOG.md",
     "README.de.md",
     "README.md",
-    "docs/adr/0067-guided-first-configuration.md",
+    "deploy/agent_keys.py",
+    "deploy/deploy.py",
+    "docs/adr/0068-standalone-agent-key-and-release-tool.md",
     "docs/adr/README.md",
-    "docs/security/risk-register.json",
-    "router/config.minimal.yaml",
-    "router/skirnir_router/app.py",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/posture.py",
-    "router/skirnir_router/setup_init.py",
-    "test/check_public_changes.py",
-    "test/selftest_init.py",
-    "test/selftest_memory.py",
-    "test/selftest_posture.py"
+    "test/selftest_key_rotation.py"
   ],
   "risk_ids": [
-    "TM-01",
-    "TM-03"
+    "TM-13"
   ],
   "boundaries": [
-    "B1",
-    "B2"
+    "B8"
   ],
-  "summary": "Router 0.23.0 adds a guided first configuration (ADR-0067). New router/config.minimal.yaml: one role and model, client_auth enforce and locked, control and API TLS, no cloud, MQTT or decision engine; its placeholders (control users empty, the example token sha256('changeme')) load but are reported by the posture check. New skirnir_router/setup_init.py behind `router.py --init <dir>`: refuses if <dir>/config.yaml exists, the template lacks an expected line, the password is shorter than 12 characters or differs from its repetition on a terminal, a user or client name is not plain, or --public-url is not https; reads the password with getpass on a terminal or one line from stdin otherwise; stores only auth.hash_password(password) and sha256 of a secrets.token_urlsafe(32) client token; writes the file with O_CREAT|O_EXCL and mode 0600; loads it like --check; prints the posture report and the token once; ends with INIT: written or INIT: refused. app.cli gains --help, --hash without argument (getpass, no shell history), --init, and refuses unknown options instead of loading them as a configuration path. posture.py gains client_example_token (high; sha256 of a fixed list of placeholder tokens, names only in output), control_without_tls (high; control_listen not loopback and no control_tls) and control_on_network (info). The publication guard (test/check_public_changes.py) now also accepts the unspecified address 0.0.0.0 (listen on all interfaces), like loopback; private and other non-example addresses are still reported (selftest_memory covers both).",
+  "summary": "Operator tooling, no router or agent code change (ADR-0068). deploy/agent_keys.py becomes a standalone command line tool that needs only Python and cryptography: `--keys <dir>` (or SKIRNIR_OPS) with state, create, next, use-next, replace-lost and sign-release. New load_signing_key, release_files (release-asset name for the version, else the build name), signed_manifest (canonical JSON with sorted keys, compact separators, UTF-8, Ed25519 signature - the format the agent verifies) and sign_release (refuses without a key, with a version not matching N.N.N, without binaries, or when the output folder already holds manifest.json; copies the binaries under their release names and writes manifest.json into <dist>/publish or --out; prints where to copy them and the public key). main() refuses a missing or nonexistent key folder and unknown commands. deploy.py imports AGENT_BINARIES from agent_keys, signs with agent_keys.signed_manifest and loads the key with agent_keys.load_signing_key; an unused import was removed. The missing-key message names both the standalone and the deploy.py commands.",
   "findings": [
     {
-      "id": "TM-01",
-      "evidence": "The full example configuration gave four clients the token 'changeme' with every role, and the posture report did not flag it.",
-      "resolution": "Guided --init with generated secrets; posture flags well-known example tokens.",
-      "disposition": "baseline"
-    },
-    {
-      "id": "TM-03",
-      "evidence": "A control port on a network address without control_tls carried Basic Auth and the agent tunnel in plaintext with only a log warning; router.py --hash took the password on the command line.",
-      "resolution": "Posture reports control_without_tls (high); --hash and --init ask without echo.",
+      "id": "TM-13",
+      "evidence": "Key creation, rotation, recovery and release signing were reachable only through deploy.py, which loads the maintainer's deploy environment and paramiko at import.",
+      "resolution": "Standalone tool with one shared manifest implementation; tested by verifying the signature like the agent.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_init.py (Windows and WSL)",
+      "command": "python test/selftest_key_rotation.py (Windows and WSL)",
       "result": "passed",
-      "evidence": "4 tests OK: valid owner-only configuration (0600 on Linux), hash verifies, token only as sha256 and shown once, no high/medium finding; refusals leave files untouched; template loads with its placeholders reported; --help and unknown option."
-    },
-    {
-      "command": "python test/selftest_posture.py",
-      "result": "passed",
-      "evidence": "6 tests OK including client_example_token, control_on_network and control_without_tls."
+      "evidence": "0 failure(s); on Linux 39 PASS plus the negative check: CLI without deploy environment, sign-release refusals, release-named files, signature verifies with the public key, a changed manifest does not, hashes and sizes match, deploy.py uses the shared code."
     },
     {
       "command": "All python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names; check_control_flow; ruff check .",
       "result": "passed",
-      "evidence": "No failures; ADR index ok: 67 ADRs; ALLE OK; control flow ok; All checks passed."
+      "evidence": "No failures; ADR index ok: 68 ADRs; ALLE OK; All checks passed."
     },
     {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "command": "python tools/security/review.py check --base origin/feat/guided-setup --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -73,7 +52,7 @@
     }
   ],
   "limitations": [
-    "The qwen3:8b catalogue values in config.minimal.yaml are starting estimates, not measurements.",
-    "The example-token list is a fixed set of common placeholders, not a strength check of real tokens."
+    "Stacked on #115; the record is refreshed against main once #115 is merged.",
+    "Copying the signed files to the router remains a manual or operator-specific step."
   ]
 }
