@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "5bf5f82ab6f3ac5101c20b375d74c361416c979e",
-  "change_digest": "e25992fbca8331cceb962c2263c771970b1b4f2240fde6d8455508184ca6712d",
+  "base_sha": "042251655b3e092e8fd607bc6e56840d78cb8c45",
+  "change_digest": "e6d1c83f170909d6c7f558e503ac753792a1f19deb4e6d673f7575a1a11259e5",
   "reviewed_paths": [
     "CHANGELOG.md",
     "README.de.md",
@@ -63,7 +63,7 @@
       "evidence": "No failures; ADR index ok: 70 ADRs; ALLE OK; All checks passed."
     },
     {
-      "command": "python tools/security/review.py check --base origin/feat/router-install --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -74,7 +74,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #117; the record is refreshed against main once the stack below is merged.",
-    "systemctl enable --now runs only on a real Linux node; the staged test does not exercise it. A CA file on a node must be protected like the configuration."
+    "systemctl enable --now runs only on a real Linux node; the staged test does not exercise it. A CA file on a node must be protected like the configuration.",
+    "Merged main after the PRs below it."
   ]
 }
