@@ -191,6 +191,21 @@ def packed(items):
     return (NOTICE + json.dumps(items, ensure_ascii=True, separators=(",", ":"))).replace("<", "\\u003c").replace(">", "\\u003e")
 
 
+def unpacked_texts(content):
+    """The fact texts of a data message made by packed(), decoded (TM-05: checks on the final payload must read them as
+    text, not as \\uXXXX escapes); [] for any other content. A client may send a user message that merely starts like
+    the notice, so the JSON is decoded defensively."""
+    if not isinstance(content, str) or not content.startswith(NOTICE):
+        return []
+    try:
+        items = json.loads(content[len(NOTICE):])
+    except ValueError:  # exception-ok: json.loads is the only full validity check; a look-alike message is plain text
+        return []
+    if not isinstance(items, list):
+        return []
+    return [item["text"] for item in items if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip()]
+
+
 class MemoryService:
     def __init__(self, cfg, key, client):
         self.cfg, self.key, self.client = cfg, key, client

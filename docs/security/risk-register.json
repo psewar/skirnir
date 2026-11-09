@@ -83,13 +83,15 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Incorrect declaration or classifier false negative forwards sensitive data.",
-      "controls": "Client class floor, cloud opt-out, secret scan.",
-      "next_action": "Test final payload and explicit privacy exception.",
+      "controls": "Client class floor, cloud opt-out, secret scan. The cloud checks run on the final payload after memory insertion; the credential scan, the privacy rules and the classifier read inserted facts as text (router 0.21.1).",
+      "next_action": "Measure classifier quality on realistic personal and neutral texts; include tool results in the final-payload test.",
       "owner_role": "maintainer and operator",
       "test_refs": [
+        "test/selftest_cloud_final_payload.py",
+        "test/selftest_privacy_check.py",
         "test/selftest_security.py"
       ],
-      "validation_gap": "V5: end-to-end no-egress and classifier quality not proven."
+      "validation_gap": "V5: final payload with memory is tested; end-to-end no-egress, classifier quality and tool results are not proven."
     },
     {
       "id": "TM-06",
@@ -159,15 +161,16 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Stolen token or foreign UUID/project alias access.",
-      "controls": "Credential principals and scoped authorization. Route-inventory tests enumerate every registered session and memory route: none is reachable without an identity, and every owner-scoped session-store call uses the authenticated caller, never an owner taken from the request.",
-      "next_action": "Token and grant rotation tests; the memory gateway routes with the gateway enabled; deployment checks.",
+      "controls": "Credential principals and scoped authorization. Route-inventory tests enumerate every registered session and memory route: none is reachable without an identity, and every owner-scoped session-store call uses the authenticated caller, never an owner taken from the request. With the gateway enabled every gateway route refuses requests without identity and the same alias maps to a bank per client; a token rotation refuses the old token on memory, gateway and session routes; a grant revoked by reload refuses recall.",
+      "next_action": "Deployment checks: separate tokens per client, minimal grants, and rotation after suspected exposure.",
       "owner_role": "maintainer and operator",
       "test_refs": [
-        "test/selftest_sessions.py",
+        "test/selftest_interoperability.py",
+        "test/selftest_isolation_rotation.py",
         "test/selftest_memory.py",
-        "test/selftest_interoperability.py"
+        "test/selftest_sessions.py"
       ],
-      "validation_gap": "V8: route inventory covers authentication for all session and memory routes and owner scoping for session routes; gateway routes with the gateway enabled, rotation and deployment coverage remain."
+      "validation_gap": "V8: route, gateway, rotation and revocation behaviour is tested in process; deployment coverage remains."
     },
     {
       "id": "TM-10",
@@ -270,14 +273,15 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Metadata/secrets leak or local audit is altered.",
-      "controls": "Audit omits prompts and tokens; router-written files are owner-only (common.open_private, unit UMask=0077, ADR-0056); a CI canary test covers client and control authentication, inference paths and token rotation.",
-      "next_action": "Log rotation and retention, backup controls for these files, independent audit retention; canaries for memory and session paths.",
+      "controls": "Audit omits prompts and tokens; router-written files are owner-only (common.open_private, unit UMask=0077, ADR-0056); a CI canary test covers client and control authentication, inference paths and token rotation. Since router 0.21.1 the canaries also cover memory recall and retention, memory and inference backend errors and the session API, and an unexpected exception is logged by type and code location only (ADR-0062).",
+      "next_action": "Log rotation and retention, backup controls for these files, independent audit retention.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/check_public_changes.py",
-        "test/selftest_log_hygiene.py"
+        "test/selftest_log_hygiene.py",
+        "test/selftest_log_hygiene_paths.py"
       ],
-      "validation_gap": "V14: the canary test covers authentication, inference without a node and token rotation; memory, session and upstream error paths, rotation and backups are not covered."
+      "validation_gap": "V14: canaries cover authentication, inference, memory, session and backend error paths; rotation and backups are not covered."
     },
     {
       "id": "TM-16",

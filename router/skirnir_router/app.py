@@ -14,6 +14,7 @@ from aiohttp import ClientSession, web
 
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
 from . import decision, fallback_observation, memory, quiet, rerank, session_api, context_ops
+from .unexpected import unexpected_error_middleware
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 from .outcome import failed
 
@@ -37,7 +38,7 @@ def keepalive_socket(listen):
 
 
 def build_apps():
-    api = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[auth.client_auth_middleware])
+    api = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[unexpected_error_middleware, auth.client_auth_middleware])
     session_api.register(api)
     memory.register(api)
     api.cleanup_ctx.append(context_ops.lifecycle)
@@ -63,7 +64,7 @@ def build_apps():
         api.router.add_post("/v1/completions", openai_api.handle_oa_completions)
         api.router.add_post("/v1/embeddings", openai_api.handle_oa_embeddings)
         api.router.add_route("*", "/v1/{rest:.*}", openai_api.handle_oa_unknown)
-    ctl = web.Application(middlewares=[auth.basic_auth_middleware])
+    ctl = web.Application(middlewares=[unexpected_error_middleware, auth.basic_auth_middleware])
     ctl[context_ops.API_KEY] = api
     ctl.router.add_get("/admin/context", context_ops.handle)
     ctl.router.add_get("/", admin.handle_ui)
