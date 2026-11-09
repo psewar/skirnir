@@ -33,6 +33,7 @@ jobs:
         run: python test/selftest_pinned_references.py && python test/check_pinned_references.py
       - run: python test/selftest_log_hygiene.py
       - run: python test/selftest_log_hygiene_paths.py
+      - run: python test/selftest_client_limits.py
       - run: python test/selftest_agent_revocation.py
       - run: python test/selftest_key_rotation.py
       - run: python test/selftest_english_names.py

@@ -142,7 +142,20 @@ def _deny(request, status, msg, why=None):
 
 def _stats_for(name):
     return state.CLIENT_STATS["clients"].setdefault(name, {"total": 0, "last_seen": 0.0, "via": None, "recent": deque(),
-                                                           "rate_limited": 0, "forbidden": 0, "last_audit": 0.0})
+                                                           "rate_limited": 0, "forbidden": 0, "last_audit": 0.0,
+                                                           "inflight": 0, "peak_inflight": 0, "concurrency_limited": 0,
+                                                           "too_large": 0})
+
+
+# ADR-0063 (TM-08): bounds for an authenticated client, each overridable per client in client_auth.clients.<name>.
+DEFAULT_MAX_CONCURRENT = 4     # requests of one client in progress at the same time (all API routes)
+DEFAULT_MAX_BODY_MIB = 16      # declared request body size; the app's client_max_size (64 MiB) stays the hard ceiling
+MIB = 1024 * 1024
+
+
+def client_limits(spec):
+    """(max_concurrent, max_body_bytes) of a configured client."""
+    return (spec.get("max_concurrent") or DEFAULT_MAX_CONCURRENT), (spec.get("max_body_mib") or DEFAULT_MAX_BODY_MIB) * MIB
 
 
 @web.middleware
@@ -187,7 +200,26 @@ async def client_auth_middleware(request, handler):
         audit("forbidden", client=name, path=request.path, reason=refused.kind)
         return _deny(request, refused.status, refused.message, why={"code": refused.kind, "blockers": []})
     request["client"] = name
-    return await handler(request)
+    spec = cfg["clients"].get(name)
+    if spec is None:   # the router's own UI identity is not a configured client and has no client limits
+        return await handler(request)
+    limit, max_body = client_limits(spec)
+    if request.content_length is not None and request.content_length > max_body:
+        st["too_large"] += 1
+        audit("body_too_large", client=name, path=request.path, limit_mib=max_body // MIB)
+        return _deny(request, 413, f"request body above {max_body // MIB} MiB for client {name}")
+    if st["inflight"] >= limit:
+        st["concurrency_limited"] += 1
+        audit("concurrency_limited", client=name, path=request.path, limit=limit)
+        resp = _deny(request, 429, f"concurrency limit: {limit} requests at a time for client {name}")
+        resp.headers["Retry-After"] = "1"
+        return resp
+    st["inflight"] += 1
+    st["peak_inflight"] = max(st["peak_inflight"], st["inflight"])
+    try:
+        return await handler(request)
+    finally:   # also when the client disconnects mid-stream (cancellation): the slot is always given back
+        st["inflight"] -= 1
 
 
 # A client with `inference: false` (e.g. a memory service that only reranks and is identified by its source IP) may access

@@ -2,77 +2,63 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "0306e0255af0c934729451fb721e0c86dc1a177b",
-  "change_digest": "70823c941e61f821613477b20bda6359ab68eeb359145d6c70463a36d04d378c",
+  "base_sha": "4adf5d7d4b94a88227fe4215677e3feed9495c04",
+  "change_digest": "34fdb1c93ec3c2b001f10d173b90690d2ed5bdab0e97c4f07d9e7693e566e9c5",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "docs/adr/0062-log-unexpected-errors-without-their-message.md",
+    "README.de.md",
+    "README.md",
+    "docs/adr/0063-bound-concurrency-and-body-size-per-client.md",
     "docs/adr/README.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "router/skirnir_router/app.py",
+    "router/config.example.yaml",
+    "router/skirnir_router/admin.py",
+    "router/skirnir_router/auth.py",
     "router/skirnir_router/common.py",
-    "router/skirnir_router/memory.py",
-    "router/skirnir_router/privacy.py",
-    "router/skirnir_router/unexpected.py",
-    "test/selftest_cloud_final_payload.py",
-    "test/selftest_isolation_rotation.py",
-    "test/selftest_log_hygiene_paths.py"
+    "router/skirnir_router/config.py",
+    "router/skirnir_router/metrics.py",
+    "router/skirnir_router/settings.py",
+    "test/selftest_client_limits.py"
   ],
   "risk_ids": [
-    "TM-05",
-    "TM-09",
-    "TM-15"
+    "TM-08"
   ],
   "boundaries": [
     "B1",
-    "B4",
-    "B5",
-    "B6",
-    "B7",
-    "B9"
+    "B2",
+    "B3",
+    "B6"
   ],
-  "summary": "Router 0.21.1 adds self-tests for three open P1 evidence gaps and fixes the two defects they found. TM-05: test/selftest_cloud_final_payload.py checks that memory is inserted before the cloud checks (proxy._prepare calls memory.prepare before _cloud_ordered, which takes cloud.request_block_reason on that body), that the credential scan finds a secret in an inserted fact, and that with the privacy exception the provider receives the final payload. Defect: memory.packed escapes non-ASCII characters, so privacy.user_texts passed escaped JSON to the rules and the classifier and a configured term such as a name with an umlaut in a recalled fact did not keep the request local. Fix: memory.unpacked_texts decodes the facts of a data message that starts with memory.NOTICE (json.loads guarded, a look-alike message stays plain text) and privacy.user_texts adds them; the model-facing format is unchanged. TM-09: test/selftest_isolation_rotation.py runs the router from a temporary configuration file with the gateway enabled, a mocked session store and a control user: every gateway route refuses requests without identity or with a wrong token, the same alias maps to a bank per client, a token rotation through POST /admin/clients/{name}/token refuses the old token on REST recall, gateway recall and session read while the new token works and another client is unaffected, and a read grant revoked in the file and reloaded refuses recall with 403 while the identity stays valid. TM-15: test/selftest_log_hygiene_paths.py puts canaries on automatic recall, curated and answer retention, memory and inference backend error bodies and the session API, and checks log records and the journal, with instrument checks. Defect: an unexpected session-store exception reached the log with its message through aiohttp's default handler. Fix (ADR-0062): unexpected.unexpected_error_middleware is the outermost middleware of both apps; it passes web.HTTPException, logs type, method, path, a reference and code locations without the message or chained exceptions, and answers a fixed 500 internal_error with the reference.",
+  "summary": "Router 0.22.0 bounds authenticated traffic per client (ADR-0063). auth.client_auth_middleware, after identity, rate limit and inference refusal, applies client_limits(spec) for a configured client: a declared Content-Length above max_body_mib (default 16 MiB) is answered 413 before the handler; with max_concurrent (default 4) requests of the client already in progress the next one gets 429 with Retry-After: 1 before any work; otherwise the in-progress counter is raised and given back in a finally block, also when the client disconnects and the handler is cancelled. The router's own UI identity is not a configured client and is not limited. config.py validates max_concurrent (1-256) and max_body_mib (1-64) as integers (booleans and strings refused) and adds them to the schema; admin.py and settings.py expose them in the UI with German and English labels; metrics.py exports skirnir_client_inflight, skirnir_client_peak_inflight, skirnir_client_concurrency_limited_total and skirnir_client_too_large_total. Refusals are audited (concurrency_limited, body_too_large) with client, path and limit, never content. Chunked bodies without a declared length stay bounded by the app ceiling of 64 MiB. Breaking for clients that run more than 4 requests at once: they need a higher max_concurrent before the upgrade.",
   "findings": [
     {
-      "id": "TM-05",
-      "evidence": "A recalled fact 'Termin bei Frau Müller' with privacy term 'Müller' was sent to the cloud provider: the inserted data message carried 'M\\u00fcller'.",
-      "resolution": "privacy.user_texts reads inserted facts decoded; covered by selftest_cloud_final_payload. Classifier quality and tool results remain open.",
-      "disposition": "baseline"
-    },
-    {
-      "id": "TM-09",
-      "evidence": "Gateway routes were only enumerated with the gateway disabled; rotation and revocation were untested.",
-      "resolution": "Tested with the gateway enabled, real token rotation and grant revocation by reload; no defect found. Deployment coverage remains.",
-      "disposition": "baseline"
-    },
-    {
-      "id": "TM-15",
-      "evidence": "A session-store exception text carrying a canary appeared in the log (aiohttp 'Error handling request' traceback).",
-      "resolution": "Last-resort middleware logs type and code locations only (ADR-0062); canaries on memory, session and backend error paths. Rotation and backups remain open.",
+      "id": "TM-08",
+      "evidence": "An authenticated client was bounded by requests per minute and the 64 MiB app ceiling only; its requests in progress were unbounded.",
+      "resolution": "Per-client concurrency and declared size bounds with defaults and peak gauges. Chunked bodies, per-client cost and hostile-load budgets remain open.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_cloud_final_payload.py; python test/selftest_isolation_rotation.py; python test/selftest_log_hygiene_paths.py (WSL)",
+      "command": "python test/selftest_client_limits.py (WSL)",
       "result": "passed",
-      "evidence": "6, 3 and 2 tests OK."
+      "evidence": "7 tests OK: fifth concurrent request 429 with Retry-After and no work, per-client slots, 413 above 16 MiB unless 32 allowed, slot returned after disconnect, config bounds, UI fields, gauges."
     },
     {
-      "command": "Negative checks: selftest_cloud_final_payload before the privacy fix; selftest_log_hygiene_paths without the middleware",
+      "command": "Negative check: test/selftest_client_limits.py against the router without these changes",
       "result": "passed",
-      "evidence": "3 failures (term passed, classifier saw escaped JSON, provider called); 'store exception leaked into the log'."
+      "evidence": "FAILED (failures=4, errors=6)."
     },
     {
-      "command": "All python test/... commands of ci.yml (WSL) after rebase onto #108; check_control_flow; check_adr_index; ruff check .",
+      "command": "All python test/... commands of ci.yml (WSL); check_adr_index; selftest_english_names; ruff check .",
       "result": "passed",
-      "evidence": "No failures; ADR index ok: 62 ADRs; control flow ok; All checks passed."
+      "evidence": "No failures; ADR index ok: 63 ADRs; ALLE OK; All checks passed."
     },
     {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "command": "python tools/security/review.py check --base origin/security/p1-evidence --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -83,7 +69,7 @@
     }
   ],
   "limitations": [
-    "The privacy classifier is stubbed; its quality on real text is not measured.",
-    "Code locations in the unexpected-error log include source lines, which are code, not data; the message itself is withheld and is lost for debugging."
+    "Stacked on #109; the record is refreshed against main once #109 is merged.",
+    "Per-client defaults were checked against three days of journal starts (highest: 14 starts in 30 s for one agent client), which bound but do not measure concurrency; the new peak gauge measures it."
   ]
 }

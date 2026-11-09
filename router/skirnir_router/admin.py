@@ -53,7 +53,7 @@ async def handle_config_get(request):
 
 
 CLIENT_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
-CLIENT_FIELDS = ("ip", "roles", "models", "requests_per_minute", "max_priority", "cloud", "data_class", "note")
+CLIENT_FIELDS = ("ip", "roles", "models", "requests_per_minute", "max_concurrent", "max_body_mib", "max_priority", "cloud", "data_class", "note")
 
 
 def _privacy_view(pc):
@@ -83,6 +83,7 @@ def clients_view():
                      "token_rotated": (ov.get(name) or {}).get("token_rotated") or c.get("token_rotated"), "created": c.get("created"),
                      "ip": c.get("ip") or [], "roles": c.get("roles") or ["*"], "models": c.get("models") is True,
                      "requests_per_minute": c.get("requests_per_minute"), "max_priority": c.get("max_priority"),
+                     "max_concurrent": c.get("max_concurrent"), "max_body_mib": c.get("max_body_mib"),
                      "cloud": c.get("cloud", True), "data_class": c.get("data_class"), "note": c.get("note"),
                      "privacy_check": c.get("privacy_check") is True}   # config.yaml only (privacy.py), shown read-only
     return out
@@ -107,10 +108,11 @@ def _client_spec(name, v):
     for k in ("models", "cloud"):
         if v.get(k) is not None:
             spec[k] = bool(v[k])
-    if v.get("requests_per_minute") is not None:
-        spec["requests_per_minute"] = values.number(v["requests_per_minute"], f"client {name}: requests_per_minute", integer=True)
-        if failed(spec["requests_per_minute"]):
-            return spec["requests_per_minute"]
+    for k in ("requests_per_minute", "max_concurrent", "max_body_mib"):
+        if v.get(k) is not None:
+            spec[k] = values.number(v[k], f"client {name}: {k}", integer=True)
+            if failed(spec[k]):
+                return spec[k]
     for k in ("max_priority", "data_class"):
         if v.get(k):
             spec[k] = str(v[k])

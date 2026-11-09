@@ -141,14 +141,15 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Pre-auth flood, long streams or parallel costly inference.",
-      "controls": "Client rate and enrollment limits. Unauthenticated statistics capped at 1024 sources (LRU, evictions counted); their audit lines limited per source and event kind and by a global per-minute budget with withheld counts (ADR-0057).",
-      "next_action": "Concurrency, time, byte and cost bounds for authenticated and tunnel traffic; WebSocket handshake limits under load.",
+      "controls": "Client rate and enrollment limits. Unauthenticated statistics capped at 1024 sources (LRU, evictions counted); their audit lines limited per source and event kind and by a global per-minute budget with withheld counts (ADR-0057). Since router 0.22.0 (ADR-0063) every configured client has max_concurrent requests in progress (default 4, 429 with Retry-After) and max_body_mib declared body size (default 16, 413), with per-client peak gauges.",
+      "next_action": "Measure peaks per client and tune limits; per-client cost bounds for cloud; bound chunked bodies per client; hostile-load test.",
       "owner_role": "maintainer and operator",
       "test_refs": [
+        "test/selftest_client_limits.py",
         "test/selftest_max_parallel.py",
         "test/selftest_security.py"
       ],
-      "validation_gap": "V12: pre-auth state and audit volume are bounded and unit-tested; hostile-load budgets for authenticated traffic remain open."
+      "validation_gap": "V12: pre-auth state, audit volume and per-client concurrency and declared size are bounded and unit-tested; chunked bodies, per-client cost and hostile-load budgets remain."
     },
     {
       "id": "TM-09",
