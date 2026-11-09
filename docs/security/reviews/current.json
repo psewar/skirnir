@@ -2,49 +2,65 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "0967485464c134dadb2e79d0ceda625083d71616",
-  "change_digest": "da8dbc7907c432a17e776241eb5a1ecd2e04f365c91ae0899ecfa362bcb8d14c",
+  "base_sha": "042251655b3e092e8fd607bc6e56840d78cb8c45",
+  "change_digest": "e6d1c83f170909d6c7f558e503ac753792a1f19deb4e6d673f7575a1a11259e5",
   "reviewed_paths": [
-    ".gitattributes",
-    ".github/workflows/ci.yml",
     "CHANGELOG.md",
     "README.de.md",
     "README.md",
-    "docs/adr/0069-router-install-script.md",
-    "docs/adr/README.md",
-    "router/install.sh",
-    "test/selftest_install.py"
+    "agent/app.go",
+    "agent/config.example.yaml",
+    "agent/config.go",
+    "agent/main.go",
+    "agent/routertls.go",
+    "agent/routertls_test.go",
+    "agent/setup_linux.go",
+    "agent/setup_linux_test.go",
+    "agent/setup_other.go",
+    "agent/skirnir-agent.service",
+    "agent/tunnel.go",
+    "agent/updater.go",
+    "docs/adr/0070-linux-agent-setup-and-private-router-ca.md",
+    "docs/adr/README.md"
   ],
   "risk_ids": [
+    "TM-07",
     "TM-14"
   ],
   "boundaries": [
-    "B3"
+    "B3",
+    "B8"
   ],
-  "summary": "Operator tooling, no router code change (ADR-0069). New router/install.sh (bash, LF, executable): options --prefix, --config-dir, --check, and for packaging/tests --root DIR (no root, apt or systemctl), --no-venv and --os-release FILE. Before any change it refuses without root (unless --root), on a distribution whose ID/ID_LIKE is not debian/ubuntu, without Python >= 3.11, or with an incomplete source folder; unknown options are refused. Missing apt packages (python3, python3-venv, python3-aiohttp, python3-yaml, python3-cryptography, curl, jq) are installed, or only listed with --check or --root. Program files are staged in a mktemp folder below the prefix and swapped (the package folder renamed aside, then removed), bytecode caches are not copied, units are copied to /etc/systemd/system and systemd is reloaded; the configuration folder is created 0750 and never written. The venv uses --system-site-packages plus requirements-session.txt (includes requirements.txt with paho-mqtt<2) and is checked by importing the packages. With a configuration it runs router.py --check --files under setpriv --inh-caps=-all --bounding-set=-all (as the ADR-0044 unit runs) and --posture; a failing check refuses with the program files installed and the service untouched. Without one it names router.py --init. Last line STATE: installed | checked | refused. .gitattributes gains *.cmd text eol=crlf so Set-UpdateKey.cmd is checked out with CRLF.",
+  "summary": "Agent 0.30.0 (ADR-0070). New routertls.go: routerTLSConfig(caFile) returns nil for an empty value (Go defaults with the system store, as before), otherwise a tls.Config with RootCAs = system pool (or an empty pool where none exists) plus the PEM certificates of the file and MinVersion TLS 1.2; hostname verification is unchanged; an unreadable file or one without a certificate is an error. RouterCfg gains ca_file; Config.validate calls routerTLSConfig so check-config and the start refuse an unusable file; app.go sets the result on the tunnel (websocket.Dialer TLSClientConfig) and the updater (download http.Client Transport with ProxyFromEnvironment). New setup_linux.go (build tag linux; setup_other.go now !windows && !linux): `setup [--router] [--update-key] [--ca-file] [--root]` refuses without root (unless --root), with a router URL not starting https://, an update key that is not 32 bytes base64, or an unusable CA file; writes the configuration only if none exists, owner-only with O_EXCL, with identity.dir /var/lib/skirnir-agent/identity, logging.dir /var/log/skirnir-agent and tunnel upstream on loopback; creates both folders 0700; copies os.Executable() to /usr/local/bin/skirnir-agent via a temporary file and rename; writes the go:embed unit; validates with loadConfig; without --root runs systemctl daemon-reload and enable --now; prints the fingerprint comparison step and STATE: installed. The unit's comments and description are English. The agent usage text is English and lists game (it said spiel).",
   "findings": [
     {
+      "id": "TM-07",
+      "evidence": "Nodes could reach a router with a private certificate only by installing that CA system-wide; Linux nodes had no setup and the README did not ask to compare fingerprints there.",
+      "resolution": "router.ca_file scoped to the router connection; Linux setup ends with the fingerprint comparison step.",
+      "disposition": "baseline"
+    },
+    {
       "id": "TM-14",
-      "evidence": "A manual install had to create the venv and check the capability-less readability of configured files by hand; only the maintainer's deploy did both.",
-      "resolution": "install.sh performs and checks these steps; apt, systemctl and the venv are exercised only on a real machine.",
+      "evidence": "The Linux unit makes /etc read-only while the default key folder lived under /etc, and its writable folders had to pre-exist.",
+      "resolution": "setup places key and logs under /var and creates them 0700.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_install.py (WSL)",
+      "command": "go vet ./... (windows and GOOS=linux); go test -count=1 ./... on Windows and Linux (WSL)",
       "result": "passed",
-      "evidence": "3 tests OK: layout, 0750 configuration folder, upgrade without leftovers, --check, refusals, valid --init configuration passes with posture, broken configuration refused with program files kept."
+      "evidence": "ok on both; new TestRouterTLSConfigInputs, TestTunnelDialTrustsOnlyWithCAFile, TestUpdateDownloadTrustsOnlyWithCAFile, TestConfigRefusesUnusableCAFile, TestLinuxSetupStaged, TestLinuxSetupRefusals ran (-v)."
     },
     {
-      "command": "Manual staging runs in WSL including the venv step without python3-venv",
+      "command": "go run . check-config --config config.example.yaml",
       "result": "passed",
-      "evidence": "venv step refused with 'python3 -m venv failed'; missing certificate files refused with the file names; STATE lines as documented."
+      "evidence": "ok: the example with the commented ca_file still loads."
     },
     {
       "command": "All python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names; ruff check .",
       "result": "passed",
-      "evidence": "No failures; ADR index ok: 69 ADRs; ALLE OK; All checks passed."
+      "evidence": "No failures; ADR index ok: 70 ADRs; ALLE OK; All checks passed."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -58,7 +74,7 @@
     }
   ],
   "limitations": [
-    "No shellcheck was available locally; apt-get, systemctl and the real venv path are not run in CI.",
+    "systemctl enable --now runs only on a real Linux node; the staged test does not exercise it. A CA file on a node must be protected like the configuration.",
     "Merged main after the PRs below it."
   ]
 }

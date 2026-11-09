@@ -488,9 +488,9 @@ only for now; Linux archives are tar.zst.
 answer three questions (router address, the operator's update key, the user allowed to control the service); it installs
 itself as the service *Skirnir Agent* and the node appears in the *Agents* tab for approval.
 
-A new GPU machine needs: Ollama with models, the agent binary, a configuration with `router.url` (template
-[agent/config.example.yaml](agent/config.example.yaml)), `Install-Service.ps1` as administrator, then approval in the router
-UI (Wake-on-LAN, weight, MQTT device). No token, no firewall rule, no certificate, no IP by hand.
+**New Linux node since agent 0.30.0:** `sudo ./skirnir-agent-<version>-linux-amd64 setup --router https://<router>:11435` (optionally `--update-key <public key>`, `--ca-file <pem>`) writes the configuration, creates the key and log folders under `/var`, installs the binary and the systemd unit and starts the service (ADR-0070).
+
+A new GPU machine needs: Ollama with models (bound to loopback, `OLLAMA_HOST=127.0.0.1`), the agent, `setup` as above, then approval in the router UI after comparing the fingerprint with `skirnir-agent identity` (Wake-on-LAN, weight, MQTT device). No token, no firewall rule, no IP by hand. The router's certificate must be trusted by the node: a public one, or a private CA named in `router.ca_file`.
 
 The agent refuses a configuration with a top-level key it does not read (a misspelt block, or one retired in an earlier
 version) and names the key. `skirnir-agent check-config` shows this before a restart; a self-update then ends as a failed

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -55,6 +56,7 @@ const ollamaResync = 30 * time.Second
 
 type Tunnel struct {
 	url            string
+	tls            *tls.Config // router.ca_file (ADR-0070); nil = system trust store
 	upstream       string
 	log            *Logger
 	http           *http.Client
@@ -158,7 +160,7 @@ type ctlMsg struct {
 
 func (t *Tunnel) session(ctx context.Context) (time.Duration, error) {
 	start := time.Now()
-	d := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	d := websocket.Dialer{HandshakeTimeout: 10 * time.Second, TLSClientConfig: t.tls}
 	conn, resp, err := d.DialContext(ctx, t.url, nil)
 	if err != nil {
 		if resp != nil {

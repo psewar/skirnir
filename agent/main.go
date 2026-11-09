@@ -22,25 +22,26 @@ var version = "dev"
 func usage() {
 	fmt.Fprintf(os.Stderr, `skirnir-agent %s
 
-  skirnir-agent <verb> [--config <pfad>]
+  skirnir-agent <verb> [--config <path>]
 
-  setup         Einrichtung per Doppelklick (Windows): fragt nach Adminrechten, legt Konfiguration und Dienst an oder
-				aktualisiert beide, GPU-Z-Relay-Aufgabe, Zustand - Standard, wenn kein Verb angegeben ist
-  install       Dienst anlegen (Windows, Admin): Konto, Recovery, ACLs, Firewall, Steuerrecht
-  uninstall     Dienst entfernen (Windows, Admin)
-  apply-rules   ACLs, Firewall-Regeln und Steuerrecht neu setzen (Windows, Admin)
-  start|stop|restart   Dienst steuern (Windows; ohne Admin, wenn install das Steuerrecht gesetzt hat)
-  status        Dienstzustand + /health des laufenden Agenten
-  run           im Vordergrund laufen (Konsole/systemd, Ctrl-C beendet)
-  identity      Fingerprint und Public Key dieses Agenten zeigen (zum Abgleich mit der Router-UI)
-  check-config  Konfiguration laden und pruefen
-  mqtt-clear    retained Discovery-Configs dieses Geraets loeschen (Testgeraete aufraeumen)
-  gpu           Messquelle (NVML/nvidia-smi) und alle Sensoren einmal ausgeben, GPU-Z eingeschlossen
-  gpuz-relay    GPU-Z-Sensoren aus der Anmeldesitzung an den Dienst reichen (Windows; Aufgabe bei Anmeldung)
-  spiel         Spielerkennung und Hauptspeicher einmal ausgeben (Spielordner, Programmnamen, Treffer)
+  setup         install or update (Windows: double-click, asks for administrator rights, creates configuration and
+                service, GPU-Z relay task - the default without a verb; Linux: sudo skirnir-agent setup [--router URL]
+                [--update-key KEY] [--ca-file PEM] writes configuration, folders, binary and systemd unit, starts it)
+  install       create the service (Windows, administrator): account, recovery, ACLs, firewall, control right
+  uninstall     remove the service (Windows, administrator)
+  apply-rules   set ACLs, firewall rules and control right again (Windows, administrator)
+  start|stop|restart   control the service (Windows; without administrator rights once install granted control)
+  status        service state and /health of the running agent
+  run           run in the foreground (console/systemd, Ctrl-C ends it)
+  identity      show this agent's fingerprint and public key (compare with the router UI before approving)
+  check-config  load and check the configuration
+  mqtt-clear    delete this device's retained discovery configs (clean up test devices)
+  gpu           print the measurement source (NVML/nvidia-smi) and all sensors once, GPU-Z included
+  gpuz-relay    pass GPU-Z sensors from the login session to the service (Windows; task at login)
+  game          print game detection and main memory once (game folders, program names, matches)
   version
 
-  Standard-Config: %s
+  default configuration: %s
 `, version, defaultConfigPath)
 }
 

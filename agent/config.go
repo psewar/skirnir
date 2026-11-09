@@ -106,8 +106,9 @@ func (p *ProxyCfg) on() bool           { return p.Enabled != nil && *p.Enabled }
 func (p *ProxyCfg) requireToken() bool { return p.RequireToken == nil || *p.RequireToken }
 
 type RouterCfg struct {
-	URL   string `yaml:"url"`
-	Token string `yaml:"token"` // only for the TLS front-end (ollama_proxy: X-Router-Token)
+	URL    string `yaml:"url"`
+	Token  string `yaml:"token"`   // only for the TLS front-end (ollama_proxy: X-Router-Token)
+	CAFile string `yaml:"ca_file"` // PEM with a private CA the router's certificate is issued by (ADR-0070); empty = system trust store
 }
 
 // MQTTCfg is read both locally (YAML) and provisioned by the Router (JSON).
@@ -406,6 +407,9 @@ func (c *Config) validate() error {
 	}
 	if c.Router.URL == "" {
 		return fmt.Errorf("router.url missing")
+	}
+	if _, err := routerTLSConfig(c.Router.CAFile); err != nil {
+		return err
 	}
 	if c.MQTT.on() && c.MQTT.Host != "" { // only check local MQTT-Config if set (otherwise the Router provisions it)
 		if c.MQTT.Password == "" && c.MQTT.PasswordSecret == "" {
