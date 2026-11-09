@@ -15,6 +15,7 @@ from aiohttp import ClientSession, web
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
 from . import decision, fallback_observation, memory, quiet, rerank, session_api, context_ops
 from .unexpected import unexpected_error_middleware
+from . import posture
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 from .outcome import failed
 
@@ -113,6 +114,10 @@ async def main(cfg_path):
         log.error("configuration invalid, router does not start: %s", cfg.message)
         sys.exit(2)
     state.CFG = cfg
+    lines, summary = posture.report(cfg)   # ADR-0064: what the configuration allows, as facts on every start
+    for line in lines:
+        log.warning("posture %s", line)
+    log.info("%s", summary)
     state.INTERNAL_TOKEN = secrets.token_urlsafe(32)   # Self-call of the UI (Try it) in enforce mode, localhost only
     decision.init()   # Auto role (decision_engine), if configured
     state.NODES = {name: nodes.Node(name, spec) for name, spec in state.CFG.nodes.items()}
@@ -207,7 +212,7 @@ async def main(cfg_path):
 
 
 def cli():
-    """CLI: `router.py <config.yaml>` or `router.py --hash <password>`."""
+    """CLI: `router.py <config.yaml>`, `router.py --hash <password>`, `--check <config>` or `--posture <config>`."""
     if len(sys.argv) > 2 and sys.argv[1] == "--hash":
         print(auth.hash_password(sys.argv[2]))      # Hilfsfunktion: python3 router.py --hash '<passwort>'
         sys.exit(0)
@@ -226,6 +231,16 @@ def cli():
             sys.exit(2)
         print(f"configuration ok: {len(cfg.roles)} roles, {len(cfg.models)} models in the catalog, {len(cfg.nodes)} static nodes, "
               f"client_auth {cfg.client_auth['mode']}" + ("" if "--pure" in sys.argv or not os.path.exists(cfg.overrides_path) else " (with roles.yaml)"))
+        sys.exit(0)
+    if len(sys.argv) > 2 and sys.argv[1] == "--posture":
+        # ADR-0064: security posture of a configuration as facts; rc 0 also with findings, 2 only for an invalid config.
+        cfg = config.Config.load(sys.argv[2], use_overrides="--pure" not in sys.argv)
+        if failed(cfg):
+            print(f"ERROR: {cfg.message}")
+            sys.exit(2)
+        lines, summary = posture.report(cfg)
+        for line in [*lines, summary]:
+            print(line)
         sys.exit(0)
     logging.basicConfig(level=os.environ.get("ROUTER_LOG", "INFO"),
                         format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)

@@ -501,7 +501,7 @@ Ein TLS-Zertifikat für den Hostnamen des Routers (z. B. Let's Encrypt), auf den
 2. [router/config.example.yaml](router/config.example.yaml) nach `/etc/skirnir-router/config.yaml` (0600) und anpassen:
    `public_url`, Zertifikatspfade, Rollen, Katalog, Clients. Passwort-Hashes für die UI erzeugt
    `python3 router.py --hash '<passwort>'`; Client-Hashes sind `sha256` des Tokens.
-3. Prüfen: `python3 router.py --check /etc/skirnir-router/config.yaml` – meldet unbekannte Schlüssel mit Vorschlag.
+3. Prüfen: `python3 router.py --check /etc/skirnir-router/config.yaml` – meldet unbekannte Schlüssel mit Vorschlag; `python3 router.py --posture /etc/skirnir-router/config.yaml` meldet, was die Konfiguration erlaubt, das das Bedrohungsmodell als riskant führt (observe-Modus, geteilte Tokens, Klartext-Backends …; ADR-0064), auch im Startlog.
 4. systemd-Einheiten aus `router/` nach `/etc/systemd/system/`: `skirnir-router.service` (läuft mit `ProtectSystem=strict`,
    schreibt nur `/etc/skirnir-router` und sein Log-Verzeichnis), optional `skirnir-router-cert.path` (Neustart bei erneuertem
    Zertifikat) und `skirnir-router-secrets.*` (siehe 5). `systemctl enable --now skirnir-router`.
