@@ -1,5 +1,9 @@
 # Changelog
 
+## Node tools (unreleased)
+
+- `agent/Set-OllamaLoopback.cmd` binds Ollama on a Windows node to loopback in one step (TM-11, ADR-0072): double-click, it asks for administrator rights itself and starts despite the default execution policy. It detects whether Ollama is the agent's child or a user's desktop app, sets `OLLAMA_HOST=127.0.0.1:11434` there, restarts Ollama, verifies that every listener is a loopback address (else restores the previous state) and disables firewall rules that only opened Ollama. It refuses while other machines are connected to Ollama (`-Force "<reason>"`); `-Check` only reports. Router and agent versions are unchanged.
+
 ## Development tooling (pinning included in v0.26.1, the rest in v0.27.0)
 
 - Agent revocation and enrollment at the wire (TM-07): `test/selftest_agent_revocation.py` signs the tunnel challenge with an Ed25519 key like an agent and checks that revoking ends a waiting and a streaming request with the reason `revoked`, tells the agent, closes the connection and removes the node; that the revoked key is refused on reconnect; and that new keys beyond the per-address limit are refused with 1008 while an approved key still connects.

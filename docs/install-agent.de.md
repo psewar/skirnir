@@ -24,7 +24,12 @@ am Knoten, kein Zertifikat, kein Token und keine feste IP. Interna des Agenten: 
    allen Adressen, ist es am Router vorbei erreichbar (TM-11). Unter Linux mit dem systemd-Dienst von Ollama:
    `sudo systemctl edit ollama`, `[Service]` und `Environment="OLLAMA_HOST=127.0.0.1"` eintragen, dann
    `sudo systemctl restart ollama`. Unter Windows als Umgebungsvariable setzen oder Ollama als Kind des Agenten betreiben
-   ([unten](#ollama-als-kind-des-agenten)).
+   ([unten](#ollama-als-kind-des-agenten)). Auf einem Windows-Knoten, der schon läuft, erledigt das
+   `agent\Set-OllamaLoopback.cmd` in einem Schritt (Doppelklick; fragt selbst nach Administratorrechten): Es erkennt, ob
+   Ollama ein Kind des Agenten oder die Desktop-App eines Benutzers ist, setzt `OLLAMA_HOST=127.0.0.1:11434` an der richtigen
+   Stelle, startet Ollama neu, prüft, dass es nur noch auf Loopback lauscht (sonst stellt es den alten Stand wieder her), und
+   deaktiviert Firewall-Regeln, die nur Ollama öffneten. Es lehnt ab, solange andere Rechner mit Ollama verbunden sind.
+   `-Check` meldet nur; das Protokoll liegt neben dem Skript (ADR-0072).
 3. `OLLAMA_NUM_PARALLEL` sollte `max_inflight` des Knotens im Router entsprechen (Standard 2,
    [configuration.de.md](configuration.de.md#scheduler-circuit-breaker-admission)).
 4. Windows: Der Ollama-Installer legt Firewall-Regeln `ollama.exe` an, die jede Quelle zulassen. Diese entfernen, Ollama braucht

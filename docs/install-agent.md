@@ -24,6 +24,11 @@ no certificate, no token and no fixed IP. Agent internals (German): [agent/READM
    addresses makes Ollama reachable around the router (TM-11). On Linux with the Ollama systemd service:
    `sudo systemctl edit ollama`, add `[Service]` and `Environment="OLLAMA_HOST=127.0.0.1"`, then `sudo systemctl restart ollama`.
    On Windows set it as an environment variable, or run Ollama as a child of the agent ([below](#ollama-as-a-child-of-the-agent)).
+   On a Windows node that already runs, `agent\Set-OllamaLoopback.cmd` does it in one step (double-click; it asks for
+   administrator rights): it detects whether Ollama is the agent's child or a user's desktop app, sets
+   `OLLAMA_HOST=127.0.0.1:11434` in the right place, restarts Ollama, checks that it listens on loopback only (else it
+   restores the previous state) and disables firewall rules that only opened Ollama. It refuses while other machines are
+   connected to Ollama. `-Check` only reports; the log lands next to the script (ADR-0072).
 3. `OLLAMA_NUM_PARALLEL` should match the node's `max_inflight` in the router (default 2,
    [configuration.md](configuration.md#scheduler-circuit-breaker-admission)).
 4. Windows: the Ollama installer creates firewall rules `ollama.exe` that allow any source. Remove them, Ollama needs no
