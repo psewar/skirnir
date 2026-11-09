@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "0ed659f9c12a75e84372a78af122e8223b15527a",
-  "change_digest": "e516b55c036c740443c9e84409f46d53a361d67a91877705feab72fce2dad438",
+  "base_sha": "0967485464c134dadb2e79d0ceda625083d71616",
+  "change_digest": "da8dbc7907c432a17e776241eb5a1ecd2e04f365c91ae0899ecfa362bcb8d14c",
   "reviewed_paths": [
     ".gitattributes",
     ".github/workflows/ci.yml",
@@ -47,7 +47,7 @@
       "evidence": "No failures; ADR index ok: 69 ADRs; ALLE OK; All checks passed."
     },
     {
-      "command": "python tools/security/review.py check --base origin/feat/agent-keys-cli --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -58,7 +58,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #116; the record is refreshed against main once the stack below is merged.",
-    "No shellcheck was available locally; apt-get, systemctl and the real venv path are not run in CI."
+    "No shellcheck was available locally; apt-get, systemctl and the real venv path are not run in CI.",
+    "Merged main after the PRs below it."
   ]
 }
