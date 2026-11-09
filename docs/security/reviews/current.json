@@ -2,72 +2,31 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "008527fe11177f4c085e45707895d139dbc2ee7f",
-  "change_digest": "27f3230d6d14ca9150c6dad0ee8b05bd07b6b74f10a524b83a2315309c6bdf63",
+  "base_sha": "2cd7c33b2072f9dc068523c4b8c9a0e93664a1a9",
+  "change_digest": "719e38c38e4d777654d3f822974d165fd868f5c0c4a54795ab0eeed1a7b3b927",
   "reviewed_paths": [
-    "AGENTS.md",
-    "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "docs/adr/0071-documentation-layout-quick-start-and-docs-twins.md",
-    "docs/adr/README.md",
-    "docs/clients.de.md",
-    "docs/clients.md",
-    "docs/configuration.de.md",
-    "docs/configuration.md",
-    "docs/install-agent.de.md",
-    "docs/install-agent.md",
-    "docs/install-router.de.md",
-    "docs/install-router.md",
-    "docs/operations.de.md",
-    "docs/operations.md",
-    "docs/reference.de.md",
-    "docs/reference.md",
-    "docs/troubleshooting.de.md",
-    "docs/troubleshooting.md",
-    "router/config.minimal.yaml",
-    "router/skirnir_router/setup_init.py"
+    "CHANGELOG.md"
   ],
   "risk_ids": [
-    "TM-01",
-    "TM-03",
-    "TM-11"
+    "TM-13"
   ],
   "boundaries": [
-    "B1",
-    "B2",
-    "B3"
+    "B8"
   ],
-  "summary": "Documentation restructure (ADR-0071) plus one path alignment. README.md and README.de.md are rewritten to about 215 lines each: what it is, architecture, a quick start (dev environment without GPU, router via install.sh and router.py --init, GPU node with Ollama on loopback and the agent setup on Windows/Linux, approval after comparing skirnir-agent identity, first request with curl on the OpenAI and native Ollama APIs, Home Assistant), concepts, security essentials (enforce and locked, one token per client, TLS on both ports, firewall 11435, Ollama on loopback, fingerprint comparison, --posture before rollouts, capability-less root and readable key files, no passwords on the command line), links, development, license. New docs/install-router, install-agent, configuration, clients, operations, troubleshooting and reference, each with a .de.md twin, hold the moved README sections; content present in only one language is now in both; outdated statements are corrected (versions, modes.score instead of scheduler.score, the shipped decision engine chain, setup instead of Install-Service.ps1, TLS only when configured with api_tls default false, 401/403/429/413 reasons, the game verb, release asset names, StateDirectory, repo layout). AGENTS.md: README and every docs twin stay in step; the Names link points to docs/operations.md. Code change: router/config.minimal.yaml and setup_init.py (template markers) use /etc/skirnir-router/certs/ for control_tls, the path skirnir-router-cert.path watches and config.example.yaml uses; before, --init wrote /etc/skirnir-router/tls/ and certificate renewal would not have restarted the router.",
+  "summary": "Changelog only: the v0.30.0 row (router 0.23.0, agent 0.30.0) links the published release, created with the release tool on the merge commit of #119 with the agent 0.29.1 binaries. No code or configuration change.",
   "findings": [
     {
-      "id": "TM-03",
-      "evidence": "The README called all links TLS although api_tls defaults to false and the control port is plaintext without control_tls; --init used a certificate path the renewal unit does not watch.",
-      "resolution": "Security essentials state what to set; --init and the minimal configuration use the watched path.",
-      "disposition": "baseline"
-    },
-    {
-      "id": "TM-11",
-      "evidence": "Binding Ollama to loopback on nodes was stated as a fact, not as an operator step.",
-      "resolution": "Quick start and install-agent make OLLAMA_HOST=127.0.0.1 an explicit step.",
+      "id": "TM-13",
+      "evidence": "The v0.30.0 row was marked unreleased.",
+      "resolution": "Row links the release; content unchanged.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "Link and anchor check over README*.md and docs/*.md; heading structure of every EN/DE pair; maintainer-environment word list; flags named next to router.py, install.sh, agent_keys.py and setup",
+      "command": "gh release view v0.30.0 (target and assets, checked by the release tool)",
       "result": "passed",
-      "evidence": "All relative links and anchors resolve, pairs have the same heading structure, no environment names; one false positive (setup_init next to --init)."
-    },
-    {
-      "command": "python test/selftest_init.py; all python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names",
-      "result": "passed",
-      "evidence": "OK; no failures; ADR index ok: 71 ADRs; ALLE OK."
-    },
-    {
-      "command": "Facts checked against code: requirements-dev.txt exists, X-Skirnir-Node/-Model/-Tier headers (request.py), test-cert.pem created by run_tests.py, --init defaults",
-      "result": "passed",
-      "evidence": "All present as described."
+      "evidence": "Target 2cd7c33 (merge of #119), assets skirnir-agent-0.30.0-linux-amd64 and skirnir-agent-0.30.0-windows-amd64.exe."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -80,8 +39,5 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": [
-    "The commands were not run on a fresh Debian host or GPU node; the Home Assistant menu path is standard knowledge, not tested here.",
-    "Merged main after the PRs below it."
-  ]
+  "limitations": []
 }
