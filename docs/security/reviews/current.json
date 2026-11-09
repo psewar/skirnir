@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "605418b6214d7a1e95bb54e5df74c806f7a56cfb",
-  "change_digest": "02d634499aa17b00821de28144306401025a6812a763cac926b1ce6b40a6d7d2",
+  "base_sha": "57ad3fb0cc2e2bcf4e786dcb67f3caa1c66fa738",
+  "change_digest": "fa266a4028f7125baf392ca99668a57083dfb1bb62d540349160f7f46a5e835f",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
@@ -85,7 +85,7 @@
       "evidence": "No failures except the two git-based checks under WSL (worktree path), which pass on Windows; ADR index ok: 73 ADRs."
     },
     {
-      "command": "python tools/security/review.py check --base origin/feat/ollama-loopback --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -98,6 +98,6 @@
   "limitations": [
     "The unit directives were not started under systemd here; the rollout verifies them on the router host (secrets service run, write probe in the router's mount namespace).",
     "The router still runs as root; a dedicated user, the Linux agent unit and a LocalSystem child from a user-writable path remain open under TM-14.",
-    "Stacked on the Ollama loopback script PR."
+    "Merged main after the PRs below it."
   ]
 }
