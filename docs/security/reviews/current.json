@@ -2,85 +2,24 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "faf2844341e3ea50a2802577ac927a47aa7834f4",
-  "change_digest": "a8540b6b78672f19ed5d74e31c4cccc694062b91e221bad63ee5e6c8c6b41bd0",
+  "base_sha": "994330b4711bd5540b001aebf70e498093365861",
+  "change_digest": "61134b6d80462b02dad9064eaf539372af7f349acf762aacb3e1f15196f66eba",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
-    ".gitignore",
-    "CHANGELOG.md",
-    "design/memory-reliability.de.md",
-    "design/memory-reliability.md",
-    "docs/adr/0076-deletion-lifecycle-across-stores-and-restores.md",
-    "docs/adr/README.md",
-    "docs/clients.de.md",
-    "docs/clients.md",
-    "docs/operations.de.md",
-    "docs/operations.md",
-    "docs/security/risk-register.json",
-    "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md",
-    "router/config.example.yaml",
-    "router/skirnir_router/app.py",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/context_ops.py",
-    "router/skirnir_router/decision/capture.py",
-    "router/skirnir_router/deletion_journal.py",
-    "router/skirnir_router/memory.py",
-    "router/skirnir_router/memory_gateway.py",
-    "router/skirnir_router/memory_outbox.py",
-    "router/skirnir_router/metrics.py",
-    "router/skirnir_router/posture.py",
-    "router/skirnir_router/reliability_store.py",
-    "router/skirnir_router/request.py",
-    "router/skirnir_router/session_api.py",
-    "router/skirnir_router/session_config.py",
-    "router/skirnir_router/session_migrations.py",
-    "router/skirnir_router/session_store.py",
-    "test/integration_deletion_lifecycle.py",
-    "test/selftest_deletion_lifecycle.py",
-    "test/selftest_memory.py"
+    "CHANGELOG.md"
   ],
   "risk_ids": [
-    "TM-12",
-    "TM-09",
-    "TM-15"
+    "TM-16"
   ],
   "boundaries": [
-    "B4",
-    "B5",
     "B9"
   ],
-  "summary": "Router 0.25.0, ADR-0076. New deletion_journal.py: completed API deletions of sessions (session_api delete) and memory operations (memory_gateway operation delete) are appended as {ts, kind, owner, id} to deletions.jsonl next to config.yaml (open_private, owner-only; write failures logged once). session_api.lifecycle replays it right after the store opens and before the memory lifecycle starts the outbox worker; an unreadable journal or a database error aborts the start. Schema migration adds memory_outbox.session_id (nullable) with a partial index. reliability_store: outbox_put stores session_id; _request_deletion applies the API deletion transitions in bulk while keeping the stored scope (never sent -> deleted without payload, possibly in Hindsight -> delete_pending with retry_base, processing -> delete_requested only); outbox_finish turns accepted/completed/pending of a delete_requested row into delete_pending; replay_deletions deletes journaled sessions and marks journaled operations (and, with the option, the operations of journaled sessions) in one transaction; outbox_stuck_deletions; outbox_deleted_documents pages sent-and-deleted operations by id; cleanup can mark memory of expired sessions. session_store.delete runs in a transaction and optionally marks the session's operations first. New session_store.delete_memory_with_session (bool, default false), example config, posture infos session_retention_off, memory_kept_on_session_delete, outbox_payload_retention_off. memory.Capture records the session id; memory.prepare sets req.memory_operation (HMAC operation id) for retaining requests, returned as X-Skirnir-Memory-Operation. Admin POST /admin/memory/reconcile-deletions on the control port (basic auth middleware) validates after/limit, deletes each listed document again via the Hindsight client, returns counts and next, audits counts. Gauge skirnir_memory_deletions_stuck. Decision capture rotates at 64 MiB to one .1 file. .gitignore for test journals. Docs EN/DE (design/memory-reliability lifecycle table, operations restore order, clients header), threat model and register TM-12, CHANGELOG.",
-  "findings": [
-    {
-      "id": "TM-12",
-      "evidence": "Deletion tombstones lived in the same database as the data; a restored older database resent pending rows of deleted knowledge; a restored Hindsight kept deleted documents; session deletion left retained memory with no way for the owner to find its id.",
-      "resolution": "Journal outside the database replayed before the outbox starts; admin reconcile for Hindsight; opt-in session memory deletion; operation id header; in-flight deletions taken over.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-09",
-      "evidence": "Session deletion with memory must not touch other owners' rows even with a colliding session id.",
-      "resolution": "All bulk updates are scoped by owner and session or operation id; the integration test covers another owner with the same session id.",
-      "disposition": "baseline"
-    },
-    {
-      "id": "TM-15",
-      "evidence": "The journal and the reconcile answer could become new content stores.",
-      "resolution": "Ids, kind and owner only; owner-only file; reconcile returns and audits counts only.",
-      "disposition": "baseline"
-    }
-  ],
+  "summary": "Documentation only: CHANGELOG marks v0.31.0 as released (tag link and date in the table row) and the node-tools section as included in v0.31.0. No code, configuration or workflow change.",
+  "findings": [],
   "tests": [
     {
-      "command": "python test/selftest_deletion_lifecycle.py; selftest_posture; selftest_pydeps; selftest_sbom; lock_requirements.py check; ruff check .; check_control_flow; check_pinned_references; check_adr_index; selftest_english_names; router.py --check config.example.yaml --pure",
+      "command": "python test/check_adr_index.py",
       "result": "passed",
-      "evidence": "all passed on Windows; ADR index ok: 76 ADRs."
-    },
-    {
-      "command": "pg-testlauf: every python step of ci.yml jobs python and sessions-postgres with PostgreSQL 16 (WSL), including test/integration_deletion_lifecycle.py",
-      "result": "passed",
-      "evidence": "integration_deletion_lifecycle ok, integration_sessions/context/interoperability ok; selftest_memory fixed for the new Capture field; three tests need pip or packaging, which that venv lacks (they pass with pip, as in CI)."
+      "evidence": "ADR index ok."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -94,8 +33,6 @@
     }
   ],
   "limitations": [
-    "Derived Hindsight observations are removed by Hindsight with their document; the opt-in live test was not extended.",
-    "The journal must not be restored older than the database; documented as an operational rule.",
-    "A deletion requested while an API delete is in flight still answers 409 for that single call."
+    "Text change only."
   ]
 }
