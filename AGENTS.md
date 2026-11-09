@@ -40,8 +40,9 @@ A pull request is complete when it contains, as far as they apply:
   recorded in the changelog.
 - **Changelog.** A new top row in `CHANGELOG.md` with the next tag, router and agent version and what changes for the
   operator, breaking changes first.
-- **Documentation.** `README.md` and `README.de.md` stay in step (same content, English and German); the matching
-  `design/` document describes the new behaviour.
+- **Documentation.** `README.md` and `README.de.md`, and each `docs/<name>.md` with its `docs/<name>.de.md`, stay in step
+  (same sections and facts, English and German); the README keeps the quick start, details live in `docs/`; the
+  matching `design/` document describes the new behaviour.
 - **ADR** for every decision (next section).
 - **Configuration.** A new key goes into the schema (`SCHEMA` in `router/skirnir_router/config.py`), the example
   configuration (`router/config.example.yaml`, `agent/config.example.yaml`) and, if the web UI may change it at runtime,
@@ -74,7 +75,7 @@ python test/check_public_changes.py                            # public-data sca
 
 - Code, identifiers, log and error messages, API fields, commit messages, ADRs and design documents are English.
   German exists as a translation (`README.de.md`, `*.de.md`) and in release-note summaries.
-- Names follow the product (`skirnir_router`, `skirnir-agent`, see README "Names"); `test/selftest_english_names.py`
+- Names follow the product (`skirnir_router`, `skirnir-agent`, see [docs/operations.md](docs/operations.md#names)); `test/selftest_english_names.py`
   guards the transition from the earlier German names.
 
 ## Tools check their own preconditions

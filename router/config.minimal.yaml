@@ -12,8 +12,8 @@ router:
   control_listen: 0.0.0.0:11435    # agents' tunnel and the web UI; firewall it to your GPU nodes and admin machines
   public_url: https://router.example.net:11435   # REPLACE: the name your nodes and browser use to reach this router
   control_tls:                     # a certificate your nodes' and clients' operating systems trust (e.g. Let's Encrypt)
-    cert: /etc/skirnir-router/tls/fullchain.pem
-    key: /etc/skirnir-router/tls/privkey.pem
+    cert: /etc/skirnir-router/certs/fullchain.pem
+    key: /etc/skirnir-router/certs/privkey.pem
   api_tls: true                    # the API port uses the same certificate, so client tokens never cross the network in clear
   control_auth:
     users: {}                      # REPLACE: {admin: "<hash from: python3 router.py --hash>"}; without users the port answers 503
