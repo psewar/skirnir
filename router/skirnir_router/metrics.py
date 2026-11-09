@@ -268,6 +268,10 @@ def render():
     ca = state.CLIENT_STATS
     gauge("skirnir_client_forbidden_total", "rejected requests per client (403)", [({"client": k}, v.get("forbidden", 0)) for k, v in ca["clients"].items()])
     gauge("skirnir_client_rate_limited_total", "rate-limited requests per client (429)", [({"client": k}, v.get("rate_limited", 0)) for k, v in ca["clients"].items()])
+    gauge("skirnir_client_inflight", "requests of a client in progress (ADR-0063)", [({"client": k}, v.get("inflight", 0)) for k, v in ca["clients"].items()])
+    gauge("skirnir_client_peak_inflight", "highest concurrent requests of a client since start", [({"client": k}, v.get("peak_inflight", 0)) for k, v in ca["clients"].items()])
+    gauge("skirnir_client_concurrency_limited_total", "requests refused by the client concurrency limit (429)", [({"client": k}, v.get("concurrency_limited", 0)) for k, v in ca["clients"].items()])
+    gauge("skirnir_client_too_large_total", "requests refused for their declared body size (413)", [({"client": k}, v.get("too_large", 0)) for k, v in ca["clients"].items()])
     gauge("skirnir_unauthenticated_total", "requests without a valid identity per source IP", [({"ip": k}, v.get("total", 0)) for k, v in ca["unauth"].items()])
     t = usage_totals(usage_today())
     gauge("skirnir_usage_today_requests", "requests today (all clients)", [({}, t["requests"])])

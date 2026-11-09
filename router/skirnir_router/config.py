@@ -72,6 +72,7 @@ SCHEMA = {
         "idempotency_ttl_s": None, "control_auth": {"users": None, "allow_unauthenticated_loopback": None}, "heartbeat_token": None, "api_tls": None,
         "client_auth": {"mode": None, "audit_log": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
+                                          "max_concurrent": None, "max_body_mib": None,
                                           "cloud": None, "data_class": None, "privacy_check": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None, "privacy_check": dict.fromkeys(PRIVACY_FIELDS),
@@ -415,6 +416,10 @@ class Config:
                             "may also call every role", name)
             if spec.get("requests_per_minute") is not None:
                 spec["requests_per_minute"] = int(spec["requests_per_minute"])
+            # ADR-0063 (TM-08): per-client bounds; absent = auth.DEFAULT_MAX_CONCURRENT / DEFAULT_MAX_BODY_MIB
+            for key, low, high in (("max_concurrent", 1, 256), ("max_body_mib", 1, 64)):
+                if spec.get(key) is not None and (type(spec[key]) is not int or not low <= spec[key] <= high):
+                    return invalid(f"client_auth.clients.{name}.{key} must be an integer between {low} and {high}")
             if spec.get("max_priority") is not None and spec["max_priority"] not in PRIORITIES:   # Stage 3: Class truncation
                 return invalid(f"client_auth.clients.{name}.max_priority must be one of {PRIORITIES}")
             clients[str(name)] = spec

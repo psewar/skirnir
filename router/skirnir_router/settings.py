@@ -255,6 +255,10 @@ _e(C + "ip", "iplist", "Quell-IPs", "Identitaet ueber die Absenderadresse fuer C
 _e(C + "roles", "list", "Rollen", "erlaubte Rollen, * = alle", "Clients", ["*"], choices="roles", label_en="Roles", help_en="allowed roles, * = all")
 _e(C + "models", "bool", "konkrete Modelle", "darf konkrete Modellnamen rufen", "Clients", True, label_en="concrete models", help_en="may call concrete model names")
 _e(C + "requests_per_minute", "int", "Anfragen/min", "leer = unbegrenzt", "Clients", None, min=1, max=100000, nullable=True, label_en="Requests/min", help_en="empty = unlimited")
+_e(C + "max_concurrent", "int", "gleichzeitige Anfragen", "hoechstens so viele Anfragen dieses Clients gleichzeitig, weitere bekommen 429 (leer = 4)", "Clients", None,
+   min=1, max=256, nullable=True, label_en="Concurrent requests", help_en="at most this many requests of this client at a time, more get 429 (empty = 4)")
+_e(C + "max_body_mib", "int", "Anfrage-Groesse MiB", "groessere Anfragen bekommen 413 (leer = 16)", "Clients", None, min=1, max=64, nullable=True,
+   label_en="Request size MiB", help_en="larger requests get 413 (empty = 16)")
 _e(C + "max_priority", "choice", "hoechste Prioritaet", "leer = keine Kappung", "Clients", None, choices=list(PRIORITIES), nullable=True,
    label_en="highest priority", help_en="empty = no cap")
 _e(C + "cloud", "bool", "Cloud erlaubt", "aus = Opt-out: Cloud-Stufen werden fuer diesen Client uebersprungen", "Clients", True,

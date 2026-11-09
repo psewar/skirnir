@@ -316,9 +316,9 @@ client_auth:
     batch-jobs:     { token_sha256: "…", roles: ["gross"], models: false, max_priority: batch, cloud: false, data_class: internal }
 ```
 
-Je Client: `roles`, `models` (konkrete Modellnamen erlaubt?), `requests_per_minute` (429), `max_priority`, `cloud`, `data_class`,
+Je Client: `roles`, `models` (konkrete Modellnamen erlaubt?), `requests_per_minute` (429), `max_concurrent` (gleichzeitig laufende Anfragen, Standard 4, 429), `max_body_mib` (angegebene Grösse, Standard 16, 413; ADR-0063), `max_priority`, `cloud`, `data_class`,
 `rerank` und `inference` (`false` = nur der [Rerank-Endpunkt](#optionaler-rerank-endpunkt), alles andere 403).
-Verstöße geben 403 und landen im Audit-Log (`auth_denied`, `bad_token`, `forbidden`, `rate_limited` – nie Prompts, nie Tokens).
+Verstöße geben 403 und landen im Audit-Log (`auth_denied`, `bad_token`, `forbidden`, `rate_limited`, `concurrency_limited`, `body_too_large` – nie Prompts, nie Tokens).
 Clients lassen sich auch in der UI anlegen; der Router erzeugt das Secret, zeigt den Klartext genau einmal und speichert den Hash
 in `roles.yaml`. Der Knopf „Ausprobieren“ nutzt die interne Identität `skirnir-ui`, die nur von localhost gilt.
 
