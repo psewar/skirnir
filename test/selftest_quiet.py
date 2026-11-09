@@ -240,6 +240,40 @@ check("POST /admin/nodes/{fp}/quiet -> quiet.handle_start", g[("POST", "quiet")]
 check("DELETE /admin/nodes/{fp}/quiet -> quiet.handle_end", g[("DELETE", "quiet")] is quiet.handle_end)
 check("POST /admin/nodes/{fp}/approve still -> registry.handle_node_action", g[("POST", "approve")] is registry.handle_node_action)
 
+
+
+# 10) Rejected cases through the real control app (B2): no credentials, no CSRF header -> nothing changes
+async def guarded():
+    from skirnir_router import auth
+    users = state.CFG.control_users
+    state.CFG.control_users = {"tester": auth.hash_password("synthetic-pass", iterations=1000)}
+    n = add_node()
+    _, ctl = app.build_apps()
+    c = TestClient(TestServer(ctl, host="127.0.0.1"))
+    await c.start_server()
+    basic = {"Authorization": "Basic " + __import__("base64").b64encode(b"tester:synthetic-pass").decode()}
+    body = {"until": time.time() + 600, "reason": "tempo run"}
+    got = {}
+    got["post_anon"] = (await c.post(f"/admin/nodes/{FP}/quiet", json=body)).status
+    got["post_no_csrf"] = (await c.post(f"/admin/nodes/{FP}/quiet", json=body, headers=basic)).status
+    got["quiet_after_rejects"] = n.quiet(time.time())
+    got["post_ok"] = (await c.post(f"/admin/nodes/{FP}/quiet", json=body, headers={**basic, "X-Skirnir-UI": "1"})).status
+    got["delete_anon"] = (await c.delete(f"/admin/nodes/{FP}/quiet")).status
+    got["delete_no_csrf"] = (await c.delete(f"/admin/nodes/{FP}/quiet", headers=basic)).status
+    got["quiet_still"] = n.quiet(time.time())
+    await c.close()
+    state.CFG.control_users = users
+    return got
+
+
+g = asyncio.run(guarded())
+check("POST quiet without credentials -> 401", g["post_anon"] == 401, str(g))
+check("POST quiet without X-Skirnir-UI -> 403", g["post_no_csrf"] == 403, str(g))
+check("... and neither rejected POST started a quiet", g["quiet_after_rejects"] is False, str(g))
+check("POST quiet with credentials and header -> 200", g["post_ok"] == 200, str(g))
+check("DELETE quiet without credentials -> 401, without header -> 403, quiet stays",
+      g["delete_anon"] == 401 and g["delete_no_csrf"] == 403 and g["quiet_still"] is True, str(g))
+
 print()
 print(f"{len(FAILS)} failures" if FAILS else "all passed")
 sys.exit(1 if FAILS else 0)

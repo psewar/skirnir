@@ -2,36 +2,77 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "002b74f423421e6d45ad77f36c31b6ade7b995eb",
-  "change_digest": "aeb626f3ad0a3a30bef77fc275a7245aeccccd4ad927a0f07424ba7577ad0503",
+  "base_sha": "c6ee9acb64d86568e05f0fc8f127acd2bb2bccea",
+  "change_digest": "62b465346dbd53318557ef4a3747f08d7019a8feaf3875c7b1c1b374336788f3",
   "reviewed_paths": [
-    "CHANGELOG.md"
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "README.de.md",
+    "README.md",
+    "design/routing-algorithm.md",
+    "docs/adr/0061-quiet-a-single-node-for-a-measurement.md",
+    "docs/adr/README.md",
+    "router/skirnir_router/app.py",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/nodes.py",
+    "router/skirnir_router/poll.py",
+    "router/skirnir_router/quiet.py",
+    "router/ui.html",
+    "test/selftest_quiet.py",
+    "router/skirnir_router/auth.py (basic_auth_middleware, CSRF check, inspected)",
+    "router/skirnir_router/registry.py (handle_node_action, registry_view, inspected)",
+    "router/skirnir_router/state.py (remember, journal, inspected)"
   ],
   "risk_ids": [
-    "TM-10"
+    "TM-03",
+    "TM-08",
+    "TM-15"
   ],
   "boundaries": [
-    "B5"
+    "B2",
+    "B3",
+    "B9"
   ],
-  "summary": "Changelog only: the v0.28.0 row (router 0.20.0, agent 0.29.1) links the published release, created on the merge commit of #106 with the agent 0.29.1 binaries. No code or configuration change.",
+  "summary": "Router 0.21.0 adds POST and DELETE /admin/nodes/{fp}/quiet on the control app. Traced: both routes are registered on the control app behind basic_auth_middleware (Basic Auth, then X-Skirnir-UI and Sec-Fetch-Site for non-GET /admin/*), before the generic node-action route. Input: until must be a finite number in the future and at most 12 h ahead; reason a string, non-printable characters replaced, whitespace folded, at most 200 characters, so it cannot inject lines into the log or journal. The node is looked up by fingerprint among approved, active registry entries only. The reason reaches /admin/state, events.jsonl (owner-only, ADR-0056) and the web UI, where it is HTML-escaped inside a title attribute. Effect: an authenticated admin can stop the router's unloading and prewarming on one node for up to 12 h; busy detection, routing, admission and auth are unchanged, and the same admin can already switch these settings globally via PUT /admin/config, so no privilege is added. The quiet lives in memory and ends on expiry or router restart. A rejected-case test drives the real control app: without credentials 401, without the CSRF header 403, and neither starts or ends a quiet. No dependency, deployment or workflow logic change besides one added self-test line in ci.yml.",
   "findings": [
     {
-      "id": "TM-10",
-      "evidence": "The v0.28.0 row was marked unreleased.",
-      "resolution": "Row links the release; content unchanged.",
+      "id": "TM-03",
+      "evidence": "The quiet reason is operator text shown in the UI node table.",
+      "resolution": "Rendered through esc() (escapes & < > and double quotes) in a double-quoted title attribute; control characters removed and length capped server-side. Same-origin XSS and stolen admin credentials remain the baseline risk of TM-03, not introduced here.",
+      "disposition": "baseline"
+    },
+    {
+      "id": "TM-08",
+      "evidence": "A quiet node keeps a model loaded that the safety net would otherwise unload, for at most 12 h.",
+      "resolution": "Only reachable by an authenticated admin who can already disable unload_on_busy globally; bounded by the 12 h maximum and router restart; busy detection keeps real traffic away. Availability impact for authenticated admins is the existing TM-08 residual.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "gh release view v0.28.0 (target and assets)",
+      "command": "python test/selftest_quiet.py",
       "result": "passed",
-      "evidence": "Target 002b74f (merge of #106), assets skirnir-agent-0.29.1-linux-amd64 and skirnir-agent-0.29.1-windows-amd64.exe."
+      "evidence": "all passed: validation 400s, unknown fingerprint 404, pending 409, safety net / busy transition / prewarm / residency each with control and quiet case, expiry, HTTP 409 with would_unload, accept_unload, route order, unauthenticated 401 and missing X-Skirnir-UI 403 without state change."
+    },
+    {
+      "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml",
+      "result": "passed",
+      "evidence": "46 self-tests, none failed (before the rejected-case addition; selftest_quiet.py rerun after it)."
+    },
+    {
+      "command": "python test/run_tests.py",
+      "result": "passed",
+      "evidence": "First run 1 failure (Residency: rank-1 prewarmed again after evictor idle, timing); two further runs on this branch and one on main: 0 failures."
+    },
+    {
+      "command": "ruff check . ; python test/check_control_flow.py ; python test/check_adr_index.py ; python test/check_pinned_references.py",
+      "result": "passed",
+      "evidence": "All checks passed; control flow ok; ADR index ok: 61 ADRs; pinned references 0 findings."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
-      "evidence": "Security evidence: 0 error(s)."
+      "evidence": "Run on this staged record before commit."
     },
     {
       "command": "python test/check_public_changes.py",
@@ -39,5 +80,9 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": []
+  "limitations": [
+    "Not exercised against a deployed router or a real agent; the router behaviour is covered by self-tests with recorded spawns and the end-to-end suite with fake nodes.",
+    "The quiet is not persisted: a router restart during a measurement ends it, and the safety net may then unload the measured model (stated in ADR-0061).",
+    "The UI badge was not rendered in a browser; escaping was checked in the source."
+  ]
 }
