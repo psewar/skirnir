@@ -14,7 +14,7 @@ PY = sys.executable
 
 cfg = yaml.safe_load(open(os.path.join(HERE, "test-config.yaml"), encoding="utf-8"))
 cfg["router"].pop("control_tls", None)
-cfg["router"].pop("control_auth", None)
+cfg["router"]["control_auth"] = {"allow_unauthenticated_loopback": True}   # ADR-0053: without users the port answers 503
 cfg["router"]["api_tls"] = False
 cfg["router"]["public_url"] = "http://127.0.0.1:21435"
 cfg["router"]["client_auth"]["mode"] = "observe"

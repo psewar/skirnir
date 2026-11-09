@@ -2,58 +2,59 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "27a1647c0a60260f598ec97d4e38625a26439aa8",
-  "change_digest": "cf9185cf18a5410ff8366fea8d8d7e867223b668cd0cd45255fad474a4928ba5",
+  "base_sha": "03610ce5ffd8f2b6094870903b5f7c514b7de822",
+  "change_digest": "b15ccfa0e648fa15ce2b66545224e5cbc131890b094dc597d71abcb498a0486d",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "agent/config.example.yaml",
-    "docs/adr/0064-report-the-security-posture-as-facts.md",
+    "docs/adr/0065-browser-headers-and-handler-escaping-for-the-control-ui.md",
     "docs/adr/README.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
     "router/skirnir_router/app.py",
+    "router/skirnir_router/browser_headers.py",
     "router/skirnir_router/common.py",
-    "router/skirnir_router/posture.py",
-    "test/selftest_posture.py"
+    "router/ui.html",
+    "test/dev_env.py",
+    "test/selftest_browser.py"
   ],
   "risk_ids": [
-    "TM-01",
-    "TM-11"
+    "TM-03"
   ],
   "boundaries": [
     "B1",
-    "B5",
-    "B8"
+    "B2"
   ],
-  "summary": "Router 0.22.1 reports the security posture of a configuration as facts (ADR-0064). New module posture.py: findings(cfg, environ) returns frozen Finding(code, severity, risk, text, next_step) for client_auth.mode not enforce (high), client_auth not locked, clients identified only by source address (medium; info with inference: false), clients sharing one token_sha256 (high; names only, never the hash), control port without users (high), unauthenticated loopback control access, API port without TLS, static nodes over plain HTTP to a non-loopback host without fingerprint, and a session store whose DSN (read from the environment variable named in session_store.dsn_env, never printed) uses an sslmode below verify-ca to a non-loopback host, or is unset (info). report() sorts by severity and ends with POSTURE: ok or counts. app.cli gains --posture <config> [--pure] (exit 0 with findings, 2 only for an invalid configuration); app.main logs each finding as a warning and the summary at start, without changing behaviour. The agent example configuration now binds a child Ollama to 127.0.0.1:11434 with the reason; it suggested all addresses, which made Ollama reachable around the router (TM-11). Docs: ADR-0064, README (EN/DE), CHANGELOG, threat model (EN/DE), risk register (TM-01, TM-11 stay open).",
+  "summary": "Router 0.22.2 hardens the control UI (ADR-0065). Defect: ui.html put values into inline event handlers as onclick=\"f('${esc(x)}')\"; esc() did not escape the single quote, and HTML entities are decoded before handler JavaScript runs, so a model name reported by a node (controlled by a compromised approved agent) could break out of the string and run script in the operator's browser, where same-origin script can call admin APIs. Fix: esc() also escapes the single quote; new js(s) = esc(JSON.stringify(String(s))); all 53 quoted interpolations in inline handlers (model, role, client, setting, node fingerprint and version values, the node name inside a confirm text, the copy-token label) now use ${js(...)}; only a numeric loop index and the fixed property names canary/shadow remain unquoted. New browser_headers.install adds via on_response_prepare (setdefault, a handler's own header wins): on the control port Content-Security-Policy default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' and X-Frame-Options DENY; on both ports X-Content-Type-Options nosniff and Referrer-Policy no-referrer; no CORS header anywhere. test/dev_env.py now sets control_auth.allow_unauthenticated_loopback (it removed control_auth, which answers 503 since ADR-0053).",
   "findings": [
     {
-      "id": "TM-01",
-      "evidence": "Enforce, locked policy, separate tokens and TLS were only checkable by reading the configuration.",
-      "resolution": "Posture report on demand and on every start; proxy/IP behaviour in the deployment remains.",
-      "disposition": "baseline"
-    },
-    {
-      "id": "TM-11",
-      "evidence": "The agent example configuration bound a child Ollama to all addresses; router-side transport to static nodes and the session store was not reported.",
-      "resolution": "Example binds to loopback; plaintext static nodes and unverified session-store TLS are reported. Backend listening addresses and egress need host inspection.",
+      "id": "TM-03",
+      "evidence": "A model name with a single quote rendered into onclick=\"measure('...')\" broke out of the JavaScript string; the control port sent no CSP or framing protection.",
+      "resolution": "Handler values as JSON string literals, CSP with connect-src 'self' and frame-ancestors 'none', companion headers; checked in CI and once in a browser. 'unsafe-inline' remains.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_posture.py",
+      "command": "python test/selftest_browser.py",
       "result": "passed",
-      "evidence": "6 tests OK: each finding, clean configuration POSTURE: ok, no token hash or DSN in output, CLI process."
+      "evidence": "5 tests OK; against the previous state FAILED (failures=4)."
+    },
+    {
+      "command": "Browser check with test/dev_env.py: render the catalog with model name x');window.__pwned=1;// and click its measure button; fetch to a foreign origin",
+      "result": "passed",
+      "evidence": "measure() received the exact name, __pwned stayed 0; the foreign fetch was refused with a connect-src 'self' violation; UI rendered, role edit handler set dirty without errors."
+    },
+    {
+      "command": "node syntax check of the inline script and all 69 inline handlers with interpolations replaced as rendered",
+      "result": "passed",
+      "evidence": "scripts: 1, handlers: 69, syntax errors: 0."
     },
     {
       "command": "All python test/... commands of ci.yml (WSL); check_adr_index; selftest_english_names; check_control_flow; ruff check .",
       "result": "passed",
-      "evidence": "No failures; ADR index ok: 64 ADRs; ALLE OK; All checks passed."
+      "evidence": "No failures; ADR index ok: 65 ADRs; ALLE OK; control flow ok; All checks passed."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -67,7 +68,7 @@
     }
   ],
   "limitations": [
-    "Merged main after #109 and #110.",
-    "The report reads only the router configuration and the session DSN's TLS mode; it cannot see a backend host's listening addresses or egress."
+    "Merged main after #109, #110 and #111.",
+    "'unsafe-inline' remains for script and style, so injected markup with an inline handler would still run inside the page; the static test covers handlers, not every innerHTML interpolation."
   ]
 }

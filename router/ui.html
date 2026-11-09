@@ -592,7 +592,10 @@ translateDom();
 let CFG = null, STATE = null, dirty = false;
 let SET_CHANGES = {}, MODEL_CHANGES = {}, MODEL_DELETES = [];   // Stufe 7: Einstellungen / Katalog-Cloud-Modelle bis zum Speichern
 const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// js(): a value inside an inline handler (onclick="f(${js(x)})"): a JSON string literal, HTML-escaped for the attribute.
+// esc() alone is not enough there: the browser decodes &#39; back to ' before the JavaScript runs (TM-03).
+const js = s => esc(JSON.stringify(String(s ?? '')));
 const isCloud = m => !!((CFG && CFG.models[m]) || {}).cloud;
 const fmtCost = v => (v ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 4 });   // currency of the catalog prices
 
@@ -716,11 +719,11 @@ function renderModels() {
     if (isCloud(m)) {
       const pr = c.price_chf_per_m || {};
       const uiModel = (CFG.ui_models || []).includes(m);
-      const ed = (k, v, ph) => `<input class="inl" type="number" step="0.01" min="0" value="${v ?? ''}" placeholder="${ph}" title="${t('{ph} je 1 Mio. Tokens', { ph })}" onchange="modelField('${esc(m)}','${k}',this.value)">`;
+      const ed = (k, v, ph) => `<input class="inl" type="number" step="0.01" min="0" value="${v ?? ''}" placeholder="${ph}" title="${t('{ph} je 1 Mio. Tokens', { ph })}" onchange="modelField(${js(m)},${js(k)},this.value)">`;
       tb.insertAdjacentHTML('beforeend', `<tr><td><span class="cloudc">☁</span> ${esc(m)}${c.provider_model ? `<div class="muted">${esc(c.provider_model)}</div>` : ''}${uiModel ? `<div class="muted">${t('aus der UI')}</div>` : ''}</td><td class="muted">–</td><td class="muted">–</td>
-        <td><span class="cloudc">${ed('input', pr.input, 'in')} / ${ed('output', pr.output, 'out')}</span><div class="muted">${t('Kontext')} <input class="inl" type="number" step="1000" min="1000" value="${c.context_tokens ?? ''}" onchange="modelField('${esc(m)}','context_tokens',this.value)"></div></td>
+        <td><span class="cloudc">${ed('input', pr.input, 'in')} / ${ed('output', pr.output, 'out')}</span><div class="muted">${t('Kontext')} <input class="inl" type="number" step="1000" min="1000" value="${c.context_tokens ?? ''}" onchange="modelField(${js(m)},'context_tokens',this.value)"></div></td>
         <td class="muted">${t('Katalog')}</td><td>${tempo}</td><td>${caps}</td><td class="cloudc">cloud:${esc(c.cloud)}</td>
-        <td>${uiModel ? `<button class="small" title="${t('aus dem Katalog entfernen (nur Einträge aus der UI)')}" onclick="delCloudModel('${esc(m)}')">✕</button>` : ''}</td></tr>`);
+        <td>${uiModel ? `<button class="small" title="${t('aus dem Katalog entfernen (nur Einträge aus der UI)')}" onclick="delCloudModel(${js(m)})">✕</button>` : ''}</td></tr>`);
       continue;
     }
     const known = c.weights_gib != null;
@@ -735,8 +738,8 @@ function renderModels() {
     const btn = mst ? `<span class="warn">${esc(tv(mst.step))}${mst.error ? ': ' + esc(mst.error) : ''}</span>`
       : bst ? `<span class="warn">Benchmark: ${esc(tv(bst.step))}${bst.error ? ': ' + esc(bst.error) : ''}</span>`
       : (busyAny ? `<button class="small" disabled>${t('Messen')}</button> <button class="small" disabled>Benchmark</button>`
-        : `<button class="small" onclick="measure('${esc(m)}')" title="${t('lädt das Modell bei 8k und 32k Kontext auf einem freien Knoten (~1 Min.)')}">${t((c.source || '').startsWith('measured') ? 'neu messen' : 'Messen')}</button>
-           <button class="small" onclick="bench('${esc(m)}')" title="${t('standardisierter Warm-Benchmark (~30 s)')}">Benchmark</button>`);
+        : `<button class="small" onclick="measure(${js(m)})" title="${t('lädt das Modell bei 8k und 32k Kontext auf einem freien Knoten (~1 Min.)')}">${t((c.source || '').startsWith('measured') ? 'neu messen' : 'Messen')}</button>
+           <button class="small" onclick="bench(${js(m)})" title="${t('standardisierter Warm-Benchmark (~30 s)')}">Benchmark</button>`);
     tb.insertAdjacentHTML('beforeend', `<tr><td>${esc(m)}</td><td>${known ? c.weights_gib + ' GiB' : '–'}</td>
       <td>${known ? ((c.kv_gib_per_1k || 0) * 1000 < 10 ? '≈ 0' : (c.kv_gib_per_1k * 1024).toFixed(0) + ' MiB') + ' / 1k ' + t('Token') : '–'}</td>
       <td>${need(8)} / ${need(32)} / ${need(64)} GiB</td><td>${src}</td><td>${tempo}</td><td>${caps}</td><td class="muted">${esc(onNodes(m)) || '–'}</td><td>${btn}</td></tr>`);
@@ -748,13 +751,13 @@ function expEditor(rname, kind, r) {
   const label = kind === 'canary' ? '🐤 Canary' : '🌒 Shadow';
   const tip = t(kind === 'canary' ? 'Anteil der Anfragen läuft auf diesem Modell (auch kalt), Ergebnis geht an den Client - Kandidat mit echtem Verkehr messen'
     : 'Anteil der Anfragen läuft NACH der Antwort noch einmal auf diesem Modell; der Client merkt nichts, Tempo/Fehler/Usage (Client shadow) zeigen den Kandidaten');
-  if (!v) return `<div class="exp"><span class="muted" title="${tip}">${label}</span><span><button class="small" onclick="CFG.roles['${esc(rname)}'].${kind}={model:allModels()[0],num_ctx:8192,percent:10};dirty=true;renderRoles()">${t('+ einrichten')}</button></span><span></span><span></span></div>`;
+  if (!v) return `<div class="exp"><span class="muted" title="${tip}">${label}</span><span><button class="small" onclick="CFG.roles[${js(rname)}].${kind}={model:allModels()[0],num_ctx:8192,percent:10};dirty=true;renderRoles()">${t('+ einrichten')}</button></span><span></span><span></span></div>`;
   const opts = allModels().map(m => `<option value="${esc(m)}" title="${esc(modelTitle(m))}" ${m === v.model ? 'selected' : ''}>${esc(modelLabel(m))}</option>`).join('');
   return `<div class="exp"><span class="muted" title="${tip}">${label}</span>
-    <select onchange="CFG.roles['${esc(rname)}'].${kind}.model=this.value;dirty=true">${opts}</select>
-    <input type="number" value="${v.num_ctx}" step="1024" min="1024" title="num_ctx" onchange="CFG.roles['${esc(rname)}'].${kind}.num_ctx=+this.value;dirty=true">
-    <span style="display:flex;gap:4px;align-items:center"><input type="number" value="${v.percent}" min="0" max="100" style="width:56px" title="${t('Prozent der Anfragen')}" onchange="CFG.roles['${esc(rname)}'].${kind}.percent=+this.value;dirty=true">%
-      <button class="small" title="${t('entfernen')}" onclick="CFG.roles['${esc(rname)}'].${kind}=null;dirty=true;renderRoles()">✕</button></span></div>`;
+    <select onchange="CFG.roles[${js(rname)}].${kind}.model=this.value;dirty=true">${opts}</select>
+    <input type="number" value="${v.num_ctx}" step="1024" min="1024" title="num_ctx" onchange="CFG.roles[${js(rname)}].${kind}.num_ctx=+this.value;dirty=true">
+    <span style="display:flex;gap:4px;align-items:center"><input type="number" value="${v.percent}" min="0" max="100" style="width:56px" title="${t('Prozent der Anfragen')}" onchange="CFG.roles[${js(rname)}].${kind}.percent=+this.value;dirty=true">%
+      <button class="small" title="${t('entfernen')}" onclick="CFG.roles[${js(rname)}].${kind}=null;dirty=true;renderRoles()">✕</button></span></div>`;
 }
 
 function renderRoles() {
@@ -769,22 +772,22 @@ function renderRoles() {
     const lf = r.latency_first;
     const prio = r.priority || 'normal';
     let html = `<div class="role" data-role="${esc(rname)}"><h3><code>${esc(rname)}:latest</code>
-      <label class="muted" title="${t('leer = globale Einstellung (warm_first={v})', { v: CFG.warm_first })}"><select onchange="CFG.roles['${esc(rname)}'].latency_first=(this.value===''?null:this.value==='1');dirty=true" style="width:auto">
+      <label class="muted" title="${t('leer = globale Einstellung (warm_first={v})', { v: CFG.warm_first })}"><select onchange="CFG.roles[${js(rname)}].latency_first=(this.value===''?null:this.value==='1');dirty=true" style="width:auto">
         <option value="" ${lf === null || lf === undefined ? 'selected' : ''}>${t('warm zuerst: global ({v})', { v: t(CFG.warm_first ? 'an' : 'aus') })}</option>
         <option value="1" ${lf === true ? 'selected' : ''}>${t('warm zuerst: an')}</option>
         <option value="0" ${lf === false ? 'selected' : ''}>${t('warm zuerst: aus (strikt nach Rang)')}</option></select></label>
-      <label class="muted" title="${t('Prioritätsklasse beim Warten auf einen vollen Knoten: interactive vor normal vor batch (Alterung verhindert Verhungern)')}"><select onchange="CFG.roles['${esc(rname)}'].priority=this.value;dirty=true" style="width:auto">
+      <label class="muted" title="${t('Prioritätsklasse beim Warten auf einen vollen Knoten: interactive vor normal vor batch (Alterung verhindert Verhungern)')}"><select onchange="CFG.roles[${js(rname)}].priority=this.value;dirty=true" style="width:auto">
         ${['interactive', 'normal', 'batch'].map(p => `<option value="${p}" ${p === prio ? 'selected' : ''}>${t('Priorität')}: ${p}</option>`).join('')}</select></label>
-      ${toolsWarn} ${cloudInfo}<button class="small" style="margin-left:auto" onclick="delRole('${esc(rname)}')">${t('Rolle löschen')}</button></h3>
+      ${toolsWarn} ${cloudInfo}<button class="small" style="margin-left:auto" onclick="delRole(${js(rname)})">${t('Rolle löschen')}</button></h3>
       <div class="tier muted" style="font-size:11px"><span></span><span>${t('Modell')}</span><span>num_ctx max</span><span>busy_ok</span><span></span></div>`;
     r.tiers.forEach((tr, i) => {
       html += `<div class="tier"><span class="muted">${i + 1}.</span>
-        <select onchange="CFG.roles['${esc(rname)}'].tiers[${i}].model=this.value;dirty=true;renderRoles()">${opts(tr.model)}</select>
-        <input type="number" value="${tr.num_ctx}" step="1024" min="1024" onchange="CFG.roles['${esc(rname)}'].tiers[${i}].num_ctx=+this.value;dirty=true">
-        ${isCloud(tr.model) ? `<span class="cloudc" title="${t('Cloud: kein busy, kein VRAM')}">☁ Cloud</span>` : `<input type="checkbox" ${tr.busy_ok ? 'checked' : ''} onchange="CFG.roles['${esc(rname)}'].tiers[${i}].busy_ok=this.checked;dirty=true">`}
-        <span><button class="small" onclick="moveTier('${esc(rname)}',${i},-1)">↑</button> <button class="small" onclick="moveTier('${esc(rname)}',${i},1)">↓</button> <button class="small" onclick="delTier('${esc(rname)}',${i})">✕</button></span></div>`;
+        <select onchange="CFG.roles[${js(rname)}].tiers[${i}].model=this.value;dirty=true;renderRoles()">${opts(tr.model)}</select>
+        <input type="number" value="${tr.num_ctx}" step="1024" min="1024" onchange="CFG.roles[${js(rname)}].tiers[${i}].num_ctx=+this.value;dirty=true">
+        ${isCloud(tr.model) ? `<span class="cloudc" title="${t('Cloud: kein busy, kein VRAM')}">☁ Cloud</span>` : `<input type="checkbox" ${tr.busy_ok ? 'checked' : ''} onchange="CFG.roles[${js(rname)}].tiers[${i}].busy_ok=this.checked;dirty=true">`}
+        <span><button class="small" onclick="moveTier(${js(rname)},${i},-1)">↑</button> <button class="small" onclick="moveTier(${js(rname)},${i},1)">↓</button> <button class="small" onclick="delTier(${js(rname)},${i})">✕</button></span></div>`;
     });
-    html += `<div class="row"><button class="small" onclick="addTier('${esc(rname)}')">${t('+ Stufe')}</button></div>`;
+    html += `<div class="row"><button class="small" onclick="addTier(${js(rname)})">${t('+ Stufe')}</button></div>`;
     html += expEditor(rname, 'canary', r) + expEditor(rname, 'shadow', r) + `</div>`;
     box.insertAdjacentHTML('beforeend', html);
   }
@@ -835,14 +838,14 @@ function settingInput(it) {
   const pending = it.path in SET_CHANGES;
   if (pending && v === null) v = it.base_set ? it.base : null;   // Reset vorgemerkt: Basiswert zeigen
   const shown = v === null || v === undefined ? (it.nullable ? null : it.default) : v;
-  const num = () => `<input type="number" value="${shown ?? ''}" ${it.min != null ? `min="${it.min}"` : ''} ${it.max != null ? `max="${it.max}"` : ''} step="${it.step ?? (it.type === 'int' ? 1 : 'any')}" placeholder="${it.nullable ? t('leer') : ''}" onchange="setChange('${p}', this.value === '' ? null : +this.value)">`;
+  const num = () => `<input type="number" value="${shown ?? ''}" ${it.min != null ? `min="${it.min}"` : ''} ${it.max != null ? `max="${it.max}"` : ''} step="${it.step ?? (it.type === 'int' ? 1 : 'any')}" placeholder="${it.nullable ? t('leer') : ''}" onchange="setChange(${js(p)}, this.value === '' ? null : +this.value)">`;
   switch (it.type) {
-    case 'bool': return `<label><input type="checkbox" ${shown ? 'checked' : ''} onchange="setChange('${p}', this.checked)"> ${t(shown ? 'an' : 'aus')}</label>`;
+    case 'bool': return `<label><input type="checkbox" ${shown ? 'checked' : ''} onchange="setChange(${js(p)}, this.checked)"> ${t(shown ? 'an' : 'aus')}</label>`;
     case 'int': case 'float': return num();
-    case 'choice': return `<select onchange="setChange('${p}', this.value === '' ? null : this.value)">${it.nullable ? `<option value="" ${shown == null ? 'selected' : ''}>${t('leer')}</option>` : ''}${(it.choices || []).map(c => `<option value="${esc(c)}" ${c === shown ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
-    case 'tristate': return `<select onchange="setChange('${p}', this.value === '' ? null : this.value === 'true')"><option value="false" ${shown === false ? 'selected' : ''}>false</option><option value="true" ${shown === true ? 'selected' : ''}>true</option><option value="" ${shown == null ? 'selected' : ''}>${t('leer')}</option></select>`;
-    case 'list': { const cur = new Set(shown || []); return `<div class="chk">${(it.choices || []).map(c => `<label><input type="checkbox" ${cur.has(c) ? 'checked' : ''} onchange="listToggle('${p}', '${esc(c)}', this.checked)"> ${esc(c)}</label>`).join('')}</div>`; }
-    default: return `<input type="text" value="${esc(shown ?? '')}" placeholder="${it.nullable ? t('leer') : ''}" onchange="setChange('${p}', this.value === '' ? null : this.value)">`;
+    case 'choice': return `<select onchange="setChange(${js(p)}, this.value === '' ? null : this.value)">${it.nullable ? `<option value="" ${shown == null ? 'selected' : ''}>${t('leer')}</option>` : ''}${(it.choices || []).map(c => `<option value="${esc(c)}" ${c === shown ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
+    case 'tristate': return `<select onchange="setChange(${js(p)}, this.value === '' ? null : this.value === 'true')"><option value="false" ${shown === false ? 'selected' : ''}>false</option><option value="true" ${shown === true ? 'selected' : ''}>true</option><option value="" ${shown == null ? 'selected' : ''}>${t('leer')}</option></select>`;
+    case 'list': { const cur = new Set(shown || []); return `<div class="chk">${(it.choices || []).map(c => `<label><input type="checkbox" ${cur.has(c) ? 'checked' : ''} onchange="listToggle(${js(p)}, ${js(c)}, this.checked)"> ${esc(c)}</label>`).join('')}</div>`; }
+    default: return `<input type="text" value="${esc(shown ?? '')}" placeholder="${it.nullable ? t('leer') : ''}" onchange="setChange(${js(p)}, this.value === '' ? null : this.value)">`;
   }
 }
 function listToggle(path, item, on) {
@@ -864,7 +867,7 @@ function renderSettings() {
       const pending = it.path in SET_CHANGES, over = it.overridden || (pending && SET_CHANGES[it.path] !== null);
       const baseTxt = `config.yaml: ${esc(fmtVal(it, it.base_set ? it.base : null))}${it.note ? ' · ' + esc(it.note) : ''}`;
       html += `<div class="srow ${over ? 'over' : ''}" title="${esc(it.help || '')}"><div><span class="lbl">${esc(it.label)}</span>${pending ? ' <span class="warn">●</span>' : ''}<div class="base">${baseTxt}</div></div>
-        <div>${settingInput(it)}</div><div>${it.overridden || pending ? `<button class="small" title="${t('zurück auf config.yaml')}" onclick="resetSetting('${esc(it.path)}')">↺</button>` : ''}</div></div>`;
+        <div>${settingInput(it)}</div><div>${it.overridden || pending ? `<button class="small" title="${t('zurück auf config.yaml')}" onclick="resetSetting(${js(it.path)})">↺</button>` : ''}</div></div>`;
     }
     return html + '</div>';
   }).join('') || `<span class="muted">${t('keine Einstellungen')}</span>`;
@@ -880,18 +883,18 @@ function renderClients() {
     const ident = [c.source === 'intern' ? t('Start-Zufall im Speicher') : c.has_token ? `Secret <span class="muted">(sha256 ${esc(c.token_prefix)}…${c.token_rotated ? ', ' + t('rotiert') + ' ' + esc(c.token_rotated.replace('T', ' ')) : ''})</span>` : `<span class="warn">${t('kein Secret')}</span>`,
                    (c.ip || []).length ? `IP ${esc((c.ip || []).join(', '))}` : ''].filter(Boolean).join(' · ');
     const tok = NEW_TOKENS[name] ? `<div class="tok"><b class="warn">${t('Neues Secret – nur jetzt sichtbar:')}</b> <code id="tok-${esc(name)}">${esc(NEW_TOKENS[name])}</code>
-        <button class="small" onclick="navigator.clipboard.writeText(NEW_TOKENS['${esc(name)}']).then(()=>this.textContent='${t('kopiert')}')">${t('kopieren')}</button>
+        <button class="small" onclick="navigator.clipboard.writeText(NEW_TOKENS[${js(name)}]).then(()=>this.textContent=${js(t('kopiert'))})">${t('kopieren')}</button>
         <div class="muted">${t('In den Client eintragen (HA: API-Key im Ollama-Eintrag „Skirnir“, Node-RED: apiKey der llm-config, sonst <code>Authorization: Bearer …</code>) und in Secret-Store ablegen. Der Router kennt nur den Hash; das alte Secret ist ab sofort ungültig.')}</div></div>` : '';
     const internal = c.source === 'intern';
     const rows = internal ? '' : items.filter(it => it.entity === name).map(it => {
       const pending = it.path in SET_CHANGES, over = it.overridden || (pending && SET_CHANGES[it.path] !== null);
       return `<div class="srow ${over ? 'over' : ''}" title="${esc(it.help || '')}"><div><span class="lbl">${esc(it.label)}</span>${pending ? ' <span class="warn">●</span>' : ''}<div class="base">config.yaml: ${esc(fmtVal(it, it.base_set ? it.base : null))}</div></div>
-        <div>${settingInput(it)}</div><div>${it.overridden || pending ? `<button class="small" title="${t('zurück auf config.yaml')}" onclick="resetSetting('${esc(it.path)}')">↺</button>` : ''}</div></div>`;
+        <div>${settingInput(it)}</div><div>${it.overridden || pending ? `<button class="small" title="${t('zurück auf config.yaml')}" onclick="resetSetting(${js(it.path)})">↺</button>` : ''}</div></div>`;
     }).join('');
     return `<div class="client"><h3>${internal ? '🐦' : '👥'} ${esc(name)} <span class="badge">${internal ? t('intern') : c.source === 'ui' ? t('aus der UI') : 'config.yaml'}</span>
         <span class="muted" style="font-size:12px">${s.total ?? 0} ${t('Anfragen')} · ${seen}${s.via ? ' · via ' + esc(s.via) : ''}${s.forbidden ? ` · <span class="warn">${s.forbidden} ${t('verboten')}</span>` : ''}${s.rate_limited ? ` · <span class="warn">${s.rate_limited} ${t('gedrosselt')}</span>` : ''}</span>
-        <span style="margin-left:auto">${internal ? '' : `<button class="small" onclick="rotateToken('${esc(name)}')" title="${t('neues zufälliges Secret; das alte gilt sofort nicht mehr')}">${t(c.has_token ? '🔑 Secret erneuern' : '🔑 Secret erzeugen')}</button>`}
-        ${c.source === 'ui' ? ` <button class="small" onclick="delClient('${esc(name)}')">${t('Client löschen')}</button>` : ''}</span></h3>
+        <span style="margin-left:auto">${internal ? '' : `<button class="small" onclick="rotateToken(${js(name)})" title="${t('neues zufälliges Secret; das alte gilt sofort nicht mehr')}">${t(c.has_token ? '🔑 Secret erneuern' : '🔑 Secret erzeugen')}</button>`}
+        ${c.source === 'ui' ? ` <button class="small" onclick="delClient(${js(name)})">${t('Client löschen')}</button>` : ''}</span></h3>
       <div class="muted" style="font-size:12px;margin-bottom:6px">${t('Identität')}: ${ident}${c.note ? ' · ' + esc(c.note) : ''}</div>${tok}${rows}</div>`;
   }).join('') || `<span class="muted">${t('keine Clients konfiguriert (client_auth.clients)')}</span>`;
 }
@@ -1239,24 +1242,24 @@ async function renderRegistry() {
     const f = n.facts || {}, p = n.policy || {};
     const st = n.state === 'approved' ? `<span class="state ${n.node_state || 'offline'}">${n.node_state || 'offline'}</span>`
       : n.state === 'pending' ? `<span class="state busy">${t('wartet auf Freigabe')}</span>` : `<span class="state offline">${t('gesperrt')}</span>`;
-    const pol = `<label><input type="checkbox" ${p.wol ? 'checked' : ''} onchange="nodePolicy('${n.fp}', {wol: this.checked})"> WOL</label><br>
-      <label>${t('Gewicht')} <input type="number" min="1" max="10" value="${p.weight ?? 1}" style="width:48px" onchange="nodePolicy('${n.fp}', {weight: +this.value})"></label><br>
-      <label title="${t('gleichzeitige Anfragen (Admission); leer = Default aus der Konfiguration; sollte OLLAMA_NUM_PARALLEL des Rechners entsprechen')}">${t('gleichzeitig')} <input type="number" min="1" max="32" value="${p.max_inflight ?? ''}" placeholder="def" style="width:48px" onchange="nodePolicy('${n.fp}', {max_inflight: this.value ? +this.value : null})"></label><br>
-      <label title="${t('busy ab dieser GPU-Auslastung in % (mit >= 1 GiB fremdem VRAM); leer = global (Einstellungen › Busy-Erkennung)')}">${t('busy ab GPU')} <input type="number" min="1" max="100" value="${p.busy_gpu_util_pct ?? ''}" placeholder="glob" style="width:48px" onchange="nodePolicy('${n.fp}', {busy_gpu_util_pct: this.value ? +this.value : null})"> %</label><br>
-      <label title="${t('busy ab so viel fremdem VRAM über der Baseline in GiB; leer = global. Kleine Karten brauchen kleinere Werte: auf 16 GiB neben 8 GiB Ollama bleibt einem Spiel nie 6 GiB')}">${t('busy ab fremd')} <input type="number" min="0.1" max="64" step="0.5" value="${p.busy_foreign_gib ?? ''}" placeholder="glob" style="width:48px" onchange="nodePolicy('${n.fp}', {busy_foreign_gib: this.value ? +this.value : null})"> GiB</label><br>
-      <label title="${t('Router beachtet den GPU-Schutz-Status dieses Agenten: Deckel 1 in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA. Aus z. B. für Karten ohne 12V-2x6-Stecker; der Agent setzt sein Power-Limit trotzdem')}"><input type="checkbox" ${p.gpu_guard === false ? '' : 'checked'} onchange="nodePolicy('${n.fp}', {gpu_guard: this.checked})"> ${t('GPU-Schutz beachten')}</label><br>
-      <label><input type="checkbox" ${p.mqtt === false ? '' : 'checked'} onchange="nodePolicy('${n.fp}', {mqtt: this.checked})"> ${t('MQTT-Gerät in HA')}</label><br>
-      <label title="${t('Router bringt diesen Agenten selbsttätig auf die hinterlegte Version (Kanarienvogel zuerst, dann die anderen nach der Wartezeit); nur im Leerlauf')}"><input type="checkbox" ${p.auto_update ? 'checked' : ''} onchange="nodePolicy('${n.fp}', {auto_update: this.checked})"> ${t('Auto-Update')}</label><br>
-      <label class="${(n.ollama_update || {}).unmanaged_reason === 'tray' ? 'muted' : ''}" title="${(n.ollama_update || {}).unmanaged_reason === 'tray' ? t('Nicht verfügbar: Ollama läuft hier als Tray-App unter dem Benutzer und aktualisiert sich selbst') : t('Router bringt Ollama auf diesem Knoten selbsttätig auf die neueste Version: nur im Nachtfenster, Kanarienvogel zuerst, nur im Leerlauf. Voraussetzung: Ollama läuft als Kind des Agenten')}"><input type="checkbox" ${p.ollama_auto_update && (n.ollama_update || {}).unmanaged_reason !== 'tray' ? 'checked' : ''} ${(n.ollama_update || {}).unmanaged_reason === 'tray' ? 'disabled' : ''} onchange="nodePolicy('${n.fp}', {ollama_auto_update: this.checked})"> ${t('Ollama-Auto-Update')}</label>`;
+    const pol = `<label><input type="checkbox" ${p.wol ? 'checked' : ''} onchange="nodePolicy(${js(n.fp)}, {wol: this.checked})"> WOL</label><br>
+      <label>${t('Gewicht')} <input type="number" min="1" max="10" value="${p.weight ?? 1}" style="width:48px" onchange="nodePolicy(${js(n.fp)}, {weight: +this.value})"></label><br>
+      <label title="${t('gleichzeitige Anfragen (Admission); leer = Default aus der Konfiguration; sollte OLLAMA_NUM_PARALLEL des Rechners entsprechen')}">${t('gleichzeitig')} <input type="number" min="1" max="32" value="${p.max_inflight ?? ''}" placeholder="def" style="width:48px" onchange="nodePolicy(${js(n.fp)}, {max_inflight: this.value ? +this.value : null})"></label><br>
+      <label title="${t('busy ab dieser GPU-Auslastung in % (mit >= 1 GiB fremdem VRAM); leer = global (Einstellungen › Busy-Erkennung)')}">${t('busy ab GPU')} <input type="number" min="1" max="100" value="${p.busy_gpu_util_pct ?? ''}" placeholder="glob" style="width:48px" onchange="nodePolicy(${js(n.fp)}, {busy_gpu_util_pct: this.value ? +this.value : null})"> %</label><br>
+      <label title="${t('busy ab so viel fremdem VRAM über der Baseline in GiB; leer = global. Kleine Karten brauchen kleinere Werte: auf 16 GiB neben 8 GiB Ollama bleibt einem Spiel nie 6 GiB')}">${t('busy ab fremd')} <input type="number" min="0.1" max="64" step="0.5" value="${p.busy_foreign_gib ?? ''}" placeholder="glob" style="width:48px" onchange="nodePolicy(${js(n.fp)}, {busy_foreign_gib: this.value ? +this.value : null})"> GiB</label><br>
+      <label title="${t('Router beachtet den GPU-Schutz-Status dieses Agenten: Deckel 1 in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA. Aus z. B. für Karten ohne 12V-2x6-Stecker; der Agent setzt sein Power-Limit trotzdem')}"><input type="checkbox" ${p.gpu_guard === false ? '' : 'checked'} onchange="nodePolicy(${js(n.fp)}, {gpu_guard: this.checked})"> ${t('GPU-Schutz beachten')}</label><br>
+      <label><input type="checkbox" ${p.mqtt === false ? '' : 'checked'} onchange="nodePolicy(${js(n.fp)}, {mqtt: this.checked})"> ${t('MQTT-Gerät in HA')}</label><br>
+      <label title="${t('Router bringt diesen Agenten selbsttätig auf die hinterlegte Version (Kanarienvogel zuerst, dann die anderen nach der Wartezeit); nur im Leerlauf')}"><input type="checkbox" ${p.auto_update ? 'checked' : ''} onchange="nodePolicy(${js(n.fp)}, {auto_update: this.checked})"> ${t('Auto-Update')}</label><br>
+      <label class="${(n.ollama_update || {}).unmanaged_reason === 'tray' ? 'muted' : ''}" title="${(n.ollama_update || {}).unmanaged_reason === 'tray' ? t('Nicht verfügbar: Ollama läuft hier als Tray-App unter dem Benutzer und aktualisiert sich selbst') : t('Router bringt Ollama auf diesem Knoten selbsttätig auf die neueste Version: nur im Nachtfenster, Kanarienvogel zuerst, nur im Leerlauf. Voraussetzung: Ollama läuft als Kind des Agenten')}"><input type="checkbox" ${p.ollama_auto_update && (n.ollama_update || {}).unmanaged_reason !== 'tray' ? 'checked' : ''} ${(n.ollama_update || {}).unmanaged_reason === 'tray' ? 'disabled' : ''} onchange="nodePolicy(${js(n.fp)}, {ollama_auto_update: this.checked})"> ${t('Ollama-Auto-Update')}</label>`;
     const u = n.update || {};
     const ou = n.ollama_update || {};
     const ouState = ou.state ? `<div class="${ou.state === 'failed' || ou.state === 'stalled' ? 'bad' : ou.state === 'done' ? 'ok' : ou.state === 'manual' ? 'muted' : 'warn'}">Ollama ${esc(ou.version || '')}: ${esc(ou.state)}${ou.message ? ' – ' + esc(ou.message) : ''}${ou.ts ? ` <span class="muted">${esc(ou.ts.slice(11))}</span>` : ''}</div>` : '';
-    const ouBtn = n.state === 'approved' && ou.pending && ou.managed === true && n.connected ? `<button class="small" onclick="nodeOllamaUpdate('${n.fp}', '${esc(ou.available)}')">${t('Ollama auf {v} aktualisieren', { v: esc(ou.available) })}</button>` : '';
+    const ouBtn = n.state === 'approved' && ou.pending && ou.managed === true && n.connected ? `<button class="small" onclick="nodeOllamaUpdate(${js(n.fp)}, ${js(ou.available)})">${t('Ollama auf {v} aktualisieren', { v: esc(ou.available) })}</button>` : '';
     const uState = u.state ? `<div class="${u.state === 'failed' || u.state === 'stalled' ? 'bad' : u.state === 'done' ? 'ok' : 'warn'}">Update ${esc(u.version || '')}: ${esc(u.state)}${u.message ? ' – ' + esc(u.message) : ''}${u.ts ? ` <span class="muted">${esc(u.ts.slice(11))}</span>` : ''}</div>` : '';
-    const uBtn = n.state === 'approved' && u.pending && n.connected ? `<button class="small" onclick="nodeUpdate('${n.fp}', '${esc(u.available)}')">${t('auf {v} aktualisieren', { v: esc(u.available) })}</button>` : '';
-    const btn = n.state === 'pending' ? `<button onclick="nodeAct('${n.fp}','approve')">${t('freigeben')}</button><br><button class="small" onclick="nodeDel('${n.fp}')">${t('löschen')}</button>`
-      : n.state === 'approved' ? `<button class="small" onclick="if(confirm('${t('Knoten {n} sperren? Der Tunnel wird getrennt.', { n: esc(n.name) })}')) nodeAct('${n.fp}','revoke')">${t('sperren')}</button>`
-      : `<button onclick="nodeAct('${n.fp}','approve')">${t('wieder freigeben')}</button><br><button class="small" onclick="nodeDel('${n.fp}')">${t('löschen')}</button>`;
+    const uBtn = n.state === 'approved' && u.pending && n.connected ? `<button class="small" onclick="nodeUpdate(${js(n.fp)}, ${js(u.available)})">${t('auf {v} aktualisieren', { v: esc(u.available) })}</button>` : '';
+    const btn = n.state === 'pending' ? `<button onclick="nodeAct(${js(n.fp)},'approve')">${t('freigeben')}</button><br><button class="small" onclick="nodeDel(${js(n.fp)})">${t('löschen')}</button>`
+      : n.state === 'approved' ? `<button class="small" onclick="if(confirm(${js(t('Knoten {n} sperren? Der Tunnel wird getrennt.', { n: n.name }))})) nodeAct(${js(n.fp)},'revoke')">${t('sperren')}</button>`
+      : `<button onclick="nodeAct(${js(n.fp)},'approve')">${t('wieder freigeben')}</button><br><button class="small" onclick="nodeDel(${js(n.fp)})">${t('löschen')}</button>`;
     const vram = f.vram_total_mib ? (f.vram_total_mib / 1024).toFixed(1) + ' GiB' : '';
     const base = n.learned && n.learned.baseline_gib != null ? `${t('{g} GiB gelernt', { g: n.learned.baseline_gib })} <span class="muted">(${t('{n} Proben', { n: n.learned.samples || 0 })})</span>` : `<span class="muted">${t('noch nichts gelernt')}</span>`;
     tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(n.name)}</b><div class="muted" title="${n.fp}">${n.fp.slice(0, 16)}…${n.connected ? ' · ' + t('verbunden') : ''}</div></td>
