@@ -2,55 +2,87 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "5ce2727846068120aeb064f4383c2251976580f5",
-  "change_digest": "70fbe47c25fe99878fb013166e39496b26d13e65d87d7ba6fe772c808ea67c96",
+  "base_sha": "57ad3fb0cc2e2bcf4e786dcb67f3caa1c66fa738",
+  "change_digest": "fa266a4028f7125baf392ca99668a57083dfb1bb62d540349160f7f46a5e835f",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "agent/Set-OllamaLoopback.cmd",
-    "agent/Set-OllamaLoopback.ps1",
-    "docs/adr/0072-windows-node-ollama-loopback-script.md",
+    "agent/config.example.yaml",
+    "agent/ollamaupdate.go",
+    "agent/ollamaupdate_test.go",
+    "agent/passthrough.go",
+    "agent/passthrough_test.go",
+    "agent/routes_test.go",
+    "agent/tunnel.go",
+    "deploy/deploy.py",
+    "docs/adr/0073-close-router-paths-to-host-privileges.md",
     "docs/adr/README.md",
     "docs/install-agent.de.md",
     "docs/install-agent.md",
+    "docs/install-router.de.md",
+    "docs/install-router.md",
+    "docs/operations.de.md",
+    "docs/operations.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "test/selftest_ollama_loopback.ps1"
+    "monitoring/render-monitoring.sh",
+    "router/install.sh",
+    "router/render-env.conf.example",
+    "router/render-env.sh",
+    "router/skirnir-router-cert.service",
+    "router/skirnir-router-secrets-refresh.service",
+    "router/skirnir-router-secrets.service",
+    "router/skirnir-router.service",
+    "router/skirnir_router/common.py",
+    "test/selftest_privilege_paths.py"
   ],
   "risk_ids": [
-    "TM-11",
-    "TM-14"
+    "TM-14",
+    "TM-13",
+    "TM-11"
   ],
   "boundaries": [
     "B3",
-    "B6"
+    "B6",
+    "B8"
   ],
-  "summary": "New node tool agent/Set-OllamaLoopback.ps1 with a .cmd launcher (-ExecutionPolicy Bypass for that call only), ADR-0072. Without administrator rights it relaunches itself elevated (UAC) and waits for Enter at the end. It detects how Ollama runs: an agent child (children[] item named ollama* or running ollama.exe) gets OLLAMA_HOST=127.0.0.1:11434 in its env (replaced, or added to a list, a mapping or a missing env), the configuration is validated with the installed agent's check-config, the service restarts; or the desktop app / ollama serve of a signed-in user: that user's OLLAMA_HOST in HKEY_USERS\\<sid>\\Environment (and the machine-wide one if it names a network address) becomes the loopback value and the app restarts in the user's session through a one-shot interactive scheduled task that is removed afterwards. It refuses with more than one Ollama child, inline or duplicated env entries, an agent upstream/ollama_url on port 11434 with a non-loopback host, another program on a network address while the child is already set, and live connections from other machines on port 11434 unless -Force with a reason. Afterwards it waits up to 90 s for /api/version on 127.0.0.1 and for every listener on the port to be loopback; otherwise the configuration backup or the previous variable values are restored. Then it disables (not deletes) enabled inbound allow rules that open only port 11434 or the Ollama program and prints how to enable them again. -Check only reports. A transcript is written next to the script. Docs (install-agent EN/DE), threat model TM-11 rows, risk register, CHANGELOG, CI steps (pwsh on Linux, Windows PowerShell 5.1 in the Windows job).",
+  "summary": "Router 0.23.1 / agent 0.31.0, ADR-0073. (1) render-env.sh and render-monitoring.sh source their secret-store access only from /etc/skirnir-router-secrets/render-env.conf (overridable for tests only via RENDER_ENV_* environment variables, which the units do not set); before sourcing it or SECRET_STORE_AUTH_FILE they resolve the path with readlink -f and refuse (render nothing, exit 0) when it lies under /etc/skirnir-router, /var/lib/skirnir-router or /var/log/skirnir-router, when the file or its folder is not owned by uid 0, or is group/other writable; the old location is never read. deploy.py pushes the access file to the new folder (install -d -m 0700) and removes the old copy; install.sh creates the folder and moves an existing old file. The router unit adds ReadOnlyPaths=-/etc/skirnir-router/certs and InaccessiblePaths=-/etc/skirnir-router-secrets; the secrets, refresh and cert helper units add NoNewPrivileges, PrivateTmp, ProtectHome, kernel protections, RestrictSUIDSGID, LockPersonality and UMask where it does not affect their job. (2) Agent tunnel: requests without a configured route reach the upstream only for an exact allow-list of inference, listing and version paths with their methods; anything else gets 403 path_not_allowed_on_node and a log line, without an upstream call. The existing route test changed accordingly (/rerank without a route is refused instead of forwarded). (3) Ollama update orders older than the installed version (live /api/version, else the binary's version) or not a plain release are refused before any download unless ollama_update.allow_downgrade is set; an unknown installed version keeps the previous behaviour.",
   "findings": [
     {
-      "id": "TM-11",
-      "evidence": "Inspection 2026-11-09: Ollama on both Windows nodes listened on all addresses; only host firewall rules kept other machines out, and one node had allow rules for two hosts on port 11434.",
-      "resolution": "One script per node binds Ollama to loopback where it is configured, verifies the listeners and closes the rules that existed only for direct access.",
-      "disposition": "baseline"
+      "id": "TM-14",
+      "evidence": "The router runs as uid 0 without capabilities with /etc/skirnir-router writable; owner bits let it rewrite the root-owned render-env.conf, which the daily secrets timer sources with full root; the same applied to render-monitoring.sh.",
+      "resolution": "The access file moves to a root-only folder the router unit cannot see; both renderers refuse files in router-writable paths or with loose ownership/modes before sourcing.",
+      "disposition": "fixed"
     },
     {
       "id": "TM-14",
-      "evidence": "The script runs elevated and writes the agent configuration, another user's environment and firewall rules.",
-      "resolution": "It changes only OLLAMA_HOST and rules that open nothing but Ollama, keeps a backup, restores on failed verification, takes no input beyond -Check and a -Force reason (quotes stripped before the relaunch), runs no downloaded code and names every change in the log.",
-      "disposition": "baseline"
+      "evidence": "Tunnel.handle forwarded every path without a configured route to Ollama, including /api/pull, /api/create, /api/delete and /api/blobs, on nodes where Ollama runs as LocalSystem.",
+      "resolution": "Exact allow-list in the agent; CI checks it covers every path the router sends and none it forbids.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "TM-13",
+      "evidence": "The router chose any Ollama version for an update order; only the archive checksum was verified.",
+      "resolution": "Downgrade and pre-release refusal unless ollama_update.allow_downgrade, like the agent's own update.",
+      "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "pwsh -NoProfile -File test/selftest_ollama_loopback.ps1; powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/selftest_ollama_loopback.ps1",
+      "command": "python test/selftest_privilege_paths.py (WSL)",
       "result": "passed",
-      "evidence": "all passed on PowerShell 7 and Windows PowerShell 5.1; rewritten configurations inspected by eye for the insert cases."
+      "evidence": "all passed; a mutation that removed the auth-file check made it fail (1 failure)."
     },
     {
-      "command": "python test/check_control_flow.py; python test/check_pinned_references.py; python test/check_adr_index.py; python test/selftest_english_names.py",
+      "command": "go vet ./... && go test -count=1 ./... (agent, WSL)",
       "result": "passed",
-      "evidence": "control flow ok; 0 pinned-reference findings; ADR index ok: 72 ADRs; ALLE OK."
+      "evidence": "ok; TestPassthroughOnlyInferencePaths, TestPassthroughAllowsNoModelManagement, TestOllamaDowngradeRefused, TestTunnelRoutes ran."
+    },
+    {
+      "command": "all python test/... commands of ci.yml and security.yml (WSL); check_pinned_references, selftest_pinned_references, check_control_flow, check_adr_index, selftest_english_names (Windows)",
+      "result": "passed",
+      "evidence": "No failures except the two git-based checks under WSL (worktree path), which pass on Windows; ADR index ok: 73 ADRs."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -64,7 +96,8 @@
     }
   ],
   "limitations": [
-    "The host part (elevation, service restart, scheduled task in another user's session, firewall) was not run in CI; it runs on the nodes by the operator, whose log is the evidence.",
-    "Connections that happen only later are not seen by the live-connection check; consumers that used Ollama directly must move to the router."
+    "The unit directives were not started under systemd here; the rollout verifies them on the router host (secrets service run, write probe in the router's mount namespace).",
+    "The router still runs as root; a dedicated user, the Linux agent unit and a LocalSystem child from a user-writable path remain open under TM-14.",
+    "Merged main after the PRs below it."
   ]
 }

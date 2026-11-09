@@ -148,6 +148,11 @@ needs no secrets of its own. No token, no firewall rule, no IP by hand.
   ([configuration.md](configuration.md#roles-and-tiers)).
 - Receives its configuration package through the tunnel after approval.
 - Can run Ollama and further services as children (above).
+- Forwards to Ollama only what the router needs: `POST /api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`,
+  `/api/show`, `GET /api/tags`, `/api/ps`, `/api/version` and, for OpenAI-compatible servers, `POST /v1/chat/completions`,
+  `/v1/embeddings`, `GET /v1/models`. Anything else - model management such as `/api/pull` or `/api/delete`, blob uploads -
+  is answered 403 `path_not_allowed_on_node` without reaching Ollama, which runs with the agent's service rights
+  (agent 0.31.0, ADR-0073). Models are pulled on the node itself.
 - Optionally provides a TLS proxy in front of Ollama (`ollama_proxy`, port 11443, certificate pinned by fingerprint) for
   routers that should access it directly without the tunnel.
 - **Guards the GPU** with a power limit, on by default ([reference.md](reference.md#gpu-guard)).

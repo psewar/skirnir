@@ -105,6 +105,17 @@ for u in "$SRC"/skirnir-router*.service "$SRC"/skirnir-router*.path "$SRC"/skirn
   [ -e "$u" ] && cp "$u" "$UNITS/"
 done
 mkdir -p "$CONF" && chmod 0750 "$CONF" || refuse "cannot create $CONF"
+# Secret-store access for the root renderers lives outside what the router may write (ADR-0073); move an old copy there.
+SECRETS="$ROOT/etc/skirnir-router-secrets"
+mkdir -p "$SECRETS" && chmod 0700 "$SECRETS" || refuse "cannot create $SECRETS"
+if [ -e "$CONF/render-env.conf" ]; then
+  if [ -e "$SECRETS/render-env.conf" ]; then
+    rm -f "$CONF/render-env.conf" && echo "Removed $CONF/render-env.conf (the copy in $SECRETS is used)"
+  else
+    mv "$CONF/render-env.conf" "$SECRETS/render-env.conf" && chmod 0600 "$SECRETS/render-env.conf" \
+      && echo "Moved render-env.conf to $SECRETS (ADR-0073)" || refuse "cannot move render-env.conf to $SECRETS"
+  fi
+fi
 echo "Program files: $DEST (version $(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$DEST/skirnir_router/common.py"))"
 
 # --- venv -------------------------------------------------------------------------------------------------------

@@ -29,6 +29,10 @@ ProtectSystem=strict
 ProtectHome=tmpfs
 ReadOnlyPaths=/opt/skirnir-router
 ReadWritePaths=/etc/skirnir-router
+# ADR-0073: the router must not change what root processes read from here. The certificates are written by the
+# ACME client (as root); the secret-store access is sourced by the root renderers and is not needed by the router.
+ReadOnlyPaths=-/etc/skirnir-router/certs
+InaccessiblePaths=-/etc/skirnir-router-secrets
 StateDirectory=skirnir-router
 LogsDirectory=skirnir-router
 PrivateTmp=true

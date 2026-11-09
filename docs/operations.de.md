@@ -118,7 +118,9 @@ eigenen festen Quelle und prüft es gegen die `sha256sum.txt` des Releases, wäh
 meldet er *ready*; der Router nimmt den Knoten aus dem Routing, wartet, bis keine Anfrage mehr läuft, und gibt den Tausch frei
 (Agent 0.15.0). Der Agent hält Ollama an, tauscht die Dateien, startet neu und setzt zurück, wenn die neue Version nicht
 antwortet. Während eines Updates wärmt der Router den Knoten nicht vor, danach einmal. Der Router wählt also nur die Version,
-nie den Code. Vorerst nur Windows-Knoten; die Linux-Archive sind tar.zst.
+nie den Code, und seit Agent 0.31.0 keine ältere: Ein Auftrag unter dem installierten Ollama (oder eine Vorabversion) wird
+abgelehnt, ausser die Konfiguration des Knotens setzt `ollama_update.allow_downgrade: true` für ein bewusstes Zurückgehen
+(ADR-0073). Vorerst nur Windows-Knoten; die Linux-Archive sind tar.zst.
 
 ## Schlüsselwechsel
 

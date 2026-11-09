@@ -38,6 +38,7 @@ jobs:
       - run: python test/selftest_init.py
       - run: python test/selftest_install.py
       - run: pwsh -NoProfile -File test/selftest_ollama_loopback.ps1
+      - run: python test/selftest_privilege_paths.py
       - run: python test/selftest_browser.py
       - run: python test/selftest_agent_revocation.py
       - run: python test/selftest_key_rotation.py

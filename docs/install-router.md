@@ -131,8 +131,13 @@ The start log lists the posture findings (lines `posture …`). Then open `https
 The router reads `/etc/skirnir-router/secrets.env` (0600) as environment: `MQTT_PASSWORD`, `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY` and, for the optional memory layers, the variables their configuration names. Maintain it by hand, or let
 `render-env.sh` render it from a secret store with a universal-auth API: access goes into
-`/etc/skirnir-router/render-env.conf` (template [router/render-env.conf.example](../router/render-env.conf.example)); the
-daily timer restarts the router when a secret changed. If the secret store is unreachable the last file stays.
+`/etc/skirnir-router-secrets/render-env.conf` (folder 0700 root, file 0600; template
+[router/render-env.conf.example](../router/render-env.conf.example)); the daily timer restarts the router when a secret
+changed. If the secret store is unreachable the last file stays. The access file is read by root, so it must not lie in
+a folder the router may write: `render-env.sh` refuses a file (or `SECRET_STORE_AUTH_FILE`) under `/etc/skirnir-router`,
+`/var/lib/skirnir-router` or `/var/log/skirnir-router`, or one that is not owned by root or writable by group or others,
+and the router unit cannot see `/etc/skirnir-router-secrets` at all. `install.sh` and `deploy.py` move an old
+`/etc/skirnir-router/render-env.conf` there (ADR-0073).
 
 ## Optional: decision engine for the auto role
 

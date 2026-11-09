@@ -154,6 +154,11 @@ braucht keine eigenen Secrets. Kein Token, keine Firewall-Regel, keine IP von Ha
   ([configuration.de.md](configuration.de.md#rollen-und-stufen)).
 - Bekommt nach der Freigabe sein Konfigurationspaket durch den Tunnel.
 - Kann Ollama und weitere Dienste als Kinder führen (oben).
+- Reicht an Ollama nur durch, was der Router braucht: `POST /api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings`,
+  `/api/show`, `GET /api/tags`, `/api/ps`, `/api/version` und für OpenAI-kompatible Server `POST /v1/chat/completions`,
+  `/v1/embeddings`, `GET /v1/models`. Alles andere - Modellverwaltung wie `/api/pull` oder `/api/delete`, Blob-Uploads -
+  beantwortet er mit 403 `path_not_allowed_on_node`, ohne Ollama zu erreichen, das mit den Dienstrechten des Agenten läuft
+  (Agent 0.31.0, ADR-0073). Modelle werden auf dem Knoten selbst geladen.
 - Stellt optional einen TLS-Proxy vor Ollama (`ollama_proxy`, Port 11443, Zertifikat per Fingerprint gepinnt) für Router, die
   ohne Tunnel direkt zugreifen sollen.
 - **Schützt die GPU** mit einem Power-Limit, standardmäßig an ([reference.de.md](reference.de.md#gpu-schutz)).

@@ -112,8 +112,10 @@ downloads the release archive (`ollama.exe` plus `lib/ollama`, no installer) fro
 the release's `sha256sum.txt` while Ollama keeps serving requests. Only then does it report *ready*; the router takes the node
 out of routing, waits until no request is running and releases the swap (agent 0.15.0). The agent stops Ollama, swaps the
 files, restarts it and rolls back if the new version does not answer. While an update runs the router does not prewarm the
-node, and it prewarms once when the update is done. The router therefore chooses only the version, never the code. Windows
-nodes only for now; Linux archives are tar.zst.
+node, and it prewarms once when the update is done. The router therefore chooses only the version, never the code, and
+since agent 0.31.0 no older version: an order below the installed Ollama (or a pre-release) is refused unless the node's
+configuration sets `ollama_update.allow_downgrade: true` for a deliberate rollback (ADR-0073). Windows nodes only for now;
+Linux archives are tar.zst.
 
 ## Key rotation
 
