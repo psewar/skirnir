@@ -504,9 +504,9 @@ Requirements: Debian 12 (or comparable) with Python 3.11, packages `python3-aioh
 A TLS certificate for the router's hostname (e.g. Let's Encrypt) that the clients connect to.
 
 1. Copy `router/` to `/opt/skirnir-router/` (including the package `skirnir_router/`).
-2. Copy [router/config.example.yaml](router/config.example.yaml) to `/etc/skirnir-router/config.yaml` (0600) and adapt:
+2. Easiest: `python3 /opt/skirnir-router/router.py --init /etc/skirnir-router --public-url https://<name>:11435` writes a first, safe configuration from [router/config.minimal.yaml](router/config.minimal.yaml) (asks the web UI password, generates a client token and shows it once; ADR-0067). Or copy [router/config.example.yaml](router/config.example.yaml) (the full reference) to `/etc/skirnir-router/config.yaml` (0600) and adapt:
    `public_url`, certificate paths, roles, catalogue, clients. Password hashes for the UI are generated with
-   `python3 router.py --hash '<password>'`; client hashes are the `sha256` of the token.
+   `python3 router.py --hash` (asks without echo); client hashes are the `sha256` of the token.
 3. Check: `python3 router.py --check /etc/skirnir-router/config.yaml` – reports unknown keys with a suggestion; `python3 router.py --posture /etc/skirnir-router/config.yaml` reports what the configuration allows that the threat model calls risky (observe mode, shared tokens, plaintext backends …; ADR-0064), also in the start log.
 4. systemd units from `router/` to `/etc/systemd/system/`: `skirnir-router.service` (runs with `ProtectSystem=strict`, writes only
    `/etc/skirnir-router` and its log directory), optionally `skirnir-router-cert.path` (restart on renewed certificate) and

@@ -11,10 +11,11 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Network exposure with observe or shared proxy identity.",
-      "controls": "Enforce rejects unknown clients; credential identities available. Since router 0.22.1 the posture report (router.py --posture, start log; ADR-0064) states observe mode, an unlocked policy, shared tokens, address-only clients, a control port without login and an API port without TLS.",
+      "controls": "Enforce rejects unknown clients; credential identities available. Since router 0.22.1 the posture report (router.py --posture, start log; ADR-0064) states observe mode, an unlocked policy, shared tokens, address-only clients, a control port without login and an API port without TLS. Since router 0.23.0 (ADR-0067) router.py --init writes a first configuration without placeholder secrets, and the posture report flags a well-known example token and a control port on the network without TLS.",
       "next_action": "Run the posture report before every rollout and resolve or accept each finding; proxy/IP behaviour in the deployment.",
       "owner_role": "maintainer and operator",
       "test_refs": [
+        "test/selftest_init.py",
         "test/selftest_posture.py",
         "test/selftest_security.py"
       ],

@@ -36,7 +36,8 @@ def findings(line):
             address = ipaddress.ip_address(match[0])
         except ValueError:
             continue
-        if not address.is_loopback and not any(address in network for network in EXAMPLE_NETWORKS):
+        # loopback and the unspecified address (0.0.0.0: listen on all interfaces) reveal nothing about a deployment
+        if not (address.is_loopback or address.is_unspecified) and not any(address in network for network in EXAMPLE_NETWORKS):
             found.append("non-example IP address")
     return sorted(set(found))
 

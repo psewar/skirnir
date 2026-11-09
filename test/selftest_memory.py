@@ -71,6 +71,7 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_publication_guard_uses_synthetic_examples_and_redacted_findings(self):
         self.assertEqual(findings("http://127.0.0.1:1234 user@example.invalid 192.0.2.23"), [])
+        self.assertEqual(findings("listen: 0.0.0.0:11434"), [], "listening on all interfaces reveals nothing")
         self.assertIn("private hostname", findings("https://synthetic-worker." + "lan"))
         self.assertIn("non-example email", findings("synthetic@" + "mail.vendor"))
         self.assertIn("credential in URL", findings("https://" + "user:pass@" + "memory.example.invalid"))

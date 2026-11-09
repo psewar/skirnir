@@ -44,6 +44,7 @@ def clean_raw():
     r["control_auth"] = {"users": {"operator": "pbkdf2:1000:00:00"}}
     r["api_tls"] = True
     r["control_tls"] = {"cert": "/synthetic/cert.pem", "key": "/synthetic/key.pem"}
+    r["control_listen"] = "127.0.0.1:11435"   # a network address adds an information finding
     raw["nodes"] = {}
     return raw
 
@@ -100,6 +101,17 @@ class PostureTests(unittest.TestCase):
         raw = clean_raw()
         raw["nodes"] = {"plain-node": {"ollama": "http://192.0.2.50:11434"}}
         cases.append((raw, "node_plain_http", "medium"))
+        raw = clean_raw()
+        raw["router"]["client_auth"]["clients"]["agent-a"]["token_sha256"] = hashlib.sha256(b"changeme").hexdigest()
+        cases.append((raw, "client_example_token", "high"))
+        raw = clean_raw()
+        raw["router"]["control_listen"] = "0.0.0.0:11435"
+        cases.append((raw, "control_on_network", "info"))
+        raw = clean_raw()
+        raw["router"]["control_listen"] = "0.0.0.0:11435"
+        del raw["router"]["control_tls"]
+        raw["router"]["api_tls"] = False
+        cases.append((raw, "control_without_tls", "high"))
         for raw, code, severity in cases:
             with self.subTest(code=code):
                 self.assertEqual(codes(load(raw)).get(code), severity)
