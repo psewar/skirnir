@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "e544b2fbb09f574b1ab1e8a60ce588ed19e0a2a2",
-  "change_digest": "323f7031002327e4530df125f02d7ff991b72660581c003eb6bc582a339d8094",
+  "base_sha": "03610ce5ffd8f2b6094870903b5f7c514b7de822",
+  "change_digest": "b15ccfa0e648fa15ce2b66545224e5cbc131890b094dc597d71abcb498a0486d",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
@@ -57,7 +57,7 @@
       "evidence": "No failures; ADR index ok: 65 ADRs; ALLE OK; control flow ok; All checks passed."
     },
     {
-      "command": "python tools/security/review.py check --base origin/security/tm01-tm11-posture --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -68,7 +68,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #111; the record is refreshed against main once the stack below is merged.",
+    "Merged main after #109, #110 and #111.",
     "'unsafe-inline' remains for script and style, so injected markup with an inline handler would still run inside the page; the static test covers handlers, not every innerHTML interpolation."
   ]
 }
