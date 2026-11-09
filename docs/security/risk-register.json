@@ -11,10 +11,11 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Network exposure with observe or shared proxy identity.",
-      "controls": "Enforce rejects unknown clients; credential identities available.",
-      "next_action": "Set enforce and locked policy; separate client tokens.",
+      "controls": "Enforce rejects unknown clients; credential identities available. Since router 0.22.1 the posture report (router.py --posture, start log; ADR-0064) states observe mode, an unlocked policy, shared tokens, address-only clients, a control port without login and an API port without TLS.",
+      "next_action": "Run the posture report before every rollout and resolve or accept each finding; proxy/IP behaviour in the deployment.",
       "owner_role": "maintainer and operator",
       "test_refs": [
+        "test/selftest_posture.py",
         "test/selftest_security.py"
       ],
       "validation_gap": "V1: proxy/IP behavior needs deployment tests."
@@ -202,11 +203,13 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Direct backend access or its own cloud extraction.",
-      "controls": "Gateway-scoped grants on the router path only.",
-      "next_action": "Restrict backend reachability and credentials; audit backend egress.",
+      "controls": "Gateway-scoped grants on the router path only. The posture report flags static nodes over plain HTTP and a session store without verified TLS (ADR-0064); the agent example binds a child Ollama to loopback.",
+      "next_action": "Bind node Ollama to loopback in each agent configuration; inspect listening addresses and egress of Hindsight and PostgreSQL; separate service credentials.",
       "owner_role": "maintainer and operator",
-      "test_refs": [],
-      "validation_gap": "V5/V8: requires deployment inspection; no gateway test proves this."
+      "test_refs": [
+        "test/selftest_posture.py"
+      ],
+      "validation_gap": "V5/V8: router-side transport is reported; backend listening addresses and egress need host inspection."
     },
     {
       "id": "TM-12",

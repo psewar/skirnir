@@ -2,61 +2,58 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "7cf82818799784fe60dbc59c352baa9061851acd",
-  "change_digest": "38b0d86e3eb7891fa105c02b7b438e6309afbc184a4c4e3682d4276fcca60e38",
+  "base_sha": "27a1647c0a60260f598ec97d4e38625a26439aa8",
+  "change_digest": "cf9185cf18a5410ff8366fea8d8d7e867223b668cd0cd45255fad474a4928ba5",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
     "README.de.md",
     "README.md",
-    "docs/adr/0063-bound-concurrency-and-body-size-per-client.md",
+    "agent/config.example.yaml",
+    "docs/adr/0064-report-the-security-posture-as-facts.md",
     "docs/adr/README.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "router/config.example.yaml",
-    "router/skirnir_router/admin.py",
-    "router/skirnir_router/auth.py",
+    "router/skirnir_router/app.py",
     "router/skirnir_router/common.py",
-    "router/skirnir_router/config.py",
-    "router/skirnir_router/metrics.py",
-    "router/skirnir_router/settings.py",
-    "test/selftest_client_limits.py",
-    "test/selftest_security.py"
+    "router/skirnir_router/posture.py",
+    "test/selftest_posture.py"
   ],
   "risk_ids": [
-    "TM-08"
+    "TM-01",
+    "TM-11"
   ],
   "boundaries": [
     "B1",
-    "B2",
-    "B3",
-    "B6"
+    "B5",
+    "B8"
   ],
-  "summary": "Router 0.22.0 bounds authenticated traffic per client (ADR-0063). auth.client_auth_middleware, after identity, rate limit and inference refusal, applies client_limits(spec) for a configured client: a declared Content-Length above max_body_mib (default 16 MiB) is answered 413 before the handler; with max_concurrent (default 4) requests of the client already in progress the next one gets 429 with Retry-After: 1 before any work; otherwise the in-progress counter is raised and given back in a finally block, also when the client disconnects and the handler is cancelled. The router's own UI identity is not a configured client and is not limited. config.py validates max_concurrent (1-256) and max_body_mib (1-64) as integers (booleans and strings refused) and adds them to the schema; admin.py and settings.py expose them in the UI with German and English labels; metrics.py exports skirnir_client_inflight, skirnir_client_peak_inflight, skirnir_client_concurrency_limited_total and skirnir_client_too_large_total. Refusals are audited (concurrency_limited, body_too_large) with client, path and limit, never content. Chunked bodies without a declared length stay bounded by the app ceiling of 64 MiB. Breaking for clients that run more than 4 requests at once: they need a higher max_concurrent before the upgrade.",
+  "summary": "Router 0.22.1 reports the security posture of a configuration as facts (ADR-0064). New module posture.py: findings(cfg, environ) returns frozen Finding(code, severity, risk, text, next_step) for client_auth.mode not enforce (high), client_auth not locked, clients identified only by source address (medium; info with inference: false), clients sharing one token_sha256 (high; names only, never the hash), control port without users (high), unauthenticated loopback control access, API port without TLS, static nodes over plain HTTP to a non-loopback host without fingerprint, and a session store whose DSN (read from the environment variable named in session_store.dsn_env, never printed) uses an sslmode below verify-ca to a non-loopback host, or is unset (info). report() sorts by severity and ends with POSTURE: ok or counts. app.cli gains --posture <config> [--pure] (exit 0 with findings, 2 only for an invalid configuration); app.main logs each finding as a warning and the summary at start, without changing behaviour. The agent example configuration now binds a child Ollama to 127.0.0.1:11434 with the reason; it suggested all addresses, which made Ollama reachable around the router (TM-11). Docs: ADR-0064, README (EN/DE), CHANGELOG, threat model (EN/DE), risk register (TM-01, TM-11 stay open).",
   "findings": [
     {
-      "id": "TM-08",
-      "evidence": "An authenticated client was bounded by requests per minute and the 64 MiB app ceiling only; its requests in progress were unbounded.",
-      "resolution": "Per-client concurrency and declared size bounds with defaults and peak gauges. Chunked bodies, per-client cost and hostile-load budgets remain open.",
+      "id": "TM-01",
+      "evidence": "Enforce, locked policy, separate tokens and TLS were only checkable by reading the configuration.",
+      "resolution": "Posture report on demand and on every start; proxy/IP behaviour in the deployment remains.",
+      "disposition": "baseline"
+    },
+    {
+      "id": "TM-11",
+      "evidence": "The agent example configuration bound a child Ollama to all addresses; router-side transport to static nodes and the session store was not reported.",
+      "resolution": "Example binds to loopback; plaintext static nodes and unverified session-store TLS are reported. Backend listening addresses and egress need host inspection.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_client_limits.py (WSL)",
+      "command": "python test/selftest_posture.py",
       "result": "passed",
-      "evidence": "7 tests OK: fifth concurrent request 429 with Retry-After and no work, per-client slots, 413 above 16 MiB unless 32 allowed, slot returned after disconnect, config bounds, UI fields, gauges."
+      "evidence": "6 tests OK: each finding, clean configuration POSTURE: ok, no token hash or DSN in output, CLI process."
     },
     {
-      "command": "Negative check: test/selftest_client_limits.py against the router without these changes",
+      "command": "All python test/... commands of ci.yml (WSL); check_adr_index; selftest_english_names; check_control_flow; ruff check .",
       "result": "passed",
-      "evidence": "FAILED (failures=4, errors=6)."
-    },
-    {
-      "command": "All python test/... commands of ci.yml (WSL); check_adr_index; selftest_english_names; ruff check .",
-      "result": "passed",
-      "evidence": "No failures; ADR index ok: 63 ADRs; ALLE OK; All checks passed."
+      "evidence": "No failures; ADR index ok: 64 ADRs; ALLE OK; All checks passed."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -70,7 +67,7 @@
     }
   ],
   "limitations": [
-    "Rebased onto main after #109 was merged.",
-    "Per-client defaults were checked against three days of journal starts (highest: 14 starts in 30 s for one agent client), which bound but do not measure concurrency; the new peak gauge measures it."
+    "Merged main after #109 and #110.",
+    "The report reads only the router configuration and the session DSN's TLS mode; it cannot see a backend host's listening addresses or egress."
   ]
 }
