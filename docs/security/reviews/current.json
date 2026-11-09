@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "36f182f0620218a0e9c7483afa02e93545d13244",
-  "change_digest": "827af860d71a2199f673b62db43d78beb340c8a9c3c4b364e7e4efaf6d294cc2",
+  "base_sha": "209c0ba815bd5ab920852f92c8fa18ee9cbbff09",
+  "change_digest": "4d2af85000a7d2f53786023df84311fc6772c0e5a2dc5ee30fd96255b0cd1fad",
   "reviewed_paths": [
     "CHANGELOG.md",
     "README.de.md",
@@ -41,7 +41,7 @@
       "evidence": "No failures; ADR index ok: 68 ADRs; ALLE OK; All checks passed."
     },
     {
-      "command": "python tools/security/review.py check --base origin/feat/guided-setup --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -52,7 +52,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #115; the record is refreshed against main once #115 is merged.",
-    "Copying the signed files to the router remains a manual or operator-specific step."
+    "Copying the signed files to the router remains a manual or operator-specific step.",
+    "Merged main after the PRs below it."
   ]
 }
