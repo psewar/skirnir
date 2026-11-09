@@ -21,6 +21,7 @@ class Request(dict):
         super().__init__()
         self.path, self.remote, self.method = path, remote, method
         self.headers = headers or {}
+        self.content_length = None   # as aiohttp's Request; the per-client size bound reads it (ADR-0063)
 
 async def main():
     state.CFG = SimpleNamespace(
