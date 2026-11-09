@@ -42,8 +42,9 @@ optional model reviews are advisory and require an explicitly configured endpoin
   (`tools`, `vision`, `thinking`, `structured` …), minimum context, priority, session, data class.
 - **Auto role** `auto:latest`: a chain of local decision engines (embedding model on CPU, small LLM, TF-IDF, rules) picks the role
   from the text of the request. Measured 93 to 98 % accuracy.
-- **Cloud as a tier.** OpenAI and Anthropic models can sit as the last (or first) tier of a role, with data classes, credential
-  scan, monthly budget and an egress allowlist. By default nothing goes to the cloud.
+- **Cloud as a tier.** OpenAI, Anthropic and other OpenAI-compatible providers (for example Mistral) can sit as the last (or
+  first) tier of a role, with data classes, credential scan, monthly budget and an egress allowlist. By default nothing goes to
+  the cloud.
 - **Client identities** on the inference port (Bearer, Basic, source IP), role and model locks, rate limit, audit log.
 - **Observable:** Prometheus endpoint, usage per day and client, decision log, Home Assistant device via MQTT discovery, web UI
   with live charts, catalogue, role editor, playground and load test.

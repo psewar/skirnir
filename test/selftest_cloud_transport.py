@@ -20,7 +20,9 @@ class ProviderURLs(unittest.TestCase):
     def test_config_load(self):
         data = yaml.safe_load((ROOT / "router/config.example.yaml").read_text())
         provider = {"kind": "openai", "api_key_env": "SYNTHETIC_KEY"}
-        data["router"]["cloud"]["egress_allow"] = ["model.example.test", "127.0.0.1", "::1"]
+        # keep the example's own hosts (its providers must stay valid), add the synthetic ones
+        data["router"]["cloud"]["egress_allow"] = [*data["router"]["cloud"].get("egress_allow", []),
+                                                   "model.example.test", "127.0.0.1", "::1"]
         data["router"]["cloud"]["providers"]["demo"] = provider
         with tempfile.TemporaryDirectory() as td:
             for n, (url, valid) in enumerate([

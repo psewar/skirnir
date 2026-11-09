@@ -239,3 +239,10 @@ Schranken (`router.cloud`):
 
 Adapter: `openai` (auch für OpenAI-kompatible Endpunkte) und `anthropic` (Messages-API). Beide übersetzen in das Ollama-Format,
 danach gelten dieselben Wege wie bei Knoten.
+
+**Weitere OpenAI-kompatible Anbieter** (zum Beispiel Mistrals EU-Endpunkt `https://api.eu.mistral.ai/v1`) brauchen keinen Code:
+ein Anbieter mit `kind: openai`, seiner `base_url`, `api_key_env` und `secrets_file`, der Host in `router.cloud.egress_allow`
+und Katalogeinträge `<anbieter>:<modell>` mit `cloud: <anbieter>` und Preisen. Ihre Reihenfolge in einer Rolle bestimmt, welcher
+Anbieter zuerst gefragt wird. Mit `render-env.sh` den Schlüssel in `render-env.conf` als `EXTRA_SECRET_KEYS="EXAMPLE_API_KEY"`
+nennen, damit er in `secrets.env` landet (ADR-0080); Namen müssen auf `_KEY` oder `_TOKEN` enden, weil `secrets.env` die Umgebung des Router-Dienstes ist. Siehe den deaktivierten Anbieter `mistral` in
+[config.example.yaml](../router/config.example.yaml).

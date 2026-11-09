@@ -238,3 +238,9 @@ Limits (`router.cloud`):
 
 Adapters: `openai` (also for OpenAI-compatible endpoints) and `anthropic` (Messages API). Both translate into the Ollama format,
 after which the same paths as for nodes apply.
+
+**Further OpenAI-compatible providers** (for example Mistral's EU endpoint `https://api.eu.mistral.ai/v1`) need no code:
+a provider with `kind: openai`, its `base_url`, `api_key_env` and `secrets_file`, the host in `router.cloud.egress_allow`, and
+catalogue entries named `<provider>:<model>` with `cloud: <provider>` and prices. Their order inside a role decides which
+provider is asked first. With `render-env.sh`, name the key in `render-env.conf` as `EXTRA_SECRET_KEYS="EXAMPLE_API_KEY"` so it
+reaches `secrets.env` (ADR-0080); names must end in `_KEY` or `_TOKEN`, because `secrets.env` is the router unit's environment. See the disabled `mistral` provider in [config.example.yaml](../router/config.example.yaml).

@@ -117,6 +117,8 @@ router:
       terms: []                  #   eigene Begriffe (Namen der Familie, Orte), ganze Woerter
       # redact_domains / redact_device_classes / redact_names / redact_tools / threshold / refusal: Vorgaben in privacy.py
     # Use final HTTPS endpoints. HTTP requires an explicitly allowed literal loopback address.
+    # Weitere Hosts fuer OpenAI-kompatible Anbieter (Vorgabe: api.openai.com, api.anthropic.com, generativelanguage.googleapis.com)
+    egress_allow: [api.eu.mistral.ai]
     providers:
       openai:                    # Schluessel als OPENAI_API_KEY in secrets.env
         kind: openai
@@ -136,6 +138,15 @@ router:
         budget_month_chf: 10
         warn_at_percent: 80
         region: us
+      mistral:                   # OpenAI-kompatibel (kind: openai), EU-Endpunkt; enabled: false, bis ein Schluessel vorliegt.
+        kind: openai             #   Schluessel als MISTRAL_API_KEY in secrets.env - mit render-env.sh ueber
+        enabled: false           #   EXTRA_SECRET_KEYS="MISTRAL_API_KEY" in render-env.conf (ADR-0080). Katalog z. B.
+        base_url: https://api.eu.mistral.ai/v1   #   "mistral:mistral-medium-latest": {cloud: mistral, price_chf_per_m: {...}}
+        api_key_env: MISTRAL_API_KEY
+        secrets_file: /etc/skirnir-router/secrets.env
+        budget_month_chf: 10
+        warn_at_percent: 80
+        region: eu
   control_auth:                  # Basic Auth fuer UI + /admin/*; Klartext im Secret-Store
     # allow_unauthenticated_loopback: true   # NUR Entwicklung ohne users: Loopback ohne Anmeldung (ADR-0053); sonst 503
     users:
