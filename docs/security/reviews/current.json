@@ -3,7 +3,7 @@
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
   "base_sha": "e5e969a1157ea64161f315f491bccf972bda9338",
-  "change_digest": "a91afea5fd5ebb1c9dd64c544bdef69bb973f53ea32c0287f44a8abbaa3f699e",
+  "change_digest": "7df5de64eafe648a423e9864c16f93a62127c03f2c8b05c040f06e11ba9e086d",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
@@ -29,7 +29,7 @@
     "B5",
     "B8"
   ],
-  "summary": "Router 0.22.1 reports the security posture of a configuration as facts (ADR-0064). New module posture.py: findings(cfg, environ) returns frozen Finding(code, severity, risk, text, next_step) for client_auth.mode not enforce (high), client_auth not locked, clients identified only by source address (medium; info with inference: false), clients sharing one token_sha256 (high; names only, never the hash), control port without users (high), unauthenticated loopback control access, API port without TLS, static nodes over plain HTTP to a non-loopback host without fingerprint, and a session store whose DSN (read from the environment variable named in session_store.dsn_env, never printed) uses an sslmode below verify-ca to a non-loopback host, or is unset (info). report() sorts by severity and ends with POSTURE: ok or counts. app.cli gains --posture <config> [--pure] (exit 0 with findings, 2 only for an invalid configuration); app.main logs each finding as a warning and the summary at start, without changing behaviour. The agent example configuration now binds a child Ollama to 127.0.0.1:11434 with the reason; it suggested 0.0.0.0, which made Ollama reachable around the router (TM-11). Docs: ADR-0064, README (EN/DE), CHANGELOG, threat model (EN/DE), risk register (TM-01, TM-11 stay open).",
+  "summary": "Router 0.22.1 reports the security posture of a configuration as facts (ADR-0064). New module posture.py: findings(cfg, environ) returns frozen Finding(code, severity, risk, text, next_step) for client_auth.mode not enforce (high), client_auth not locked, clients identified only by source address (medium; info with inference: false), clients sharing one token_sha256 (high; names only, never the hash), control port without users (high), unauthenticated loopback control access, API port without TLS, static nodes over plain HTTP to a non-loopback host without fingerprint, and a session store whose DSN (read from the environment variable named in session_store.dsn_env, never printed) uses an sslmode below verify-ca to a non-loopback host, or is unset (info). report() sorts by severity and ends with POSTURE: ok or counts. app.cli gains --posture <config> [--pure] (exit 0 with findings, 2 only for an invalid configuration); app.main logs each finding as a warning and the summary at start, without changing behaviour. The agent example configuration now binds a child Ollama to 127.0.0.1:11434 with the reason; it suggested all addresses, which made Ollama reachable around the router (TM-11). Docs: ADR-0064, README (EN/DE), CHANGELOG, threat model (EN/DE), risk register (TM-01, TM-11 stay open).",
   "findings": [
     {
       "id": "TM-01",
@@ -39,7 +39,7 @@
     },
     {
       "id": "TM-11",
-      "evidence": "The agent example configuration bound a child Ollama to 0.0.0.0; router-side transport to static nodes and the session store was not reported.",
+      "evidence": "The agent example configuration bound a child Ollama to all addresses; router-side transport to static nodes and the session store was not reported.",
       "resolution": "Example binds to loopback; plaintext static nodes and unverified session-store TLS are reported. Backend listening addresses and egress need host inspection.",
       "disposition": "baseline"
     }

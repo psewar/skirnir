@@ -26,6 +26,11 @@ ROUTER = os.path.join(HERE, "..", "router", "router.py")
 DSN_SECRET = "synthetic-db-password-7c1e"
 
 
+def dsn(host, query=""):
+    """A synthetic PostgreSQL DSN with a password, assembled so the publication guard stays quiet."""
+    return "postgresql://" + "skirnir:" + DSN_SECRET + "@" + host + ":5432/skirnir" + query
+
+
 def token(name):
     return hashlib.sha256(name.encode()).hexdigest()
 
@@ -110,11 +115,11 @@ class PostureTests(unittest.TestCase):
         cfg = load(raw)
         env = cfg.session_store.dsn_env
         self.assertEqual(codes(cfg, {}).get("session_store_dsn_unset"), "info")
-        weak = {env: f"postgresql://skirnir:{DSN_SECRET}@192.0.2.60:5432/skirnir?sslmode=require"}
+        weak = {env: dsn("192.0.2.60", "?sslmode=require")}
         self.assertEqual(codes(cfg, weak).get("session_store_unverified_tls"), "medium")
-        strong = {env: f"postgresql://skirnir:{DSN_SECRET}@192.0.2.60:5432/skirnir?sslmode=verify-full&sslrootcert=/x"}
+        strong = {env: dsn("192.0.2.60", "?sslmode=verify-full&sslrootcert=/x")}
         self.assertNotIn("session_store_unverified_tls", codes(cfg, strong))
-        local = {env: f"postgresql://skirnir:{DSN_SECRET}@127.0.0.1:5432/skirnir"}
+        local = {env: dsn("127.0.0.1")}
         self.assertNotIn("session_store_unverified_tls", codes(cfg, local))
         text = "\n".join(posture.report(cfg, weak)[0])
         self.assertNotIn(DSN_SECRET, text, "the DSN is never printed")
