@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "90cdec9eccc9db96739335f53fdbbc8997dca451",
-  "change_digest": "da23ac66db2421e66aeea3c59fd9306721360490c3adf73d8e1b17ec601cfcb3",
+  "base_sha": "008527fe11177f4c085e45707895d139dbc2ee7f",
+  "change_digest": "27f3230d6d14ca9150c6dad0ee8b05bd07b6b74f10a524b83a2315309c6bdf63",
   "reviewed_paths": [
     "AGENTS.md",
     "CHANGELOG.md",
@@ -70,7 +70,7 @@
       "evidence": "All present as described."
     },
     {
-      "command": "python tools/security/review.py check --base origin/feat/agent-linux-setup-ca --head INDEX",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
       "evidence": "Security evidence: 0 error(s)."
     },
@@ -81,7 +81,7 @@
     }
   ],
   "limitations": [
-    "Stacked on #118; the record is refreshed against main once the stack below is merged.",
-    "The commands were not run on a fresh Debian host or GPU node; the Home Assistant menu path is standard knowledge, not tested here."
+    "The commands were not run on a fresh Debian host or GPU node; the Home Assistant menu path is standard knowledge, not tested here.",
+    "Merged main after the PRs below it."
   ]
 }
