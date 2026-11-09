@@ -47,7 +47,7 @@ router:
     outbox_retention_days: 0
     recall_min_score: 0.0
   memory_scopes:
-    shared-research: {data_class: personal, allow_cloud: false}
+    shared-research: {data_class: personal, allow_cloud: false, writers: [agent-a]}
   context_manager:
     enabled: true
     optimize_recall: true
@@ -93,7 +93,7 @@ shared HMAC uses `shared-v1`, scope name and classification, independently of th
 principal. A missing `scope` keeps a bank private. Shared classification must match
 the global scope exactly; cloud use requires both the grant and global scope to
 permit it, plus the existing routing cloud checks. Read, write and source deletion
-are separate grants; unknown scopes/clients are denied. Policy is checked on each
+are separate grants; unknown scopes/clients are denied. Writing needs both sides (ADR-0060, router 0.20.0): the scope lists its writers in `writers`, and a write grant of a client not listed there stops loading with a message naming client and scope. Absent or empty `writers` means nobody may write; the list is checked again on every request. Reading and deletion grants need no entry. Policy is checked on each
 request and again inside the HTTP concurrency slot before every upstream attempt.
 Revocation stops queued work; bytes already sent cannot be recalled. Backend/pool
 and lifecycle configuration changes require restart; authorization follows the
@@ -123,6 +123,13 @@ fails the whole recall as before. Each name must be another project of the same
 client with `read: true` (max 4); loading refuses anything else. Writing is not
 affected: retains go only to the addressed project. Automatic recall for inference
 (`routing.memory`, strategies `auto`/`hybrid`) is not affected either.
+
+**No automatic recall into requests with tools (ADR-0059, router 0.20.0).** A fact in a shared scope may come from
+another writer. When an inference request carries a nonempty `tools` list, the router therefore adds no recalled
+facts and reports `skipped:tools` (header `X-Skirnir-Memory-State`, journal, counter `outcome="skipped_tools"`).
+A project grant may opt in with `recall_into_tools: true` (requires `read`); the facts then arrive as before, as
+untrusted data, and that client's tool calls should be confirmed or limited by the client. Explicit recall APIs
+return facts to the client and are not affected.
 
 | Strategy | Behavior |
 | --- | --- |

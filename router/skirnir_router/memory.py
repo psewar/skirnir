@@ -80,6 +80,9 @@ def scope_for_principal(principal, project, *, read=False, write=False, explicit
     shared_policy = getattr(state.CFG, "memory_scopes", {}).get(shared) if shared else None
     if shared and (not shared_policy or shared_policy["data_class"] != grant["data_class"]):
         return denied("shared scope unavailable or classification changed")
+    if write and shared and principal not in shared_policy.get("writers", ()):
+        # ADR-0060: loading already refuses such a grant; checked again so a live policy can never widen it
+        return denied("client is not a writer of this shared memory scope")
     allow_cloud = bool(grant.get("allow_cloud")) and (not shared or shared_policy["allow_cloud"])
     # The configuration refuses the option for any bank that can reach a cloud; checked again here so a live policy can
     # never widen it.
@@ -652,6 +655,13 @@ async def prepare(request, path, body, req):
     if not isinstance(messages, list) or any(not isinstance(m, dict) for m in messages):
         return invalid("memory chat messages must be a list of objects")
     if spec["recall"]:
+        grant = (policy.get("projects") or {}).get(spec["project"]) or {}
+        if body.get("tools") and grant.get("recall_into_tools", False) is not True:
+            # ADR-0059: the model may call tools in this request; retrieved facts (possibly written by another client)
+            # reach it only where the grant opts in. Reported like any skipped recall, never as missing knowledge.
+            req.memory_state = "skipped:tools"
+            count("recall", "skipped_tools")
+            return None
         query, skipped = recall_query(messages)
         if skipped:
             # A recall that never ran is a state too: without it, "no facts" looked like "no knowledge" (2026-10-23, the
@@ -673,7 +683,7 @@ async def prepare(request, path, body, req):
     return None
 
 
-RECALL_SKIPPED = ("no_messages", "last_not_user", "content_not_text")
+RECALL_SKIPPED = ("no_messages", "last_not_user", "content_not_text")   # from recall_query; prepare() adds "tools" (ADR-0059)
 
 
 def recall_query(messages):

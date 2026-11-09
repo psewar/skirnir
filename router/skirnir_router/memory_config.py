@@ -110,7 +110,8 @@ def parse_hindsight(raw):
 # Accepted keys; config.SCHEMA derives its client memory section from these, so the schema check cannot refuse a key
 # the parser accepts (0.8.9 shipped recall_with here but not in the schema, and loading refused it).
 CLIENT_MEMORY_FIELDS = ("owner", "projects", "strategy", "default_project", "auto_retain")
-PROJECT_FIELDS = ("read", "write", "delete", "data_class", "allow_cloud", "scope", "allow_private_addresses", "recall_with")
+PROJECT_FIELDS = ("read", "write", "delete", "data_class", "allow_cloud", "scope", "allow_private_addresses", "recall_with",
+                  "recall_into_tools")
 
 
 def parse_client_memory(raw, classes):
@@ -129,10 +130,13 @@ def parse_client_memory(raw, classes):
         if policy.get("data_class") not in classes:
             return invalid("each memory project needs an explicit configured data_class")
         clean[project] = {"data_class": policy["data_class"]}
-        for k in ("read", "write", "allow_cloud", "delete", "allow_private_addresses"):
+        for k in ("read", "write", "allow_cloud", "delete", "allow_private_addresses", "recall_into_tools"):
             if type(policy.get(k, False)) is not bool:
                 return invalid(f"memory project {k} must be boolean")
             clean[project][k] = policy.get(k, False)
+        # ADR-0059: automatic recall into a request that carries tools only by explicit choice; meaningless without read.
+        if clean[project]["recall_into_tools"] and not clean[project]["read"]:
+            return invalid("memory project recall_into_tools requires read")
         # Private network addresses may enter a bank only when its contents never reach a cloud (a shared scope is
         # checked in config.py, where the scopes are known). Explicit, so the filter never loosens silently.
         if clean[project]["allow_private_addresses"] and clean[project]["allow_cloud"]:

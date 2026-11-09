@@ -23,12 +23,24 @@ statt in eine neue Bank umgeleitet zu werden. Rotation des Handoff-Schlüssels m
 bestehende Übergabepakete ungültig.
 
 Gemeinsame Scopes werden unter `router.memory_scopes` definiert, beispielsweise
-`shared-research: {data_class: personal, allow_cloud: false}`. Ein Client erhält in
+`shared-research: {data_class: personal, allow_cloud: false, writers: [agent-a]}`. Ein Client erhält in
 `memory.projects.example-project` einen serverseitigen Verweis
 `scope: shared-research`, dieselbe Datenklasse und getrennte boolesche Freigaben
 `read`, `write`, `delete`, `allow_cloud`. Ohne `scope` bleibt die Bank privat.
 Mehrere Clients beziehungsweise Projekt-Aliase können denselben Scope verwenden;
 ein Client kann mehrere Grants besitzen. Es gibt keine freie physische Bank-Auswahl.
+
+Schreiben braucht beide Seiten (ADR-0060, Router 0.20.0): Der Scope nennt seine Schreiber in `writers`; die
+Schreibfreigabe eines dort nicht genannten Clients bricht das Laden mit einer Meldung ab, die Client und Scope
+nennt. Fehlt `writers` oder ist die Liste leer, darf niemand schreiben; der Router prüft die Liste bei jeder
+Anfrage erneut. Lese- und Löschfreigaben brauchen keinen Eintrag.
+
+Kein automatischer Recall in Anfragen mit Werkzeugen (ADR-0059, Router 0.20.0): Ein Fakt im gemeinsamen Scope
+kann von einem anderen Schreiber stammen. Bringt eine Inferenzanfrage eine nicht leere `tools`-Liste mit, fügt der
+Router keine Fakten ein und meldet `skipped:tools` (Header `X-Skirnir-Memory-State`, Journal, Zähler
+`outcome="skipped_tools"`). Ein Projekt-Grant kann das mit `recall_into_tools: true` ausdrücklich erlauben
+(erfordert `read`); die Fakten kommen dann wie bisher als nicht vertrauenswürdige Daten, und die Werkzeugaufrufe
+dieses Clients sollte der Client bestätigen oder begrenzen. Explizite Recall-Schnittstellen sind nicht betroffen.
 
 Cloud-Verarbeitung erfordert beim Shared Scope sowohl die globale als auch die
 clientseitige Freigabe und sämtliche bestehenden Routing-Prüfungen. Authentifizierung

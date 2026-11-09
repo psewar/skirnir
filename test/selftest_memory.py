@@ -121,10 +121,53 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.validate_schema(raw), [])
         for allow_cloud, ok in ((False, True), (True, False)):
             with self.subTest(shared_allow_cloud=allow_cloud):
-                raw["router"]["memory_scopes"] = {"example-team": {"data_class": "personal", "allow_cloud": allow_cloud}}
+                raw["router"]["memory_scopes"] = {"example-team": {"data_class": "personal", "allow_cloud": allow_cloud,
+                                                                   "writers": ["example-client"]}}
                 cfg = config.Config.__new__(config.Config)
                 result = cfg.parse(copy.deepcopy(raw))   # an invalid scope grant stops loading, as a Problem
                 self.assertEqual(failed(result), not ok, getattr(result, "message", result))
+
+    def test_shared_scope_names_its_writers(self):
+        # ADR-0060 (TM-10): a client's write grant on a shared scope is refused unless the scope lists the client.
+        raw = copy.deepcopy(config.load_yaml(BASE))
+        raw["router"]["hindsight"] = {"enabled": False}
+        writer, reader = policy(), policy(write=False)
+        for spec in (writer, reader):
+            spec["projects"][PROJECT]["scope"] = "example-team"
+        raw["router"]["client_auth"] = {"clients": {"example-writer": {"memory": writer}, "example-reader": {"memory": reader}}}
+        cases = ((None, False), ([], False), (["example-reader"], False), (["example-writer"], True),
+                 (["example-writer", "example-reader"], True), (["example-unknown"], False),
+                 (["example-writer", "example-writer"], False), ("example-writer", False), ([""], False))
+        for writers, ok in cases:
+            with self.subTest(writers=writers):
+                scope = {"data_class": "personal", "allow_cloud": False}
+                if writers is not None:
+                    scope["writers"] = writers
+                raw["router"]["memory_scopes"] = {"example-team": scope}
+                self.assertEqual(config.validate_schema(raw), [])
+                cfg = config.Config.__new__(config.Config)
+                result = cfg.parse(copy.deepcopy(raw))
+                self.assertEqual(failed(result), not ok, getattr(result, "message", result))
+        # A read-only client needs no entry: without any writer grant an empty list loads.
+        raw["router"]["client_auth"]["clients"].pop("example-writer")
+        raw["router"]["memory_scopes"] = {"example-team": {"data_class": "personal", "allow_cloud": False}}
+        self.assertFalse(failed(config.Config.__new__(config.Config).parse(copy.deepcopy(raw))))
+
+    def test_recall_into_tools_is_an_explicit_boolean_that_needs_read(self):
+        # ADR-0059 (TM-10)
+        self.assertFalse(parse_client_memory(policy(), ["personal"])["projects"][PROJECT]["recall_into_tools"])
+        spec = policy()
+        spec["projects"][PROJECT]["recall_into_tools"] = True
+        self.assertTrue(parse_client_memory(spec, ["personal"])["projects"][PROJECT]["recall_into_tools"])
+        for value, read in (("yes", True), (1, True), (True, False)):
+            spec = policy(read=read)
+            spec["projects"][PROJECT]["recall_into_tools"] = value
+            with self.subTest(value=value, read=read):
+                self.assertTrue(failed(parse_client_memory(spec, ["personal"])))
+
+
+TOOLS = [{"type": "function", "function": {"name": "example_tool", "description": "Synthetic tool",
+                                           "parameters": {"type": "object", "properties": {}}}}]
 
 
 class MemoryHarness(unittest.IsolatedAsyncioTestCase):
@@ -337,6 +380,55 @@ class MemoryHttpTests(MemoryHarness):
         self.assertEqual((await self.call()).status, 403)
         self.assertEqual((await self.call("retain", data=data)).status, 202)
         await self.service.queue.join()
+
+    async def test_no_automatic_recall_into_a_request_with_tools_unless_the_grant_opts_in(self):
+        # ADR-0059 (TM-10): facts possibly written by another client must not steer a model that may call tools.
+        def memory_messages():
+            return [m for m in self.upstream_bodies[-1]["messages"] if "Untrusted retrieved memory" in str(m.get("content"))]
+        before = trimmed_count("skipped_tools")
+        for path in ("/api/chat", "/v1/chat/completions", "/v1/messages"):
+            with self.subTest(path=path):
+                calls = len(self.calls)
+                tools = TOOLS if path != "/v1/messages" else [{"name": "example_tool", "description": "Synthetic tool",
+                                                                 "input_schema": {"type": "object", "properties": {}}}]
+                r = await self.infer(path, extra={"tools": tools})
+                self.assertEqual((r.status, r.headers.get("X-Skirnir-Memory-State")), (200, "skipped:tools"))
+                self.assertEqual(len(self.calls), calls, "no recall is sent")
+                self.assertEqual(memory_messages(), [])
+        self.assertEqual(trimmed_count("skipped_tools") - before, 3)
+        # An empty tool list offers no tool: recall as usual.
+        r = await self.infer(extra={"tools": []})
+        self.assertEqual(r.headers.get("X-Skirnir-Memory-State"), "available")
+        # The grant's explicit opt-in restores recall into tool requests, still as untrusted data.
+        state.CFG.client_auth["clients"]["client-a"]["memory"]["projects"][PROJECT]["recall_into_tools"] = True
+        calls = len(self.calls)
+        r = await self.infer(extra={"tools": TOOLS})
+        self.assertEqual((r.status, r.headers.get("X-Skirnir-Memory-State")), (200, "available"))
+        self.assertEqual(len(self.calls), calls + 1)
+        self.assertEqual(len(memory_messages()), 1)
+        self.assertEqual(self.upstream_bodies[-1]["tools"], TOOLS)
+        # Only true opts in, and only for that client.
+        state.CFG.client_auth["clients"]["client-a"]["memory"]["projects"][PROJECT]["recall_into_tools"] = "true"
+        self.assertEqual((await self.infer(extra={"tools": TOOLS})).headers.get("X-Skirnir-Memory-State"), "skipped:tools")
+        self.assertEqual((await self.infer(extra={"tools": TOOLS}, token="client-b")).headers.get("X-Skirnir-Memory-State"),
+                         "skipped:tools")
+
+    async def test_writing_a_shared_scope_needs_the_scopes_writer_list_at_runtime(self):
+        # ADR-0060 (TM-10): checked per request too, so a live policy can never widen what loading refused.
+        state.CFG.memory_scopes = {"example-team": {"data_class": "personal", "allow_cloud": False, "writers": ("client-a",)}}
+        for name in ("client-a", "client-b"):
+            spec = policy()
+            spec["projects"][PROJECT]["scope"] = "example-team"
+            state.CFG.client_auth["clients"][name]["memory"] = spec
+        self.assertFalse(failed(memory.scope_for_principal("client-a", PROJECT, write=True)))
+        self.assertTrue(failed(memory.scope_for_principal("client-b", PROJECT, write=True)))
+        self.assertFalse(failed(memory.scope_for_principal("client-b", PROJECT, read=True)), "reading needs no entry")
+        data = {"project": PROJECT, "event_id": "one", "content": "Synthetic curated fact", "confirmed": True}
+        self.assertEqual((await self.call("retain", token="client-b", data=data)).status, 403)
+        self.assertEqual((await self.call("retain", data=data)).status, 202)
+        await self.service.queue.join()
+        state.CFG.memory_scopes["example-team"]["writers"] = ()
+        self.assertTrue(failed(memory.scope_for_principal("client-a", PROJECT, write=True)), "an empty list means nobody")
 
     async def test_skipped_recall_reports_its_reason_and_the_journal_keeps_the_state(self):
         def last_route():

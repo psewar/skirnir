@@ -178,14 +178,14 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Shared writer injects false facts or tool instructions.",
-      "controls": "Grants, provenance and untrusted-context markers.",
-      "next_action": "Minimize writer rights; independently authorize tools.",
+      "controls": "Grants, provenance and untrusted-context markers. Since router 0.20.0 a shared scope names its writers (memory_scopes.<scope>.writers, checked at load and per request, ADR-0060) and automatic recall skips requests that carry tools (skipped:tools) unless the project grant sets recall_into_tools: true (ADR-0059); opting in accepts the risk for that client.",
+      "next_action": "Review the writer list of every shared scope and every recall_into_tools opt-in; confirm or limit tool calls in clients that opt in; consider fact review before shared facts are recalled.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_memory.py",
         "test/selftest_context.py"
       ],
-      "validation_gap": "V9: downstream agent/tool behavior is outside unit-test coverage."
+      "validation_gap": "V9: a listed writer can still plant false facts, and downstream agent/tool behavior of an opted-in client is outside unit-test coverage."
     },
     {
       "id": "TM-11",
