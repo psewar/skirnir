@@ -106,6 +106,12 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 		return f
 	}
 	a.tunnel = newTunnel(cfg.Router.URL, cfg.Tunnel.Upstream, a.id, a.hb, facts, log)
+	routerTLS, err := routerTLSConfig(cfg.Router.CAFile) // validated by loadConfig; checked again for the error value
+	if err != nil {
+		return nil, err
+	}
+	a.tunnel.tls = routerTLS
+	a.updater.tls = routerTLS
 	a.tunnel.onStatus = a.onTunnelStatus
 	a.tunnel.onUpdate = a.updater.Handle
 	a.tunnel.onOllamaUpdate = a.ollamaUp.Handle

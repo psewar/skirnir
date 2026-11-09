@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -160,6 +161,7 @@ func updateKind(err error) string {
 }
 
 type Updater struct {
+	tls     *tls.Config // router.ca_file for downloads from the router (ADR-0070); nil = system trust store
 	cfg     UpdateCfg
 	cfgPath string
 	log     *Logger
@@ -288,7 +290,11 @@ func (u *Updater) download(ctx context.Context, url, token, dst string, want *ma
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
+	client := &http.Client{Timeout: 10 * time.Minute}
+	if u.tls != nil { // router.ca_file (ADR-0070)
+		client.Transport = &http.Transport{Proxy: http.ProxyFromEnvironment, TLSClientConfig: u.tls}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("Download: %w", err)
 	}

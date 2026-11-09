@@ -1,8 +1,7 @@
-# systemd-Unit fuer den skirnir-agent auf Linux (siehe config.example.yaml, Abschnitt LINUX)
-# Installation: sudo cp skirnir-agent.service /etc/systemd/system/ && sudo systemctl daemon-reload
-#               && sudo systemctl enable --now skirnir-agent
+# systemd unit for the Skirnir agent on Linux. `sudo skirnir-agent setup` installs it (ADR-0070); by hand:
+#   sudo cp skirnir-agent.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now skirnir-agent
 [Unit]
-Description=Skirnir Agent (Tunnel zum Skirnir-Router, GPU-Heartbeat, HA-MQTT)
+Description=Skirnir agent (tunnel to the Skirnir router, GPU heartbeat, Home Assistant MQTT)
 After=network-online.target ollama.service
 Wants=network-online.target
 
@@ -11,11 +10,11 @@ Type=simple
 ExecStart=/usr/local/bin/skirnir-agent run --config /etc/skirnir-agent/config.yaml
 Restart=always
 RestartSec=5
-# Schluessel (0600) und Provisionierung liegen in identity.dir, Logs in logging.dir - beide Pfade in der Config setzen
-# (z. B. /var/lib/skirnir-agent und /var/log/skirnir-agent) und dem Dienst gehoeren lassen:
+# The key (0600) and provisioning live in identity.dir, logs in logging.dir. setup sets them to /var/lib/skirnir-agent and
+# /var/log/skirnir-agent and creates both folders; /etc stays read-only for the service (ProtectSystem=full).
 User=root
 ProtectSystem=full
-# /usr/local/bin: das Selbst-Update (updater.go) legt <binary>.new daneben und tauscht - unter ProtectSystem=full sonst read-only
+# /usr/local/bin: the self-update (updater.go) puts <binary>.new next to the binary and swaps it
 ReadWritePaths=/var/lib/skirnir-agent /var/log/skirnir-agent /usr/local/bin
 NoNewPrivileges=true
 RestrictSUIDSGID=true

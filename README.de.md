@@ -482,9 +482,9 @@ nur die Version, nie den Code. Vorerst nur Windows-Knoten; die Linux-Archive sin
 beantworten (Router-Adresse, Update-Schlüssel des Betreibers, Benutzer mit Steuerrecht); die Binary richtet sich selbst als
 Dienst *Skirnir Agent* ein, und der Knoten erscheint im Tab „Agenten“ zur Freigabe.
 
-Ein neuer GPU-Rechner braucht: Ollama mit Modellen, das Agent-Binary, eine Konfiguration mit `router.url` (Vorlage
-[agent/config.example.yaml](agent/config.example.yaml)), `Install-Service.ps1` als Administrator, dann die Freigabe in der
-Router-UI (Wake-on-LAN, Gewicht, MQTT-Gerät). Kein Token, keine Firewall-Regel, kein Zertifikat, keine IP von Hand.
+**Neuer Linux-Knoten seit Agent 0.30.0:** `sudo ./skirnir-agent-<version>-linux-amd64 setup --router https://<router>:11435` (optional `--update-key <öffentlicher Schlüssel>`, `--ca-file <pem>`) schreibt die Konfiguration, legt Schlüssel- und Log-Ordner unter `/var` an, installiert Binary und systemd-Unit und startet den Dienst (ADR-0070).
+
+Ein neuer GPU-Rechner braucht: Ollama mit Modellen (an Loopback gebunden, `OLLAMA_HOST=127.0.0.1`), den Agenten, `setup` wie oben, dann die Freigabe in der Router-UI nach dem Vergleich des Fingerprints mit `skirnir-agent identity` (Wake-on-LAN, Gewicht, MQTT-Gerät). Kein Token, keine Firewall-Regel, keine IP von Hand. Dem Zertifikat des Routers muss der Knoten vertrauen: ein öffentliches oder eine private CA in `router.ca_file`.
 
 Der Agent lehnt eine Konfiguration mit einem Schlüssel auf oberster Ebene ab, den er nicht liest (ein vertippter oder in
 einer früheren Version entfernter Block), und nennt den Schlüssel. `skirnir-agent check-config` zeigt das vor einem

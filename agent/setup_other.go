@@ -1,9 +1,9 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package main
 
 import "fmt"
 
 func setupInteractive(cfgPath string) error {
-	return fmt.Errorf("setup exists only on Windows; Linux: binary to /usr/local/bin, config to /etc/skirnir-agent, systemd unit (see config.example.yaml)")
+	return fmt.Errorf("setup exists on Windows and Linux; elsewhere install by hand (see agent/config.example.yaml)")
 }
