@@ -139,6 +139,9 @@ CREATE INDEX outbox_verify ON skirnir_sessions.memory_outbox(available_at) WHERE
 DROP INDEX skirnir_sessions.outbox_payload_expiry;
 CREATE INDEX outbox_payload_expiry ON skirnir_sessions.memory_outbox(updated_at)
     WHERE payload IS NOT NULL AND state IN ('completed','dead','revoked','cancelled','deleted');
+""", """
+ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN session_id uuid;
+CREATE INDEX outbox_session ON skirnir_sessions.memory_outbox(owner,session_id) WHERE session_id IS NOT NULL;
 """)
 
 

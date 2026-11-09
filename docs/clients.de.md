@@ -127,7 +127,8 @@ Auch ohne Block liest der Router den Request: `tools` → tools, Bilder → visi
 
 Die Antwort trägt immer die Header `X-Skirnir-Request-Id`, `-Node`, `-Model`, `-Tier`, `-Warm`; eine Anfrage mit
 Gedächtnis-Recall zusätzlich `X-Skirnir-Memory-State` (`available`, `bank_missing`, `query_filtered` oder `unavailable[:<art>]`,
-siehe [design/hindsight-memory.md](../design/hindsight-memory.md)). Der Block `routing` im Body (Knoten, Modell, Stufe,
+siehe [design/hindsight-memory.md](../design/hindsight-memory.md)); eine Anfrage, deren Antwort gespeichert werden kann,
+trägt `X-Skirnir-Memory-Operation` mit der Operations-ID, um sie später zu löschen (ADR-0076). Der Block `routing` im Body (Knoten, Modell, Stufe,
 `reason`, `skipped` mit Grund je übersprungener Stufe, `candidates` mit Score, `queued_ms`, `decision`) kommt nur, wenn der
 Client selbst einen `routing`-Block geschickt hat – Altclients sehen einen unveränderten Body. Bei `/v1` steht er im
 `chat.completion` bzw. im letzten SSE-Chunk.

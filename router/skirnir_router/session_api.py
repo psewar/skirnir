@@ -12,7 +12,7 @@ from uuid import UUID
 
 from aiohttp import web
 
-from . import auth, metrics, state
+from . import auth, deletion_journal, metrics, state
 from .outcome import Problem, failed, invalid, too_large
 from .session_config import SessionConfig
 from .context_config import ContextConfig
@@ -43,12 +43,25 @@ async def lifecycle(app):
         store = await PostgresSessionStore.open(dsn, cfg)
         if failed(store):
             raise RuntimeError("session store startup failed; check driver, database and credentials")  # exception-ok: aborts startup
+        # ADR-0076: before anything sends restored memory, deletions recorded outside the database are applied again
+        replayed = await deletion_journal.replay(store, cfg.delete_memory_with_session)
+        if failed(replayed):
+            await store.close()
+            raise RuntimeError("deletion journal could not be applied to the session store")  # exception-ok: aborts startup
     app[STORE_KEY] = store
     try:
         yield
     finally:
         if store is not None:
             await store.close()
+
+
+def wake_memory(app):
+    """Let the memory outbox take up deletions requested with a session at once (ADR-0076)."""
+    from . import memory   # memory imports this module; resolved at call time
+    service = app.get(memory.SERVICE_KEY)
+    if service is not None:
+        service.wakeup.set()
 
 
 def register(app):
@@ -259,8 +272,14 @@ async def dispatch(request, action):
     if action == "get":
         return web.json_response(session)
     if action == "delete":
-        deleted = await store.delete(principal, session_id)
-        return deleted if failed(deleted) else web.Response(status=204)
+        cfg = request.app[CONFIG_KEY]
+        deleted = await store.delete(principal, session_id, with_memory=cfg.delete_memory_with_session)
+        if failed(deleted):
+            return deleted
+        deletion_journal.record("session", principal, session_id)
+        if cfg.delete_memory_with_session:
+            wake_memory(request.app)
+        return web.Response(status=204)
     if action == "update":
         data = await body(request)
         if failed(data):

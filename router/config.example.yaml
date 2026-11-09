@@ -81,6 +81,7 @@ router:
     retention_days: 0
     archived_retention_days: 0
     maintenance_interval_s: 300
+    delete_memory_with_session: false   # true: deleting a session also deletes the memory retained from its answers (ADR-0076)
   listen: 0.0.0.0:11434
   control_listen: 0.0.0.0:11435
   public_url: https://router.example.net:11435

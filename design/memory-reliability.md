@@ -59,6 +59,24 @@ shared-memory guide). Categories are `unavailable`, `timeout`, `transport`, `ups
 exception text, endpoint or credential is persisted as a diagnostic. HTTP errors
 remain bounded/retried; these categories do not promise the upstream did no work.
 
+## Deletion lifecycle
+
+Decision: [ADR-0076](../docs/adr/0076-deletion-lifecycle-across-stores-and-restores.md). Where content lives and how it goes:
+
+| Store | Content | Retention | Deletion | After a restore |
+|---|---|---|---|---|
+| Sessions (PostgreSQL) | messages, checkpoints, compactions, handoff imports | `session_store.retention_days`, `archived_retention_days` (0 = kept) | owner `DELETE /v1/skirnir/sessions/{id}` (cascade) | journaled; the router deletes it again at start |
+| Memory outbox (PostgreSQL) | retain payload until the job ends | `hindsight.outbox_retention_days` drops payloads of finished jobs; the row stays as tombstone | `POST .../memory/operations/{id}/delete` (grant `delete`); with `session_store.delete_memory_with_session` also every operation retained from the deleted session's answers | journaled; marked again at start before anything is sent |
+| Hindsight | documents and derived facts (`document_id` = operation id) | Hindsight's own | from the outbox (`delete_document`) once the extraction ended | `POST /admin/memory/reconcile-deletions` deletes every deleted operation's document again |
+| `deletions.jsonl` next to `config.yaml` | ids of completed deletions (no content) | kept | - | must not be restored older than the database |
+| `decisions.jsonl` (decision capture, opt-in) | anonymised prompt excerpts | at most 64 MiB plus one rotated file | turn the capture off and remove the files | - |
+| Journal `events.jsonl`, audit log, metrics | no content | ring / size-bound | - | - |
+
+An inference whose answer may be retained names its operation in `X-Skirnir-Memory-Operation`, so its owner can delete
+it later. `skirnir_memory_deletions_stuck` counts deletions whose job ended dead or revoked (grant lost, bank changed):
+that knowledge may still be in Hindsight. The posture report names sessions without retention, memory kept on session
+deletion and outbox payloads without retention (info).
+
 ## Ledger growth and monitoring
 
 Migration **4** adds retry/diagnostic fields, partial indexes and an aggregate

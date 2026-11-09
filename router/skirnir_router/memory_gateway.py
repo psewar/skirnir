@@ -18,6 +18,7 @@ from aiohttp import web
 from . import auth, memory, session_api
 from .common import log
 from .memory_outbox import upstream_id
+from . import deletion_journal
 from .outcome import Problem, bad_gateway, denied, failed, invalid, unavailable
 from .reliability_store import OPERATION_NOT_FOUND
 
@@ -187,6 +188,7 @@ async def operation_control(request, service, principal, gateway):
         deleted = await service.outbox.outbox_delete(row["owner"], operation, {**asdict(scope), "__bank": service.bank(scope)})
         if failed(deleted):
             return deleted
+        deletion_journal.record("operation", row["owner"], operation)   # ADR-0076: survives a database restore
         if curator is not None:   # visible afterwards: who removed whose knowledge from the shared scope
             log.info("memory curation: %s deletes operation %s of %s in shared scope %s", principal, operation, row["owner"],
                      scope.shared_scope)

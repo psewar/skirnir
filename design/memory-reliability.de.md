@@ -50,6 +50,25 @@ policy_changed, lease_expired, upstream_failed, remote_unknown.
 Keine Fehlertexte, Endpunkte, Credentials oder Upstream-Bodies werden persistiert.
 Die Kategorie beweist nicht, dass der Upstream noch keine Arbeit ausgeführt hat.
 
+## Lebenszyklus beim Löschen
+
+Entscheidung: [ADR-0076](../docs/adr/0076-deletion-lifecycle-across-stores-and-restores.md). Wo Inhalte liegen und wie sie
+verschwinden:
+
+| Speicher | Inhalt | Aufbewahrung | Löschen | Nach einem Restore |
+|---|---|---|---|---|
+| Sessions (PostgreSQL) | Nachrichten, Checkpoints, Verdichtungen, Handoff-Importe | `session_store.retention_days`, `archived_retention_days` (0 = bleibt) | Besitzer `DELETE /v1/skirnir/sessions/{id}` (Kaskade) | im Journal; der Router löscht sie beim Start erneut |
+| Memory-Outbox (PostgreSQL) | Retain-Inhalt bis zum Ende des Jobs | `hindsight.outbox_retention_days` entfernt Inhalte beendeter Jobs; die Zeile bleibt als Tombstone | `POST .../memory/operations/{id}/delete` (Grant `delete`); mit `session_store.delete_memory_with_session` auch jede Operation aus den Antworten der gelöschten Session | im Journal; beim Start erneut markiert, bevor etwas gesendet wird |
+| Hindsight | Dokumente und abgeleitete Fakten (`document_id` = Operations-ID) | Hindsights eigene | aus der Outbox (`delete_document`), sobald die Extraktion beendet ist | `POST /admin/memory/reconcile-deletions` löscht das Dokument jeder gelöschten Operation erneut |
+| `deletions.jsonl` neben `config.yaml` | IDs abgeschlossener Löschungen (kein Inhalt) | bleibt | - | darf nicht älter als die Datenbank zurückgespielt werden |
+| `decisions.jsonl` (Entscheidungsaufzeichnung, opt-in) | anonymisierte Prompt-Auszüge | höchstens 64 MiB plus eine rotierte Datei | Aufzeichnung abschalten und Dateien entfernen | - |
+| Journal `events.jsonl`, Audit-Log, Metriken | kein Inhalt | Ring / größenbegrenzt | - | - |
+
+Eine Inferenz, deren Antwort gespeichert werden kann, nennt ihre Operation in `X-Skirnir-Memory-Operation`, damit der
+Besitzer sie später löschen kann. `skirnir_memory_deletions_stuck` zählt Löschungen, deren Job tot oder widerrufen endete
+(Grant weg, Bank geändert): Dieses Wissen kann noch in Hindsight liegen. Der Posture-Bericht nennt Sessions ohne
+Aufbewahrungsgrenze, beim Session-Löschen behaltenes Gedächtnis und Outbox-Inhalte ohne Aufbewahrungsgrenze (Info).
+
 ## Datenbank und Überwachung
 
 Migration **4** ergänzt Diagnose-/Retry-Felder, partielle Indizes und

@@ -57,3 +57,5 @@ monitoring/secrets/
 monitoring/prometheus.yml
 monitoring/prometheus-data/
 monitoring/grafana-data/
+router/deletions.jsonl
+test/deletions.jsonl

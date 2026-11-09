@@ -41,6 +41,9 @@ def group_id(text: str) -> str:
     return hashlib.sha1(" ".join(words).encode()).hexdigest()[:12]
 
 
+MAX_BYTES = 64 * 1024 * 1024   # per file; the capture keeps this file and one rotated predecessor
+
+
 class Capture:
     def __init__(self, cfg: dict):
         self.enabled = bool(cfg.get("enabled"))
@@ -67,6 +70,9 @@ class Capture:
         try:
             if os.path.dirname(self.path):
                 os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            # ADR-0076: bounded - at most MAX_BYTES current plus one older file; older rows are gone
+            if os.path.exists(self.path) and os.path.getsize(self.path) >= MAX_BYTES:
+                os.replace(self.path, self.path + ".1")
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
         except OSError as e:  # exception-ok: file system boundary; a lost capture row never fails the request

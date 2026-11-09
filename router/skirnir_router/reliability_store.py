@@ -18,7 +18,7 @@ OPERATION_NOT_FOUND = not_found("memory operation not found")
 
 class ReliabilityStore:
     @database
-    async def outbox_put(self, operation, scope, payload, fingerprint, capacity, owner_capacity=0):
+    async def outbox_put(self, operation, scope, payload, fingerprint, capacity, owner_capacity=0, session_id=None):
         async with self.transaction() as (conn, tx):
             await conn.execute("SELECT pg_advisory_xact_lock(7365471202492)")
             old = await conn.fetchrow("SELECT * FROM skirnir_sessions.memory_outbox WHERE operation_id=$1", operation)
@@ -29,8 +29,9 @@ class ReliabilityStore:
             full = await self._outbox_capacity(conn, scope["principal"], capacity, owner_capacity)
             if failed(full):
                 return tx.reject(full)
-            row = await conn.fetchrow("""INSERT INTO skirnir_sessions.memory_outbox(operation_id,owner,project,scope,payload,fingerprint)
-                VALUES($1,$2,$3,$4,$5,$6) RETURNING *""", operation, scope["principal"], scope["project"], scope, payload, fingerprint)
+            row = await conn.fetchrow("""INSERT INTO skirnir_sessions.memory_outbox(operation_id,owner,project,scope,payload,fingerprint,session_id)
+                VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *""", operation, scope["principal"], scope["project"], scope, payload, fingerprint,
+                session_id)
             return record(row)
 
     @database
@@ -68,7 +69,11 @@ class ReliabilityStore:
             raise ValueError("invalid outbox completion")  # exception-ok: programming error (violated invariant)
         async with self.connection() as conn:
             # First acceptance after a send starts the verification clock; a verification that keeps 'accepted' does not.
-            result = await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state=$3,lease=NULL,lease_until=NULL,
+            # ADR-0076: a deletion requested while the send was in flight (session deletion, journal replay) takes over
+            # as soon as the send or its verification ends with the knowledge possibly in Hindsight.
+            result = await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET
+                state=CASE WHEN delete_requested AND $3 IN ('accepted','completed','pending') THEN 'delete_pending' ELSE $3 END,
+                lease=NULL,lease_until=NULL,
                 available_at=clock_timestamp()+$4*interval '1 second',updated_at=clock_timestamp(),
                 last_error=$5,payload=CASE WHEN $3 IN ('deleted','revoked') THEN NULL ELSE payload END,
                 accepted_at=CASE WHEN $3='accepted' AND state='processing' THEN clock_timestamp() ELSE accepted_at END,
@@ -104,6 +109,57 @@ class ReliabilityStore:
             await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state='cancelled',payload=NULL,updated_at=clock_timestamp()
                 WHERE operation_id=$1""", operation)
 
+    async def _request_deletion(self, conn, where, *args):
+        """Mark the matching operations for deletion like outbox_delete, keeping their stored scope (ADR-0076): never sent
+        -> deleted and payload dropped; possibly in Hindsight -> delete_pending; in flight -> delete_requested, taken over by
+        outbox_finish. Returns how many rows changed."""
+        result = await conn.execute(f"""UPDATE skirnir_sessions.memory_outbox SET
+            state=CASE WHEN state='processing' THEN state WHEN attempts=0 OR state='cancelled' THEN 'deleted' ELSE 'delete_pending' END,
+            payload=CASE WHEN state<>'processing' AND (attempts=0 OR state='cancelled') THEN NULL ELSE payload END,
+            retry_base=CASE WHEN state<>'processing' AND attempts>0 AND state<>'cancelled' THEN attempts ELSE retry_base END,
+            delete_requested=true,available_at=clock_timestamp(),updated_at=clock_timestamp()
+            WHERE ({where}) AND state NOT IN ('deleted','delete_pending') AND NOT (state='processing' AND delete_requested)""", *args)
+        return int(result.split()[-1])
+
+    @database
+    async def outbox_delete_sessions(self, owner, session_ids):
+        """Request deletion of every memory operation retained from these sessions' inference. Number of rows changed."""
+        async with self.transaction() as (conn, tx):
+            return await self._request_deletion(conn, "owner=$1 AND session_id = ANY($2::uuid[])", owner, list(session_ids))
+
+    @database
+    async def replay_deletions(self, sessions, operations, with_memory):
+        """Apply journaled deletions again (after a database restore). sessions/operations: lists of (owner, uuid).
+        Returns {"sessions": deleted again, "operations": operations marked again}."""
+        async with self.transaction() as (conn, tx):
+            owners, ids = [o for o, _ in sessions], [i for _, i in sessions]
+            marked = 0
+            if with_memory and sessions:
+                marked += await self._request_deletion(conn, """(owner,session_id) IN (SELECT * FROM unnest($1::text[],$2::uuid[]))""",
+                                                       owners, ids)
+            result = await conn.execute("""DELETE FROM skirnir_sessions.sessions WHERE (owner,id) IN
+                (SELECT * FROM unnest($1::text[],$2::uuid[]))""", owners, ids) if sessions else "DELETE 0"
+            if operations:
+                marked += await self._request_deletion(conn, """(owner,operation_id) IN (SELECT * FROM unnest($1::text[],$2::uuid[]))""",
+                                                       [o for o, _ in operations], [i for _, i in operations])
+            return {"sessions": int(result.split()[-1]), "operations": marked}
+
+    @database
+    async def outbox_stuck_deletions(self):
+        """Deletions that will not finish by themselves: requested, but the job is dead or revoked (ADR-0076)."""
+        async with self.connection() as conn:
+            return await conn.fetchval("""SELECT count(*) FROM skirnir_sessions.memory_outbox
+                WHERE delete_requested AND state IN ('dead','revoked')""")
+
+    @database
+    async def outbox_deleted_documents(self, after, limit):
+        """(operation_id, bank) of deletions that reached Hindsight, ordered by id after `after` - for re-applying them
+        after a Hindsight restore (memory_reconcile)."""
+        async with self.connection() as conn:
+            rows = await conn.fetch("""SELECT operation_id, scope->>'__bank' AS bank FROM skirnir_sessions.memory_outbox
+                WHERE state='deleted' AND attempts>0 AND operation_id>$1 ORDER BY operation_id LIMIT $2""", after, limit)
+            return [(r["operation_id"], r["bank"]) for r in rows]
+
     @database
     async def outbox_counts(self):
         async with self.connection() as conn:
@@ -111,7 +167,7 @@ class ReliabilityStore:
             return {r["state"]: r["count"] for r in rows}
 
     @database
-    async def cleanup(self, session_days, archived_days, outbox_days):
+    async def cleanup(self, session_days, archived_days, outbox_days, with_memory=False):
         async with self.transaction() as (conn, tx):
             rows = await conn.fetch("""SELECT owner,id FROM skirnir_sessions.sessions s
                 WHERE (($1>0 AND updated_at<clock_timestamp()-$1*interval '1 day') OR
@@ -119,14 +175,17 @@ class ReliabilityStore:
                 AND NOT EXISTS(SELECT 1 FROM skirnir_sessions.turns t WHERE t.owner=s.owner AND t.session_id=s.id
                     AND state='pending' AND lease_until>clock_timestamp())
                 ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 100""", session_days, archived_days)
+            memory_deletions = 0
             for row in rows:
+                if with_memory:
+                    memory_deletions += await self._request_deletion(conn, "owner=$1 AND session_id=$2", row['owner'], row['id'])
                 await conn.execute("DELETE FROM skirnir_sessions.sessions WHERE owner=$1 AND id=$2", row['owner'], row['id'])
             # Keep idempotency tombstones. Removing IDs could resurrect deleted knowledge.
             result = await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET payload=NULL,scope=jsonb_build_object('__bank',scope->>'__bank')
                 WHERE operation_id IN (SELECT operation_id FROM skirnir_sessions.memory_outbox
                     WHERE $1>0 AND payload IS NOT NULL AND state IN ('completed','dead','revoked','cancelled','deleted')
                     AND updated_at<clock_timestamp()-$1*interval '1 day' ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 100)""", outbox_days)
-            return {"sessions": len(rows), "outbox_payloads": int(result.split()[-1])}
+            return {"sessions": len(rows), "outbox_payloads": int(result.split()[-1]), "memory_deletions": memory_deletions}
 
     @database
     async def outbox_delete(self, owner, operation, scope):

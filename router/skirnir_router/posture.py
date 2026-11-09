@@ -111,6 +111,19 @@ def findings(cfg, environ=None):
         else:
             out.append(Finding("session_store_dsn_unset", INFO, "TM-11", f"session store enabled, {store.dsn_env} not set here.",
                                "run the posture check where the service environment is loaded"))
+        # ADR-0076: retention and deletion are choices; the report names the ones that keep content indefinitely
+        if not store.retention_days and not store.archived_retention_days:
+            out.append(Finding("session_retention_off", INFO, "TM-12", "sessions are kept until their owner deletes them.",
+                               "set session_store.retention_days / archived_retention_days if sessions should expire"))
+        memory_cfg = getattr(cfg, "hindsight", None)
+        if memory_cfg is not None and getattr(memory_cfg, "enabled", False) and not store.delete_memory_with_session:
+            out.append(Finding("memory_kept_on_session_delete", INFO, "TM-12",
+                               "deleting a session keeps the memory retained from its answers.",
+                               "set session_store.delete_memory_with_session: true if it should go with the session"))
+        if memory_cfg is not None and getattr(memory_cfg, "outbox_enabled", False) and not getattr(memory_cfg, "outbox_retention_days", 0):
+            out.append(Finding("outbox_payload_retention_off", INFO, "TM-12",
+                               "finished memory jobs keep their content in the outbox indefinitely.",
+                               "set hindsight.outbox_retention_days to drop it after that many days (the job id stays)"))
     return out
 
 
