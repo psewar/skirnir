@@ -467,7 +467,7 @@ on the router; agents pull them through their outbound connection, verify signat
 An agent refuses a signed version older than the one it runs (update kind `downgrade`); a deliberate rollback needs
 `update.allow_downgrade: true` in the node's own configuration (ADR-0054). To rotate the signing key without a gap, add
 the new public key to `update.public_keys` on every node (`deploy.py --new-agent-key` creates it), switch signing with
-`deploy.py --use-next-agent-key`, let every node install a release signed with the new key (a node that does not trust it yet keeps its binary and reports an invalid manifest signature), then remove the old public key from the nodes (ADR-0058).
+`deploy.py --use-next-agent-key`, let every node install a release signed with the new key (a node that does not trust it yet keeps its binary and reports an invalid manifest signature), then remove the old public key from the nodes (ADR-0058). On Windows nodes `agent/Set-UpdateKey.cmd -Step Add|Complete -Key <public key>` makes the node-local change as administrator, with backup, `check-config` and rollback. If the signing key is lost, `deploy.py --replace-lost-agent-key "<reason>"` creates a new one with a record and every node needs `-Step Replace` before it accepts a release again; `deploy.py --agent` never creates a key itself (`--create-agent-key` for a new installation; ADR-0066).
 A button per node in the web UI, or the rollout loop with a per-node policy and a canary node that gets new versions first
 (`modes.agent_update`). Failures and stalls become Home Assistant problems. Windows with Smart App Control blocks unsigned
 binaries, so the release binary is Authenticode-signed after the build (`agent/sign.ps1`; `deploy.py --agent` refuses an
@@ -517,7 +517,7 @@ A TLS certificate for the router's hostname (e.g. Let's Encrypt) that the client
    restarts the router when a secret changed).
 6. For the auto role: `decision-tfidf.json` to `/etc/skirnir-router/` and start the embedding container from `decision-embed/`
    (`compose.yaml`, binds only `127.0.0.1:8082`). Both are optional; without them `decision_engine.enabled` stays `false`.
-7. Install agents and approve them in the UI.
+7. Install agents and approve them in the UI. Before approving, compare the fingerprint shown in the UI with `skirnir-agent identity` on that node, over another channel than the network it enrolled through (TM-07).
 
 **Deploying from a workstation** (LXC): [deploy/deploy.py](deploy/deploy.py) copies code, configuration and units via SFTP to
 the LXC host, from there via file push into the container (templates `CT_EXEC`/`CT_PUSH`, default LXD), checks the

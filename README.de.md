@@ -461,7 +461,7 @@ tauschen sich selbst und starten neu. Eine signierte Version, die älter ist als
 (Update-Art `downgrade`); ein bewusster Rückschritt braucht `update.allow_downgrade: true` in der Konfiguration des
 Knotens (ADR-0054). Den Signierschlüssel ohne Lücke wechseln: den neuen öffentlichen Schlüssel auf allen Knoten in
 `update.public_keys` eintragen (`deploy.py --new-agent-key` erzeugt ihn), mit `deploy.py --use-next-agent-key` auf ihn
-umstellen, jeden Knoten eine mit dem neuen Schlüssel signierte Version installieren lassen (ein Knoten, der ihm noch nicht vertraut, behält seine Binary und meldet eine ungültige Manifest-Signatur) und erst danach den alten öffentlichen Schlüssel von den Knoten entfernen (ADR-0058). Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
+umstellen, jeden Knoten eine mit dem neuen Schlüssel signierte Version installieren lassen (ein Knoten, der ihm noch nicht vertraut, behält seine Binary und meldet eine ungültige Manifest-Signatur) und erst danach den alten öffentlichen Schlüssel von den Knoten entfernen (ADR-0058). Auf Windows-Knoten erledigt `agent/Set-UpdateKey.cmd -Step Add|Complete -Key <öffentlicher Schlüssel>` die Änderung als Administrator, mit Sicherung, `check-config` und Rückweg. Ist der Signierschlüssel verloren, erzeugt `deploy.py --replace-lost-agent-key "<Grund>"` einen neuen samt Protokoll, und jeder Knoten braucht `-Step Replace`, bevor er wieder ein Release annimmt; `deploy.py --agent` legt nie selbst einen Schlüssel an (`--create-agent-key` für eine neue Installation; ADR-0066). Knopf je Knoten in der Web-UI oder Rollout-Schleife mit Policy je Knoten und einem
 Kanarienvogel-Knoten, der neue Versionen zuerst bekommt (`modes.agent_update`). Fehler und Hänger werden HA-Probleme.
 Windows mit Smart App Control blockt unsignierte Binaries, darum wird die Release-Binary nach dem Build Authenticode-signiert
 (`agent/sign.ps1`; `deploy.py --agent` verweigert eine unsignierte Binary, sobald ein Signier-Thumbprint konfiguriert ist).
@@ -511,7 +511,7 @@ Ein TLS-Zertifikat für den Hostnamen des Routers (z. B. Let's Encrypt), auf den
    täglicher Timer startet den Router bei geändertem Secret neu).
 6. Für die Auto-Rolle: `decision-tfidf.json` nach `/etc/skirnir-router/` und den Embedding-Container aus `decision-embed/` starten
    (`compose.yaml`, bindet nur `127.0.0.1:8082`). Beides ist optional; ohne sie bleibt `decision_engine.enabled: false`.
-7. Agenten installieren und in der UI freigeben.
+7. Agenten installieren und in der UI freigeben. Vor der Freigabe den Fingerprint in der UI mit `skirnir-agent identity` auf dem Knoten vergleichen, über einen anderen Weg als das Netz, über das er sich angemeldet hat (TM-07).
 
 **Ausrollen von einer Arbeitsstation** (LXC): [deploy/deploy.py](deploy/deploy.py) kopiert Code, Konfiguration und
 Einheiten per SFTP auf den LXC-Host, von dort per Datei-Push in den Container (Vorlagen `CT_EXEC`/`CT_PUSH`, Standard LXD), prüft die Konfiguration vor und nach dem

@@ -8,6 +8,8 @@ Usage:  python deploy.py              (full deploy)
          python deploy.py --agent [dist-folder] [--version v]   (sign agent binaries and place them on the router)
          python deploy.py --new-agent-key       (rotation step 1: create the next signing key, print its public part)
          python deploy.py --use-next-agent-key  (rotation step 2: sign with the next key from now on, archive the old)
+         python deploy.py --create-agent-key    (first signing key of a new installation; --agent never creates one)
+         python deploy.py --replace-lost-agent-key "<reason>"  (the signing key is lost: new key, reason on record; ADR-0066)
 Key rotation (ADR-0058): add the next public key to update.public_keys on every node, then --use-next-agent-key, then
 remove the old public key from the nodes. Both steps work offline in the ops folder.
 The LXC host's SSH host key is saved to <ops>/known_hosts on first connection and verified thereafter
@@ -147,24 +149,14 @@ AGENT_BINARIES = [  # (filename in dist/, os, arch) - names as in the GitHub rel
 
 
 def agent_signing_key():
-    """Operator key for agent manifests: Ed25519, raw (32-byte seed, base64) in the ops folder. Generated on first call;
-    the public part belongs in the agent configuration (update.public_key) and optionally in modes.agent_update.public_key."""
+    """Operator key for agent manifests: Ed25519, raw (32-byte seed, base64) in the ops folder; the public part belongs in
+    the agent configuration (update.public_key) and optionally in modes.agent_update.public_key. Never created here
+    (ADR-0066): main() refuses --agent without a key before connecting; --create-agent-key makes the first one."""
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    path = os.path.join(ops_env.ops_dir(), "agent-update.key")
-    if os.path.exists(path):
-        seed = base64.b64decode(open(path, encoding="utf-8").read().strip())
-        key = Ed25519PrivateKey.from_private_bytes(seed)
-    else:
-        key = Ed25519PrivateKey.generate()
-        seed = key.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(base64.b64encode(seed).decode())
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-        print("New operator key for agent updates:", path)
+    path = os.path.join(ops_env.ops_dir(), agent_keys.KEY)
+    seed = base64.b64decode(open(path, encoding="utf-8").read().strip())
+    key = Ed25519PrivateKey.from_private_bytes(seed)
     pub = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     return key, base64.b64encode(pub).decode()
 
@@ -274,6 +266,16 @@ def main():
         sys.exit(agent_keys.new_agent_key(ops_env.ops_dir()))
     if "--use-next-agent-key" in sys.argv:
         sys.exit(agent_keys.use_next_agent_key(ops_env.ops_dir()))
+    if "--create-agent-key" in sys.argv:
+        sys.exit(agent_keys.create_agent_key(ops_env.ops_dir()))
+    if "--replace-lost-agent-key" in sys.argv:
+        i = sys.argv.index("--replace-lost-agent-key")
+        sys.exit(agent_keys.replace_lost_agent_key(ops_env.ops_dir(), sys.argv[i + 1] if len(sys.argv) > i + 1 else ""))
+    if "--agent" in sys.argv:
+        key_state, detail = agent_keys.signing_key_state(ops_env.ops_dir())   # checked before any connection (ADR-0066)
+        if key_state != "present":
+            print(detail)
+            sys.exit(2)
     host = OPS["ROUTER_HOST"]
     c = connect()
     if "--agent" in sys.argv:

@@ -2,59 +2,61 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "03610ce5ffd8f2b6094870903b5f7c514b7de822",
-  "change_digest": "b15ccfa0e648fa15ce2b66545224e5cbc131890b094dc597d71abcb498a0486d",
+  "base_sha": "19a28e364ac88cda03770846e3c370751d1bb6e0",
+  "change_digest": "0bcb827f7e149120d4f75681896a1cd17a857ddfa7a2bb70de645e47f42bcb07",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "docs/adr/0065-browser-headers-and-handler-escaping-for-the-control-ui.md",
+    "README.de.md",
+    "README.md",
+    "agent/Set-UpdateKey.cmd",
+    "agent/Set-UpdateKey.ps1",
+    "deploy/agent_keys.py",
+    "deploy/deploy.py",
+    "docs/adr/0066-explicit-agent-key-creation-and-lost-key-recovery.md",
     "docs/adr/README.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "router/skirnir_router/app.py",
-    "router/skirnir_router/browser_headers.py",
-    "router/skirnir_router/common.py",
-    "router/ui.html",
-    "test/dev_env.py",
-    "test/selftest_browser.py"
+    "test/selftest_key_rotation.py"
   ],
   "risk_ids": [
-    "TM-03"
+    "TM-13",
+    "TM-07"
   ],
   "boundaries": [
-    "B1",
-    "B2"
+    "B8",
+    "B3"
   ],
-  "summary": "Router 0.22.2 hardens the control UI (ADR-0065). Defect: ui.html put values into inline event handlers as onclick=\"f('${esc(x)}')\"; esc() did not escape the single quote, and HTML entities are decoded before handler JavaScript runs, so a model name reported by a node (controlled by a compromised approved agent) could break out of the string and run script in the operator's browser, where same-origin script can call admin APIs. Fix: esc() also escapes the single quote; new js(s) = esc(JSON.stringify(String(s))); all 53 quoted interpolations in inline handlers (model, role, client, setting, node fingerprint and version values, the node name inside a confirm text, the copy-token label) now use ${js(...)}; only a numeric loop index and the fixed property names canary/shadow remain unquoted. New browser_headers.install adds via on_response_prepare (setdefault, a handler's own header wins): on the control port Content-Security-Policy default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' and X-Frame-Options DENY; on both ports X-Content-Type-Options nosniff and Referrer-Policy no-referrer; no CORS header anywhere. test/dev_env.py now sets control_auth.allow_unauthenticated_loopback (it removed control_auth, which answers 503 since ADR-0053).",
+  "summary": "Operator tooling and documentation, no router or agent code change (ADR-0066). Defect: deploy.py agent_signing_key created a new Ed25519 signing key whenever agent-update.key was missing, so a lost key silently became a new one, releases were signed with it and every node refused them; the file was also written before its mode was tightened. Now deploy/agent_keys.py has signing_key_state (present with public key, or missing with both ways), create_agent_key (first key, refuses if a signing or prepared key exists; O_EXCL 0600), and replace_lost_agent_key(reason) (refuses without a reason of at least 8 characters, while the key exists, or while a prepared next key exists; writes the new key 0600 and agent-update.recovery-<time>.txt with time, reason and public key only; prints the node step). deploy.py main refuses --agent without a key before connect(), offers --create-agent-key and --replace-lost-agent-key, and agent_signing_key only loads. New agent/Set-UpdateKey.ps1 and Set-UpdateKey.cmd (execution-policy wrapper): node-local Add, Complete, Replace and Check of update.public_key/public_keys, with administrator, service, agent >= 0.29.0 and key-format checks before acting (format checked by pattern before decoding), backup, check-config with the installed binary, service restart and rollback; .NET file I/O for Windows PowerShell 5.1. README (EN/DE): rotation and recovery steps, and comparing the UI fingerprint with skirnir-agent identity before approving a node (TM-07).",
   "findings": [
     {
-      "id": "TM-03",
-      "evidence": "A model name with a single quote rendered into onclick=\"measure('...')\" broke out of the JavaScript string; the control port sent no CSP or framing protection.",
-      "resolution": "Handler values as JSON string literals, CSP with connect-src 'self' and frame-ancestors 'none', companion headers; checked in CI and once in a browser. 'unsafe-inline' remains.",
+      "id": "TM-13",
+      "evidence": "A missing agent-update.key was silently replaced by a new key in deploy.py --agent; lost-key recovery was undefined.",
+      "resolution": "Explicit first-key and recorded lost-key steps; --agent refuses without a key; node script in the repository. Recovery is not yet practised in the deployment.",
+      "disposition": "baseline"
+    },
+    {
+      "id": "TM-07",
+      "evidence": "Fingerprint verification before approval was asked for but not described.",
+      "resolution": "README procedure with skirnir-agent identity; plausibility checks of approved agents remain.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_browser.py",
+      "command": "python test/selftest_key_rotation.py (Windows and WSL)",
       "result": "passed",
-      "evidence": "5 tests OK; against the previous state FAILED (failures=4)."
+      "evidence": "0 failure(s); 27 PASS on Linux including owner-only modes of first, next and replacement keys."
     },
     {
-      "command": "Browser check with test/dev_env.py: render the catalog with model name x');window.__pwned=1;// and click its measure button; fetch to a foreign origin",
+      "command": "agent/Set-UpdateKey.ps1 under Windows PowerShell 5.1 with the agent 0.29.1 binary and check-config (admin and service checks replaced in a test copy)",
       "result": "passed",
-      "evidence": "measure() received the exact name, __pwned stayed 0; the foreign fetch was refused with a connect-src 'self' violation; UI rendered, role edit handler set dirty without errors."
+      "evidence": "Check, Add, repeated Add (current), Complete, Complete without Add refused, Replace (also with another key listed), invalid key refused; no BOM, CRLF kept."
     },
     {
-      "command": "node syntax check of the inline script and all 69 inline handlers with interpolations replaced as rendered",
+      "command": "All python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names; check_control_flow; ruff check .",
       "result": "passed",
-      "evidence": "scripts: 1, handlers: 69, syntax errors: 0."
-    },
-    {
-      "command": "All python test/... commands of ci.yml (WSL); check_adr_index; selftest_english_names; check_control_flow; ruff check .",
-      "result": "passed",
-      "evidence": "No failures; ADR index ok: 65 ADRs; ALLE OK; control flow ok; All checks passed."
+      "evidence": "No failures; ADR index ok: 66 ADRs; ALLE OK; control flow ok; All checks passed."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -68,7 +70,7 @@
     }
   ],
   "limitations": [
-    "Merged main after #109, #110 and #111.",
-    "'unsafe-inline' remains for script and style, so injected markup with an inline handler would still run inside the page; the static test covers handlers, not every innerHTML interpolation."
+    "Merged main after #109 to #112.",
+    "Set-UpdateKey.ps1 is Windows-only; its administrator and service checks were not exercised in the test copy. Linux nodes edit the configuration by hand."
   ]
 }
