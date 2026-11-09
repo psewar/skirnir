@@ -2,15 +2,10 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "f818efac860a220be1fe39cba7703e121f313763",
-  "change_digest": "e6e0a41413eda4f5f4d4eca12c84e683761318e388b2f7aff38519564240ee1b",
+  "base_sha": "9922e73878c281e1d625062dfef09022f8471c91",
+  "change_digest": "131d62da77ab91c3609c73037401dd7a556235e0f3eec64765d56e11e9c4696f",
   "reviewed_paths": [
-    "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "docs/security/risk-register.json",
-    "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md"
+    "CHANGELOG.md"
   ],
   "risk_ids": [
     "TM-13"
@@ -18,25 +13,20 @@
   "boundaries": [
     "B8"
   ],
-  "summary": "Documentation only, no code or configuration change. Records that the signing-key rotation of ADR-0058 has been practised once in a two-node deployment: the new public key was added to update.public_keys on every node, signing was switched with deploy.py --use-next-agent-key, agent 0.29.1 (same source as 0.29.0, only the version string differs) was signed only with the new key and installed by every node, and only then was the old key removed from the nodes. CHANGELOG v0.27.0 now names agent 0.29.1; README (EN/DE) adds the proof step before removing the old key; threat model (EN/DE) and the TM-13 register entry state that the rotation is practised. TM-13 stays open because recovery from a lost signing key and the independent Ollama source check remain.",
+  "summary": "Changelog only, no code or configuration change. v0.27.0 was released from f818efa with agent 0.29.0, matching the changelog at that tag; the row now links the release and names agent 0.29.0 again. Agent 0.29.1 (same code, first manifest signed with the rotated key) becomes the new row v0.27.1. The development-tooling heading records that the pinning item shipped in v0.26.1 and the rest in v0.27.0.",
   "findings": [
     {
       "id": "TM-13",
-      "evidence": "The previous record left TM-13 open because a rotation had not been practised in the deployment.",
-      "resolution": "Rotation practised once; the remaining gap is recovery from a lost signing key, recorded as next_action and validation_gap. Status stays open.",
+      "evidence": "After #104 the changelog named agent 0.29.1 for v0.27.0, while the published v0.27.0 release carries agent 0.29.0.",
+      "resolution": "Published tag left unchanged; the changelog follows the release and v0.27.1 carries agent 0.29.1.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "Deployment: both nodes report agent 0.29.1 after an update whose manifest was signed only with the new key; after removing the old key both reconnected",
+      "command": "gh release view v0.27.0 (target and assets)",
       "result": "passed",
-      "evidence": "Router node list: both nodes connected, update state done, running 0.29.1."
-    },
-    {
-      "command": "python -c json.load(docs/security/risk-register.json)",
-      "result": "passed",
-      "evidence": "Register parses; TM-13 status open."
+      "evidence": "Target f818efa, assets skirnir-agent-0.29.0-linux-amd64 and skirnir-agent-0.29.0-windows-amd64.exe."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -50,6 +40,6 @@
     }
   ],
   "limitations": [
-    "The deployment proof is operational evidence from one two-node installation and is not reproduced in CI; the code path is covered by agent/updater_test.go and test/selftest_key_rotation.py."
+    "The v0.27.1 link resolves once the release is created on the merge commit of this change."
   ]
 }
