@@ -2,31 +2,64 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "79d1bdccc2c2300a059ce60bd1cf2f4c22844298",
-  "change_digest": "d9a9294c1ea1141162608e591f8ade051d94aeb09a3cc6f2ea79797720cea85b",
+  "base_sha": "4c11ac872aae2ce747f198c5751c390fbb697911",
+  "change_digest": "bf2492c9dccb2f996501b3405bb729cf810410296cf69ab3ce1717e11e3015b4",
   "reviewed_paths": [
-    "CHANGELOG.md"
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "README.de.md",
+    "README.md",
+    "docs/adr/0067-guided-first-configuration.md",
+    "docs/adr/README.md",
+    "docs/security/risk-register.json",
+    "router/config.minimal.yaml",
+    "router/skirnir_router/app.py",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/posture.py",
+    "router/skirnir_router/setup_init.py",
+    "test/check_public_changes.py",
+    "test/selftest_init.py",
+    "test/selftest_memory.py",
+    "test/selftest_posture.py"
   ],
   "risk_ids": [
-    "TM-13"
+    "TM-01",
+    "TM-03"
   ],
   "boundaries": [
-    "B8"
+    "B1",
+    "B2"
   ],
-  "summary": "Changelog only: the v0.29.0 row (router 0.22.2, agent 0.29.1) links the published release, created with the release tool on the merge commit of #113 with the agent 0.29.1 binaries. No code or configuration change.",
+  "summary": "Router 0.23.0 adds a guided first configuration (ADR-0067). New router/config.minimal.yaml: one role and model, client_auth enforce and locked, control and API TLS, no cloud, MQTT or decision engine; its placeholders (control users empty, the example token sha256('changeme')) load but are reported by the posture check. New skirnir_router/setup_init.py behind `router.py --init <dir>`: refuses if <dir>/config.yaml exists, the template lacks an expected line, the password is shorter than 12 characters or differs from its repetition on a terminal, a user or client name is not plain, or --public-url is not https; reads the password with getpass on a terminal or one line from stdin otherwise; stores only auth.hash_password(password) and sha256 of a secrets.token_urlsafe(32) client token; writes the file with O_CREAT|O_EXCL and mode 0600; loads it like --check; prints the posture report and the token once; ends with INIT: written or INIT: refused. app.cli gains --help, --hash without argument (getpass, no shell history), --init, and refuses unknown options instead of loading them as a configuration path. posture.py gains client_example_token (high; sha256 of a fixed list of placeholder tokens, names only in output), control_without_tls (high; control_listen not loopback and no control_tls) and control_on_network (info). The publication guard (test/check_public_changes.py) now also accepts the unspecified address 0.0.0.0 (listen on all interfaces), like loopback; private and other non-example addresses are still reported (selftest_memory covers both).",
   "findings": [
     {
-      "id": "TM-13",
-      "evidence": "The v0.29.0 row was marked unreleased.",
-      "resolution": "Row links the release; content unchanged.",
+      "id": "TM-01",
+      "evidence": "The full example configuration gave four clients the token 'changeme' with every role, and the posture report did not flag it.",
+      "resolution": "Guided --init with generated secrets; posture flags well-known example tokens.",
+      "disposition": "baseline"
+    },
+    {
+      "id": "TM-03",
+      "evidence": "A control port on a network address without control_tls carried Basic Auth and the agent tunnel in plaintext with only a log warning; router.py --hash took the password on the command line.",
+      "resolution": "Posture reports control_without_tls (high); --hash and --init ask without echo.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "gh release view v0.29.0 (target and assets, checked by the release tool)",
+      "command": "python test/selftest_init.py (Windows and WSL)",
       "result": "passed",
-      "evidence": "Target 79d1bdc (merge of #113), assets skirnir-agent-0.29.1-linux-amd64 and skirnir-agent-0.29.1-windows-amd64.exe."
+      "evidence": "4 tests OK: valid owner-only configuration (0600 on Linux), hash verifies, token only as sha256 and shown once, no high/medium finding; refusals leave files untouched; template loads with its placeholders reported; --help and unknown option."
+    },
+    {
+      "command": "python test/selftest_posture.py",
+      "result": "passed",
+      "evidence": "6 tests OK including client_example_token, control_on_network and control_without_tls."
+    },
+    {
+      "command": "All python test/... commands of ci.yml and security.yml (WSL); check_adr_index; selftest_english_names; check_control_flow; ruff check .",
+      "result": "passed",
+      "evidence": "No failures; ADR index ok: 67 ADRs; ALLE OK; control flow ok; All checks passed."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -39,5 +72,8 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": []
+  "limitations": [
+    "The qwen3:8b catalogue values in config.minimal.yaml are starting estimates, not measurements.",
+    "The example-token list is a fixed set of common placeholders, not a strength check of real tokens."
+  ]
 }

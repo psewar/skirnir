@@ -9,12 +9,16 @@ session store, the sslmode of the DSN in the environment (never the DSN itself).
 
 Findings are facts, not errors: the router still starts. A finding the operator accepts stays visible on every start.
 """
+import hashlib
 import ipaddress
 import os
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlsplit
 
 HIGH, MEDIUM, INFO = "high", "medium", "info"
+# sha256 of placeholder tokens from examples and tutorials; a client still using one has no real secret (ADR-0067).
+EXAMPLE_TOKEN_HASHES = frozenset(hashlib.sha256(t.encode()).hexdigest() for t in
+                                 ("changeme", "change-me", "secret", "password", "token", "test", "example"))
 
 
 @dataclass(frozen=True)
@@ -65,9 +69,22 @@ def findings(cfg, environ=None):
     for names in sorted(v for v in by_hash.values() if len(v) > 1):
         out.append(Finding("clients_share_token", HIGH, "TM-01", f"clients {', '.join(sorted(names))} share one token.",
                            "rotate the token of all but one (POST /admin/clients/<name>/token)"))
+    for name, spec in sorted(clients.items()):
+        if spec.get("token_sha256") in EXAMPLE_TOKEN_HASHES:
+            out.append(Finding("client_example_token", HIGH, "TM-01", f"client {name} still has a well-known example token.",
+                               f"give {name} its own token (router.py --init, or the Clients tab)"))
     if not getattr(cfg, "control_users", None):
         out.append(Finding("control_without_users", HIGH, "TM-03", "control_auth has no users: the control port answers 503.",
-                           "add router.control_auth.users"))
+                           "add router.control_auth.users (router.py --hash, or router.py --init)"))
+    control_host = str(getattr(cfg, "control_listen", "") or "").rsplit(":", 1)[0]
+    if not getattr(cfg, "control_tls", None) and not _loopback(control_host):
+        out.append(Finding("control_without_tls", HIGH, "TM-03",
+                           "control port without TLS on a network address: admin login and the agents' tunnel are plaintext.",
+                           "set router.control_tls (cert, key)"))
+    elif not _loopback(control_host):
+        out.append(Finding("control_on_network", INFO, "TM-03",
+                           "control port listens on a network address (needed for remote agents and the web UI).",
+                           "firewall it to your GPU nodes and admin machines"))
     if getattr(cfg, "control_open_loopback", False):
         out.append(Finding("control_open_loopback", MEDIUM, "TM-03", "control port is open without login from loopback.",
                            "remove router.control_auth.allow_unauthenticated_loopback (development only)"))

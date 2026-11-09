@@ -213,11 +213,42 @@ async def main(cfg_path):
     await state.SESSION.close()
 
 
+USAGE = """Skirnir router
+  router.py [config.yaml]                 run the router (default /etc/skirnir-router/config.yaml)
+  router.py --init <dir> [--public-url https://name:11435] [--user admin] [--client my-client]
+                         [--cert fullchain.pem] [--key privkey.pem]
+                                          write a first, safe configuration (ADR-0067): asks the control password,
+                                          generates a client token (shown once), then checks it
+  router.py --check <config> [--pure] [--files]    validate a configuration (--files: its files are readable)
+  router.py --posture <config> [--pure]            security posture of a configuration as facts (ADR-0064)
+  router.py --hash [password]             PBKDF2 hash for control_auth.users (asks without echo when omitted)
+  --pure ignores an adjacent roles.yaml (changes made in the web UI)."""
+
+
+def _option(name, default=None):
+    """Value after `name` on the command line, or default."""
+    if name in sys.argv and sys.argv.index(name) + 1 < len(sys.argv):
+        return sys.argv[sys.argv.index(name) + 1]
+    return default
+
+
 def cli():
-    """CLI: `router.py <config.yaml>`, `router.py --hash <password>`, `--check <config>` or `--posture <config>`."""
-    if len(sys.argv) > 2 and sys.argv[1] == "--hash":
-        print(auth.hash_password(sys.argv[2]))      # Hilfsfunktion: python3 router.py --hash '<passwort>'
+    """Command line; see USAGE."""
+    if len(sys.argv) > 1 and sys.argv[1] in ("--help", "-h"):
+        print(USAGE)
         sys.exit(0)
+    if len(sys.argv) > 1 and sys.argv[1] == "--hash":
+        # Without an argument the password is asked without echo, so it does not land in the shell history.
+        import getpass
+        print(auth.hash_password(sys.argv[2] if len(sys.argv) > 2 else getpass.getpass("Password: ")))
+        sys.exit(0)
+    if len(sys.argv) > 2 and sys.argv[1] == "--init":
+        from . import setup_init
+        sys.exit(setup_init.init(sys.argv[2], public_url=_option("--public-url"), user=_option("--user", "admin"),
+                                 client=_option("--client", "my-client"), cert=_option("--cert"), key=_option("--key")))
+    if len(sys.argv) > 1 and sys.argv[1].startswith("--") and sys.argv[1] not in ("--check", "--posture"):
+        print(f"unknown option {sys.argv[1]}\n\n{USAGE}")
+        sys.exit(2)
     if len(sys.argv) > 2 and sys.argv[1] == "--check":
         # Stage 6: Validate configuration against schema and parser (deploy.py: local without, on CT with roles.yaml).
         # rc 0 = ok, 2 = invalid. --pure ignores an adjacent roles.yaml.
