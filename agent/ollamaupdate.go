@@ -34,6 +34,9 @@ import (
 type OllamaUpdateCfg struct {
 	Enabled *bool  `yaml:"enabled"`
 	Source  string `yaml:"source"` // Release URL prefix: <source>v<version>/<file> and <source>v<version>/sha256sum.txt
+	// AllowDowngrade (ADR-0073): the router chooses the version; an older release than the installed Ollama, or a
+	// version that is not a plain release, is installed only with this switch (a deliberate rollback).
+	AllowDowngrade bool `yaml:"allow_downgrade"`
 }
 
 const ollamaSourceDefault = "https://github.com/ollama/ollama/releases/download/"
@@ -476,6 +479,9 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
+	if err := ollamaDowngradeRefusal(u.installedVersion(ctx), o.Version, u.cfg.AllowDowngrade); err != nil {
+		return err
+	}
 	for drained := false; !drained; { // Discard old release from a previous task
 		select {
 		case <-u.swapCh:
@@ -553,4 +559,34 @@ func (u *OllamaUpdater) run(o OllamaUpdateOrder) error {
 	rerr := rollbackTop(u.dir, newDir, backup, moved)
 	u.release()
 	return fmt.Errorf("neues Ollama meldete sich nicht innerhalb %s mit %s - zurueckgesetzt (%v)", u.verifyWait, o.Version, rerr == nil)
+}
+
+// installedVersion: the version the running Ollama reports, else the version of the installed binary; "" if neither is
+// known (then no downgrade can be judged and the order proceeds as before).
+func (u *OllamaUpdater) installedVersion(ctx context.Context) string {
+	if v := u.live(ctx); v != "" {
+		return v
+	}
+	archive, err := u.archive()
+	if err != nil || u.dir == "" {
+		return ""
+	}
+	v, err := u.probe(filepath.Join(u.dir, ollamaExeName(archive)))
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
+// ollamaDowngradeRefusal (ADR-0073, TM-14): a compromised router could otherwise pin an Ollama release with known flaws on a
+// node where Ollama runs with the agent's service rights. Same rule as the agent's own update (downgradeRefusal, ADR-0054):
+// older or non-release versions only with ollama_update.allow_downgrade.
+func ollamaDowngradeRefusal(installed, want string, allow bool) error {
+	if allow {
+		return nil
+	}
+	if downgradeRefusal(installed, want, false) != nil {
+		return fmt.Errorf("Ollama %s refused: the installed Ollama is %s; an older or non-release version needs ollama_update.allow_downgrade: true", want, installed)
+	}
+	return nil
 }

@@ -194,10 +194,10 @@ func TestTunnelRoutes(t *testing.T) {
 	defer rsrv.Close()
 	routes := newRoutes([]RouteCfg{{Name: "rerank", Path: "/rerank", Methods: []string{"POST"}, Upstream: rsrv.URL, Health: "/health"}}, quietLogger())
 
-	// without routes: everything goes to Ollama, including /rerank (behavior as before)
+	// without routes: /rerank is no inference path, the agent refuses it without calling Ollama (ADR-0073)
 	st, _, body := respOf(t, runHandle(t, newTestTunnel(osrv.URL, nil), "POST", "/rerank", `{}`))
-	if st != 200 || body != ollama.reply || len(rerank.calls()) != 0 {
-		t.Fatalf("ohne routes: %d %q, Reranker-Aufrufe %v", st, body, rerank.calls())
+	if st != http.StatusForbidden || !strings.Contains(body, "path_not_allowed_on_node") || len(ollama.calls()) != 0 || len(rerank.calls()) != 0 {
+		t.Fatalf("ohne routes: %d %q, Ollama %v, Reranker %v", st, body, ollama.calls(), rerank.calls())
 	}
 
 	tun := newTestTunnel(osrv.URL, routes)
@@ -222,10 +222,14 @@ func TestTunnelRoutes(t *testing.T) {
 		t.Fatalf("405 hat einen Upstream aufgerufen: ollama %v, rerank %v", ollama.calls(), rerank.calls())
 	}
 
-	// unlisted paths pass through to Ollama; the comparison is exact
-	for _, p := range []string{"/api/chat", "/rerank/", "/RERANK"} {
+	// the route comparison is exact: an inference path goes to Ollama, near misses of the route are refused, not forwarded
+	st, _, body = respOf(t, runHandle(t, tun, "POST", "/api/chat", `{}`))
+	if st != 200 || body != ollama.reply {
+		t.Fatalf("POST /api/chat: %d %q", st, body)
+	}
+	for _, p := range []string{"/rerank/", "/RERANK"} {
 		st, _, body = respOf(t, runHandle(t, tun, "POST", p, `{}`))
-		if st != 200 || body != ollama.reply {
+		if st != http.StatusForbidden || !strings.Contains(body, "path_not_allowed_on_node") {
 			t.Fatalf("POST %s: %d %q", p, st, body)
 		}
 	}

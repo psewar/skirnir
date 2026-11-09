@@ -6,3 +6,7 @@ Type=oneshot
 # kurz warten, bis der ACME-Client auch den Key geschrieben hat (crt und key werden nacheinander geschrieben)
 ExecStartPre=/bin/sleep 5
 ExecStart=/usr/bin/systemctl restart skirnir-router.service
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+RestrictSUIDSGID=true

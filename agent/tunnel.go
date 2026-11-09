@@ -419,6 +419,10 @@ func (t *Tunnel) handle(ctx context.Context, conn *websocket.Conn, sid uint32, p
 		}
 		target = rc.Upstream
 	} else {
+		if !passthroughAllows(head.Method, head.Path) {
+			t.pathNotAllowed(conn, sid, head.Method, head.Path)
+			return
+		}
 		var done func()
 		target, done = t.upSwitch.acquire(t.upstream)
 		defer done()

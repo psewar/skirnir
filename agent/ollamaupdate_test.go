@@ -291,3 +291,40 @@ func TestOllamaUpdateWithoutRelease(t *testing.T) {
 		t.Fatal("falsche Version freigegeben: trotzdem getauscht")
 	}
 }
+
+// TestOllamaDowngradeRefused (ADR-0073): the installed version comes from the running Ollama, else from the binary; an
+// older or non-release order is refused before any download unless allow_downgrade is set.
+func TestOllamaDowngradeRefused(t *testing.T) {
+	const archive = "ollama-windows-amd64.zip"
+	srv, sum, size := releaseServer(t, "0.34.0", archive)
+	dir := filepath.Join(t.TempDir(), "Ollama")
+	writeFile(t, filepath.Join(dir, "ollama.exe"), "neu 0.34.4")
+	u := testUpdater(t, srv, dir)
+	u.live = func(context.Context) string { return "" } // not running: the binary's version counts
+	for _, v := range []string{"0.34.0", "0.33.9", "0.34.4-rc1"} {
+		err := u.run(OllamaUpdateOrder{Version: v, File: archive, Sha256: sum, Size: size})
+		if err == nil || !strings.Contains(err.Error(), "allow_downgrade") {
+			t.Fatalf("order %s: %v", v, err)
+		}
+	}
+	if readFile(t, filepath.Join(dir, "ollama.exe")) != "neu 0.34.4" || u.Report() != nil {
+		t.Fatalf("a refused order touched something: %q %+v", readFile(t, filepath.Join(dir, "ollama.exe")), u.Report())
+	}
+	if err := ollamaDowngradeRefusal("0.34.4", "0.34.4", false); err != nil {
+		t.Fatalf("same version: %v", err)
+	}
+	if err := ollamaDowngradeRefusal("0.34.4", "0.35.0", false); err != nil {
+		t.Fatalf("newer version: %v", err)
+	}
+	if err := ollamaDowngradeRefusal("", "0.30.0", false); err != nil {
+		t.Fatalf("unknown installed version: %v", err)
+	}
+	if err := ollamaDowngradeRefusal("0.34.4", "0.34.0", true); err != nil {
+		t.Fatalf("allow_downgrade: %v", err)
+	}
+	u.cfg.AllowDowngrade = true
+	u.swapWait = 200 * time.Millisecond
+	if err := u.run(OllamaUpdateOrder{Version: "0.34.0", File: archive, Sha256: sum, Size: size}); err == nil || strings.Contains(err.Error(), "allow_downgrade") {
+		t.Fatalf("with allow_downgrade the order must get past the check (and here wait for approval): %v", err)
+	}
+}

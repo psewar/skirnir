@@ -48,7 +48,8 @@ FILES = [  # (local, target path in container, mode); source is ROUTER_DIR, unle
     ("favicon.png", "/opt/skirnir-router/favicon.png", "0644"),    # Tab icon (128 px), also /favicon.ico
     ("decision-tfidf.json", "/etc/skirnir-router/decision-tfidf.json", "0644"),   # Decision Engine tier 1 (train_tfidf.py)
     (OPS["CONFIG_YAML"], "/etc/skirnir-router/config.yaml", "0600"),
-    (OPS["RENDER_ENV_CONF"], "/etc/skirnir-router/render-env.conf", "0600"),
+    # Outside /etc/skirnir-router: the root renderers source it, the router may write that folder (ADR-0073)
+    (OPS["RENDER_ENV_CONF"], "/etc/skirnir-router-secrets/render-env.conf", "0600"),
     ("skirnir-router.service", "/etc/systemd/system/skirnir-router.service", "0644"),
     ("skirnir-router-cert.path", "/etc/systemd/system/skirnir-router-cert.path", "0644"),
     ("skirnir-router-cert.service", "/etc/systemd/system/skirnir-router-cert.service", "0644"),
@@ -317,13 +318,15 @@ def main():
         for local, _remote, _ in FILES:
             sftp.put(_local(local), f"/tmp/skirnir-router/{_staged(local)}")
         sftp.close()
-        rc, out, err = run(c, ct_exec(f"mkdir -p /opt/skirnir-router/skirnir_router /etc/skirnir-router {_MKDIRS}"))
+        rc, out, err = run(c, ct_exec(f"mkdir -p /opt/skirnir-router/skirnir_router /etc/skirnir-router {_MKDIRS} && install -d -m 0700 -o root -g root /etc/skirnir-router-secrets"))
         for local, remote, mode in FILES:
             rc, out, err = run(c, ct_push(f"/tmp/skirnir-router/{_staged(local)}", remote, mode))
             if rc != 0:
                 print("push failed:", local, out, err)
                 sys.exit(1)
         run(c, "rm -rf /tmp/skirnir-router")
+        # The previous location is in the router's writable folder; the renderers no longer read it (ADR-0073).
+        rc, out, err = run(c, ct_exec("rm -f /etc/skirnir-router/render-env.conf && chmod 0700 /etc/skirnir-router-secrets"))
         # --files under setpriv: the configured files must be readable without capabilities, as the service runs (ADR-0044);
         # 2026-11-02 a TLS key owned by another user stopped the hardened service only after the restart.
         rc, out, err = run(c, ct_exec("P=python3; command -v setpriv >/dev/null && P='setpriv --bounding-set=-all --inh-caps=-all python3'; "

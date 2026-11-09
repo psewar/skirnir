@@ -85,6 +85,7 @@ tunnel:                                         # ausgehende Verbindung zum Rout
 # ollama_update:                                # Ollama-Update ueber den Router (0.12.0; nur wenn Ollama ein Kind ist, s. children)
 #   enabled: false                              #   Standard an; der Agent laedt das Release-Archiv selbst von `source`
 #   source: https://github.com/ollama/ollama/releases/download/   # <source>v<version>/<datei> + sha256sum.txt (interner Spiegel moeglich)
+#   allow_downgrade: false                    # aeltere Version oder Vorabversion nur mit true (bewusstes Zurueckgehen, ADR-0073)
 
 # gpu_guard:                                    # GPU-Schutz (12V-2x6-Stecker): Power-Limit 80 % des Standards, Stufe 2 bei
 #   enabled: false                              #   Dauer-Vollast, Spannungs-/Temperaturwarnung. Standard AN; false = abgewaehlt
