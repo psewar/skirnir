@@ -37,6 +37,7 @@ jobs:
       - run: python test/selftest_posture.py
       - run: python test/selftest_init.py
       - run: python test/selftest_install.py
+      - run: pwsh -NoProfile -File test/selftest_ollama_loopback.ps1
       - run: python test/selftest_browser.py
       - run: python test/selftest_agent_revocation.py
       - run: python test/selftest_key_rotation.py
@@ -147,6 +148,8 @@ jobs:
         with:
           go-version-file: agent/go.mod
       - run: go test ./...
+      - name: Node scripts under Windows PowerShell 5.1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File ../test/selftest_ollama_loopback.ps1
 
   e2e:
     name: Router end-to-end suite (nightly, informational)

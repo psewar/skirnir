@@ -205,11 +205,12 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Direct backend access or its own cloud extraction.",
-      "controls": "Gateway-scoped grants on the router path only. The posture report flags static nodes over plain HTTP and a session store without verified TLS (ADR-0064); the agent example binds a child Ollama to loopback.",
-      "next_action": "Bind node Ollama to loopback in each agent configuration; inspect listening addresses and egress of Hindsight and PostgreSQL; separate service credentials.",
+      "controls": "Gateway-scoped grants on the router path only. The posture report flags static nodes over plain HTTP and a session store without verified TLS (ADR-0064); the agent example binds a child Ollama to loopback. `agent/Set-OllamaLoopback.cmd` binds node Ollama on Windows to loopback (agent child or desktop app), verifies the listeners and disables firewall rules that only opened Ollama (ADR-0072).",
+      "next_action": "Run Set-OllamaLoopback on every Windows node; inspect listening addresses and egress of Hindsight and PostgreSQL; separate service credentials.",
       "owner_role": "maintainer and operator",
       "test_refs": [
-        "test/selftest_posture.py"
+        "test/selftest_posture.py",
+        "test/selftest_ollama_loopback.ps1"
       ],
       "validation_gap": "V5/V8: router-side transport is reported; backend listening addresses and egress need host inspection."
     },

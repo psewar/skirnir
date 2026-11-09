@@ -2,31 +2,55 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "2cd7c33b2072f9dc068523c4b8c9a0e93664a1a9",
-  "change_digest": "719e38c38e4d777654d3f822974d165fd868f5c0c4a54795ab0eeed1a7b3b927",
+  "base_sha": "5ce2727846068120aeb064f4383c2251976580f5",
+  "change_digest": "70fbe47c25fe99878fb013166e39496b26d13e65d87d7ba6fe772c808ea67c96",
   "reviewed_paths": [
-    "CHANGELOG.md"
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "agent/Set-OllamaLoopback.cmd",
+    "agent/Set-OllamaLoopback.ps1",
+    "docs/adr/0072-windows-node-ollama-loopback-script.md",
+    "docs/adr/README.md",
+    "docs/install-agent.de.md",
+    "docs/install-agent.md",
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
+    "test/selftest_ollama_loopback.ps1"
   ],
   "risk_ids": [
-    "TM-13"
+    "TM-11",
+    "TM-14"
   ],
   "boundaries": [
-    "B8"
+    "B3",
+    "B6"
   ],
-  "summary": "Changelog only: the v0.30.0 row (router 0.23.0, agent 0.30.0) links the published release, created with the release tool on the merge commit of #119 with the agent 0.29.1 binaries. No code or configuration change.",
+  "summary": "New node tool agent/Set-OllamaLoopback.ps1 with a .cmd launcher (-ExecutionPolicy Bypass for that call only), ADR-0072. Without administrator rights it relaunches itself elevated (UAC) and waits for Enter at the end. It detects how Ollama runs: an agent child (children[] item named ollama* or running ollama.exe) gets OLLAMA_HOST=127.0.0.1:11434 in its env (replaced, or added to a list, a mapping or a missing env), the configuration is validated with the installed agent's check-config, the service restarts; or the desktop app / ollama serve of a signed-in user: that user's OLLAMA_HOST in HKEY_USERS\\<sid>\\Environment (and the machine-wide one if it names a network address) becomes the loopback value and the app restarts in the user's session through a one-shot interactive scheduled task that is removed afterwards. It refuses with more than one Ollama child, inline or duplicated env entries, an agent upstream/ollama_url on port 11434 with a non-loopback host, another program on a network address while the child is already set, and live connections from other machines on port 11434 unless -Force with a reason. Afterwards it waits up to 90 s for /api/version on 127.0.0.1 and for every listener on the port to be loopback; otherwise the configuration backup or the previous variable values are restored. Then it disables (not deletes) enabled inbound allow rules that open only port 11434 or the Ollama program and prints how to enable them again. -Check only reports. A transcript is written next to the script. Docs (install-agent EN/DE), threat model TM-11 rows, risk register, CHANGELOG, CI steps (pwsh on Linux, Windows PowerShell 5.1 in the Windows job).",
   "findings": [
     {
-      "id": "TM-13",
-      "evidence": "The v0.30.0 row was marked unreleased.",
-      "resolution": "Row links the release; content unchanged.",
+      "id": "TM-11",
+      "evidence": "Inspection 2026-11-09: Ollama on both Windows nodes listened on all addresses; only host firewall rules kept other machines out, and one node had allow rules for two hosts on port 11434.",
+      "resolution": "One script per node binds Ollama to loopback where it is configured, verifies the listeners and closes the rules that existed only for direct access.",
+      "disposition": "baseline"
+    },
+    {
+      "id": "TM-14",
+      "evidence": "The script runs elevated and writes the agent configuration, another user's environment and firewall rules.",
+      "resolution": "It changes only OLLAMA_HOST and rules that open nothing but Ollama, keeps a backup, restores on failed verification, takes no input beyond -Check and a -Force reason (quotes stripped before the relaunch), runs no downloaded code and names every change in the log.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "gh release view v0.30.0 (target and assets, checked by the release tool)",
+      "command": "pwsh -NoProfile -File test/selftest_ollama_loopback.ps1; powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/selftest_ollama_loopback.ps1",
       "result": "passed",
-      "evidence": "Target 2cd7c33 (merge of #119), assets skirnir-agent-0.30.0-linux-amd64 and skirnir-agent-0.30.0-windows-amd64.exe."
+      "evidence": "all passed on PowerShell 7 and Windows PowerShell 5.1; rewritten configurations inspected by eye for the insert cases."
+    },
+    {
+      "command": "python test/check_control_flow.py; python test/check_pinned_references.py; python test/check_adr_index.py; python test/selftest_english_names.py",
+      "result": "passed",
+      "evidence": "control flow ok; 0 pinned-reference findings; ADR index ok: 72 ADRs; ALLE OK."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -39,5 +63,8 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": []
+  "limitations": [
+    "The host part (elevation, service restart, scheduled task in another user's session, firewall) was not run in CI; it runs on the nodes by the operator, whose log is the evidence.",
+    "Connections that happen only later are not seen by the live-connection check; consumers that used Ollama directly must move to the router."
+  ]
 }
