@@ -8,3 +8,7 @@ SECRET_STORE_CLIENT_SECRET=changeme
 # SECRET_STORE_AUTH_FILE=/etc/skirnir-router-secrets/secret-store-auth.env   (root, 0600; nie unter /etc/skirnir-router)
 PROJECT_ID=00000000-0000-0000-0000-000000000000
 ENVIRONMENT=prod
+# Optional (ADR-0080): weitere Secrets, die zusaetzlich nach secrets.env sollen, z. B. der Schluessel eines weiteren
+# OpenAI-kompatiblen Cloud-Anbieters (in config.yaml als api_key_env genannt). Nur Grossbuchstaben, Ziffern und _,
+# Endung _KEY oder _TOKEN (secrets.env ist die Umgebung des Router-Dienstes; LD_PRELOAD, PATH u. ae. werden verworfen).
+# EXTRA_SECRET_KEYS="EXAMPLE_API_KEY"

@@ -48,15 +48,50 @@ T=$(printf '{"clientId":"%s","clientSecret":"%s"}' "$SECRET_STORE_CLIENT_ID" "$S
      | curl -s -m 15 "$SECRET_STORE_DOMAIN/api/v1/auth/universal-auth/login" -H 'Content-Type: application/json' -d @- | jq -r .accessToken)
 [ -z "$T" -o "$T" = "null" ] && { echo "Secret-Store-Login fehlgeschlagen - behalte bestehende $OUT"; exit 0; }
 g(){ curl -s -m 15 "$SECRET_STORE_DOMAIN/api/v3/secrets/raw/$1?workspaceId=$PROJECT_ID&environment=$ENVIRONMENT&secretPath=%2F" -H "Authorization: Bearer $T" | jq -r .secret.secretValue; }
+# secrets.env has one KEY=value per line and is the router unit's EnvironmentFile: a value with a line break would start a
+# further variable of the store writer's choosing (LD_PRELOAD=..., PATH=...) in the root process. Such values are refused.
+one_line(){ case "$1" in *$'\n'*|*$'\r'*) return 1 ;; esac; }
 M=$(g MQTT_PASSWORD)
 [ -z "$M" -o "$M" = "null" ] && { echo "Secret-Fetch fehlgeschlagen (Secret-Store nicht erreichbar?) - behalte bestehende $OUT"; exit 0; }
+one_line "$M" || { echo "MQTT_PASSWORD contains a line break - not rendered, keeping the existing $OUT"; exit 0; }
 TMP=$(mktemp); printf 'MQTT_PASSWORD=%s\n' "$M" > "$TMP"; chmod 600 "$TMP"
 # Stufe 5 Cloud: Anbieter-Schluessel sind optional (fehlt einer im Secret-Store, bleibt der Anbieter im Router ohne Schluessel = keine Stufe)
 # Optionale Gedaechtnisschicht (design/session-store.md, design/hindsight-memory.md): nur vorhandene Secrets landen in der
 # Datei; ohne sie bleibt die Schicht aus bzw. startet nicht (der Router meldet beim Start, welche Variable fehlt).
-for K in OPENAI_API_KEY ANTHROPIC_API_KEY SKIRNIR_SESSION_DSN SKIRNIR_MEMORY_NAMESPACE_KEY SKIRNIR_HINDSIGHT_URL SKIRNIR_HINDSIGHT_TOKEN SKIRNIR_HANDOFF_KEY; do
-  V=$(g "$K"); [ -n "$V" -a "$V" != "null" ] && printf '%s=%s\n' "$K" "$V" >> "$TMP"
+BUILTIN_KEYS="OPENAI_API_KEY ANTHROPIC_API_KEY SKIRNIR_SESSION_DSN SKIRNIR_MEMORY_NAMESPACE_KEY SKIRNIR_HINDSIGHT_URL SKIRNIR_HINDSIGHT_TOKEN SKIRNIR_HANDOFF_KEY"
+for K in $BUILTIN_KEYS; do
+  V=$(g "$K"); [ -n "$V" -a "$V" != "null" ] || continue
+  one_line "$V" || { echo "$K contains a line break - skipped"; continue; }
+  printf '%s=%s\n' "$K" "$V" >> "$TMP"
 done
+# Further optional secrets, e.g. the keys of additional OpenAI-compatible cloud providers (ADR-0080): their names go into
+# render-env.conf as EXTRA_SECRET_KEYS="EXAMPLE_API_KEY OTHER_API_KEY". A name must start with a capital letter, contain only
+# capital letters, digits and "_" (it ends up in the query URL and in secrets.env) and end in _KEY or _TOKEN: secrets.env is
+# the router unit's EnvironmentFile, so a name like LD_PRELOAD, PATH or PYTHONPATH would let a value from the secret store
+# steer the root process. Anything else is reported and skipped.
+# A name that is missing from the secret store is reported as missing (never its value). Names rendered above are not repeated.
+set -f   # no globbing while splitting the list ("*" must stay a word, not a file list)
+for K in ${EXTRA_SECRET_KEYS:-}; do
+  case "$K" in
+    [A-Z]*) ;;
+    *) echo "EXTRA_SECRET_KEYS: '$K' is not a valid name - skipped"; continue ;;
+  esac
+  case "$K" in
+    *[!A-Z0-9_]*) echo "EXTRA_SECRET_KEYS: '$K' is not a valid name - skipped"; continue ;;
+  esac
+  case "$K" in
+    ?*_KEY|?*_TOKEN) ;;
+    *) echo "EXTRA_SECRET_KEYS: '$K' does not end in _KEY or _TOKEN - skipped"; continue ;;
+  esac
+  case " MQTT_PASSWORD $BUILTIN_KEYS " in
+    *" $K "*) continue ;;
+  esac
+  V=$(g "$K")
+  [ -n "$V" -a "$V" != "null" ] || { echo "EXTRA_SECRET_KEYS: $K missing in the secret store"; continue; }
+  one_line "$V" || { echo "EXTRA_SECRET_KEYS: $K contains a line break - skipped"; continue; }
+  printf '%s=%s\n' "$K" "$V" >> "$TMP"
+done
+set +f
 if [ ! -f "$OUT" ] || ! cmp -s "$TMP" "$OUT"; then
   mv "$TMP" "$OUT"; echo "$(date) $OUT aus dem Secret-Store aktualisiert"
   if [ "$RESTART" = 1 ] && systemctl is-active --quiet skirnir-router; then

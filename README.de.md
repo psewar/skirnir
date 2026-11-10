@@ -42,8 +42,9 @@ und [Anleitung für PR-Review/CI](design/continuous-security-review.md). Jeder P
   (`tools`, `vision`, `thinking`, `structured` …), Mindestkontext, Priorität, Sitzung, Datenklasse.
 - **Auto-Rolle** `auto:latest`: eine Kette lokaler Entscheidungs-Engines (Embedding-Modell auf CPU, kleines LLM, TF-IDF, Regeln)
   wählt die Rolle aus dem Text der Anfrage. Gemessen 93 bis 98 % Treffer.
-- **Cloud als Stufe.** OpenAI- und Anthropic-Modelle können als letzte (oder erste) Stufe in Rollen liegen, mit Datenklassen,
-  Credential-Scan, Monatsbudget und Egress-Allowlist. Standardmäßig geht nichts in die Cloud.
+- **Cloud als Stufe.** OpenAI, Anthropic und weitere OpenAI-kompatible Anbieter (zum Beispiel Mistral) können als letzte (oder
+  erste) Stufe in Rollen liegen, mit Datenklassen, Credential-Scan, Monatsbudget und Egress-Allowlist. Standardmäßig geht nichts
+  in die Cloud.
 - **Client-Identitäten** auf dem Inferenz-Port (Bearer, Basic, Quell-IP), Rollen- und Modellsperren, Rate Limit, Audit-Log.
 - **Beobachtbar:** Prometheus-Endpunkt, Nutzung je Tag und Client, Entscheidungsprotokoll, Home-Assistant-Gerät per MQTT-Discovery,
   Web-UI mit Live-Grafiken, Katalog, Rollen-Editor, Probierfeld und Lasttest.

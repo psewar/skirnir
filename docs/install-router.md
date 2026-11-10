@@ -131,7 +131,8 @@ The start log lists the posture findings (lines `posture …`). Then open `https
 ## Secrets
 
 The router reads `/etc/skirnir-router/secrets.env` (0600) as environment: `MQTT_PASSWORD`, `OPENAI_API_KEY`,
-`ANTHROPIC_API_KEY` and, for the optional memory layers, the variables their configuration names. Maintain it by hand, or let
+`ANTHROPIC_API_KEY`, the keys named in `EXTRA_SECRET_KEYS` (further cloud providers, ADR-0080) and, for the optional memory
+layers, the variables their configuration names. Maintain it by hand, or let
 `render-env.sh` render it from a secret store with a universal-auth API: access goes into
 `/etc/skirnir-router-secrets/render-env.conf` (folder 0700 root, file 0600; template
 [router/render-env.conf.example](../router/render-env.conf.example)); the daily timer restarts the router when a secret
