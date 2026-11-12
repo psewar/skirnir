@@ -2,31 +2,72 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "73f8c9e84a50150efcc8775dfbd8c665ede26cdf",
-  "change_digest": "050bb63a41e27231754f7b7e42886f4ebb291adaced35dedd1712efafdb22816",
+  "base_sha": "8d87aab445318625dcf286893f3d89868f0df218",
+  "change_digest": "66367aa245acbdfbfc3de8faf640b4e632628cd4dbbb9e1fc67f492f3a9083ad",
   "reviewed_paths": [
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "agent/main.go",
+    "agent/probe_identity.go",
+    "agent/probe_identity_other.go",
+    "agent/probe_identity_test.go",
+    "agent/probe_identity_windows.go",
+    "agent/probe_identity_windows_test.go",
+    "docs/adr/0087-windows-agent-children-without-system-rights.md",
+    "docs/adr/README.md",
+    "docs/install-agent.de.md",
+    "docs/install-agent.md",
+    "docs/security/risk-register.json"
   ],
   "risk_ids": [
-    "TM-16"
+    "TM-14",
+    "TM-15"
   ],
   "boundaries": [
-    "B9"
+    "B3",
+    "B8"
   ],
-  "summary": "Documentation only: the v0.32.0 CHANGELOG row links the published release and carries its date (2026-11-12). No code, configuration or workflow change.",
+  "summary": "Agent 0.33.0: verb probe-identity (ADR-0087, now accepted). As LocalSystem it creates primary tokens (system baseline, restricted: administrators + user SID deny-only, max privileges dropped, medium integrity; localservice via LogonUser) and starts each enabled child once per token on a free probe port (health port number replaced in args/env) inside a kill-on-close job object, measuring start, health, CUDA lines, per-process VRAM and tree end; a copy of the agent under each token checks NVML set-to-current, GPU-Z, process paths, user hives. Started elevated, it re-runs itself once as LocalSystem via a scheduled task, only if its own program cannot be changed by non-admins (childpath rules). Nothing in the running service changes.",
   "findings": [
     {
-      "id": "TM-16",
-      "evidence": "The release tool reads router and agent version from the CHANGELOG row of the tag at the target commit; a wrong row would publish wrong version claims next to the attested binaries.",
-      "resolution": "Only the tag and date cells change; versions stay 0.28.0 / 0.32.0 as released.",
+      "id": "TM-14",
+      "evidence": "The probe runs as LocalSystem and starts programs; a probe binary in a user-writable folder would hand SYSTEM to whoever can replace it.",
+      "resolution": "probeViaSystemTask refuses unless the program's file, folder and folders above pass the ADR-0085 exposure check; the scheduled task is removed after the run; the report is written atomically into the configuration folder (SYSTEM/Administrators).",
+      "disposition": "fixed"
+    },
+    {
+      "id": "TM-14",
+      "evidence": "Probe children could collide with the running children (ports) or outlive the probe.",
+      "resolution": "Each probe child gets a free port (whole-number replacement of its health port, unit-tested incl. near misses); it runs in its own kill-on-close job, is ended after the measurement, and the report states tree_ended. The upstream child (large model) is excluded unless a reason is given.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "TM-14",
+      "evidence": "NVML permission is tested by writing the power limit.",
+      "resolution": "Set to the current value read just before (a no-op); under tokens without the right NVML refuses with rc 4 - measured as the normal user: denied, matching the 2026-09-24 measurement of the virtual account.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "TM-15",
+      "evidence": "The report includes the last output lines of a child that failed.",
+      "resolution": "Only for failed or CUDA-error children, at most 25 lines; children's logs carry no secrets by design (log hygiene); the report lies in the admin-only configuration folder.",
       "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "git diff origin/main -- CHANGELOG.md",
+      "command": "go test ./... (Windows and Linux/WSL), gofmt, go vet (linux, windows)",
       "result": "passed",
-      "evidence": "one line: v0.32.0 (unreleased) -> link to the release, date 2026-11-12."
+      "evidence": "new probe_identity_test.go (options, child selection, port replacement, CUDA reading) and probe_identity_windows_test.go (restricted token not admin and medium integrity; stand-in child under it: started, healthy on its own probe port, CUDA seen, tree ended)."
+    },
+    {
+      "command": "probe-identity --inner-rights as the normal user; probe-identity without elevation",
+      "result": "passed",
+      "evidence": "NVML denied (rc 4), process paths 448 of 655, hives 1 of 1; without elevation: refused with the next step."
+    },
+    {
+      "command": "python test/check_adr_index.py; python test/check_public_changes.py",
+      "result": "passed",
+      "evidence": "ADR index ok: 87 ADRs; 0 findings."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -39,5 +80,8 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": []
+  "limitations": [
+    "The full measurement on a node (as LocalSystem, real children) has not run yet; it needs the operator's administrator rights.",
+    "LOCAL SERVICE stands in for the virtual service account in the rights check."
+  ]
 }
