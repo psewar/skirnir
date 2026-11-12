@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "27a399d53c9c302379fd9bf85bbc336665e339a4",
-  "change_digest": "f98db1b62e3f2d177529fda3767891d73674686e6e687999c33b15b815ee8084",
+  "base_sha": "754293f646b09b1918c37511f093cb1bd826b41b",
+  "change_digest": "edf3d311d02de7b45e81bb7417a195345c1a30bb27a161ca6396a2c95d180ff5",
   "reviewed_paths": [
     "CHANGELOG.md",
     "docs/adr/0090-report-recall-skipped-for-tools-per-client.md",
@@ -17,13 +17,13 @@
     "B1",
     "B9"
   ],
-  "summary": "Documentation only: ADR-0090 (report recalls skipped for tools as a state per client) is accepted by the operator; status in the ADR, its Decision Outcome line, the ADR index and the CHANGELOG row. PR #142 merged it while it still said proposed. No code, configuration or behaviour change; the decision text is unchanged (proposed -> accepted is the only change allowed to an ADR besides typos and links).",
+  "summary": "Documentation only: ADR-0090 (report recalls skipped for tools as a state per client) is accepted by the operator; status in the ADR, its Decision Outcome line, the ADR index and the CHANGELOG row. PR #142 merged it while it still said proposed. No code, configuration or behaviour change; the decision text is unchanged (proposed -> accepted is the only change allowed to an ADR besides typos and links). Re-reviewed after merging main with PR #143: the CHANGELOG row is main's (agent 0.34.1, ADR-0091) with only ADR-0090 marked accepted.",
   "findings": [],
   "tests": [
     {
       "command": "python test/check_adr_index.py",
       "result": "passed",
-      "evidence": "ADR index ok: 90 ADRs"
+      "evidence": "ADR index ok: 91 ADRs"
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
