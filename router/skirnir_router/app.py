@@ -117,7 +117,7 @@ async def main(cfg_path):
         log.error("configuration invalid, router does not start: %s", cfg.message)
         sys.exit(2)
     state.CFG = cfg
-    # ADR-0064: what the configuration allows, as facts on every start; ADR-0081: also with this process's file-system view
+    # ADR-0064: what the configuration allows, as facts on every start; ADR-0083: also with this process's file-system view
     lines, summary = posture.report(cfg, view=process_view.ProcessView.current())
     for line in lines:
         log.warning("posture %s", line)

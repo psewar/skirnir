@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-test (TM-14, ADR-0081): the running router reports TLS files it could change or replace.
+"""Self-test (TM-14, ADR-0083): the running router reports TLS files it could change or replace.
 
 process_view.ProcessView decides from the mount table and the credentials of the process whether a file could be
 changed or replaced. The cases mirror the router unit: ProtectSystem=strict (root read-only), ReadWritePaths for

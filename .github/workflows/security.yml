@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # weekly: a vulnerability published after the last push must still surface (ADR-0081, ADR-0074);
+    # test/selftest_dependency_audit.py fails if this trigger or the audits below go away
+    - cron: "29 4 * * 1"
   workflow_dispatch:
 
 permissions:

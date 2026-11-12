@@ -1,4 +1,4 @@
-"""What the running router could change on disk, from its own point of view (TM-14, ADR-0081).
+"""What the running router could change on disk, from its own point of view (TM-14, ADR-0083).
 
 The systemd unit decides what the router may write: `ProtectSystem=strict` mounts the system read-only,
 `ReadWritePaths=` and `ReadOnlyPaths=` add bind mounts, and the empty capability bounding set leaves owner and mode as

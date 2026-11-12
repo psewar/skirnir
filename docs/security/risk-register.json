@@ -265,7 +265,7 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Router/agent compromise reaches privileged host operations.",
-      "controls": "Router systemd capabilities/filesystem restrictions. The agent forwards only inference, listing and version paths to the upstream and refuses Ollama downgrades without ollama_update.allow_downgrade; the root secret renderers source their access file only from a root-only folder the router cannot see or write, and the router unit sees its certificate folder read-only (ADR-0073). render-env.sh refuses secret values with a line break and renders further names only when they end in _KEY or _TOKEN (ADR-0080).",
+      "controls": "Router systemd capabilities/filesystem restrictions. The agent forwards only inference, listing and version paths to the upstream and refuses Ollama downgrades without ollama_update.allow_downgrade; the root secret renderers source their access file only from a root-only folder the router cannot see or write, and the router unit sees its certificate folders read-only (certs, ADR-0073; tls of installations older than router.py --init, ADR-0082). render-env.sh refuses secret values with a line break and renders further names only when they end in _KEY or _TOKEN (ADR-0080).",
       "next_action": "Dedicated router user and fuller unit directive set; Linux agent unit without /usr/local/bin write access; warn when a LocalSystem agent child runs from a user-writable path; separate privileged Windows agent operations.",
       "owner_role": "maintainer and operator",
       "test_refs": [
@@ -306,11 +306,12 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Mutable dependencies/actions or compromised build.",
-      "controls": "pip-audit on runtime and optional requirement sets, govulncheck and Dependabot (actions, Go, monitoring compose, decision-service Dockerfiles). Third-party actions pinned to commit SHAs, tools to versions, images and base images to digests, enforced by test/check_pinned_references.py (ADR-0055). Default-branch PR verification on an isolated hosted runner, App-bound merge status and same-dependency bump checks. Router hosts install pip packages only from router/requirements-lock.txt with --require-hashes --no-deps on top of distribution packages; CI installs requirements-ci-lock.txt; both locks are audited and compared with PyPI (ADR-0074). Release provenance: the agent is rebuilt from the tag and attested with SBOMs only if byte-identical (ADR-0075).",
+      "controls": "pip-audit on runtime and optional requirement sets and govulncheck on every push, pull request and weekly, enforced by test/selftest_dependency_audit.py (ADR-0081); Dependabot (actions, Go, monitoring compose, decision-service Dockerfiles). Third-party actions pinned to commit SHAs, tools to versions, images and base images to digests, enforced by test/check_pinned_references.py (ADR-0055). Default-branch PR verification on an isolated hosted runner, App-bound merge status and same-dependency bump checks. Router hosts install pip packages only from router/requirements-lock.txt with --require-hashes --no-deps on top of distribution packages; CI installs requirements-ci-lock.txt; both locks are audited and compared with PyPI (ADR-0074). Release provenance: the agent is rebuilt from the tag and attested with SBOMs only if byte-identical (ADR-0075).",
       "next_action": "Refresh the Python locks regularly (no Dependabot support for them); consider signing the router source archive; extend the rebuild to releases whose agent came from an earlier commit.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         ".github/workflows/security.yml",
+        "test/selftest_dependency_audit.py",
         "test/check_pinned_references.py",
         "test/selftest_pinned_references.py",
         "test/selftest_threat_review.py",

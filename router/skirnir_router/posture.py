@@ -6,7 +6,7 @@ only by their source address or sharing one token, a control port open without l
 Ollama, the session store, or an API port without TLS. Each finding names its code, severity, the risk it maps to and
 the next step; no secret, token, hash or connection string is printed. The check reads the configuration and, for the
 session store, the sslmode of the DSN in the environment (never the DSN itself). At start the router also passes its own
-view of the file system (process_view.py, ADR-0081) and reports TLS files it could change; the CLI runs outside the
+view of the file system (process_view.py, ADR-0083) and reports TLS files it could change; the CLI runs outside the
 unit and cannot see that view, so it leaves this check out.
 
 Findings are facts, not errors: the router still starts. A finding the operator accepts stays visible on every start.
@@ -47,7 +47,7 @@ def _loopback(host):
 def findings(cfg, environ=None, view=None):
     environ = os.environ if environ is None else environ
     out = []
-    # TM-14, ADR-0081: root helpers write the certificates; a file the router could change or replace would let a
+    # TM-14, ADR-0083: root helpers write the certificates; a file the router could change or replace would let a
     # compromised router steer what they write and where. Only the running router knows its unit's view (view).
     control_tls = getattr(cfg, "control_tls", None)
     if view is not None and control_tls:
