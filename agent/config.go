@@ -159,6 +159,9 @@ type ChildSpec struct {
 	Env           []string `yaml:"env"`
 	HealthTCPPort int      `yaml:"health_tcp_port"`
 	StartupGraceS float64  `yaml:"startup_grace_s"`
+	// UserWritableReason (ADR-0085): the child starts although someone besides the system and the administrators could
+	// change its program (childpath.go); the reason stays visible in the status and the log. Empty = such a child is refused.
+	UserWritableReason string `yaml:"user_writable_reason"`
 }
 
 // InstallCfg is only read by the install/uninstall/apply-rules verbs (Windows).

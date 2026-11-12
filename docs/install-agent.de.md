@@ -81,22 +81,30 @@ Ohne `--router` fragt setup Router-Adresse und Update-Schlüssel im Terminal ab.
   `identity.dir` und `logging.dir`,
 - legt es `/var/lib/skirnir-agent` (der Knotenschlüssel, Modus 0600, liegt in dessen Ordner `identity`) und
   `/var/log/skirnir-agent` an,
-- installiert es die Binary als `/usr/local/bin/skirnir-agent` und die Unit `/etc/systemd/system/skirnir-agent.service`,
-- prüft es die Konfiguration wie `check-config`, führt `systemctl daemon-reload` und `systemctl enable --now skirnir-agent` aus,
+- installiert es die Binary als `/opt/skirnir-agent/skirnir-agent` mit dem Link `/usr/local/bin/skirnir-agent` (die Binary
+  einer älteren Installation dort wird zum Link) und die Unit `/etc/systemd/system/skirnir-agent.service`,
+- prüft es die Konfiguration wie `check-config`, führt `systemctl daemon-reload`, `systemctl enable` und
+  `systemctl restart skirnir-agent` aus (ein erneutes `setup` bringt so auch die Unit eines bestehenden Knotens auf Stand),
 - zeigt es den `identity`-Befehl für den Fingerprint-Vergleich. Die letzte Zeile ist `STATE: installed`.
 
 **Stattdessen von Hand:**
 
 ```bash
-sudo install -m 755 skirnir-agent-<version>-linux-amd64 /usr/local/bin/skirnir-agent
+sudo install -D -m 755 skirnir-agent-<version>-linux-amd64 /opt/skirnir-agent/skirnir-agent
+sudo ln -sf /opt/skirnir-agent/skirnir-agent /usr/local/bin/skirnir-agent
 sudo mkdir -p /etc/skirnir-agent /var/lib/skirnir-agent /var/log/skirnir-agent
 sudo cp config.yaml /etc/skirnir-agent/config.yaml    # aus agent/config.example.yaml; identity.dir und logging.dir unter /var setzen
 sudo cp agent/skirnir-agent.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now skirnir-agent
 ```
 
-Die Unit startet `skirnir-agent run --config /etc/skirnir-agent/config.yaml` mit `ProtectSystem=full`; schreiben darf sie nur
-`/var/lib/skirnir-agent`, `/var/log/skirnir-agent` und `/usr/local/bin` (das Selbst-Update legt die neue Binary neben die alte).
+Die Unit startet `/opt/skirnir-agent/skirnir-agent run --config /etc/skirnir-agent/config.yaml` mit `ProtectSystem=strict`
+und `ProtectHome=read-only`; schreiben darf sie nur `/var/lib/skirnir-agent`, `/var/log/skirnir-agent`,
+`/opt/skirnir-agent` (das Selbst-Update legt die neue Binary neben die alte) und für ein Ollama-Kind `/root/.ollama`. Sie
+behält nur `CAP_SYS_ADMIN`, das der NVIDIA-Treiber für das Power-Limit des GPU-Schutzes verlangt, und einen
+Systemaufruf-Filter (`@system-service`) ohne Mount- und Modulaufrufe, damit diese Capability das schreibgeschützte
+System nicht wieder öffnen kann (ADR-0084). Ein Knoten, der vor Agent 0.32.0 eingerichtet wurde, bekommt den neuen
+Aufbau durch ein erneutes `sudo skirnir-agent setup`.
 Prüfen mit `skirnir-agent status --config /etc/skirnir-agent/config.yaml` und `journalctl -u skirnir-agent -f`.
 
 ## Ollama als Kind des Agenten
@@ -106,6 +114,17 @@ Anmeldung bereit ist; weitere Dienste beaufsichtigt er auf dieselbe Weise. Unter
 
 - Benutzer-Umgebungsvariablen gelten für das Dienstkonto nicht, darum kommen `OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_MODELS`,
   `OLLAMA_NUM_PARALLEL` usw. ins `env` des Kindes.
+- Das Programm muss in einem Ordner liegen, den nur Administratoren ändern können (ADR-0085). Das Kind läuft mit den
+  Rechten des Dienstes (LocalSystem); wer `ollama.exe`, dessen Ordner oder einen Ordner darüber ändern darf, liesse damit
+  Code als System laufen. Der Benutzer-Installer legt Ollama unter `%LOCALAPPDATA%\Programs\Ollama` ab,
+  das diesem Benutzer gehört.
+  `agent\Move-OllamaProtected.cmd` zieht es in einem Schritt um (Doppelklick; fragt selbst nach Administratorrechten):
+  Es kopiert den Programmordner nach `C:\Program Files\Ollama` (die Kopie übernimmt dessen Rechte), stellt `cmd` des
+  Kindes dorthin, lässt `check-config` zustimmen, startet den Dienst neu und prüft, dass Ollama aus der Kopie
+  antwortet - sonst stellt es die Konfiguration wieder her. `-Check` meldet nur; das Protokoll liegt neben dem
+  Skript. Die Ollama-Updates des Routers ersetzen die Dateien in der Kopie. Sonst startet der Agent das Kind nicht: `check-config` und der Status nennen den Pfad und wer ihn ändern könnte
+  (`refused`), und ein Selbst-Update, das ein Kind ablehnen würde, behält die laufende Version. Eine bewusste Ausnahme ist
+  `user_writable_reason: "<warum>"` am Kind; der Grund bleibt im Status und im Log sichtbar.
 - Die Tray-App `ollama app.exe` darf daneben **nicht** laufen (sie versucht ständig, einen eigenen Server zu starten); ihren
   Autostart abschalten.
 - Ollama-Updates kommen dann über den Router ([operations.de.md](operations.de.md#ollama-updates)); der Updater der Tray-App

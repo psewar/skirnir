@@ -265,15 +265,18 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Router/agent compromise reaches privileged host operations.",
-      "controls": "Router systemd capabilities/filesystem restrictions. The agent forwards only inference, listing and version paths to the upstream and refuses Ollama downgrades without ollama_update.allow_downgrade; the root secret renderers source their access file only from a root-only folder the router cannot see or write, and the router unit sees its certificate folders read-only (certs, ADR-0073; tls of installations older than router.py --init, ADR-0082). render-env.sh refuses secret values with a line break and renders further names only when they end in _KEY or _TOKEN (ADR-0080).",
-      "next_action": "Dedicated router user and fuller unit directive set; Linux agent unit without /usr/local/bin write access; warn when a LocalSystem agent child runs from a user-writable path; separate privileged Windows agent operations.",
+      "controls": "Router systemd capabilities/filesystem restrictions. The agent forwards only inference, listing and version paths to the upstream and refuses Ollama downgrades without ollama_update.allow_downgrade; the root secret renderers source their access file only from a root-only folder the router cannot see or write, and the router unit sees its certificate folders read-only (certs, ADR-0073; tls of installations older than router.py --init, ADR-0082). render-env.sh refuses secret values with a line break and renders further names only when they end in _KEY or _TOKEN (ADR-0080). The Linux agent unit writes no program folder on PATH (binary in /opt/skirnir-agent) and keeps only CAP_SYS_ADMIN behind a system call filter without mount calls (ADR-0084); the agent refuses to start a child whose program, folder or a folder above someone besides the system and the administrators could change, unless user_writable_reason accepts it (ADR-0085); agent\\Move-OllamaProtected.cmd moves a per-user Ollama.",
+      "next_action": "Dedicated router user and fuller unit directive set; separate privileged Windows agent operations.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_security.py",
         "test/selftest_privilege_paths.py",
         "agent/passthrough_test.go",
         "agent/ollamaupdate_test.go",
-        "test/selftest_render_env.py"
+        "test/selftest_render_env.py",
+        "agent/setup_linux_test.go",
+        "agent/childpath_test.go",
+        "test/selftest_ollama_protected.ps1"
       ],
       "validation_gap": "V13: unprivileged deployment and recovery still need staging."
     },

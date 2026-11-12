@@ -59,3 +59,7 @@ monitoring/prometheus-data/
 monitoring/grafana-data/
 router/deletions.jsonl
 test/deletions.jsonl
+
+# go build in agent/ leaves the binary there; never commit it (releases are built by bauen.sh and the provenance workflow)
+/agent/agent
+/agent/agent.exe
