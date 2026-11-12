@@ -89,6 +89,9 @@ func TestProbeChildRestricted(t *testing.T) {
 	}
 	sp := ChildSpec{Name: "standin", Cmd: exe, Args: []string{"-test.run=TestProbeHelperProcess", "--", "39871"},
 		Env: []string{probeHelperEnv + "=listen"}, Cwd: dir, HealthTCPPort: 39871, StartupGraceS: 30}
+	old := probeSettle
+	probeSettle = 3 * time.Second // the stand-in uses no GPU memory; no need to wait the full window
+	defer func() { probeSettle = old }()
 	r := probeChild(sp, "restricted", tok, 60*time.Second)
 	if !r.Started || !r.Healthy {
 		t.Fatalf("stand-in child under the restricted token must start and listen on its probe port: %+v", r)

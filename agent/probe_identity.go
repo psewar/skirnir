@@ -163,24 +163,32 @@ func probeSpec(sp ChildSpec, port int) ChildSpec {
 	return out
 }
 
-// cudaInOutput: whether the child's output says it uses CUDA. Ollama logs "inference compute ... library=cuda"; other
-// children name CUDA when they load onto the GPU. A line that reports CUDA unavailable does not count.
+var (
+	// "cuda" as a word of its own: not part of an identifier such as CUDA_VISIBLE_DEVICES, which Ollama lists at every start
+	// whether a GPU is usable or not (first measurement on a node, 2026-11-12: a false "seen").
+	cudaWord    = regexp.MustCompile(`(?i)(^|[^a-z0-9_])cuda([^a-z0-9_]|$)`)
+	cudaSuccess = regexp.MustCompile(`(?i)library=cuda|\b(bereit|ready|loaded|initiali[sz]ed)\b`)
+	cudaFailure = regexp.MustCompile(`(?i)\b(fail\w*|error|denied|not available|unavailable|no cuda)\b`)
+)
+
+// cudaInOutput: whether the child's output proves it uses CUDA - Ollama's "inference compute ... library=cuda", or a line
+// that names CUDA as loaded or ready (the STT service: "CUDA-Whisper bereit"). A line that names CUDA with a failure
+// is reported as an error; announcements ("CUDA wird geladen") prove nothing.
 func cudaInOutput(lines []string) string {
-	seen := ""
+	failure := ""
 	for _, l := range lines {
-		low := strings.ToLower(l)
-		if !strings.Contains(low, "cuda") {
+		if !cudaWord.MatchString(l) {
 			continue
 		}
-		if strings.Contains(low, "no cuda") || strings.Contains(low, "cuda not") || strings.Contains(low, "cuda unavailable") ||
-			strings.Contains(low, "failed") || strings.Contains(low, "error") {
-			seen = "error: " + strings.TrimSpace(l)
-			continue
+		switch {
+		case cudaFailure.MatchString(l):
+			failure = "error: " + strings.TrimSpace(l)
+		case cudaSuccess.MatchString(l):
+			return "seen"
 		}
-		return "seen"
 	}
-	if seen != "" {
-		return seen
+	if failure != "" {
+		return failure
 	}
 	return "not seen"
 }
