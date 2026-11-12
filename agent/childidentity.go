@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -15,9 +16,15 @@ import (
 //
 // Before every start the agent derives the folders the child needs from its command line, cwd and env (plus read_paths and
 // write_paths), checks each one as LOCAL SERVICE and grants what is missing: read on folders outside the agent's data
-// folder, modify on the child's own folder under it. The result is a fact in the status (children[].access) and in
-// check-config. A child whose access cannot be established is refused like an exposed program (ADR-0085), never started
-// with more rights instead.
+// folder, modify on the child's own folder in the children's data folder. The result is a fact in the status
+// (children[].access) and in check-config. A child whose access cannot be established is refused like an exposed program
+// (ADR-0085), never started with more rights instead.
+//
+// ADR-0091: the children's data lives next to the agent's folder, not in it (<data folder>-children, by default
+// C:\ProgramData\skirnir-agent-children). LOCAL SERVICE cannot list the agent's folder (configuration, keys), and a program
+// that normalises its paths - Go's filepath.EvalSymlinks, which Ollama calls on its manifests - must list every folder
+// above a path. Each entry therefore also says whether the child can resolve it; data still in the agent's folder keeps its
+// grant and names the folder it belongs in.
 
 const (
 	runAsLocalService = "localservice"
@@ -35,8 +42,15 @@ type ChildAccess struct {
 	From  string `json:"from"`  // program | cwd | env NAME | arg | read_paths | write_paths
 	State string `json:"state"` // ok | granted | needs grant | not checked | missing | not granted: <why> | denied: <why>
 
+	// Resolve: whether the child can resolve the path to its full form, i.e. list every folder above it; checked once
+	// access is there: ok | <folder> cannot be listed ... | not checked: <why>. Not a refusal: only some programs need it.
+	Resolve string `json:"resolve,omitempty"`
+	// MoveTo: the child's data is still in the agent's own folder; where it belongs instead (ADR-0091).
+	MoveTo string `json:"move_to,omitempty"`
+
 	noGrant string // set: only checked, never granted (too broad, or the agent's own files)
-	ownData bool   // the child's own folder under the agent's data folder (created when missing)
+	ownData bool   // the child's own folder, the first level of a data folder (created when missing)
+	inRoot  bool   // in the children's data folder: that folder must exist and be changeable by system and admins only
 	dir     bool
 }
 
@@ -50,6 +64,12 @@ type childLaunch struct {
 	env     []string
 	access  []ChildAccess
 	release func()
+}
+
+// childDataRoot: the folder for the children's own data, next to the agent's data folder (ADR-0091).
+func childDataRoot(dataDir string) string {
+	d := filepath.Clean(dataDir)
+	return filepath.Join(filepath.Dir(d), filepath.Base(d)+"-children")
 }
 
 // childRunAs: the identity a child runs as on the given platform.
@@ -123,6 +143,12 @@ func reportChildIdentities(specs []ChildSpec, dataDir string, w io.Writer) error
 				refused++
 			}
 			fmt.Fprintf(w, "  access %-6s %-11s %s (%s)\n", a.Need, a.State, a.Path, a.From)
+			if a.Resolve != "" && a.Resolve != "ok" {
+				fmt.Fprintf(w, "    resolve: %s\n", a.Resolve)
+			}
+			if a.MoveTo != "" {
+				fmt.Fprintf(w, "    move to %s (ADR-0091)\n", a.MoveTo)
+			}
 		}
 	}
 	if refused > 0 {

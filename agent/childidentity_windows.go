@@ -3,8 +3,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,6 +69,7 @@ func prepareChildLaunch(sp ChildSpec, dataDir string) (*childLaunch, error) {
 	}
 	l.access = childAccessPlan(sp, dataDir)
 	ensureAccess(l.access, dataDir, func(a ChildAccess) error { return accessAs(tok, a) }, grantLocalService)
+	markResolve(l.access, func(p string) string { return resolveAs(tok, p) })
 	for _, a := range l.access {
 		if a.refuses() {
 			tok.Close()
@@ -104,12 +107,13 @@ func checkChildIdentity(sp ChildSpec, dataDir string) (string, []ChildAccess, st
 	}
 	defer tok.Close()
 	ensureAccess(plan, dataDir, func(a ChildAccess) error { return accessAs(tok, a) }, nil)
+	markResolve(plan, func(p string) string { return resolveAs(tok, p) })
 	return who, plan, "", nil
 }
 
 // childAccessPlan derives what the child needs: the program's folder, cwd, every env value and argument that is a single
-// absolute path, read_paths and write_paths. Paths under the agent's data folder become modify on the child's own folder
-// there (the first level below it); everything else is read. Parents come before their contents, so a folder's inherited
+// absolute path, read_paths and write_paths. Paths in the children's data folder (or, from before ADR-0091, the agent's
+// own folder) become modify on the child's own folder there (the first level below it); everything else is read. Parents come before their contents, so a folder's inherited
 // grant is seen before its subfolders are checked.
 func childAccessPlan(sp ChildSpec, dataDir string) []ChildAccess {
 	type cand struct{ path, from, need string }
@@ -178,27 +182,41 @@ func underDir(p, base string) (string, bool) {
 	return "", false
 }
 
+// classifyAccess: in the children's data folder (ADR-0091) or, from before, the agent's own folder, a path becomes modify
+// on the child's own folder there (the first level); anything else is read, never granted when too broad.
 func classifyAccess(path, from, need, dataDir string) ChildAccess {
 	p := filepath.Clean(path)
 	a := ChildAccess{Path: p, From: from, Need: needRead}
 	if need == needModify {
 		a.Need = needModify
 	}
-	if rel, ok := underDir(p, filepath.Clean(dataDir)); ok {
+	root, data := childDataRoot(dataDir), filepath.Clean(dataDir)
+	for _, base := range []string{root, data} {
+		rel, ok := underDir(p, base)
+		if !ok {
+			continue
+		}
 		first, _, nested := strings.Cut(rel, `\`)
-		// directly in the data folder only a folder (existing, or missing and without a file extension) is the child's own;
-		// a file there is the agent's (config.yaml, keys)
+		// directly in a data folder only a folder (existing, or missing and without a file extension) is the child's own;
+		// a file in the agent's folder is the agent's (config.yaml, keys)
 		fi, err := os.Stat(p)
 		isFile := (err == nil && !fi.IsDir()) || (err != nil && filepath.Ext(p) != "")
 		if rel == "" || (!nested && isFile) {
 			a.noGrant = "the agent's own folder (configuration, keys)"
+			if base == root {
+				a.noGrant = "the children's data folder itself; name the child's own folder in it"
+			}
 			return a
 		}
-		a.Path = filepath.Join(filepath.Clean(dataDir), first)
+		a.Path = filepath.Join(base, first)
 		if need == "" {
 			a.Need = needModify
 		}
 		a.ownData = true
+		a.inRoot = base == root
+		if base == data {
+			a.MoveTo = filepath.Join(root, first)
+		}
 		return a
 	}
 	a.noGrant = tooBroad(p)
@@ -226,8 +244,18 @@ func tooBroad(p string) string {
 // ensureAccess fills in each entry's state: checks it as the child's account, grants what is missing (grant nil = only
 // check, for check-config) and checks again. The child's own data folder is created when it does not exist yet.
 func ensureAccess(plan []ChildAccess, dataDir string, check func(ChildAccess) error, grant func(ChildAccess) error) {
+	root, rootIssue, rootSeen := childDataRoot(dataDir), "", false
 	for i := range plan {
 		a := &plan[i]
+		if a.inRoot {
+			if !rootSeen {
+				rootIssue, rootSeen = ensureChildRoot(root, grant != nil), true
+			}
+			if rootIssue != "" {
+				a.State = "denied: the children's data folder " + root + " " + rootIssue
+				continue
+			}
+		}
 		fi, err := os.Stat(a.Path)
 		if err != nil && a.ownData {
 			if grant == nil {
@@ -272,6 +300,88 @@ func ensureAccess(plan []ChildAccess, dataDir string, check func(ChildAccess) er
 			continue
 		}
 		a.State = "granted"
+	}
+}
+
+// childRootSDDL: the children's data folder belongs to the system and the administrators; LOCAL SERVICE may only list
+// this folder (no inheritance: each child's own folder gets its modify entry from the grant), so a child can resolve the
+// paths below it (ADR-0091). Protected: nothing is inherited from ProgramData, where users may create folders.
+const childRootSDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x1200a9;;;LS)"
+
+// ensureChildRoot: the children's data folder exists (created with childRootSDDL when create is set and it is missing),
+// is no link, and nobody besides the system and the administrators can change it or a folder above. Returns why not,
+// "" when it is fine or (check only) still missing - the agent creates it at the next start.
+func ensureChildRoot(root string, create bool) string {
+	if _, err := os.Lstat(root); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "cannot be checked: " + err.Error()
+		}
+		if !create {
+			return ""
+		}
+		sd, err := windows.SecurityDescriptorFromString(childRootSDDL)
+		if err != nil {
+			return "cannot be created: " + err.Error()
+		}
+		sa := &windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+		// fails when someone created it between the look above and here; the checks below then judge that folder
+		if err := windows.CreateDirectory(windows.StringToUTF16Ptr(root), sa); err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+			return "cannot be created: " + err.Error()
+		}
+	}
+	if r := redirected(root); r != "" {
+		return r
+	}
+	if who := changeableByOthers(ChildAccess{Path: root, dir: true}); who != "" {
+		return "is not the system's and administrators' only: " + who + "; remove the folder, the agent creates it anew"
+	}
+	return ""
+}
+
+// resolveAs: can the token resolve p to its full form, as filepath.EvalSymlinks does (every folder above p is listed)?
+// The real call under the token is the check; when it fails, the first folder above p it cannot list is named.
+func resolveAs(tok windows.Token, p string) string {
+	out := ""
+	err := asToken(tok, func() error {
+		_, rerr := filepath.EvalSymlinks(p)
+		if rerr == nil {
+			out = "ok"
+			return nil
+		}
+		for q := filepath.Dir(filepath.Clean(p)); ; q = filepath.Dir(q) {
+			if !listable(q) {
+				out = q + " cannot be listed by the child; programs that resolve paths (Go's filepath.EvalSymlinks, Ollama) fail here"
+				return nil
+			}
+			if filepath.Dir(q) == q {
+				break
+			}
+		}
+		out = "cannot be resolved: " + rerr.Error()
+		return nil
+	})
+	if err != nil {
+		return "not checked: " + err.Error()
+	}
+	return out
+}
+
+func listable(dir string) bool {
+	f, err := os.Open(dir)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	_, err = f.Readdirnames(1)
+	return err == nil || err == io.EOF
+}
+
+// markResolve fills in Resolve for every entry the child has access to.
+func markResolve(plan []ChildAccess, resolve func(string) string) {
+	for i := range plan {
+		if plan[i].State == "ok" || plan[i].State == "granted" {
+			plan[i].Resolve = resolve(plan[i].Path)
+		}
 	}
 }
 

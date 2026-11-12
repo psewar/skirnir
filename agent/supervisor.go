@@ -432,7 +432,8 @@ func (s *Supervisor) allowedToStart(ctx context.Context, sp ChildSpec, st *child
 	}
 }
 
-// logLaunch: grants the agent set, paths it would not grant, and a child that keeps SYSTEM on purpose.
+// logLaunch: grants the agent set, paths it would not grant or the child cannot resolve, data still in the agent's own
+// folder, and a child that keeps SYSTEM on purpose.
 func (s *Supervisor) logLaunch(sp ChildSpec, l *childLaunch) {
 	if l.runAs == runAsSystem {
 		s.log.Warnf("supervisor: %s runs as system (run_as_reason: %s)", sp.Name, sp.RunAsReason)
@@ -443,6 +444,12 @@ func (s *Supervisor) logLaunch(sp ChildSpec, l *childLaunch) {
 			s.log.Infof("supervisor: %s: granted LOCAL SERVICE %s on %s (%s)", sp.Name, a.Need, a.Path, a.From)
 		case strings.HasPrefix(a.State, "not granted"), a.State == "missing":
 			s.log.Warnf("supervisor: %s: %s %s (%s): %s", sp.Name, a.Need, a.Path, a.From, a.State)
+		}
+		if a.Resolve != "" && a.Resolve != "ok" {
+			s.log.Warnf("supervisor: %s: %s (%s) cannot be resolved: %s", sp.Name, a.Path, a.From, a.Resolve)
+		}
+		if a.MoveTo != "" {
+			s.log.Warnf("supervisor: %s: %s is in the agent's own folder; move it to %s (ADR-0091)", sp.Name, a.Path, a.MoveTo)
 		}
 	}
 }

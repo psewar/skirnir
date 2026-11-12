@@ -145,8 +145,17 @@ Dienst ändert sich nichts.
 `NT AUTHORITY\LOCAL SERVICE` statt mit dem LocalSystem des Dienstes; ein Fehler in Ollama, im STT-Dienst oder in Strata
 bringt damit nicht mehr das System. Vor jedem Start leitet der Agent die Ordner, die das Kind braucht, aus `cmd`, `cwd`,
 `env` und `args` ab (jeder Wert, der genau ein absoluter Pfad ist), prüft jeden als LOCAL SERVICE und vergibt, was fehlt:
-Lesen auf Ordnern ausserhalb des Datenordners des Agenten (etwa die Ollama-Modelle), Ändern nur auf dem eigenen Ordner des
-Kindes darunter (`C:\ProgramData\skirnir-agent\<ordner>`; Konfiguration und Schlüssel dort nie). Eine Laufwerkswurzel,
+Lesen auf Ordnern ausserhalb des Datenordners des Agenten, Ändern nur auf dem eigenen Ordner des Kindes im
+**Datenordner der Kinder** `C:\ProgramData\skirnir-agent-children\<ordner>` (ADR-0091; der Datenordner des Agenten mit
+angehängtem `-children`). Diesen Ordner legt der Agent vor dem ersten Start selbst an, lesbar nur für System und
+Administratoren (LOCAL SERVICE darf ihn nur auflisten), und lehnt Kinder mit Daten darin ab, wenn jemand anderes ihn
+ändern kann - dann den Ordner löschen, der Agent legt ihn neu an. Die Daten der Kinder (Modelle und Home von Ollama,
+Caches, Logs, die ein Kind selbst schreibt) gehören dorthin, nicht in den Ordner des Agenten: LOCAL SERVICE darf den
+Ordner des Agenten nicht auflisten, und ein Programm, das seine Pfade auflöst (Ollama, jedes Go-Programm), scheitert
+darunter mit "Access is denied", obwohl es die Dateien öffnen dürfte. Daten, die noch im Ordner des Agenten liegen,
+funktionieren für andere Programme weiter; Log und `check-config` nennen sie mit `move to <ordner>` - Kind stoppen,
+Ordner verschieben, Pfad in der Konfiguration ändern. Für jeden Pfad meldet der Status zudem, ob das Kind ihn auflösen
+kann (`children[].access[].resolve`: `ok` oder der Ordner darüber, den das Kind nicht auflisten darf). Eine Laufwerkswurzel,
 ein Systemordner oder ein ganzes Benutzerprofil wird nur geprüft, nie freigegeben - dann einen engeren Ordner nennen.
 Ebenso ein Pfad hinter einem Link (Junction, symbolischer Link, Cloud-Ordner) - dann den Zielordner nennen -, und
 `write_paths` ausserhalb des Datenordners nur, wo ausser System und Administratoren niemand sie ändern kann.
