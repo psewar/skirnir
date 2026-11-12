@@ -2,15 +2,29 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "03e480e0d5025813d228e7f73d86c22e9886c5df",
-  "change_digest": "0fdf60d83bbf9018b054ae09f1b99bc82efeb6ef9173bcbdece25edc0e3dcc15",
+  "base_sha": "676eb727403e88ed5a8750b54590615100218998",
+  "change_digest": "eabc520624fa8458f3902e02ceaac9d83086e389d84fb58db9160f22ac5a2ac7",
   "reviewed_paths": [
     "CHANGELOG.md",
+    "agent/app.go",
+    "agent/childidentity.go",
+    "agent/childidentity_other.go",
+    "agent/childidentity_test.go",
+    "agent/childidentity_windows.go",
+    "agent/childidentity_windows_test.go",
+    "agent/childpath_test.go",
+    "agent/config.example.yaml",
+    "agent/config.go",
     "agent/main.go",
-    "agent/probe_identity.go",
-    "agent/probe_identity_test.go",
     "agent/probe_identity_windows.go",
-    "agent/probe_identity_windows_test.go"
+    "agent/supervisor.go",
+    "docs/adr/0088-windows-children-run-as-local-service.md",
+    "docs/adr/README.md",
+    "docs/install-agent.de.md",
+    "docs/install-agent.md",
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md"
   ],
   "risk_ids": [
     "TM-14"
@@ -19,30 +33,46 @@
     "B3",
     "B8"
   ],
-  "summary": "Agent 0.33.1: probe-identity instrument fixes after its first run on a node. The rights check no longer needs the configuration (it is unreadable for the restricted tokens), CUDA counts only on a proof (CUDA_VISIBLE_DEVICES in Ollama's config line gave a false 'seen'), and the probe observes up to 60 s after health for CUDA and GPU memory. No change to how the service runs.",
+  "summary": "Agent 0.34.0 (ADR-0088): on Windows the children run as NT AUTHORITY\\LOCAL SERVICE instead of LocalSystem. Before every start the agent derives the folders a child needs from cmd, cwd, env and args (plus read_paths/write_paths), checks each one by impersonating LOCAL SERVICE and grants what is missing with icacls /L: read outside its data folder, modify only on the child's own folder below it. Never granted: drive roots, system folders, whole user profiles, the agent's own files, paths behind links; modify outside the data folder only where nobody besides the administrators can change the path. A child whose access cannot be established is refused, never started as SYSTEM. run_as: system needs run_as_reason. check-config checks without granting.",
   "findings": [
     {
       "id": "TM-14",
-      "evidence": "First node run (0.33.0): rights check under restricted/localservice failed with 'configuration: Access is denied'; 'cuda seen' for children that had failed; VRAM 0 even for the system baseline.",
-      "resolution": "Second node run (0.33.1, same node): rights results for all three tokens; failed children show 'not seen'; STT under system shows its CUDA ready line and 2076 MiB, matching the running service. Unit tests for the CUDA reading cover the environment-variable line, an announcement and the ready line.",
+      "evidence": "Children (llama.cpp, the STT stack, Strata) handle network input and ran as LocalSystem; a memory-safety bug yielded SYSTEM (ADR-0087).",
+      "resolution": "They run as LOCAL SERVICE (no administrator rights; measured: NVML set denied, 19 of 666 process paths, 0 user hives). Grants are derived, checked as that account and minimal; refusal instead of fallback.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "TM-14",
+      "evidence": "Found in this review: icacls follows links by default. Whoever may replace a configured folder (a model folder in a user's profile) with a junction could choose where the agent, as LocalSystem, grants LOCAL SERVICE access; with write_paths, a program folder.",
+      "resolution": "A path that is or lies below a reparse point is never granted (checked per component, so 8.3 names are not mistaken for links); icacls runs with /L; modify outside the child's own data folder only where the ADR-0085 exposure check finds nobody besides the system and administrators. Residual: a read grant on a user-changeable folder keeps a check-to-grant race that could move a read entry; documented in ADR-0088.",
       "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "go test ./... (Windows, Linux/WSL), go vet, gofmt",
+      "command": "go test ./... (Windows, not elevated), go vet (Windows, GOOS=linux), gofmt",
       "result": "passed",
-      "evidence": "ok; probe tests incl. the new CUDA cases and the stand-in child."
+      "evidence": "ok; derivation, too-broad rule, ensureAccess states, link and user-folder refusal, grant ACE incl. inheritance, run_as validation, supervisor refusal."
     },
     {
-      "command": "probe-identity --inner-rights --config <missing file>",
+      "command": "go test (Windows, elevated, as on the CI runner): AccessAs|GrantLocalService|EnsureAccess|ChildAccess|Exposure|Refuses|ProbeChildRestricted",
       "result": "passed",
-      "evidence": "rights JSON printed, exit 0."
+      "evidence": "impersonation: a folder only administrators may read is denied to the restricted token, readable after an Everyone grant, not writable; the caller keeps its identity."
     },
     {
-      "command": "probe-identity 0.33.1 on a Windows node as LocalSystem",
+      "command": "go vet + go test ./... on Linux (WSL)",
       "result": "passed",
-      "evidence": "system: stt healthy, CUDA seen, 2076 MiB; ollama healthy, CUDA seen. restricted: stt exit 0xC06D007E, ollama cannot traverse its model folder, NVML init rc 9. localservice: stt log folder not writable, ollama model folder not traversable, NVML set rc 4; process paths ~21 of 666, user hives 0 of 1."
+      "evidence": "ok"
+    },
+    {
+      "command": "check-config of the built 0.34.0-pre once as LocalSystem on a Windows node (check only, no grant)",
+      "result": "passed",
+      "evidence": "every child reported as localservice; derived access matches the earlier measurement: model folder read needs grant, the children's own data folders modify needs grant, program folders and the STT model ok."
+    },
+    {
+      "command": "python test/check_adr_index.py; python test/check_control_flow.py",
+      "result": "passed",
+      "evidence": "ADR index ok: 88 ADRs; control flow ok."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -56,6 +86,7 @@
     }
   ],
   "limitations": [
-    "Ollama's GPU memory is 0 without a loaded model; loading one is not part of the probe."
+    "Starting children under LOCAL SERVICE through the supervisor needs LocalSystem and is confirmed by the node check during the rollout (Ollama with a loaded model, STT CUDA, Strata on request, guard power limit).",
+    "Strata's model folder is named only in its run file and needs read_paths on the node."
   ]
 }
