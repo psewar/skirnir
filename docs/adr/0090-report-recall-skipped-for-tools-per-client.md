@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-12
 decision-makers: operator
 ---
@@ -43,8 +43,8 @@ The skip itself is intended. What is missing is a signal that names the client a
 
 ## Decision Outcome
 
-Chosen option: 1, because it is the smallest signal that names the client, says that the state persists, and alerts
-without labelling memory metrics with clients.
+Chosen option (accepted by the operator 2026-11-12): 1, because it is the smallest signal that names the client, says
+that the state persists, and alerts without labelling memory metrics with clients.
 
 * A **run** starts with a client's first recall skipped for tools and ends with its next recall that passes the tools
   check (no tools, or the grant opts in). It counts its requests and keeps the project of the last one. Explicit
