@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "9212977d155748846fd31bba6908967b295fe2b6",
-  "change_digest": "a025ce0ef6815d10ee35e7897249627a62f318c5eec023145ceb6a73d5ead011",
+  "base_sha": "f886838a4864d74206be2a7fa0a5755e240b874d",
+  "change_digest": "9b5419bcfb0c7594b237a75c94d5568055449aac7480525ee27c6875799f2a08",
   "reviewed_paths": [
     "CHANGELOG.md"
   ],
@@ -13,12 +13,12 @@
   "boundaries": [
     "B9"
   ],
-  "summary": "Documentation only: the unreleased CHANGELOG row is named for the next tag, v0.32.0 (router 0.28.0, agent 0.32.0), so the release tool finds exactly one row for the tag at the release commit. No code, configuration or workflow change.",
+  "summary": "Documentation only: the v0.32.0 CHANGELOG row links the published release and carries its date (2026-11-12). No code, configuration or workflow change.",
   "findings": [
     {
       "id": "TM-16",
       "evidence": "The release tool reads router and agent version from the CHANGELOG row of the tag at the target commit; a wrong row would publish wrong version claims next to the attested binaries.",
-      "resolution": "Only the tag cell changes; router 0.28.0 matches common.py at the target, agent 0.32.0 matches the built binaries; release_anlegen.py --pruefen checks both before anything is published.",
+      "resolution": "Only the tag and date cells change; versions stay 0.28.0 / 0.32.0 as released.",
       "disposition": "fixed"
     }
   ],
@@ -26,7 +26,7 @@
     {
       "command": "git diff origin/main -- CHANGELOG.md",
       "result": "passed",
-      "evidence": "one line: tag cell v0.31.1 (unreleased) -> v0.32.0 (unreleased)."
+      "evidence": "one line: v0.32.0 (unreleased) -> link to the release, date 2026-11-12."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -39,7 +39,5 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": [
-    "The release itself is created after the merge; the follow-up PR turns the row into a link with the date."
-  ]
+  "limitations": []
 }
