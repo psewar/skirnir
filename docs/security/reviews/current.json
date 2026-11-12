@@ -3,7 +3,7 @@
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
   "base_sha": "b8bc2ce66ac29bef757b7f39360b9e7dc08a94c4",
-  "change_digest": "376b62e75098a3ac4349f8797887d0717d5a500ac69992f8c1bd24ef98e92f4a",
+  "change_digest": "9bcdc81eda0f98ee65bf8ac821fdf4e760afb3ba69be69f29590935925b5064b",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -93,6 +93,11 @@
       "command": "ruff check .; python test/check_adr_index.py",
       "result": "passed",
       "evidence": "All checks passed; ADR index ok: 85 ADRs."
+    },
+    {
+      "command": "go test -run TestChildExposureUserProgram with TMP as an 8.3 short path (Windows)",
+      "result": "passed",
+      "evidence": "CI failure reproduced with the previous test (short TEMP vs. resolved long path); the test now resolves its expectation like the check does and compares without case on Windows."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
