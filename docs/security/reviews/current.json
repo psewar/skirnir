@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "cf0a4d3429462cef372f8cd966e35f786530da5e",
-  "change_digest": "fc496a6d2790e32ff118645babe6168cb40185c38e6598e85305817698d45e12",
+  "base_sha": "27a399d53c9c302379fd9bf85bbc336665e339a4",
+  "change_digest": "eca994500285e85fe3f24a93fbd7d791ed6892a7aadc8a4c1cedccfe51abae3b",
   "reviewed_paths": [
     "CHANGELOG.md",
     "agent/childidentity.go",
@@ -11,26 +11,13 @@
     "agent/childidentity_windows_test.go",
     "agent/config.example.yaml",
     "agent/supervisor.go",
-    "design/hindsight-memory.md",
-    "design/shared-memory-interoperability.de.md",
-    "design/shared-memory-interoperability.md",
-    "docs/adr/0090-report-recall-skipped-for-tools-per-client.md",
     "docs/adr/0091-windows-children-keep-their-data-outside-the-agents-folder.md",
     "docs/adr/README.md",
     "docs/install-agent.de.md",
     "docs/install-agent.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md",
-    "docs/troubleshooting.de.md",
-    "docs/troubleshooting.md",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/context_ops.py",
-    "router/skirnir_router/memory.py",
-    "router/skirnir_router/metrics.py",
-    "router/skirnir_router/recall_skips.py",
-    "router/ui.html",
-    "test/selftest_memory.py"
+    "docs/security/threat-model.md"
   ],
   "risk_ids": [
     "TM-14"
