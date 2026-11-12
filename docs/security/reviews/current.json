@@ -2,101 +2,102 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "f9ec6dd84e6ef0c9472695be2663705f434d1bee",
-  "change_digest": "14783a87eefd614e63824c5c08f3f9b8578a0b87ce42963422b5f2448306dc72",
+  "base_sha": "ed239dc2f1ba8ff8b2c4732b384d24756f3d95c2",
+  "change_digest": "ec07d51a2f55d6d48a6e28cfac95fef714df19a1509c9e1f533e1004de1e5ae2",
   "reviewed_paths": [
+    ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "docs/adr/0082-older-certificate-folder-read-only-for-the-router.md",
+    "docs/adr/0083-router-reports-tls-files-it-could-change.md",
     "docs/adr/README.md",
     "docs/install-router.de.md",
     "docs/install-router.md",
-    "docs/security/risk-register.json",
+    "docs/reference.de.md",
+    "docs/reference.md",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "router/skirnir-router.service",
-    "router/skirnir_router/common.py",
-    "test/selftest_privilege_paths.py",
     "router/skirnir_router/app.py",
-    "router/skirnir_router/config.py",
-    "router/skirnir_router/nodes.py",
-    "router/skirnir_router/setup_init.py",
-    "router/skirnir-router-cert.path",
-    "router/skirnir-router-cert.service",
-    "router/skirnir-router-secrets.service",
-    "router/skirnir-router-secrets-refresh.service",
-    "router/skirnir-router-secrets.timer",
-    "router/install.sh",
-    "deploy/deploy.py"
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/posture.py",
+    "router/skirnir_router/process_view.py",
+    "test/selftest_process_view.py"
   ],
   "risk_ids": [
-    "TM-14"
+    "TM-14",
+    "TM-15"
   ],
   "boundaries": [
     "B8",
     "B9"
   ],
-  "summary": "Router 0.26.1, ADR-0082 (complements ADR-0073; renumbered from ADR-0081 after #129 took that number, rebased onto main f9ec6dd, entry in the v0.31.1 row next to #129's; the TM-14 lines changed here and #129's TM-16 lines were merged without overlap). skirnir-router.service gains ReadOnlyPaths=-/etc/skirnir-router/tls next to the certs line: installations set up before router.py --init keep certificate and key in /etc/skirnir-router/tls, which lay inside ReadWritePaths=/etc/skirnir-router, so a compromised router could replace its TLS key and certificate there or plant a symlink for an ACME client that writes in place. Verified first that the router never writes below tls: control_tls is only read (config.unreadable_files with os.access R_OK, app.py load_cert_chain, config.cert_fingerprint for node certificates); every router write targets a fixed file name next to config.yaml (roles.yaml, nodes.json, metrics/usage/perf/ollama-latest JSON, events.jsonl, deletions.jsonl), /var/lib/skirnir-router or /var/log/skirnir-router, or an operator-set log path; router.py --init writes only config.yaml; no code generates certificates; install.sh, deploy.py, the certificate path/service and the secrets units never write there (the certificate is written by the ACME client as root outside the router's mount namespace; the router is restarted by skirnir-router-cert.path). The leading '-' keeps hosts without the folder starting. selftest_privilege_paths now requires both read-only lines with '-', checks that the --init defaults, both example configurations and the watched path of skirnir-router-cert.path are not router-writable under the unit (most specific path setting decides), that the router's own files stay writable, and as the rejected case that the same unit without the tls line leaves certificate and key writable. Threat model EN/DE and register TM-14 controls, install guide EN/DE (TLS section, checklist), CHANGELOG v0.31.1 row.",
+  "summary": "Router 0.27.0 on top of main with ADR-0082: at start the router checks its own view (/proc/self/mountinfo, owner and mode, effective capabilities) and reports the medium posture finding tls_files_changeable (TM-14, ADR-0083) when it could change or replace control_tls.cert or control_tls.key or a folder above them. The next step names /etc/skirnir-router/certs and /etc/skirnir-router/tls (read-only for the unit since ADR-0073 and ADR-0082), or keeping the files outside the router's writable folders. The check only reads /proc/self and stat results of the configured paths; it writes nothing, reads no certificate or key content, and router.py --posture leaves it out. Reviewed: process_view.py in full, its caller in app.main (runs before unreadable_files and the TLS context), the posture finding, CI wiring, the unit lines it relies on (router/skirnir-router.service on main) and the docs.",
   "findings": [
     {
       "id": "TM-14",
-      "evidence": "router/skirnir-router.service had ReadWritePaths=/etc/skirnir-router and made only /etc/skirnir-router/certs read-only; certificate and key of older installations in /etc/skirnir-router/tls were writable by the router process (uid 0 without capabilities, owner bits suffice). Impact: a compromised router replaces the certificate it presents to nodes and clients persistently, and with an ACME client that writes into the existing file a planted symlink turns renewal into a root write.",
-      "resolution": "ReadOnlyPaths=-/etc/skirnir-router/tls. Under systemd 259 append, unlink, create and rename in tls are refused while roles.yaml in the parent stays writable; without the line all four are allowed. selftest_privilege_paths fails without the line (3 failures) and without the '-' prefix (2 failures).",
+      "evidence": "ADR-0073 and ADR-0082 make only /etc/skirnir-router/certs and /etc/skirnir-router/tls read-only for the router unit (root without capabilities, ReadWritePaths=/etc/skirnir-router). A certificate or key in any other folder below the router's writable folders, or under a unit override without those lines, stays replaceable by a compromised router, and nothing reported it.",
+      "resolution": "The running router reports tls_files_changeable with the next step. It checks the file (writable mount plus owner, group or mode), every folder above it (rename or replace), mount points, sticky folders, symlink and target, CAP_DAC_OVERRIDE and CAP_FOWNER; an owner on a writable mount counts as writer because chmod needs only ownership. The self-test mirrors the current unit (certs and tls read-only): files there give no finding, files in another folder below /etc/skirnir-router do.",
       "disposition": "fixed"
     },
     {
       "id": "TM-14",
-      "evidence": "Pre-existing, unchanged in kind: certificate and key in any other folder below /etc/skirnir-router (or /var/lib, /var/log/skirnir-router) stay router-writable; if certs or tls is a symlink, systemd mounts its target read-only but the link is an entry in the router-writable /etc/skirnir-router and can be swapped (confirmed under systemd 259: write through the link refused, replacing the link allowed). Same for certs since ADR-0073.",
-      "resolution": "Documented in install-router EN/DE (keep certificate and key in certs, tls or outside the writable folders; real folders, not symlinks) and in ADR-0082's consequences. Removed for good by the dedicated router user that TM-14's next action already plans.",
-      "disposition": "baseline"
+      "evidence": "Found in this review: changeable() walked up with `while entry != \"/\"`. control_tls accepts relative paths (no absolute-path check in config.py), and for a relative path the walk reaches \"\" where dirname(\"\") is \"\", so the start-time check looped forever before the router listened. Trigger is the operator's configuration (control_tls is not editable in the web UI); impact is a router that does not start serving.",
+      "resolution": "The path is joined to the working directory, where the router opens it, and the walk ends when dirname returns its input. test_relative_path and test_walk_ends_without_absolute_path fail against the previous code (wrong verdict; thread still looping after 5 s) and pass now.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "TM-14",
+      "evidence": "A check that raised at start (stat of a path the process cannot reach, a dangling link) would stop the router before it serves.",
+      "resolution": "Paths are checked with lexists before any stat; a link target is only stat-ed when it exists; folders above an existing entry are reachable by construction. No try/except added (check_control_flow: 0 findings). Dangling links in read-only and writable folders are tested.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "TM-15",
+      "evidence": "The finding writes configured paths to the start log.",
+      "resolution": "Only the setting name and the configured path (as config.yaml holds it) are printed; no file content, owner or other path.",
+      "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_privilege_paths.py (Windows; unit, deploy and passthrough checks)",
+      "command": "python test/selftest_process_view.py (Windows)",
       "result": "passed",
-      "evidence": "selftest_privilege_paths: all passed (22 static checks). Counter-checks on a copy of the unit: without ReadOnlyPaths=-/etc/skirnir-router/tls 3 failures (folder line, tls certificate/key writable, rejected case); with the line but without '-' 2 failures."
+      "evidence": "Ran 17 tests: OK (skipped=1, the Linux-only check of the test process's own view)."
     },
     {
-      "command": "Renderer cases of selftest_privilege_paths.py (bash, Linux)",
-      "result": "not_run",
-      "evidence": "They skip on Windows; the renderers are unchanged by this PR and CI runs the cases on Linux."
+      "command": "counter-checks on a copy of the code: previous next-step text; previous walk in process_view.changeable",
+      "result": "passed",
+      "evidence": "previous next step: test_finding FAILED ('/etc/skirnir-router/tls' not in the next step); previous walk: test_relative_path and test_walk_ends_without_absolute_path FAILED (2 failures)."
     },
     {
-      "command": "systemd-run --user --wait --pipe -p ProtectSystem=strict -p ReadWritePaths=<tmp>/etc -p ReadOnlyPaths=-<tmp>/etc/certs -p ReadOnlyPaths=-<tmp>/etc/tls -p ReadOnlyPaths=-<tmp>/etc/missing ... (WSL Ubuntu, systemd 259, user manager, throwaway tree)",
+      "command": "python test/selftest_posture.py; python test/selftest_init.py; python test/selftest_privilege_paths.py; python test/selftest_dependency_audit.py; python test/selftest_english_names.py",
       "result": "passed",
-      "evidence": "With the tls line: append/rm/create/rename in tls refused, certs refused, roles.yaml allowed, a missing '-' folder does not stop the start; write through a listed symlink refused, swapping the link allowed. Without the tls line: all tls operations allowed."
+      "evidence": "all OK; the CLI posture is unchanged (no view passed)."
     },
     {
-      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check; python test/selftest_control_flow.py && python test/check_control_flow.py",
+      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check; python test/selftest_control_flow.py; python test/check_control_flow.py; python test/check_training_data.py",
       "result": "passed",
-      "evidence": "Re-run after the rebase onto f9ec6dd: all checks passed; configuration ok: 5 roles, 7 models; ADR index ok: 82 ADRs; pinned references 0 findings; Python locks 0 problems; control flow ok."
+      "evidence": "All checks passed; configuration ok; ADR index ok: 83 ADRs; 0 pinned-reference findings; 0 lock problems; control flow ok; training data 0 findings."
     },
     {
-      "command": "python test/selftest_threat_review.py, selftest_install.py, selftest_init.py, selftest_english_names.py, selftest_posture.py, selftest_log_hygiene_paths.py, selftest_config_load.py, selftest_trusted_gate.py; after the rebase also selftest_dependency_audit.py",
+      "command": "python test/run_tests.py (end-to-end suite, Windows)",
       "result": "passed",
-      "evidence": "All exit 0 on Windows (selftest_install: OK, 3 skipped as on Windows before). After the rebase: selftest_privilege_paths, selftest_threat_review, selftest_install, selftest_init, selftest_english_names, selftest_posture, selftest_config_load and selftest_dependency_audit exit 0 again."
-    },
-    {
-      "command": "python test/run_tests.py (end-to-end suite, Windows, loopback ports)",
-      "result": "passed",
-      "evidence": "Second run: 0 failures, 332 PASS. The first run had 1 failure, 'Residency: rank-1 prewarmed again after evictor idle' (model loaded, but no residency prewarm event within the test's 12 heartbeat polls); the suite is timing-sensitive and runs nightly in CI for that reason, and this change touches no router logic (unit file and version string). Both runs were before the rebase onto f9ec6dd, which changed no router code (CI workflows, docs, selftest_dependency_audit)."
+      "evidence": "0 failures, 332 PASS."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
-      "evidence": "Run after staging this record."
+      "evidence": "Security evidence: 0 error(s)."
     },
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s); manual review of the added lines: example paths and synthetic folder names only."
+      "evidence": "Public-change scan: 0 finding(s); synthetic paths only."
     }
   ],
   "limitations": [
-    "No production host was inspected; that a deployment keeps its TLS files in /etc/skirnir-router/tls comes from the operator. deploy.py prefers a skirnir-router.service from the operator's ops folder if one exists; such an override needs the same line.",
-    "The systemd check ran under the WSL user manager, not as the root system service; there ProtectSystem=strict did not make an unlisted folder under $HOME read-only, so it evidences the precedence of ReadWritePaths/ReadOnlyPaths, not ProtectSystem.",
-    "systemd mounts the folder when the router starts: a tls folder created later is read-only from the next restart; a running router keeps an older directory if the whole folder is replaced, until the restart skirnir-router-cert.path triggers.",
-    "unit_may_write in the self-test models only ReadWritePaths, ReadOnlyPaths and InaccessiblePaths with the most specific match; StateDirectory/LogsDirectory and symlinks are not modelled.",
-    "The router still runs as root; this closes one more writable location, not the root identity (TM-14 stays open)."
+    "The Linux-only test of the running process's own view ran in CI (Ubuntu), not locally: the local WSL Python lacks aiohttp.",
+    "ACLs, security modules and immutable attributes are not read; they can only remove rights, so the check may over-report, never under-report.",
+    "A configured path with '..' through a symlink is walked after lexical normalisation as well as at its resolved target; the link swapped by such a '..' is judged only through the folders above it.",
+    "The finding only appears in the start log of the running router; router.py --posture cannot see the unit's view.",
+    "No end-to-end run on a real systemd unit for this change; the unit lines themselves were verified with systemd for ADR-0082."
   ]
 }

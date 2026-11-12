@@ -174,7 +174,7 @@ der nächsten Engine weiter. Ohne beides `enabled: false` setzen oder eine kürz
 | `router.py --help` | Befehle auflisten |
 | `router.py --init <dir> [--public-url URL] [--user NAME] [--client NAME] [--cert PEM] [--key PEM]` | Erste, sichere Konfiguration schreiben (siehe oben) |
 | `router.py --check <config> [--pure] [--files]` | Konfiguration prüfen; unbekannte Schlüssel kommen mit Vorschlag. `--files`: die genannten Dateien sind lesbar. Exit-Code 0 = in Ordnung, 2 = ungültig |
-| `router.py --posture <config> [--pure]` | Was die Konfiguration erlaubt, das das Bedrohungsmodell als riskant führt (observe-Modus, entsperrte Policy, geteilte oder Beispiel-Tokens, Clients nur per Adresse, Steuer-Port ohne Login oder TLS, API-Port ohne TLS, Klartext-Backends …), je mit Schwere und nächstem Schritt ([ADR-0064](adr/0064-report-the-security-posture-as-facts.md)). Exit-Code 0 auch mit Befunden |
+| `router.py --posture <config> [--pure]` | Was die Konfiguration erlaubt, das das Bedrohungsmodell als riskant führt (observe-Modus, entsperrte Policy, geteilte oder Beispiel-Tokens, Clients nur per Adresse, Steuer-Port ohne Login oder TLS, API-Port ohne TLS, Klartext-Backends …), je mit Schwere und nächstem Schritt ([ADR-0064](adr/0064-report-the-security-posture-as-facts.md)). Exit-Code 0 auch mit Befunden. Das Startlog meldet zusätzlich TLS-Dateien, die der laufende Router ändern oder ersetzen könnte (`tls_files_changeable`, [ADR-0083](adr/0083-router-reports-tls-files-it-could-change.md)); der Befehl läuft außerhalb der Unit und sieht das nicht |
 | `router.py --hash` | PBKDF2-Hash für `control_auth.users`; fragt ohne Echo |
 
 `--pure` ignoriert eine danebenliegende `roles.yaml` (Änderungen aus der Web-UI). Die Befehle mit dem Python des venv
@@ -201,7 +201,8 @@ Ohne `install.sh` (andere Distribution, oder um jeden Schritt zu sehen):
 - `client_auth.mode: enforce` und `locked: true` (`--init` schreibt beides).
 - Ein Token je Client, kein Beispiel-Token (`--posture` meldet `clients_share_token` und `client_example_token`).
 - `control_tls` gesetzt und `api_tls: true`.
-- Zertifikat und Schlüssel in `/etc/skirnir-router/certs`, `/etc/skirnir-router/tls` oder außerhalb der Ordner, die der Router schreiben darf.
+- Zertifikat und Schlüssel in `/etc/skirnir-router/certs`, `/etc/skirnir-router/tls` oder außerhalb der Ordner, die
+  der Router schreiben darf; sonst meldet das Startlog `tls_files_changeable`.
 - Port 11435 per Firewall auf GPU-Knoten und Admin-Rechner beschränkt.
 - Ollama auf jedem Knoten an Loopback gebunden.
 - Fingerprint vor der Freigabe eines Knotens mit `skirnir-agent identity` verglichen.
