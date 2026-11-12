@@ -265,7 +265,7 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Router/agent compromise reaches privileged host operations.",
-      "controls": "Router systemd capabilities/filesystem restrictions. The agent forwards only inference, listing and version paths to the upstream and refuses Ollama downgrades without ollama_update.allow_downgrade; the root secret renderers source their access file only from a root-only folder the router cannot see or write, and the router unit sees its certificate folder read-only (ADR-0073). render-env.sh refuses secret values with a line break and renders further names only when they end in _KEY or _TOKEN (ADR-0080).",
+      "controls": "Router systemd capabilities/filesystem restrictions. The agent forwards only inference, listing and version paths to the upstream and refuses Ollama downgrades without ollama_update.allow_downgrade; the root secret renderers source their access file only from a root-only folder the router cannot see or write, and the router unit sees its certificate folders read-only (certs, ADR-0073; tls of installations older than router.py --init, ADR-0081). render-env.sh refuses secret values with a line break and renders further names only when they end in _KEY or _TOKEN (ADR-0080).",
       "next_action": "Dedicated router user and fuller unit directive set; Linux agent unit without /usr/local/bin write access; warn when a LocalSystem agent child runs from a user-writable path; separate privileged Windows agent operations.",
       "owner_role": "maintainer and operator",
       "test_refs": [
