@@ -1,6 +1,6 @@
 // skirnir-agent: Agent for GPU nodes of the Skirnir router (Windows service, foreground/systemd on Linux).
 // Tunnel to the router with key identity, heartbeat, MQTT device for Home Assistant, supervision of local AI services.
-// Verben: setup | install | uninstall | apply-rules | start | stop | restart | status | run | identity | check-config | mqtt-clear | gpu | gpuz-relay | version
+// Verben: setup | install | uninstall | apply-rules | start | stop | restart | status | run | identity | check-config | mqtt-clear | gpu | gpuz-relay | game | probe-identity | version
 package main
 
 import (
@@ -39,6 +39,9 @@ func usage() {
   gpu           print the measurement source (NVML/nvidia-smi) and all sensors once, GPU-Z included
   gpuz-relay    pass GPU-Z sensors from the login session to the service (Windows; task at login)
   game          print game detection and main memory once (game folders, program names, matches)
+  probe-identity  measure children and privileged functions under tokens without system rights (ADR-0087;
+                Windows, administrator): [--child a,b] [--token system,restricted,localservice]
+                [--with-upstream "<reason>"] [--grace-s N]; changes nothing in the running service
   version
 
   default configuration: %s
@@ -155,6 +158,16 @@ func main() {
 	}
 	var verr error
 	switch verb {
+	case "probe-identity":
+		opts, err := parseProbeArgs(os.Args[1:])
+		if err != nil {
+			verr = err
+			break
+		}
+		verr = runProbeIdentity(cfg, cfgPath, opts, os.Stdout)
+		if verr == nil && !opts.InnerRights {
+			fmt.Println("STATE: probed")
+		}
 	case "check-config":
 		fmt.Printf("ok: node=%s router=%s upstream=%s mqtt-local=%v children=%d identity=%s service=%s account=%s\n", cfg.Node, cfg.Router.URL, cfg.Tunnel.Upstream,
 			cfg.MQTT.Host != "", len(cfg.Children), cfg.Identity.Dir, cfg.Install.ServiceName, firstNonEmpty(cfg.Install.Account, "LocalSystem"))

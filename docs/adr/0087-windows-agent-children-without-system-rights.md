@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-12
 decision-makers: operator
 ---
@@ -45,8 +45,9 @@ ADR-0085 closed the path where someone else could swap a child's program. The ch
 ## Considered Options
 
 1. **Children under a separate low-privilege identity, the agent stays LocalSystem.** Each child gets a token without
-   administrator rights. Two possible tokens: an S4U logon of a local account created by setup (no password stored), or a
-   restricted copy of the agent's token (administrators deny-only, privileges removed). The child gets read access to its
+   administrator rights. Candidate tokens: a restricted copy of the agent's token (administrators and the user SID
+   deny-only, privileges removed, integrity medium), the built-in LOCAL SERVICE account (nothing to create), or later an S4U
+   logon of a local account created by setup (no password stored). The child gets read access to its
    program and model folders and write access only to a data folder of its own.
 2. **Split the agent.** An unprivileged main agent (`NT SERVICE\SkirnirAgent`: tunnel, children, MQTT) plus a small
    LocalSystem helper. The helper accepts a fixed set of operations through a named pipe that only the main agent's
@@ -61,7 +62,7 @@ ADR-0085 closed the path where someone else could swap a child's program. The ch
 
 ## Decision Outcome
 
-Proposed: **option 1 now, option 2 as a later step.**
+Chosen (accepted by the operator 2026-11-12): **option 1 now, option 2 as a later step.**
 
 Option 1 moves the untrusted-input code out of SYSTEM and leaves the agent's privileged functions untouched. Option 2
 only shrinks what remains, the agent's own small code, and costs a second service and an IPC interface.
@@ -79,18 +80,23 @@ Implementation outline for option 1, to be confirmed by the measurements below:
 
 ### Measurement plan (on a node, administrator; nothing changes in the running service)
 
-A probe verb (`skirnir-agent probe-identity`) runs a child's command line under each candidate token from a temporary
-copy of the configuration. It reports:
+The probe verb `skirnir-agent probe-identity` (agent 0.33.0) runs as LocalSystem; started by an administrator it runs
+itself once as LocalSystem through a scheduled task, and only from a folder no one else can change. For every enabled
+child (the upstream child only with `--with-upstream "<reason>"`, it loads a large model) and each token (`system` as the
+baseline, `restricted`, `localservice`) it starts the child's command line on a probe port of its own, so the running
+child is not disturbed, and reports:
 
-1. CUDA initialises and the GPU is visible (Ollama `/api/version` plus a short generation on a small model; the STT
-   service's CUDA path; Strata's engine start up to model load).
-2. Read access to the program and model folders; writes only where granted.
+1. Whether it starts and its health port answers; otherwise its exit code and the last lines of its output (access
+   denied, missing write access to a folder).
+2. Whether its output shows CUDA (Ollama's "inference compute ... library=cuda"; the STT service's CUDA load).
 3. Strata's "runtime directory must be owner-only" requirement is met with the child's own data folder.
 4. The per-process GPU memory counter still attributes the child's VRAM to it (`gpuproc_windows.go`), so the router does
    not count it as foreign.
 5. Job objects still end the whole process tree on restart.
 
-The same probe, run as the agent's virtual account, answers what option 2 would need:
+Under each token it also runs a copy of itself that checks the agent's own privileged functions. LOCAL SERVICE stands in
+for the virtual account here, since both are service identities without administrator rights. This answers what option 2
+would need:
 
 * NVML set-to-current-value (a no-op that shows the permission);
 * GPU-Z `NtOpenSection`;

@@ -130,6 +130,16 @@ Anmeldung bereit ist; weitere Dienste beaufsichtigt er auf dieselbe Weise. Unter
 - Ollama-Updates kommen dann über den Router ([operations.de.md](operations.de.md#ollama-updates)); der Updater der Tray-App
   greift nicht mehr.
 
+**Kinder ohne Systemrechte messen** (ADR-0087): `skirnir-agent probe-identity` startet jedes aktive Kind einmal unter
+jedem Kandidaten-Token - `system` (heutige Rechte, Vergleich), `restricted` (ohne Administratorrechte, Integrität mittel)
+und `localservice` - auf einem eigenen Prüf-Port, damit die laufenden Kinder ungestört bleiben. Es meldet, ob das Kind
+gesund wird, CUDA zeigt, sein Grafikspeicher ihm zugeordnet wird und es mit seinem Job-Objekt endet, und ob die eigenen
+Funktionen des Agenten (Power-Limit des GPU-Schutzes, GPU-Z, Prozesspfade, Benutzer-Hives) unter diesem Token gehen. Aus
+einer Administrator-Eingabeaufforderung mit der installierten Binary starten; es läuft dann einmal als LocalSystem und
+legt den Bericht neben der Konfiguration ab (`probe\probe-identity-<zeit>.json`). Das Upstream-Kind (ein grosser
+Modellserver) bleibt aussen vor, ausser mit `--with-upstream "<grund>"`; `--child` und `--token` grenzen ein. Am laufenden
+Dienst ändert sich nichts.
+
 Der Beispieleintrag `children:` für Ollama samt den nötigen Ordnerrechten steht in
 [agent/config.example.yaml](../agent/config.example.yaml). Nach einer Änderung der Konfiguration `skirnir-agent check-config`
 ausführen und den Dienst neu starten (`skirnir-agent restart` unter Windows, `systemctl restart skirnir-agent` unter Linux).
