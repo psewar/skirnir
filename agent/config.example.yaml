@@ -28,7 +28,8 @@
 #
 # LINUX (systemd): `sudo skirnir-agent setup --router https://router.example.net:11435` does all of the following
 #   (ADR-0070: configuration with identity/logging folders under /var, folders, binary, unit, start). By hand:
-#   1. Binary:  sudo install -m 755 skirnir-agent-linux-amd64 /usr/local/bin/skirnir-agent
+#   1. Binary:  sudo install -D -m 755 skirnir-agent-linux-amd64 /opt/skirnir-agent/skirnir-agent
+#               sudo ln -sf /opt/skirnir-agent/skirnir-agent /usr/local/bin/skirnir-agent   (ADR-0084)
 #   2. Config:  sudo mkdir -p /etc/skirnir-agent && sudo cp config.yaml /etc/skirnir-agent/config.yaml
 #               (identity.dir und logging.dir unten fuer Linux setzen, siehe Kommentare)
 #   3. Unit:    sudo cp skirnir-agent.service /etc/systemd/system/
@@ -133,7 +134,10 @@ tunnel:                                         # ausgehende Verbindung zum Rout
 #     health_tcp_port: 10300
 #     startup_grace_s: 120
 #   - name: ollama                              # Ollama selbst als Dienst-Kind statt Tray-App (laeuft dann schon vor der Anmeldung)
-#     cmd: 'C:\Users\<benutzer>\AppData\Local\Programs\Ollama\ollama.exe'
+#     cmd: 'C:\Program Files\Ollama\ollama.exe'   # ADR-0085: nur in einem Ordner, den nur Administratoren aendern
+#                                             #   koennen - das Kind laeuft als LocalSystem. Einen Benutzer-Install zieht
+#                                             #   agent\Move-OllamaProtected.cmd in einem Schritt dorthin um
+#     # user_writable_reason: '...'           # bewusste Ausnahme: startet trotz aenderbarem Ordner, Grund im Status
 #     args: ['serve']
 #     env:                                      # Benutzer-Umgebungsvariablen gelten fuer das Dienstkonto nicht -> hier setzen
 #       - 'OLLAMA_HOST=127.0.0.1:11434'      # nur Loopback: der Agent erreicht Ollama ueber 127.0.0.1 (Tunnel und

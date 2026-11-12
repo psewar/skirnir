@@ -43,6 +43,7 @@ jobs:
       - run: python test/selftest_init.py
       - run: python test/selftest_install.py
       - run: pwsh -NoProfile -File test/selftest_ollama_loopback.ps1
+      - run: pwsh -NoProfile -File test/selftest_ollama_protected.ps1
       - run: python test/selftest_privilege_paths.py
       - name: render-env.sh renders further secret keys (ADR-0080)
         run: python test/selftest_render_env.py
@@ -165,6 +166,8 @@ jobs:
       - run: go test ./...
       - name: Node scripts under Windows PowerShell 5.1
         run: powershell -NoProfile -ExecutionPolicy Bypass -File ../test/selftest_ollama_loopback.ps1
+      - name: Move-OllamaProtected under Windows PowerShell 5.1 (ADR-0085)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File ../test/selftest_ollama_protected.ps1
 
   e2e:
     name: Router end-to-end suite (nightly, informational)

@@ -22,6 +22,8 @@ type Supervisor struct {
 	children map[string]*childState
 
 	truncations *Truncations // stille Kuerzungen im Ollama-Log (truncation.go)
+
+	exposure func(ChildSpec) (*ChildExposure, error) // childExposure; replaceable in tests
 }
 
 type childState struct {
@@ -33,12 +35,19 @@ type childState struct {
 	Since     time.Time `json:"since"`
 	LastExit  string    `json:"last_exit,omitempty"`
 	NextStart time.Time `json:"next_start,omitempty"`
-	kill      func()
-	held      bool      // Hold(): paused, no restart until Release() (Ollama update, ollamaupdate.go)
-	tree      *procTree // Job object of the running child (0.13.0: VRAM per child)
+	// Exposure (ADR-0085): someone besides the system and the administrators could change the program. Refused: the
+	// child is not started for that reason (no user_writable_reason); checked again before every start.
+	Exposure *ChildExposure `json:"exposure,omitempty"`
+	Refused  string         `json:"refused,omitempty"`
+	kill     func()
+	held     bool      // Hold(): paused, no restart until Release() (Ollama update, ollamaupdate.go)
+	tree     *procTree // Job object of the running child (0.13.0: VRAM per child)
 }
 
 var restartBackoff = []time.Duration{time.Second, 5 * time.Second, 30 * time.Second, 60 * time.Second}
+
+// exposureRecheck: a refused child is checked again this often, so it starts by itself once its folder is fixed.
+var exposureRecheck = time.Minute
 
 func newSupervisor(specs []ChildSpec, logc LogCfg, log *Logger) (*Supervisor, error) {
 	g, err := newChildGroup()
@@ -46,7 +55,7 @@ func newSupervisor(specs []ChildSpec, logc LogCfg, log *Logger) (*Supervisor, er
 		return nil, err
 	}
 	s := &Supervisor{specs: specs, logc: logc, log: log, group: g, children: map[string]*childState{},
-		truncations: newTruncations()}
+		truncations: newTruncations(), exposure: childExposure}
 	for _, sp := range specs {
 		s.children[sp.Name] = &childState{spec: sp}
 	}
@@ -78,6 +87,9 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 	attempt := 0
 	for {
 		if !s.waitWhileHeld(ctx, sp.Name) { // held before it ever ran (Park: standby fallback, upstream_hold.go)
+			return
+		}
+		if !s.allowedToStart(ctx, sp, st) { // ADR-0085: someone else could change its program
 			return
 		}
 		start := time.Now()
@@ -346,6 +358,46 @@ func withoutChild(specs []ChildSpec, name string) []ChildSpec {
 }
 
 // waitWhileHeld blocks while the child is held; false = ctx ended.
+// allowedToStart checks the child's program before every start (ADR-0085). A child someone else could change is refused
+// unless children[].user_writable_reason accepts it; a failed check refuses too (the agent can read every permission it
+// needs, so a failure is not a reason to start). Refused: state in the status, one log line per new reason, and a fresh
+// check every exposureRecheck, so the child starts by itself once its folder is fixed. False only when ctx ends.
+func (s *Supervisor) allowedToStart(ctx context.Context, sp ChildSpec, st *childState) bool {
+	logged := ""
+	for {
+		e, err := s.exposure(sp)
+		refused := ""
+		switch {
+		case err != nil:
+			refused = fmt.Sprintf("child %s: permission check failed: %v", sp.Name, err)
+		case e != nil && e.Reason == "":
+			refused = e.String() + "; next: install it in a folder only administrators can change, or state why it is " +
+				"accepted in children[].user_writable_reason"
+		}
+		s.mu.Lock()
+		st.Exposure, st.Refused = e, refused
+		if refused != "" {
+			st.NextStart = time.Now().Add(exposureRecheck)
+		}
+		s.mu.Unlock()
+		if refused == "" {
+			if e != nil {
+				s.log.Warnf("supervisor: %s - started anyway (user_writable_reason: %s)", e, e.Reason)
+			}
+			return true
+		}
+		if refused != logged {
+			s.log.Errorf("supervisor: not started: %s", refused)
+			logged = refused
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(exposureRecheck):
+		}
+	}
+}
+
 func (s *Supervisor) waitWhileHeld(ctx context.Context, name string) bool {
 	for s.isHeld(name) {
 		select {

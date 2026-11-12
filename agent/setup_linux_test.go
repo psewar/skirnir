@@ -49,6 +49,9 @@ func TestLinuxSetupStaged(t *testing.T) {
 	if st, err := os.Stat(root + linuxBinary); err != nil || st.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("binary must be installed executable: %v", err)
 	}
+	if cur, err := os.Readlink(root + linuxLink); err != nil || cur != linuxBinary {
+		t.Fatalf("%s must link to %s: %q %v", linuxLink, linuxBinary, cur, err)
+	}
 	// A second run keeps the configuration untouched.
 	out.Reset()
 	if err := setupLinux([]string{"setup", "--root", root, "--router", "https://other.example.invalid:11435"}, strings.NewReader(""), &out, cfgPath); err != nil {
@@ -57,6 +60,53 @@ func TestLinuxSetupStaged(t *testing.T) {
 	again, _ := os.ReadFile(cfgFile)
 	if !bytes.Equal(text, again) || !strings.Contains(out.String(), "left unchanged") {
 		t.Fatal("an existing configuration must stay unchanged")
+	}
+}
+
+// ADR-0084: an installation from before kept the binary itself in /usr/local/bin and a unit that let the service write
+// there. A new setup moves the binary, turns the old file into the link and writes the hardened unit.
+func TestLinuxSetupMovesOldInstallation(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := "/etc/skirnir-agent/config.yaml"
+	if err := os.MkdirAll(filepath.Dir(root+linuxLink), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root+linuxLink, []byte("old binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(root+linuxUnitPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := "[Service]\nExecStart=/usr/local/bin/skirnir-agent run\nReadWritePaths=/var/lib/skirnir-agent /var/log/skirnir-agent /usr/local/bin\n"
+	if err := os.WriteFile(root+linuxUnitPath, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := setupLinux([]string{"setup", "--root", root, "--router", "https://router.example.invalid:11435"}, strings.NewReader(""), &out, cfgPath); err != nil {
+		t.Fatalf("setup: %v\n%s", err, out.String())
+	}
+	if cur, err := os.Readlink(root + linuxLink); err != nil || cur != linuxBinary {
+		t.Fatalf("the old binary must become a link to %s: %q %v", linuxBinary, cur, err)
+	}
+	unit, _ := os.ReadFile(root + linuxUnitPath)
+	for _, line := range strings.Split(string(unit), "\n") {
+		if strings.HasPrefix(line, "ReadWritePaths=") && strings.Contains(line, "/usr/local/bin") {
+			t.Fatalf("the new unit must not let the service write /usr/local/bin: %s", line)
+		}
+	}
+	for _, want := range []string{"ExecStart=" + linuxBinary + " run", "ProtectSystem=strict", "CapabilityBoundingSet=CAP_SYS_ADMIN",
+		"SystemCallFilter=@system-service", "ProtectHome=read-only"} {
+		if !strings.Contains(string(unit), want) {
+			t.Errorf("unit lacks %q", want)
+		}
+	}
+	// Running setup again keeps the link as it is.
+	out.Reset()
+	if err := setupLinux([]string{"setup", "--root", root}, strings.NewReader(""), &out, cfgPath); err != nil {
+		t.Fatalf("second setup: %v", err)
+	}
+	if cur, _ := os.Readlink(root + linuxLink); cur != linuxBinary {
+		t.Fatalf("link changed on a second run: %q", cur)
 	}
 }
 

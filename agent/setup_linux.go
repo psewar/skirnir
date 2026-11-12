@@ -19,7 +19,10 @@ import (
 var linuxUnit string
 
 const (
-	linuxBinary   = "/usr/local/bin/skirnir-agent"
+	// ADR-0084: the binary lives in its own folder, the only program folder the unit lets the service write (self-update);
+	// /usr/local/bin only holds a symlink for the command line.
+	linuxBinary   = "/opt/skirnir-agent/skirnir-agent"
+	linuxLink     = "/usr/local/bin/skirnir-agent"
 	linuxUnitPath = "/etc/systemd/system/skirnir-agent.service"
 	linuxStateDir = "/var/lib/skirnir-agent"
 	linuxLogDir   = "/var/log/skirnir-agent"
@@ -33,8 +36,9 @@ func setupInteractive(cfgPath string) error {
 
 // setupLinux checks before acting (root, router URL https://, update key format, CA file), then writes the configuration
 // (only if none exists; owner-only) with identity.dir and logging.dir outside the read-only /etc, creates those folders,
-// copies the binary to /usr/local/bin, writes the unit, validates the configuration like `check-config`, and - unless
-// --root stages the files below a folder (packaging, tests) - reloads systemd and starts the service. Last line:
+// copies the binary to /opt/skirnir-agent and links it from /usr/local/bin (an older installation's binary there becomes
+// the link), writes the unit, validates the configuration like `check-config`, and - unless --root stages the files below
+// a folder (packaging, tests) - reloads systemd and (re)starts the service, so a changed unit takes effect. Last line:
 // STATE: installed.
 func setupLinux(args []string, stdin io.Reader, out io.Writer, cfgPath string) error {
 	opt := map[string]string{}
@@ -116,6 +120,9 @@ func setupLinux(args []string, stdin io.Reader, out io.Writer, cfgPath string) e
 	if err := installLinuxBinary(root + linuxBinary); err != nil {
 		return err
 	}
+	if err := linkLinuxBinary(root+linuxLink, linuxBinary); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(root+linuxUnitPath), 0o755); err != nil {
 		return err
 	}
@@ -125,9 +132,10 @@ func setupLinux(args []string, stdin io.Reader, out io.Writer, cfgPath string) e
 	if _, err := loadConfig(cfgFile); err != nil { // validates as `check-config` does
 		return fmt.Errorf("the configuration %s does not load: %w", cfgFile, err)
 	}
-	fmt.Fprintln(out, "binary:", root+linuxBinary, " unit:", root+linuxUnitPath)
+	fmt.Fprintln(out, "binary:", root+linuxBinary, " link:", root+linuxLink, " unit:", root+linuxUnitPath)
 	if root == "" {
-		for _, c := range [][]string{{"daemon-reload"}, {"enable", "--now", "skirnir-agent"}} {
+		// restart, not enable --now: a running service from an older setup must pick up the new unit and binary path
+		for _, c := range [][]string{{"daemon-reload"}, {"enable", "skirnir-agent"}, {"restart", "skirnir-agent"}} {
 			if o, err := exec.Command("systemctl", c...).CombinedOutput(); err != nil {
 				return fmt.Errorf("systemctl %s: %v %s", strings.Join(c, " "), err, strings.TrimSpace(string(o)))
 			}
@@ -167,4 +175,27 @@ func installLinuxBinary(dst string) error {
 		return err
 	}
 	return os.Rename(tmp, dst)
+}
+
+// linkLinuxBinary makes link a symlink to target (ADR-0084). An older installation kept the binary itself at link; it is
+// replaced by the link in one rename, so the command keeps working throughout.
+func linkLinuxBinary(link, target string) error {
+	if fi, err := os.Lstat(link); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if cur, err := os.Readlink(link); err == nil && cur == target {
+			return nil
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		return err
+	}
+	tmp := link + ".setup"
+	if _, err := os.Lstat(tmp); err == nil {
+		if err := os.Remove(tmp); err != nil {
+			return err
+		}
+	}
+	if err := os.Symlink(target, tmp); err != nil {
+		return err
+	}
+	return os.Rename(tmp, link)
 }

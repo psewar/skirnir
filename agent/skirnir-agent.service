@@ -1,4 +1,5 @@
-# systemd unit for the Skirnir agent on Linux. `sudo skirnir-agent setup` installs it (ADR-0070); by hand:
+# systemd unit for the Skirnir agent on Linux. `sudo skirnir-agent setup` installs it (ADR-0070, ADR-0084); by hand:
+#   sudo install -D -m 755 skirnir-agent-linux-amd64 /opt/skirnir-agent/skirnir-agent
 #   sudo cp skirnir-agent.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now skirnir-agent
 [Unit]
 Description=Skirnir agent (tunnel to the Skirnir router, GPU heartbeat, Home Assistant MQTT)
@@ -7,22 +8,41 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/skirnir-agent run --config /etc/skirnir-agent/config.yaml
+# ADR-0084: the binary lives in its own folder, not on PATH. The self-update (updater.go) puts <binary>.new next to it and
+# swaps it, so the service may write only there - not /usr/local/bin, where it could plant commands that root or users run.
+ExecStart=/opt/skirnir-agent/skirnir-agent run --config /etc/skirnir-agent/config.yaml
 Restart=always
 RestartSec=5
+UMask=0077
 # The key (0600) and provisioning live in identity.dir, logs in logging.dir. setup sets them to /var/lib/skirnir-agent and
-# /var/log/skirnir-agent and creates both folders; /etc stays read-only for the service (ProtectSystem=full).
+# /var/log/skirnir-agent and creates both folders; everything else is read-only for the service.
 User=root
-ProtectSystem=full
-# /usr/local/bin: the self-update (updater.go) puts <binary>.new next to the binary and swaps it
-ReadWritePaths=/var/lib/skirnir-agent /var/log/skirnir-agent /usr/local/bin
+ProtectSystem=strict
+ProtectHome=read-only
+# /root/.ollama: models of an Ollama that runs as a child of the agent (children:), if any.
+ReadWritePaths=/var/lib/skirnir-agent /var/log/skirnir-agent /opt/skirnir-agent -/root/.ollama
+PrivateTmp=true
+# CAP_SYS_ADMIN only for the GPU guard: the NVIDIA driver lets `nvidia-smi -pl` set the power limit only with it. The
+# system call filter below removes mount, module, swap, reboot and raw I/O calls, so it cannot remount the read-only
+# system; no other capability is kept.
+CapabilityBoundingSet=CAP_SYS_ADMIN
+AmbientCapabilities=
 NoNewPrivileges=true
 RestrictSUIDSGID=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
 LockPersonality=true
+# AF_NETLINK: interface and MAC lookup for the node facts (Wake-on-LAN).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

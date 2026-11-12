@@ -77,23 +77,29 @@ Without `--router` setup asks for the router address and the update key on the t
 - writes `/etc/skirnir-agent/config.yaml` (owner-only; only if none exists, an existing one stays unchanged) with the router
   URL, `router.ca_file`, `tunnel.upstream: http://127.0.0.1:11434`, `update.public_key`, `identity.dir` and `logging.dir`,
 - creates `/var/lib/skirnir-agent` (the node key, mode 0600, lives in its `identity` folder) and `/var/log/skirnir-agent`,
-- installs the binary as `/usr/local/bin/skirnir-agent` and the unit `/etc/systemd/system/skirnir-agent.service`,
-- validates the configuration like `check-config`, runs `systemctl daemon-reload` and `systemctl enable --now skirnir-agent`,
+- installs the binary as `/opt/skirnir-agent/skirnir-agent` with the link `/usr/local/bin/skirnir-agent` (an older
+  installation's binary there becomes the link) and the unit `/etc/systemd/system/skirnir-agent.service`,
+- validates the configuration like `check-config`, runs `systemctl daemon-reload`, `systemctl enable` and
+  `systemctl restart skirnir-agent` (so running `setup` again also updates the unit of an existing node),
 - prints the `identity` command for the fingerprint comparison. The last line is `STATE: installed`.
 
 **By hand instead:**
 
 ```bash
-sudo install -m 755 skirnir-agent-<version>-linux-amd64 /usr/local/bin/skirnir-agent
+sudo install -D -m 755 skirnir-agent-<version>-linux-amd64 /opt/skirnir-agent/skirnir-agent
+sudo ln -sf /opt/skirnir-agent/skirnir-agent /usr/local/bin/skirnir-agent
 sudo mkdir -p /etc/skirnir-agent /var/lib/skirnir-agent /var/log/skirnir-agent
 sudo cp config.yaml /etc/skirnir-agent/config.yaml    # from agent/config.example.yaml; set identity.dir and logging.dir under /var
 sudo cp agent/skirnir-agent.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now skirnir-agent
 ```
 
-The unit runs `skirnir-agent run --config /etc/skirnir-agent/config.yaml` with `ProtectSystem=full`; it may write only
-`/var/lib/skirnir-agent`, `/var/log/skirnir-agent` and `/usr/local/bin` (the self-update places the new binary next to the
-old one). Check with `skirnir-agent status --config /etc/skirnir-agent/config.yaml` and `journalctl -u skirnir-agent -f`.
+The unit runs `/opt/skirnir-agent/skirnir-agent run --config /etc/skirnir-agent/config.yaml` with `ProtectSystem=strict`
+and `ProtectHome=read-only`; it may write only `/var/lib/skirnir-agent`, `/var/log/skirnir-agent`, `/opt/skirnir-agent`
+(the self-update places the new binary next to the old one) and, for an Ollama child, `/root/.ollama`. It keeps only
+`CAP_SYS_ADMIN`, which the NVIDIA driver requires to set the GPU guard's power limit, and a system call filter
+(`@system-service`) that removes mount and module calls, so that capability cannot reopen the read-only system
+(ADR-0084). A node set up before agent 0.32.0 gets the new layout by running `sudo skirnir-agent setup` again. Check with `skirnir-agent status --config /etc/skirnir-agent/config.yaml` and `journalctl -u skirnir-agent -f`.
 
 ## Ollama as a child of the agent
 
@@ -102,6 +108,17 @@ without anyone logging in; it can supervise further services the same way. On Wi
 
 - User environment variables do not apply to the service account, so `OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_MODELS`,
   `OLLAMA_NUM_PARALLEL` and friends go into the child's `env`.
+- The program must lie in a folder only administrators can change (ADR-0085). The child runs with the service's
+  rights (LocalSystem), so whoever may change `ollama.exe`, its folder or a folder above it would run code as the
+  system. The per-user installer puts Ollama under `%LOCALAPPDATA%\Programs\Ollama`, which that user owns.
+  `agent\Move-OllamaProtected.cmd` moves it in one step (double-click; it asks for administrator rights itself):
+  it copies the program folder to `C:\Program Files\Ollama` (the copy takes that folder's rights), points the
+  child's `cmd` there, lets `check-config` accept it, restarts the service and checks that Ollama answers from the
+  copy - otherwise it restores the configuration. `-Check` only reports; the log lies next to the script. The
+  router's Ollama updates replace the files in the copy. Otherwise the agent does not
+  start the child: `check-config` and the status name the path and who could change it (`refused`), and a self-update
+  that would refuse a child keeps the running version. A deliberate exception is
+  `user_writable_reason: "<why>"` on the child; the reason stays in the status and the log.
 - The tray app `ollama app.exe` must **not** run next to it (it keeps trying to start its own server); disable its autostart.
 - Ollama updates then come through the router ([operations.md](operations.md#ollama-updates)); the tray app's own updater no
   longer applies.

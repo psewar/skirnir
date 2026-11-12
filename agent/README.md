@@ -366,8 +366,9 @@ kein Treffer in den 5 132 Normalzeilen `truncated = 0`).
   in `<secrets-dir>\gpu-desktop-runtime.env` und in der Config). Router-Token steht in der Config.
 - Update: ueber den Router (Abschnitt Selbst-Update); von Hand: neue Binary bauen, `Install-Service.ps1` als Admin (erkennt den
   bestehenden Dienst: stop, kopieren, start). Auf Knoten ohne Kindprozesse reicht die Binary plus die Config; `grant_read`
-  und `firewall` bleiben dort leer. Linux: die Unit gibt `/usr/local/bin` frei (`ReadWritePaths`), sonst kann der Updater
-  die neue Binary nicht daneben legen.
+  und `firewall` bleiben dort leer. Linux: die Binary liegt in `/opt/skirnir-agent`, den die Unit als einzigen Programmordner
+  freigibt (`ReadWritePaths`), damit der Updater die neue Binary daneben legen kann; `/usr/local/bin` enthaelt nur einen
+  Link (ADR-0084).
 - Stirbt ein Modul mit Panic (Tunnel, Guard, MQTT ...), beendet sich der Dienst mit Fehler statt als gesunder Zombie
   weiterzulaufen; Recovery (Windows) bzw. `Restart=always` (systemd) starten ihn neu.
 - Rueckbau: `skirnir-agent.exe uninstall` (Admin), danach ggf. die eigenen Installer der abgeloesten Tasks.
