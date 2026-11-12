@@ -123,6 +123,15 @@ without anyone logging in; it can supervise further services the same way. On Wi
 - Ollama updates then come through the router ([operations.md](operations.md#ollama-updates)); the tray app's own updater no
   longer applies.
 
+**Measuring children without system rights** (ADR-0087): `skirnir-agent probe-identity` starts every enabled child once
+under each candidate token - `system` (today's rights, the baseline), `restricted` (no administrator rights, medium
+integrity) and `localservice` - on a probe port of its own, so the running children are not disturbed. It reports whether
+the child becomes healthy, shows CUDA, gets its GPU memory attributed and ends with its job object, and whether the agent's
+own functions (GPU guard power limit, GPU-Z, process paths, user hives) work under that token. Run it from an
+administrator prompt with the installed binary; it runs itself once as LocalSystem and writes the report next to the
+configuration (`probe\probe-identity-<time>.json`). The upstream child (a large model server) is left out unless
+`--with-upstream "<reason>"`; `--child` and `--token` narrow the run. Nothing in the running service changes.
+
 The example `children:` entry for Ollama, including the folder rights it needs, is in
 [agent/config.example.yaml](../agent/config.example.yaml). After editing the configuration run `skirnir-agent check-config`
 and restart the service (`skirnir-agent restart` on Windows, `systemctl restart skirnir-agent` on Linux).
