@@ -25,14 +25,11 @@ var probeSettle = 60 * time.Second
 var (
 	probeAdvapi            = windows.NewLazySystemDLL("advapi32.dll")
 	pCreateRestrictedToken = probeAdvapi.NewProc("CreateRestrictedToken")
-	pLogonUserW            = probeAdvapi.NewProc("LogonUserW")
 )
 
 const (
-	disableMaxPrivilege    = 0x1
-	logon32LogonService    = 5
-	logon32ProviderDefault = 0
-	probeTask              = "SkirnirProbeIdentity"
+	disableMaxPrivilege = 0x1
+	probeTask           = "SkirnirProbeIdentity"
 )
 
 func tokenUser(t windows.Token) (sid string, name string) {
@@ -88,12 +85,7 @@ func probeToken(kind string) (windows.Token, error) {
 			return 0, fmt.Errorf("integrity level: %w", err)
 		}
 	case "localservice":
-		r, _, e := pLogonUserW.Call(uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("LocalService"))),
-			uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("NT AUTHORITY"))), 0, logon32LogonService, logon32ProviderDefault,
-			uintptr(unsafe.Pointer(&tok)))
-		if r == 0 {
-			return 0, fmt.Errorf("LogonUser LocalService: %v", e)
-		}
+		return localServiceToken() // the same logon the supervisor uses for its children (ADR-0088)
 	default:
 		return 0, fmt.Errorf("unknown token %q", kind)
 	}

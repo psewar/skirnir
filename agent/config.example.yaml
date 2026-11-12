@@ -138,6 +138,11 @@ tunnel:                                         # ausgehende Verbindung zum Rout
 #                                             #   koennen - das Kind laeuft als LocalSystem. Einen Benutzer-Install zieht
 #                                             #   agent\Move-OllamaProtected.cmd in einem Schritt dorthin um
 #     # user_writable_reason: '...'           # bewusste Ausnahme: startet trotz aenderbarem Ordner, Grund im Status
+#     # run_as: localservice                  # ADR-0088, nur Windows: Standard; Ordnerrechte setzt der Agent selbst
+#     # run_as: system                        #   bleibt auf LocalSystem, nur mit Grund:
+#     # run_as_reason: '...'                  #   steht im Status und im Log
+#     # read_paths: ['D:\models\strata']     # Ordner, die cmd/args/env/cwd nicht nennen (nur Lesen)
+#     # write_paths: []                       # dito zum Schreiben
 #     args: ['serve']
 #     env:                                      # Benutzer-Umgebungsvariablen gelten fuer das Dienstkonto nicht -> hier setzen
 #       - 'OLLAMA_HOST=127.0.0.1:11434'      # nur Loopback: der Agent erreicht Ollama ueber 127.0.0.1 (Tunnel und

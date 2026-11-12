@@ -108,8 +108,8 @@ without anyone logging in; it can supervise further services the same way. On Wi
 
 - User environment variables do not apply to the service account, so `OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_MODELS`,
   `OLLAMA_NUM_PARALLEL` and friends go into the child's `env`.
-- The program must lie in a folder only administrators can change (ADR-0085). The child runs with the service's
-  rights (LocalSystem), so whoever may change `ollama.exe`, its folder or a folder above it would run code as the
+- The program must lie in a folder only administrators can change (ADR-0085). The agent starts it
+  as LocalSystem (and a child with `run_as: system` keeps those rights), so whoever may change `ollama.exe`, its folder or a folder above it would run code as the
   system. The per-user installer puts Ollama under `%LOCALAPPDATA%\Programs\Ollama`, which that user owns.
   `agent\Move-OllamaProtected.cmd` moves it in one step (double-click; it asks for administrator rights itself):
   it copies the program folder to `C:\Program Files\Ollama` (the copy takes that folder's rights), points the
@@ -131,6 +131,21 @@ own functions (GPU guard power limit, GPU-Z, process paths, user hives) work und
 administrator prompt with the installed binary; it runs itself once as LocalSystem and writes the report next to the
 configuration (`probe\probe-identity-<time>.json`). The upstream child (a large model server) is left out unless
 `--with-upstream "<reason>"`; `--child` and `--token` narrow the run. Nothing in the running service changes.
+
+**Children run as LOCAL SERVICE** (ADR-0088): on Windows every child runs as the built-in account
+`NT AUTHORITY\LOCAL SERVICE` instead of the service's LocalSystem, so a bug in Ollama, the STT service or Strata no longer
+yields the system. Before every start the agent derives the folders the child needs from its `cmd`, `cwd`, `env` and
+`args` (every value that is one absolute path), checks each one as LOCAL SERVICE and grants what is missing: read on
+folders outside the agent's data folder (the Ollama models, for example), modify only on the child's own folder below it
+(`C:\ProgramData\skirnir-agent\<folder>`; the configuration and keys there are never granted). A drive root, a system
+folder or a whole user profile is only checked, never granted - name a narrower folder. Nor is a path behind a link
+(junction, symbolic link, cloud folder) - name the folder it leads to - and `write_paths` outside the data folder are
+granted only where nobody besides the system and the administrators can change them. Folders the command line does not
+name (models listed in a file the child reads) go into `read_paths` and `write_paths`. The result stands in the status
+(`children[].run_as`, `children[].access`) and in `check-config`; a grant is logged. A child whose access cannot be
+established is refused and checked again every minute, never started as the system instead. `run_as: system` keeps a
+child on LocalSystem, only with `run_as_reason: "<why>"`. Grants stay when a child is removed; remove them with
+`icacls <folder> /remove:g *S-1-5-19`. On Linux children run as the agent's own account and the keys do not apply.
 
 The example `children:` entry for Ollama, including the folder rights it needs, is in
 [agent/config.example.yaml](../agent/config.example.yaml). After editing the configuration run `skirnir-agent check-config`

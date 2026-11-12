@@ -162,6 +162,15 @@ type ChildSpec struct {
 	// UserWritableReason (ADR-0085): the child starts although someone besides the system and the administrators could
 	// change its program (childpath.go); the reason stays visible in the status and the log. Empty = such a child is refused.
 	UserWritableReason string `yaml:"user_writable_reason"`
+	// RunAs (ADR-0088, Windows): the identity the child runs as. "" or "localservice" = NT AUTHORITY\LOCAL SERVICE; "system"
+	// = the agent's LocalSystem, only with RunAsReason (it stays visible in the status and the log). Other platforms: the
+	// agent's own account (ADR-0084); the key must stay empty there.
+	RunAs       string `yaml:"run_as"`
+	RunAsReason string `yaml:"run_as_reason"`
+	// ReadPaths / WritePaths (ADR-0088, Windows): folders or files the child needs that its command line, cwd and env do
+	// not name (for example models listed in a file the child reads). The agent grants them to LOCAL SERVICE before the start.
+	ReadPaths  []string `yaml:"read_paths"`
+	WritePaths []string `yaml:"write_paths"`
 }
 
 // InstallCfg is only read by the install/uninstall/apply-rules verbs (Windows).
@@ -440,6 +449,9 @@ func (c *Config) validate() error {
 			return fmt.Errorf("children: duplicate name %q", ch.Name)
 		}
 		seen[ch.Name] = true
+		if err := validateRunAs(ch, runtime.GOOS); err != nil {
+			return err
+		}
 	}
 	if uc := c.Tunnel.UpstreamChild; uc != "" {
 		if c.Tunnel.UpstreamAPI != upstreamOpenAI {
