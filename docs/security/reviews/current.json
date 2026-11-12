@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "503ebf873bc5ed23d4a46c3a7559a80eb3bb1968",
-  "change_digest": "b68f568936465455d90d0c7b5e31c0368bfaab997f54e8c4b6f4f833070f695b",
+  "base_sha": "cf0a4d3429462cef372f8cd966e35f786530da5e",
+  "change_digest": "9db912f32876e3f4ef913900ab13b694b9caced315346824446950e81f4aafd3",
   "reviewed_paths": [
     "CHANGELOG.md",
     "design/hindsight-memory.md",
@@ -68,7 +68,7 @@
     {
       "command": "python test/run_tests.py",
       "result": "passed",
-      "evidence": "exit 0, 332 PASS, 0 failures"
+      "evidence": "Before the merge: exit 0, 332 PASS, 0 failures. On the merged tree: first run 331 PASS, 1 failure in the timing-dependent check 'Residency: rank-1 prewarmed again after evictor idle' (prewarm wait of about 7 s, code this PR does not touch); rerun exit 0, 332 PASS, 0 failures"
     },
     {
       "command": "python test/check_public_changes.py",
