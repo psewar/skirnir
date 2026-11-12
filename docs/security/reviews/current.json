@@ -2,63 +2,84 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "07e37ea7bb646be11d72932a9d805c86b59eecfc",
-  "change_digest": "8dc5563bf88215563b2be7b4c25d901e0946c0b665c4f3847ff9ca2ee079ceb6",
+  "base_sha": "f9ec6dd84e6ef0c9472695be2663705f434d1bee",
+  "change_digest": "14783a87eefd614e63824c5c08f3f9b8578a0b87ce42963422b5f2448306dc72",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
-    ".github/workflows/security.yml",
     "CHANGELOG.md",
-    "docs/adr/0081-dependency-audit-also-runs-weekly.md",
+    "docs/adr/0082-older-certificate-folder-read-only-for-the-router.md",
     "docs/adr/README.md",
+    "docs/install-router.de.md",
+    "docs/install-router.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "test/selftest_dependency_audit.py",
-    ".github/workflows/threat-model.yml",
-    ".github/workflows/threat-review.yml",
-    ".github/workflows/trusted-security-gate.yml",
-    ".github/workflows/release-provenance.yml",
-    ".github/workflows/live-memory.yml",
-    ".github/dependabot.yml",
-    "docs/adr/0045-dependency-scanning-in-ci.md",
-    "docs/adr/0074-hash-locked-python-installs.md",
-    "design/continuous-security-review.md"
+    "router/skirnir-router.service",
+    "router/skirnir_router/common.py",
+    "test/selftest_privilege_paths.py",
+    "router/skirnir_router/app.py",
+    "router/skirnir_router/config.py",
+    "router/skirnir_router/nodes.py",
+    "router/skirnir_router/setup_init.py",
+    "router/skirnir-router-cert.path",
+    "router/skirnir-router-cert.service",
+    "router/skirnir-router-secrets.service",
+    "router/skirnir-router-secrets-refresh.service",
+    "router/skirnir-router-secrets.timer",
+    "router/install.sh",
+    "deploy/deploy.py"
   ],
   "risk_ids": [
-    "TM-16"
+    "TM-14"
   ],
   "boundaries": [
+    "B8",
     "B9"
   ],
-  "summary": "CI only, no router or agent code. security.yml (pip-audit over the runtime and optional requirement sets and both hash locks, lock_requirements.py verify-pypi, govulncheck) gains a weekly schedule trigger (Monday 04:29 UTC); push, pull_request and workflow_dispatch stay, top-level permissions stay contents: read, no secrets, no new actions or tools (pins unchanged, check_pinned_references passes). Traced: a schedule runs the default branch's workflow; threat-review.yml and trusted-security-gate.yml react to workflow_run of CI only, release-provenance.yml to releases, live-memory.yml to dispatch, so a scheduled Security checks run triggers nothing downstream and gives no candidate code any credentials. New test/selftest_dependency_audit.py (added to ci.yml) parses security.yml with yaml.safe_load and rejects a missing or less than weekly schedule, a dropped push or pull_request trigger, a conditional or missing job, and missing or conditional lock/Go audit steps. ADR-0081 records the decision (refines ADR-0045, implements the weekly run ADR-0074 assumes); threat model EN/DE and register TM-16 controls/test_refs name the weekly run. TM-16 stays open; no status was weakened.",
+  "summary": "Router 0.26.1, ADR-0082 (complements ADR-0073; renumbered from ADR-0081 after #129 took that number, rebased onto main f9ec6dd, entry in the v0.31.1 row next to #129's; the TM-14 lines changed here and #129's TM-16 lines were merged without overlap). skirnir-router.service gains ReadOnlyPaths=-/etc/skirnir-router/tls next to the certs line: installations set up before router.py --init keep certificate and key in /etc/skirnir-router/tls, which lay inside ReadWritePaths=/etc/skirnir-router, so a compromised router could replace its TLS key and certificate there or plant a symlink for an ACME client that writes in place. Verified first that the router never writes below tls: control_tls is only read (config.unreadable_files with os.access R_OK, app.py load_cert_chain, config.cert_fingerprint for node certificates); every router write targets a fixed file name next to config.yaml (roles.yaml, nodes.json, metrics/usage/perf/ollama-latest JSON, events.jsonl, deletions.jsonl), /var/lib/skirnir-router or /var/log/skirnir-router, or an operator-set log path; router.py --init writes only config.yaml; no code generates certificates; install.sh, deploy.py, the certificate path/service and the secrets units never write there (the certificate is written by the ACME client as root outside the router's mount namespace; the router is restarted by skirnir-router-cert.path). The leading '-' keeps hosts without the folder starting. selftest_privilege_paths now requires both read-only lines with '-', checks that the --init defaults, both example configurations and the watched path of skirnir-router-cert.path are not router-writable under the unit (most specific path setting decides), that the router's own files stay writable, and as the rejected case that the same unit without the tls line leaves certificate and key writable. Threat model EN/DE and register TM-14 controls, install guide EN/DE (TLS section, checklist), CHANGELOG v0.31.1 row.",
   "findings": [
     {
-      "id": "TM-16",
-      "evidence": "Pre-existing: ADR-0074 states that a CVE in the hash-locked Python sets 'shows in the weekly pip-audit', but security.yml had no schedule trigger and Dependabot alerts are not enabled for the repository; an advisory published after the last push surfaced nowhere until the next commit.",
-      "resolution": "Weekly schedule on security.yml; test/selftest_dependency_audit.py in CI fails if the schedule or an audit step goes away (run against the previous workflow it fails with exit 1). ADR-0081.",
+      "id": "TM-14",
+      "evidence": "router/skirnir-router.service had ReadWritePaths=/etc/skirnir-router and made only /etc/skirnir-router/certs read-only; certificate and key of older installations in /etc/skirnir-router/tls were writable by the router process (uid 0 without capabilities, owner bits suffice). Impact: a compromised router replaces the certificate it presents to nodes and clients persistently, and with an ACME client that writes into the existing file a planted symlink turns renewal into a root write.",
+      "resolution": "ReadOnlyPaths=-/etc/skirnir-router/tls. Under systemd 259 append, unlink, create and rename in tls are refused while roles.yaml in the parent stays writable; without the line all four are allowed. selftest_privilege_paths fails without the line (3 failures) and without the '-' prefix (2 failures).",
       "disposition": "fixed"
+    },
+    {
+      "id": "TM-14",
+      "evidence": "Pre-existing, unchanged in kind: certificate and key in any other folder below /etc/skirnir-router (or /var/lib, /var/log/skirnir-router) stay router-writable; if certs or tls is a symlink, systemd mounts its target read-only but the link is an entry in the router-writable /etc/skirnir-router and can be swapped (confirmed under systemd 259: write through the link refused, replacing the link allowed). Same for certs since ADR-0073.",
+      "resolution": "Documented in install-router EN/DE (keep certificate and key in certs, tls or outside the writable folders; real folders, not symlinks) and in ADR-0082's consequences. Removed for good by the dedicated router user that TM-14's next action already plans.",
+      "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_dependency_audit.py",
+      "command": "python test/selftest_privilege_paths.py (Windows; unit, deploy and passthrough checks)",
       "result": "passed",
-      "evidence": "10 checks PASS: seven rejected variants (no schedule, monthly, go job skipped on schedule, router lock audit removed, govulncheck removed, lock audits limited to push, pull_request trigger removed), non-mapping rejected, daily accepted, shipped workflow accepted."
+      "evidence": "selftest_privilege_paths: all passed (22 static checks). Counter-checks on a copy of the unit: without ReadOnlyPaths=-/etc/skirnir-router/tls 3 failures (folder line, tls certificate/key writable, rejected case); with the line but without '-' 2 failures."
     },
     {
-      "command": "python test/selftest_dependency_audit.py against security.yml without the schedule (change stashed)",
-      "result": "passed",
-      "evidence": "Counter-check as intended: exit 1, 6 checks FAIL, including 'shipped security.yml runs weekly' with 'no schedule trigger'."
+      "command": "Renderer cases of selftest_privilege_paths.py (bash, Linux)",
+      "result": "not_run",
+      "evidence": "They skip on Windows; the renderers are unchanged by this PR and CI runs the cases on Linux."
     },
     {
-      "command": "All python steps of ci.yml run locally on Windows (70 commands, including the new test)",
+      "command": "systemd-run --user --wait --pipe -p ProtectSystem=strict -p ReadWritePaths=<tmp>/etc -p ReadOnlyPaths=-<tmp>/etc/certs -p ReadOnlyPaths=-<tmp>/etc/tls -p ReadOnlyPaths=-<tmp>/etc/missing ... (WSL Ubuntu, systemd 259, user manager, throwaway tree)",
       "result": "passed",
-      "evidence": "70/70 exit 0. check_public_changes and the PostgreSQL/end-to-end suites are not in this list; see below and limitations."
+      "evidence": "With the tls line: append/rm/create/rename in tls refused, certs refused, roles.yaml allowed, a missing '-' folder does not stop the start; write through a listed symlink refused, swapping the link allowed. Without the tls line: all tls operations allowed."
     },
     {
-      "command": "ruff check .; python test/check_adr_index.py; python test/selftest_pinned_references.py && python test/check_pinned_references.py; python test/selftest_threat_review.py; python test/selftest_trusted_gate.py; python test/selftest_control_flow.py && python test/check_control_flow.py; risk-register.json parsed as JSON",
+      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check; python test/selftest_control_flow.py && python test/check_control_flow.py",
       "result": "passed",
-      "evidence": "All checks passed; ADR index ok: 81 ADRs; 0 pinning failures/findings; threat review and trusted gate tests ok; control flow ok."
+      "evidence": "Re-run after the rebase onto f9ec6dd: all checks passed; configuration ok: 5 roles, 7 models; ADR index ok: 82 ADRs; pinned references 0 findings; Python locks 0 problems; control flow ok."
+    },
+    {
+      "command": "python test/selftest_threat_review.py, selftest_install.py, selftest_init.py, selftest_english_names.py, selftest_posture.py, selftest_log_hygiene_paths.py, selftest_config_load.py, selftest_trusted_gate.py; after the rebase also selftest_dependency_audit.py",
+      "result": "passed",
+      "evidence": "All exit 0 on Windows (selftest_install: OK, 3 skipped as on Windows before). After the rebase: selftest_privilege_paths, selftest_threat_review, selftest_install, selftest_init, selftest_english_names, selftest_posture, selftest_config_load and selftest_dependency_audit exit 0 again."
+    },
+    {
+      "command": "python test/run_tests.py (end-to-end suite, Windows, loopback ports)",
+      "result": "passed",
+      "evidence": "Second run: 0 failures, 332 PASS. The first run had 1 failure, 'Residency: rank-1 prewarmed again after evictor idle' (model loaded, but no residency prewarm event within the test's 12 heartbeat polls); the suite is timing-sensitive and runs nightly in CI for that reason, and this change touches no router logic (unit file and version string). Both runs were before the rebase onto f9ec6dd, which changed no router code (CI workflows, docs, selftest_dependency_audit)."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -68,18 +89,14 @@
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s)."
-    },
-    {
-      "command": "The scheduled run itself",
-      "result": "not_run",
-      "evidence": "A schedule only fires on the default branch after merge; this PR's push/pull_request run of the same workflow exercises the same jobs."
+      "evidence": "Public-change scan: 0 finding(s); manual review of the added lines: example paths and synthetic folder names only."
     }
   ],
   "limitations": [
-    "The schedule only detects advisories; refreshing the Python locks stays a manual pin/resolve in a PR (TM-16 next action unchanged).",
-    "GitHub disables scheduled workflows of a public repository after 60 days without repository activity; the failure notice of a scheduled run goes to the account that last changed the cron line.",
-    "Dependabot alerts (a repository setting) were not changed; enabling them is the maintainer's choice and not verifiable from the repository.",
-    "The end-to-end suite and the PostgreSQL integrations were not run; no router or agent code changed."
+    "No production host was inspected; that a deployment keeps its TLS files in /etc/skirnir-router/tls comes from the operator. deploy.py prefers a skirnir-router.service from the operator's ops folder if one exists; such an override needs the same line.",
+    "The systemd check ran under the WSL user manager, not as the root system service; there ProtectSystem=strict did not make an unlisted folder under $HOME read-only, so it evidences the precedence of ReadWritePaths/ReadOnlyPaths, not ProtectSystem.",
+    "systemd mounts the folder when the router starts: a tls folder created later is read-only from the next restart; a running router keeps an older directory if the whole folder is replaced, until the restart skirnir-router-cert.path triggers.",
+    "unit_may_write in the self-test models only ReadWritePaths, ReadOnlyPaths and InaccessiblePaths with the most specific match; StateDirectory/LogsDirectory and symlinks are not modelled.",
+    "The router still runs as root; this closes one more writable location, not the root identity (TM-14 stays open)."
   ]
 }

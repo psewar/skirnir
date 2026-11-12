@@ -104,6 +104,15 @@ sudo setpriv --inh-caps=-all --bounding-set=-all /opt/skirnir-router/venv/bin/py
 liegt `control_tls.cert` anderswo, `PathChanged=` in `/etc/systemd/system/skirnir-router-cert.path` anpassen. Einschalten mit
 `systemctl daemon-reload && systemctl enable --now skirnir-router-cert.path`.
 
+Der Router liest Zertifikat und Schlüssel nur. Seine Unit zeigt ihm `/etc/skirnir-router/certs` und `/etc/skirnir-router/tls`
+(den Ordner von Installationen, die vor `router.py --init` eingerichtet wurden) nur lesend, ein kompromittierter Router kann
+sie also nicht ersetzen ([ADR-0073](adr/0073-close-router-paths-to-host-privileges.md),
+[ADR-0082](adr/0082-older-certificate-folder-read-only-for-the-router.md)). Der Rest von `/etc/skirnir-router` bleibt für den
+Router beschreibbar: Zertifikat und Schlüssel in einen dieser beiden Ordner legen oder außerhalb der Ordner, die der Router
+schreiben darf (`/etc/skirnir-router`, `/var/lib/skirnir-router`, `/var/log/skirnir-router`).
+`certs` und `tls` als echte Ordner anlegen, nicht als symbolische Links: systemd schützt das Ziel eines Links, den Link
+selbst könnte der Router aber ersetzen.
+
 ## Dienst starten
 
 ```bash
@@ -192,6 +201,7 @@ Ohne `install.sh` (andere Distribution, oder um jeden Schritt zu sehen):
 - `client_auth.mode: enforce` und `locked: true` (`--init` schreibt beides).
 - Ein Token je Client, kein Beispiel-Token (`--posture` meldet `clients_share_token` und `client_example_token`).
 - `control_tls` gesetzt und `api_tls: true`.
+- Zertifikat und Schlüssel in `/etc/skirnir-router/certs`, `/etc/skirnir-router/tls` oder außerhalb der Ordner, die der Router schreiben darf.
 - Port 11435 per Firewall auf GPU-Knoten und Admin-Rechner beschränkt.
 - Ollama auf jedem Knoten an Loopback gebunden.
 - Fingerprint vor der Freigabe eines Knotens mit `skirnir-agent identity` verglichen.
