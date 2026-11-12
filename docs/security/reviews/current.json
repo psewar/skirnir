@@ -2,65 +2,28 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "27a399d53c9c302379fd9bf85bbc336665e339a4",
-  "change_digest": "eca994500285e85fe3f24a93fbd7d791ed6892a7aadc8a4c1cedccfe51abae3b",
+  "base_sha": "754293f646b09b1918c37511f093cb1bd826b41b",
+  "change_digest": "edf3d311d02de7b45e81bb7417a195345c1a30bb27a161ca6396a2c95d180ff5",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "agent/childidentity.go",
-    "agent/childidentity_windows.go",
-    "agent/childidentity_windows_test.go",
-    "agent/config.example.yaml",
-    "agent/supervisor.go",
-    "docs/adr/0091-windows-children-keep-their-data-outside-the-agents-folder.md",
-    "docs/adr/README.md",
-    "docs/install-agent.de.md",
-    "docs/install-agent.md",
-    "docs/security/risk-register.json",
-    "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md"
+    "docs/adr/0090-report-recall-skipped-for-tools-per-client.md",
+    "docs/adr/README.md"
   ],
   "risk_ids": [
-    "TM-14"
+    "TM-10",
+    "TM-15"
   ],
   "boundaries": [
-    "B3",
-    "B8"
+    "B1",
+    "B9"
   ],
-  "summary": "Agent 0.34.1 (ADR-0091, amends ADR-0088): a LOCAL SERVICE child's own data folder moves from the agent's data folder to a children's data folder next to it (<data>-children). The agent creates that folder only when starting a child, with a protected access list of its own (SYSTEM and Administrators full, LOCAL SERVICE list this folder only, nothing inherited), and refuses children with data there when it is a link or anyone besides the system and the administrators can change it or a folder above. Each access entry also reports resolve (the real filepath.EvalSymlinks under the child's token; on failure the first folder above the child cannot list) and, for data still in the agent's folder, move_to. Cause: Ollama as LOCAL SERVICE could open its manifests but not resolve them, because LOCAL SERVICE may not list the agent's folder.",
-  "findings": [
-    {
-      "id": "TM-14",
-      "evidence": "Rollout of agent 0.34.0: Ollama as LOCAL SERVICE reported every manifest as Access is denied; a probe showed open/read/os.Root succeed and only filepath.EvalSymlinks fails, since Go's path normalisation lists every folder above and the agent's folder (configuration, keys) is closed to LOCAL SERVICE. The stopgap was run_as: system for Ollama.",
-      "resolution": "Children's data goes to a separate folder LOCAL SERVICE may list; the agent's folder stays closed, including file names (listing it was rejected in ADR-0091). Ollama can return to LOCAL SERVICE after its models move.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-14",
-      "evidence": "Found in this review: users may create folders in ProgramData, so anyone could create the children's data folder first, or a subfolder in it, and later swap that for a link to redirect the agent's modify grant.",
-      "resolution": "The agent creates the folder with an explicit protected security descriptor in one call (CreateDirectory with SDDL); an existing folder is used only when it is no link and the ADR-0085 exposure check finds nobody besides the system and administrators who can change it or a folder above; otherwise every child with data there is refused without a grant. Inside a clean folder only the system and administrators can create a child's folder, and icacls still runs with /L.",
-      "disposition": "fixed"
-    }
-  ],
+  "summary": "Documentation only: ADR-0090 (report recalls skipped for tools as a state per client) is accepted by the operator; status in the ADR, its Decision Outcome line, the ADR index and the CHANGELOG row. PR #142 merged it while it still said proposed. No code, configuration or behaviour change; the decision text is unchanged (proposed -> accepted is the only change allowed to an ADR besides typos and links). Re-reviewed after merging main with PR #143: the CHANGELOG row is main's (agent 0.34.1, ADR-0091) with only ADR-0090 marked accepted.",
+  "findings": [],
   "tests": [
     {
-      "command": "go test ./... (Windows, not elevated), go vet (Windows, GOOS=linux), gofmt",
+      "command": "python test/check_adr_index.py",
       "result": "passed",
-      "evidence": "ok; children's data folder derivation (own folder, folder itself and files never granted, move_to for data in the agent's folder), ensureChildRoot (check only creates nothing, created folder protected with LOCAL SERVICE list-only and no inheritance, a folder others can change refuses without grant), existing ADR-0088 tests unchanged."
-    },
-    {
-      "command": "TestResolveAsNamesTheFolderItCannotList (Windows, elevated)",
-      "result": "not_run",
-      "evidence": "Skipped locally (not elevated); it runs in the agent's Windows CI job on the elevated runner: a readable folder below an administrators-only folder opens, does not resolve, and resolve names the folder above; once listable it is no longer named."
-    },
-    {
-      "command": "ls-manifest-probe as LocalSystem and as a LOCAL SERVICE process on a Windows node, model folder in the agent's data folder",
-      "result": "passed",
-      "evidence": "LOCAL SERVICE: every open/read/os.Root/DirFS operation ok, filepath.EvalSymlinks Access is denied; LocalSystem: all ok. Reproduces the incident and names the call the resolve fact uses."
-    },
-    {
-      "command": "python test/check_control_flow.py; python test/check_adr_index.py (after merging main with ADR-0090)",
-      "result": "passed",
-      "evidence": "control flow ok; ADR index ok: 91 ADRs"
+      "evidence": "ADR index ok: 91 ADRs"
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -73,7 +36,5 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": [
-    "Moving existing data from the agent's folder is an operator step per node (reported as move_to); Ollama's switch back to run_as: localservice is confirmed by the node check during the rollout."
-  ]
+  "limitations": []
 }
