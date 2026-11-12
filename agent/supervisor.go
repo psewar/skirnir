@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,6 +24,7 @@ type Supervisor struct {
 	truncations *Truncations // stille Kuerzungen im Ollama-Log (truncation.go)
 
 	exposure func(ChildSpec) (*ChildExposure, error) // childExposure; replaceable in tests
+	launch   func(ChildSpec) (*childLaunch, error)   // prepareChildLaunch (ADR-0088); replaceable in tests
 }
 
 type childState struct {
@@ -39,9 +40,14 @@ type childState struct {
 	// child is not started for that reason (no user_writable_reason); checked again before every start.
 	Exposure *ChildExposure `json:"exposure,omitempty"`
 	Refused  string         `json:"refused,omitempty"`
-	kill     func()
-	held     bool      // Hold(): paused, no restart until Release() (Ollama update, ollamaupdate.go)
-	tree     *procTree // Job object of the running child (0.13.0: VRAM per child)
+	// RunAs (ADR-0088): the identity the child runs as (localservice, system, agent); Access: the folders it needs and what
+	// the agent found or granted before the last start.
+	RunAs       string        `json:"run_as,omitempty"`
+	RunAsReason string        `json:"run_as_reason,omitempty"`
+	Access      []ChildAccess `json:"access,omitempty"`
+	kill        func()
+	held        bool      // Hold(): paused, no restart until Release() (Ollama update, ollamaupdate.go)
+	tree        *procTree // Job object of the running child (0.13.0: VRAM per child)
 }
 
 var restartBackoff = []time.Duration{time.Second, 5 * time.Second, 30 * time.Second, 60 * time.Second}
@@ -49,13 +55,15 @@ var restartBackoff = []time.Duration{time.Second, 5 * time.Second, 30 * time.Sec
 // exposureRecheck: a refused child is checked again this often, so it starts by itself once its folder is fixed.
 var exposureRecheck = time.Minute
 
-func newSupervisor(specs []ChildSpec, logc LogCfg, log *Logger) (*Supervisor, error) {
+// dataDir: the agent's data folder (next to config.yaml); a LOCAL SERVICE child may write only its own folder below it.
+func newSupervisor(specs []ChildSpec, logc LogCfg, log *Logger, dataDir string) (*Supervisor, error) {
 	g, err := newChildGroup()
 	if err != nil {
 		return nil, err
 	}
 	s := &Supervisor{specs: specs, logc: logc, log: log, group: g, children: map[string]*childState{},
 		truncations: newTruncations(), exposure: childExposure}
+	s.launch = func(sp ChildSpec) (*childLaunch, error) { return prepareChildLaunch(sp, dataDir) }
 	for _, sp := range specs {
 		s.children[sp.Name] = &childState{spec: sp}
 	}
@@ -89,11 +97,12 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 		if !s.waitWhileHeld(ctx, sp.Name) { // held before it ever ran (Park: standby fallback, upstream_hold.go)
 			return
 		}
-		if !s.allowedToStart(ctx, sp, st) { // ADR-0085: someone else could change its program
+		l, ok := s.allowedToStart(ctx, sp, st) // ADR-0085 program, ADR-0088 identity and folder access
+		if !ok {
 			return
 		}
 		start := time.Now()
-		exitMsg, err := s.runOnce(ctx, sp, st, out)
+		exitMsg, err := s.runOnce(ctx, sp, st, out, l)
 		if ctx.Err() != nil {
 			return
 		}
@@ -132,13 +141,15 @@ func (s *Supervisor) loop(ctx context.Context, sp ChildSpec) {
 }
 
 // runOnce starts the child, attaches it to the group, checks health, and waits for exit.
-func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, out *childWriter) (string, error) {
+func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, out *childWriter, l *childLaunch) (string, error) {
 	cmd := exec.Command(sp.Cmd, sp.Args...)
 	cmd.Dir = sp.Cwd
-	cmd.Env = append(os.Environ(), sp.Env...)
+	cmd.Env = append(append([]string(nil), l.env...), sp.Env...)
 	cmd.Stdout, cmd.Stderr = out, out
-	cmd.SysProcAttr = childProcAttr()
-	if err := cmd.Start(); err != nil {
+	cmd.SysProcAttr = l.attr
+	err := cmd.Start()
+	l.release() // the new process holds its own copy of the token
+	if err != nil {
 		return fmt.Sprintf("start failed: %v", err), err
 	}
 	tree, err := s.group.track(cmd.Process.Pid)
@@ -153,7 +164,7 @@ func (s *Supervisor) runOnce(ctx context.Context, sp ChildSpec, st *childState, 
 	st.kill = func() { stopChild(cmd, tree) }
 	st.tree = tree
 	s.mu.Unlock()
-	s.log.Infof("supervisor: %s started (PID %d): %s %v", sp.Name, cmd.Process.Pid, sp.Cmd, sp.Args)
+	s.log.Infof("supervisor: %s started (PID %d) as %s: %s %v", sp.Name, cmd.Process.Pid, l.runAs, sp.Cmd, sp.Args)
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -362,20 +373,42 @@ func withoutChild(specs []ChildSpec, name string) []ChildSpec {
 // unless children[].user_writable_reason accepts it; a failed check refuses too (the agent can read every permission it
 // needs, so a failure is not a reason to start). Refused: state in the status, one log line per new reason, and a fresh
 // check every exposureRecheck, so the child starts by itself once its folder is fixed. False only when ctx ends.
-func (s *Supervisor) allowedToStart(ctx context.Context, sp ChildSpec, st *childState) bool {
+//
+// Then the identity (ADR-0088): the launch with the child's token, after its folder access was checked and missing
+// grants were set. A child whose access cannot be established is refused the same way - never started as SYSTEM instead.
+func (s *Supervisor) allowedToStart(ctx context.Context, sp ChildSpec, st *childState) (*childLaunch, bool) {
 	logged := ""
 	for {
 		e, err := s.exposure(sp)
 		refused := ""
+		var l *childLaunch
 		switch {
 		case err != nil:
 			refused = fmt.Sprintf("child %s: permission check failed: %v", sp.Name, err)
 		case e != nil && e.Reason == "":
 			refused = e.String() + "; next: install it in a folder only administrators can change, or state why it is " +
 				"accepted in children[].user_writable_reason"
+		default:
+			var lerr error
+			l, lerr = s.launch(sp)
+			if lerr != nil {
+				who := runAsLocalService
+				if l != nil {
+					who = l.runAs
+				}
+				refused = fmt.Sprintf("child %s: cannot start as %s: %v; next: grant the access (read_paths, write_paths) or "+
+					"state why it runs as system in children[].run_as_reason", sp.Name, who, lerr)
+			}
 		}
 		s.mu.Lock()
 		st.Exposure, st.Refused = e, refused
+		if l != nil {
+			st.RunAs, st.Access = l.runAs, l.access
+			st.RunAsReason = ""
+			if l.runAs == runAsSystem {
+				st.RunAsReason = sp.RunAsReason
+			}
+		}
 		if refused != "" {
 			st.NextStart = time.Now().Add(exposureRecheck)
 		}
@@ -384,7 +417,8 @@ func (s *Supervisor) allowedToStart(ctx context.Context, sp ChildSpec, st *child
 			if e != nil {
 				s.log.Warnf("supervisor: %s - started anyway (user_writable_reason: %s)", e, e.Reason)
 			}
-			return true
+			s.logLaunch(sp, l)
+			return l, true
 		}
 		if refused != logged {
 			s.log.Errorf("supervisor: not started: %s", refused)
@@ -392,8 +426,23 @@ func (s *Supervisor) allowedToStart(ctx context.Context, sp ChildSpec, st *child
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return nil, false
 		case <-time.After(exposureRecheck):
+		}
+	}
+}
+
+// logLaunch: grants the agent set, paths it would not grant, and a child that keeps SYSTEM on purpose.
+func (s *Supervisor) logLaunch(sp ChildSpec, l *childLaunch) {
+	if l.runAs == runAsSystem {
+		s.log.Warnf("supervisor: %s runs as system (run_as_reason: %s)", sp.Name, sp.RunAsReason)
+	}
+	for _, a := range l.access {
+		switch {
+		case a.State == "granted":
+			s.log.Infof("supervisor: %s: granted LOCAL SERVICE %s on %s (%s)", sp.Name, a.Need, a.Path, a.From)
+		case strings.HasPrefix(a.State, "not granted"), a.State == "missing":
+			s.log.Warnf("supervisor: %s: %s %s (%s): %s", sp.Name, a.Need, a.Path, a.From, a.State)
 		}
 	}
 }

@@ -265,8 +265,8 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Router/agent compromise reaches privileged host operations.",
-      "controls": "Router runs as its own account without capabilities and writes only its state and log folders; /etc/skirnir-router is root's and read-only for it (ADR-0086). The agent forwards only inference, listing and version paths to the upstream and refuses Ollama downgrades without ollama_update.allow_downgrade; the root secret renderers source their access file only from a root-only folder the router cannot see or write, and the router unit sees its certificate folders read-only (certs, ADR-0073; tls of installations older than router.py --init, ADR-0082). render-env.sh refuses secret values with a line break and renders further names only when they end in _KEY or _TOKEN (ADR-0080). The Linux agent unit writes no program folder on PATH (binary in /opt/skirnir-agent) and keeps only CAP_SYS_ADMIN behind a system call filter without mount calls (ADR-0084); the agent refuses to start a child whose program, folder or a folder above someone besides the system and the administrators could change, unless user_writable_reason accepts it (ADR-0085); agent\\Move-OllamaProtected.cmd moves a per-user Ollama.",
-      "next_action": "Fuller unit directive set; Windows agent children without SYSTEM rights, then split the agent's privileged operations (ADR-0087 accepted; measure with skirnir-agent probe-identity first).",
+      "controls": "Router runs as its own account without capabilities and writes only its state and log folders; /etc/skirnir-router is root's and read-only for it (ADR-0086). The agent forwards only inference, listing and version paths to the upstream and refuses Ollama downgrades without ollama_update.allow_downgrade; the root secret renderers source their access file only from a root-only folder the router cannot see or write, and the router unit sees its certificate folders read-only (certs, ADR-0073; tls of installations older than router.py --init, ADR-0082). render-env.sh refuses secret values with a line break and renders further names only when they end in _KEY or _TOKEN (ADR-0080). The Linux agent unit writes no program folder on PATH (binary in /opt/skirnir-agent) and keeps only CAP_SYS_ADMIN behind a system call filter without mount calls (ADR-0084); the agent refuses to start a child whose program, folder or a folder above someone besides the system and the administrators could change, unless user_writable_reason accepts it (ADR-0085); agent\\Move-OllamaProtected.cmd moves a per-user Ollama. On Windows the agent starts its children as LOCAL SERVICE and grants only the folders their configuration names, after checking each one as that account; run_as: system needs run_as_reason (ADR-0088).",
+      "next_action": "Fuller unit directive set; node check of the Windows children as LOCAL SERVICE (ADR-0088: Ollama with a loaded model, STT, Strata on request), then split the agent's privileged operations (ADR-0087 option 2).",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_security.py",
@@ -279,7 +279,9 @@
         "test/selftest_ollama_protected.ps1",
         "test/selftest_state_dir.py",
         "agent/probe_identity_test.go",
-        "agent/probe_identity_windows_test.go"
+        "agent/probe_identity_windows_test.go",
+        "agent/childidentity_test.go",
+        "agent/childidentity_windows_test.go"
       ],
       "validation_gap": "V13: unprivileged deployment and recovery still need staging."
     },

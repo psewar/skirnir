@@ -114,8 +114,8 @@ Anmeldung bereit ist; weitere Dienste beaufsichtigt er auf dieselbe Weise. Unter
 
 - Benutzer-Umgebungsvariablen gelten für das Dienstkonto nicht, darum kommen `OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_MODELS`,
   `OLLAMA_NUM_PARALLEL` usw. ins `env` des Kindes.
-- Das Programm muss in einem Ordner liegen, den nur Administratoren ändern können (ADR-0085). Das Kind läuft mit den
-  Rechten des Dienstes (LocalSystem); wer `ollama.exe`, dessen Ordner oder einen Ordner darüber ändern darf, liesse damit
+- Das Programm muss in einem Ordner liegen, den nur Administratoren ändern können (ADR-0085). Der Agent startet es
+  als LocalSystem (ein Kind mit `run_as: system` behält diese Rechte); wer `ollama.exe`, dessen Ordner oder einen Ordner darüber ändern darf, liesse damit
   Code als System laufen. Der Benutzer-Installer legt Ollama unter `%LOCALAPPDATA%\Programs\Ollama` ab,
   das diesem Benutzer gehört.
   `agent\Move-OllamaProtected.cmd` zieht es in einem Schritt um (Doppelklick; fragt selbst nach Administratorrechten):
@@ -139,6 +139,22 @@ einer Administrator-Eingabeaufforderung mit der installierten Binary starten; es
 legt den Bericht neben der Konfiguration ab (`probe\probe-identity-<zeit>.json`). Das Upstream-Kind (ein grosser
 Modellserver) bleibt aussen vor, ausser mit `--with-upstream "<grund>"`; `--child` und `--token` grenzen ein. Am laufenden
 Dienst ändert sich nichts.
+
+**Kinder laufen als LOCAL SERVICE** (ADR-0088): Unter Windows läuft jedes Kind als eingebautes Konto
+`NT AUTHORITY\LOCAL SERVICE` statt mit dem LocalSystem des Dienstes; ein Fehler in Ollama, im STT-Dienst oder in Strata
+bringt damit nicht mehr das System. Vor jedem Start leitet der Agent die Ordner, die das Kind braucht, aus `cmd`, `cwd`,
+`env` und `args` ab (jeder Wert, der genau ein absoluter Pfad ist), prüft jeden als LOCAL SERVICE und vergibt, was fehlt:
+Lesen auf Ordnern ausserhalb des Datenordners des Agenten (etwa die Ollama-Modelle), Ändern nur auf dem eigenen Ordner des
+Kindes darunter (`C:\ProgramData\skirnir-agent\<ordner>`; Konfiguration und Schlüssel dort nie). Eine Laufwerkswurzel,
+ein Systemordner oder ein ganzes Benutzerprofil wird nur geprüft, nie freigegeben - dann einen engeren Ordner nennen.
+Ebenso ein Pfad hinter einem Link (Junction, symbolischer Link, Cloud-Ordner) - dann den Zielordner nennen -, und
+`write_paths` ausserhalb des Datenordners nur, wo ausser System und Administratoren niemand sie ändern kann.
+Ordner, die die Befehlszeile nicht nennt (Modelle aus einer Datei, die das Kind liest), gehören in `read_paths` und
+`write_paths`. Das Ergebnis steht im Status (`children[].run_as`, `children[].access`) und in `check-config`; jede
+Freigabe wird protokolliert. Ein Kind, dessen Zugriff sich nicht herstellen lässt, wird abgelehnt und jede Minute neu
+geprüft, nie stattdessen als System gestartet. `run_as: system` lässt ein Kind auf LocalSystem, nur mit
+`run_as_reason: "<warum>"`. Freigaben bleiben, wenn ein Kind entfernt wird; entfernen mit
+`icacls <ordner> /remove:g *S-1-5-19`. Unter Linux laufen Kinder mit dem Konto des Agenten, die Schlüssel gelten dort nicht.
 
 Der Beispieleintrag `children:` für Ollama samt den nötigen Ordnerrechten steht in
 [agent/config.example.yaml](../agent/config.example.yaml). Nach einer Änderung der Konfiguration `skirnir-agent check-config`

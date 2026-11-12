@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -181,6 +182,9 @@ func main() {
 		fmt.Printf("ok: node=%s router=%s upstream=%s mqtt-local=%v children=%d identity=%s service=%s account=%s\n", cfg.Node, cfg.Router.URL, cfg.Tunnel.Upstream,
 			cfg.MQTT.Host != "", len(cfg.Children), cfg.Identity.Dir, cfg.Install.ServiceName, firstNonEmpty(cfg.Install.Account, "LocalSystem"))
 		verr = reportChildExposures(cfg.Children, os.Stdout)
+		if err := reportChildIdentities(cfg.Children, filepath.Dir(cfgPath), os.Stdout); verr == nil {
+			verr = err
+		}
 	case "identity":
 		log, _ := newLogger(cfg.Logging, "agent", false)
 		id, err := loadOrCreateIdentity(cfg.Identity.Dir, log)

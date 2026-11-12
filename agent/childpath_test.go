@@ -116,7 +116,8 @@ func TestSupervisorRefusesExposedChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { log.file.Close() }) // Windows does not delete open files
-	s, err := newSupervisor([]ChildSpec{sp}, logc, log)
+	s, err := newSupervisor([]ChildSpec{sp}, logc, log, t.TempDir())
+	s.launch = testLaunch
 	if err != nil {
 		t.Fatal(err)
 	}
