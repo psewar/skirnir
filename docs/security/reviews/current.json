@@ -2,45 +2,83 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "45f7959016dd70b39c5bdddc53941fe33b302289",
-  "change_digest": "00ca52d7e0e125fb2d557423d34d0b1da449ffeb076c79717e3d9e4d40c26d79",
+  "base_sha": "503ebf873bc5ed23d4a46c3a7559a80eb3bb1968",
+  "change_digest": "b68f568936465455d90d0c7b5e31c0368bfaab997f54e8c4b6f4f833070f695b",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "docs/adr/0088-windows-children-run-as-local-service.md",
-    "docs/adr/README.md"
+    "design/hindsight-memory.md",
+    "design/shared-memory-interoperability.de.md",
+    "design/shared-memory-interoperability.md",
+    "docs/adr/0089-report-recall-skipped-for-tools-per-client.md",
+    "docs/adr/README.md",
+    "docs/troubleshooting.de.md",
+    "docs/troubleshooting.md",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/context_ops.py",
+    "router/skirnir_router/memory.py",
+    "router/skirnir_router/metrics.py",
+    "router/skirnir_router/recall_skips.py",
+    "router/ui.html",
+    "test/selftest_memory.py",
+    "router/skirnir_router/app.py",
+    "router/skirnir_router/auth.py",
+    "docs/adr/0059-no-automatic-recall-into-requests-with-tools.md",
+    "docs/security/threat-model.md",
+    "docs/security/risk-register.json"
   ],
   "risk_ids": [
-    "TM-14"
+    "TM-03",
+    "TM-10",
+    "TM-15"
   ],
   "boundaries": [
-    "B3",
-    "B8"
+    "B1",
+    "B2",
+    "B5",
+    "B9"
   ],
-  "summary": "Documentation only: ADR-0088 (Windows children run as LOCAL SERVICE) is accepted by the operator; status in the ADR, the ADR index and the CHANGELOG row. No code or configuration change.",
-  "findings": [
-    {
-      "id": "TM-14",
-      "evidence": "PR #139 merged with ADR-0088 still proposed; the operator accepted it the same day.",
-      "resolution": "Status set to accepted (proposed -> accepted, the only change allowed besides typos and links).",
-      "disposition": "fixed"
-    }
-  ],
+  "summary": "Router 0.29.0 (ADR-0089, proposed): a recall skipped because the request carries tools (ADR-0059) is also recorded as a run per client in the new module recall_skips.py, called from memory.prepare after scope_for, keyed by the authenticated principal. /admin/context (control port, basic_auth_middleware on every route) lists the runs with client, project, since, last and request count; the Overview renders them with textContent. A gauge without labels counts the clients, and one warning line per run (at most one per client and hour) gives only a count, no client or project, following the memory logging rule. Traced: memory.prepare (the tools check and the recall decision are unchanged, the recall is still skipped; passed() is called only after the check), the control app middleware, context_ops.snapshot and its callers (handle, metrics.render), and the UI rendering. Memory is bounded by the configured principals, because only requests that passed scope_for reach the tracking. No request content reaches the state, the log or the metric. The project name in a run is a granted project of that client. The log's next step names recall_into_tools: true together with the risk it accepts (TM-10) and does not change policy. No finding was introduced.",
+  "findings": [],
   "tests": [
     {
-      "command": "python test/check_adr_index.py",
+      "command": "python test/selftest_memory.py",
       "result": "passed",
-      "evidence": "ADR index ok: 88 ADRs"
+      "evidence": "Ran 47 tests, OK; includes the new HTTP test (401 without control login and no client name in the refusal, gauge without names, one log line per run without client/project/content) and RecallSkipRunTests (window, hourly limit, per-client runs)"
     },
     {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "command": "fault injection: recall_skips.skipped replaced by a no-op, then the new HTTP test",
       "result": "passed",
-      "evidence": "Security evidence: 0 error(s)."
+      "evidence": "The test fails (FAILED, errors=1) when the skip is not recorded"
+    },
+    {
+      "command": "python test/selftest_interoperability.py; python test/selftest_client_limits.py; python test/selftest_deletion_lifecycle.py; python test/selftest_rerank.py; python test/selftest_browser.py; python test/selftest_english_names.py",
+      "result": "passed",
+      "evidence": "all OK"
+    },
+    {
+      "command": "ruff check . && python test/selftest_control_flow.py && python test/check_control_flow.py",
+      "result": "passed",
+      "evidence": "All checks passed; control flow ok: 0 legacy findings (no new try/except or raise)"
+    },
+    {
+      "command": "python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check; python test/check_training_data.py",
+      "result": "passed",
+      "evidence": "configuration ok; ADR index ok: 89 ADRs; 0 pinned-reference findings; 0 lock problems; 0 training-data findings"
+    },
+    {
+      "command": "python test/run_tests.py",
+      "result": "passed",
+      "evidence": "exit 0, 332 PASS, 0 failures"
     },
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s)."
+      "evidence": "Public-change scan: 0 finding(s); added lines reviewed by hand, synthetic names only"
     }
   ],
-  "limitations": []
+  "limitations": [
+    "The per-client state is in memory only; after a restart a client is reported again only with its next skipped request.",
+    "The Overview tile was not checked in a browser; it uses textContent only and selftest_browser's static checks pass.",
+    "A client deliberately working with tools and without recall is listed too (at most one log line per hour); this is documented, not suppressed."
+  ]
 }

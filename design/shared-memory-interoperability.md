@@ -131,6 +131,13 @@ A project grant may opt in with `recall_into_tools: true` (requires `read`); the
 untrusted data, and that client's tool calls should be confirmed or limited by the client. Explicit recall APIs
 return facts to the client and are not affected.
 
+The skip is also a state of the client (ADR-0089, router 0.29.0; `recall_skips.py`). A run starts with a client's first
+recall skipped for tools and ends with its next recall that passes the tools check; it holds the project of the last
+request, `since`, `last` and the number of requests. `/admin/context` lists the runs under `recall_skipped_for_tools`
+while their last request is at most an hour old, and the Overview shows them in a tile.
+`skirnir_memory_recall_skipped_for_tools_clients` counts them without a client label. The first request of a run logs
+one warning without client or project names, at most one per client and hour. The state is in memory only.
+
 | Strategy | Behavior |
 | --- | --- |
 | `legacy` (default) | Existing explicit `routing.memory`; requires router ownership. |
@@ -408,10 +415,12 @@ Take an operator-managed database backup before upgrades. Do not run this test
 suite against a real session database.
 
 Control-plane `/admin/context` and the Overview tiles show aggregate backend and
-outbox state under existing admin authentication. Hindsight health is `unknown`
+outbox state under existing admin authentication, plus the clients whose recalls
+are skipped for tools (`recall_skipped_for_tools`, ADR-0089). Hindsight health is `unknown`
 until an actual bounded request occurs. Metrics include
 `skirnir_memory_http_seconds`, `skirnir_memory_http_total`,
-`skirnir_memory_events_total`, `skirnir_context_tokens`,
+`skirnir_memory_events_total`, `skirnir_memory_recall_skipped_for_tools_clients`,
+`skirnir_context_tokens`,
 `skirnir_compaction_saved_tokens`, `skirnir_context_backend_available`,
 `skirnir_memory_outbox_jobs`, `skirnir_handoff_total` and cleanup counters.
 Labels use fixed operations/outcomes/parts/states, never owner/session/bank IDs or

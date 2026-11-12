@@ -67,3 +67,12 @@ Anfragen mit Gedächtnis-Recall tragen `X-Skirnir-Memory-State` ([design/hindsig
 | `skipped:tools` | Die Anfrage trägt Werkzeuge, und die Projektfreigabe setzt `recall_into_tools: true` nicht ([ADR-0059](adr/0059-no-automatic-recall-into-requests-with-tools.md)). Weitere `skipped:<grund>`: `no_messages`, `last_not_user`, `content_not_text`. |
 | `query_filtered` | Der Filter für sensible Daten hat die Abfrage nicht hinausgelassen; expliziter Recall antwortet 403. |
 | `unavailable`, `unavailable:<art>` | Keine brauchbare Antwort (`timeout`, `transport`, `protocol`, `upstream_auth`, `upstream_rejected`). Mit `fail_open: true` läuft die Inferenz ohne Fakten weiter, sonst 503. |
+
+Ein Client, der den Header nicht liest, fällt trotzdem auf, wenn sein Recall wegen Werkzeugen übersprungen wird, etwa
+ein Home-Assistant-Eintrag, nachdem dort eine Werkzeug-API eingeschaltet wurde
+([ADR-0089](adr/0089-report-recall-skipped-for-tools-per-client.md)): Die Übersicht und `/admin/context`
+(`recall_skipped_for_tools`) nennen den Client, sein Projekt, seit wann und wie viele Anfragen, bis eine Stunde nach
+seiner letzten solchen Anfrage. `skirnir_memory_recall_skipped_for_tools_clients` zählt diese Clients, und das Log meldet
+einmal je Client und Stunde, dass es geschehen ist, ohne Namen. Soll der Client die Fakten bekommen,
+`recall_into_tools: true` in seiner Freigabe setzen; damit erreichen Fakten ein Modell, das Werkzeuge aufrufen kann.
+Sonst seinen Recall abschalten oder es so lassen.
