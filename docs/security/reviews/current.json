@@ -2,39 +2,31 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "f886838a4864d74206be2a7fa0a5755e240b874d",
-  "change_digest": "4d46da9725836f2d1e6aaa98382180bd15902d3501f674efa9957bef0256c63d",
+  "base_sha": "73f8c9e84a50150efcc8775dfbd8c665ede26cdf",
+  "change_digest": "050bb63a41e27231754f7b7e42886f4ebb291adaced35dedd1712efafdb22816",
   "reviewed_paths": [
-    "docs/adr/0087-windows-agent-children-without-system-rights.md",
-    "docs/adr/README.md",
-    "docs/security/risk-register.json"
+    "CHANGELOG.md"
   ],
   "risk_ids": [
-    "TM-14"
+    "TM-16"
   ],
   "boundaries": [
-    "B3",
-    "B8"
+    "B9"
   ],
-  "summary": "Documentation only: ADR-0087 (proposed) for the Windows agent - children without SYSTEM rights first (separate low-privilege token per child), the agent's own privileged operations split into a helper later; with the measurement plan that must run on a node before any code. Risk register next action points to it. No code, configuration or workflow change.",
+  "summary": "Documentation only: the v0.32.0 CHANGELOG row links the published release and carries its date (2026-11-12). No code, configuration or workflow change.",
   "findings": [
     {
-      "id": "TM-14",
-      "evidence": "The Windows agent runs as LocalSystem (needed for the GPU guard's NVML power limit and GPU-Z, measured 2026-09-24) and starts Ollama, Strata and the STT service - the code that handles network input - with SYSTEM rights.",
-      "resolution": "Proposal only: options, recommended order and a measurement plan (CUDA, folder access, Strata runtime folder, per-process VRAM attribution, job objects; NVML/GPU-Z/process paths/user hives for the later split). Decision stays with the operator.",
-      "disposition": "baseline"
+      "id": "TM-16",
+      "evidence": "The release tool reads router and agent version from the CHANGELOG row of the tag at the target commit; a wrong row would publish wrong version claims next to the attested binaries.",
+      "resolution": "Only the tag and date cells change; versions stay 0.28.0 / 0.32.0 as released.",
+      "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "python test/check_adr_index.py",
+      "command": "git diff origin/main -- CHANGELOG.md",
       "result": "passed",
-      "evidence": "ADR index ok: 87 ADRs."
-    },
-    {
-      "command": "python test/check_public_changes.py --base origin/main",
-      "result": "passed",
-      "evidence": "0 findings."
+      "evidence": "one line: v0.32.0 (unreleased) -> link to the release, date 2026-11-12."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -47,7 +39,5 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": [
-    "No measurement has run yet; the outline may change with its results."
-  ]
+  "limitations": []
 }
