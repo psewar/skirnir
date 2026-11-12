@@ -51,7 +51,9 @@ covers any path `control_tls` names.
 * `changeable(path)` is true when the file lies on a writable mount and owner or mode let the process write it, or when
   the folder holding it, or any folder above it, lies on a writable mount and lets the process add or remove entries. A
   folder that is itself a mount point cannot be renamed or removed; a sticky folder protects entries of other owners;
-  a symlink is checked as the link and as its target. `CAP_DAC_OVERRIDE` and `CAP_FOWNER` count when the process has them.
+  a symlink is checked as the link and as its target, and a folder reached through a link where it really lies. On a
+  writable mount the owner counts as able to write whatever its mode says, because `chmod` needs only ownership.
+  `CAP_DAC_OVERRIDE` and `CAP_FOWNER` count when the process has them.
 * At start, `posture.report(cfg, view=...)` adds the medium finding `tls_files_changeable` (TM-14) for
   `control_tls.cert` and `control_tls.key`. Next step: keep the files in `/etc/skirnir-router/certs`, or make their
   folder read-only for the unit in a drop-in. `router.py --posture` leaves the check out because it cannot see the view.

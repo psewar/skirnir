@@ -79,24 +79,26 @@ class ProcessView:
         return ro
 
     def _may_write(self, st):
-        """Owner and mode only: the unit leaves the router no capability that would bypass them."""
-        if self.dac_override:
+        """Owner and mode only: the unit leaves the router no capability that would bypass them. Called for objects on
+        a writable mount, where the owner may always grant itself write access (chmod needs ownership, not the bit)."""
+        if self.dac_override or self.fowner or st.st_uid == self.euid:
             return True
-        if st.st_uid == self.euid:
-            return bool(st.st_mode & 0o200)
         if st.st_gid in self.groups:
             return bool(st.st_mode & 0o020)
         return bool(st.st_mode & 0o002)
 
     def _may_replace_entry(self, folder, entry):
-        """Whether this process could remove or rename entry in folder and put another in its place."""
-        if entry in self.mount_points or self.read_only(folder):
+        """Whether this process could remove or rename entry in folder and put another in its place. The folder is
+        judged where it really lies (a symlinked folder by its target), the entry by its own name in that folder."""
+        real_folder = self._realpath(folder)
+        real_entry = posixpath.join(real_folder, posixpath.basename(entry))
+        if real_entry in self.mount_points or self.read_only(real_folder):
             return False
-        st = self._stat(folder)
+        st = self._stat(real_folder)
         if not self._may_write(st):
             return False
         if st.st_mode & 0o1000 and not self.fowner:   # sticky: only the owner of the entry or of the folder
-            return self._lstat(entry).st_uid == self.euid or st.st_uid == self.euid
+            return self._lstat(real_entry).st_uid == self.euid or st.st_uid == self.euid
         return True
 
     def changeable(self, path):

@@ -51,7 +51,7 @@ class FakeFs:
         return st(mode=0o777) if path in self.links else self.entries[path]
 
     def exists(self, path):
-        return path in self.entries or path in self.links
+        return path in self.links or self.realpath(path) in self.entries
 
 
 def view(fs, mounts=MOUNTINFO, euid=0, groups=(0,), caps=0):
@@ -107,6 +107,32 @@ class ChangeableTest(unittest.TestCase):
         self.assertTrue(v.changeable("/etc/skirnir-router/tls/server.crt"), "it owns the file")
         fs.entries["/etc/skirnir-router/tls/server.crt"] = st(gid=990, mode=0o664)
         self.assertTrue(v.changeable("/etc/skirnir-router/tls/server.crt"), "its group may write")
+
+    def test_owner_without_write_bit(self):
+        # chmod needs ownership, not the write bit: on a writable mount the owner can grant itself write access.
+        fs = router_fs(**{"/etc/skirnir-router": st(uid=990, mode=0o500), "/etc/skirnir-router/tls": st(mode=0o555),
+                          "/etc/skirnir-router/tls/server.crt": st(uid=990, mode=0o400)})
+        v = view(fs, euid=990, groups=(990,))
+        self.assertTrue(v.changeable("/etc/skirnir-router/tls/server.crt"), "owned file with mode 0400")
+        fs.entries["/etc/skirnir-router/tls/server.crt"] = st(mode=0o444)
+        self.assertTrue(v.changeable("/etc/skirnir-router/tls/server.crt"), "owned folder above with mode 0500")
+        fs.entries["/etc/skirnir-router"] = st(mode=0o755)
+        self.assertFalse(v.changeable("/etc/skirnir-router/tls/server.crt"), "nothing owned on the way")
+
+    def test_symlinked_folder_judged_by_its_target(self):
+        # A link on a writable mount, in a folder the process may not change, pointing at a folder on a read-only
+        # mount that the process owns: the owner cannot use its ownership there, so nothing is changeable.
+        mounts = ("1 0 8:1 / / ro - ext4 /dev/sda1 rw\n"
+                  "2 1 8:1 /srv/data /srv/data rw - ext4 /dev/sda1 rw\n"
+                  "3 1 8:1 /srv/ro /srv/ro ro - ext4 /dev/sda1 rw\n")
+        fs = FakeFs({"/": st(mode=0o755), "/srv": st(mode=0o755), "/srv/data": st(mode=0o755),
+                     "/srv/ro": st(mode=0o755), "/srv/ro/dir": st(uid=990, mode=0o755),
+                     "/srv/ro/dir/a.pem": st(mode=0o444)},
+                    links={"/srv/data/link": "/srv/ro/dir"})
+        v = view(fs, mounts, euid=990, groups=(990,))
+        self.assertFalse(v.changeable("/srv/data/link/a.pem"))
+        fs.entries["/srv/data"] = st(uid=990, mode=0o755)
+        self.assertTrue(v.changeable("/srv/data/link/a.pem"), "the link itself can be swapped in an owned folder")
 
     def test_folder_above_can_be_swapped(self):
         # tls itself is root-owned and closed, but the account owns the folder that holds it and may rename tls.
