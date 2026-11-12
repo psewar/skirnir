@@ -55,8 +55,9 @@ def findings(cfg, environ=None, view=None):
             if view.changeable(path):
                 out.append(Finding("tls_files_changeable", MEDIUM, "TM-14",
                                    f"the router could change or replace {setting} ({path}).",
-                                   "keep the files in /etc/skirnir-router/certs, which the router unit sees read-only, "
-                                   "or make their folder read-only for it (ReadOnlyPaths= in a unit drop-in)"))
+                                   "keep the files in /etc/skirnir-router/certs or /etc/skirnir-router/tls, which the "
+                                   "router unit sees read-only (ADR-0073, ADR-0082), or outside the router's writable "
+                                   "folders, or make their folder read-only for it (ReadOnlyPaths= in a unit drop-in)"))
     ca = cfg.client_auth or {}
     clients = ca.get("clients") or {}
     # TM-01: who may call the API port, and how the policy can change
