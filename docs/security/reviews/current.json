@@ -3,7 +3,7 @@
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
   "base_sha": "cf0a4d3429462cef372f8cd966e35f786530da5e",
-  "change_digest": "3dd7a9c70d56dfbe1a3cf3beb9d20892799907877646e02e474eb1e10d69f235",
+  "change_digest": "fc496a6d2790e32ff118645babe6168cb40185c38e6598e85305817698d45e12",
   "reviewed_paths": [
     "CHANGELOG.md",
     "agent/childidentity.go",
@@ -11,13 +11,26 @@
     "agent/childidentity_windows_test.go",
     "agent/config.example.yaml",
     "agent/supervisor.go",
+    "design/hindsight-memory.md",
+    "design/shared-memory-interoperability.de.md",
+    "design/shared-memory-interoperability.md",
+    "docs/adr/0090-report-recall-skipped-for-tools-per-client.md",
     "docs/adr/0091-windows-children-keep-their-data-outside-the-agents-folder.md",
     "docs/adr/README.md",
     "docs/install-agent.de.md",
     "docs/install-agent.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md"
+    "docs/security/threat-model.md",
+    "docs/troubleshooting.de.md",
+    "docs/troubleshooting.md",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/context_ops.py",
+    "router/skirnir_router/memory.py",
+    "router/skirnir_router/metrics.py",
+    "router/skirnir_router/recall_skips.py",
+    "router/ui.html",
+    "test/selftest_memory.py"
   ],
   "risk_ids": [
     "TM-14"
@@ -58,9 +71,9 @@
       "evidence": "LOCAL SERVICE: every open/read/os.Root/DirFS operation ok, filepath.EvalSymlinks Access is denied; LocalSystem: all ok. Reproduces the incident and names the call the resolve fact uses."
     },
     {
-      "command": "python test/check_control_flow.py",
+      "command": "python test/check_control_flow.py; python test/check_adr_index.py (after merging main with ADR-0090)",
       "result": "passed",
-      "evidence": "control flow ok"
+      "evidence": "control flow ok; ADR index ok: 91 ADRs"
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -74,7 +87,6 @@
     }
   ],
   "limitations": [
-    "The ADR index check reports a gap at 0090 until PR #142 (ADR-0090) is merged; this branch is updated from main afterwards.",
     "Moving existing data from the agent's folder is an operator step per node (reported as move_to); Ollama's switch back to run_as: localservice is confirmed by the node check during the rollout."
   ]
 }

@@ -318,7 +318,9 @@ Do not send raw session exports or whole conversation histories as memory items.
 
 No new logs/metrics contain prompts, facts, tokens, DSNs, principals, project/bank IDs
 or endpoint names. Metrics use fixed operation/outcome labels:
-`skirnir_memory_http_total`, `skirnir_memory_http_seconds`, `skirnir_memory_events_total`.
+`skirnir_memory_http_total`, `skirnir_memory_http_seconds`, `skirnir_memory_events_total`;
+`skirnir_memory_recall_skipped_for_tools_clients` has no label at all (ADR-0090). Only the
+admin-authenticated `/admin/context` names the clients whose recalls are skipped for tools.
 Hindsight/proxy/database logging and backup policies remain the operator's responsibility.
 
 ## Direct recall API and validation

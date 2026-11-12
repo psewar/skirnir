@@ -66,3 +66,11 @@ Requests with memory recall carry `X-Skirnir-Memory-State` ([design/hindsight-me
 | `skipped:tools` | The request carries tools and the project grant does not set `recall_into_tools: true` ([ADR-0059](adr/0059-no-automatic-recall-into-requests-with-tools.md)). Other `skipped:<reason>`: `no_messages`, `last_not_user`, `content_not_text`. |
 | `query_filtered` | The sensitive-data filter kept the query from being sent; explicit recall answers 403. |
 | `unavailable`, `unavailable:<kind>` | No usable answer (`timeout`, `transport`, `protocol`, `upstream_auth`, `upstream_rejected`). Inference proceeds without facts with `fail_open: true`, else 503. |
+
+A client that does not read the header still shows up when its recalls are skipped for tools, for example a Home
+Assistant entry after a tool API was enabled on it ([ADR-0090](adr/0090-report-recall-skipped-for-tools-per-client.md)):
+the Overview and `/admin/context` (`recall_skipped_for_tools`) name the client, its project, since when and how many
+requests, until an hour after its last such request. `skirnir_memory_recall_skipped_for_tools_clients` counts these
+clients, and the log says once per client and hour that it happened, without names. If the client should get the
+facts, set `recall_into_tools: true` on its grant, which accepts that facts reach a model that can call tools; otherwise
+turn its recall off or leave it.
