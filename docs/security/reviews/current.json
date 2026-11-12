@@ -2,99 +2,88 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "4176f771b9fd2724d22f16441e3a2a25367ffebf",
-  "change_digest": "26d031b2fc405246733b189771efa2d7c3708fd1fecd1f9f4f2fff5057d952fe",
+  "base_sha": "07e37ea7bb646be11d72932a9d805c86b59eecfc",
+  "change_digest": "a2158a68737e76448f445b35c17849e8a720e395807ed7f7f32116aaf9e534e2",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "docs/adr/0080-further-secret-keys-named-in-render-env-conf.md",
+    "docs/adr/0081-router-reports-tls-files-it-could-change.md",
     "docs/adr/README.md",
-    "docs/configuration.de.md",
-    "docs/configuration.md",
     "docs/install-router.de.md",
     "docs/install-router.md",
-    "docs/security/risk-register.json",
+    "docs/reference.de.md",
+    "docs/reference.md",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "router/config.example.yaml",
-    "router/render-env.conf.example",
-    "router/render-env.sh",
+    "router/skirnir_router/app.py",
     "router/skirnir_router/common.py",
-    "router/skirnir-router.service",
-    "router/skirnir_router/cloud.py",
-    "router/skirnir_router/config.py",
-    "test/selftest_cloud_transport.py",
-    "test/selftest_render_env.py"
+    "router/skirnir_router/posture.py",
+    "router/skirnir_router/process_view.py",
+    "test/selftest_process_view.py"
   ],
   "risk_ids": [
     "TM-14",
-    "TM-15",
-    "TM-06"
+    "TM-15"
   ],
   "boundaries": [
     "B6",
     "B9"
   ],
-  "summary": "Router 0.26.0, ADR-0080 (renumbered after ADR-0076 to ADR-0079 landed on main; rebased onto main after v0.31.0, entry in the v0.31.1 row). render-env.sh (run as root by the secrets units, access file in the root-only folder of ADR-0073) additionally renders the secrets named in EXTRA_SECRET_KEYS from render-env.conf into /etc/skirnir-router/secrets.env, so a further OpenAI-compatible cloud provider (example: Mistral's EU endpoint) is configuration only. Traced: secrets.env is the EnvironmentFile of skirnir-router.service (root); cloud.py reads a provider key only from the env name in api_key_env; config.py validates base_url against the egress allowlist and HTTPS (loopback HTTP only). Controls added in the renderer: names must start with a capital letter, contain only [A-Z0-9_] (they become part of the secret-store query path) and end in _KEY or _TOKEN, so LD_PRELOAD, PATH, PYTHONPATH and similar never reach the root unit's environment; globbing is off while splitting; built-in names are not fetched twice; a missing name is reported by name only. While tracing, a pre-existing path was found and closed for every key: a secret value with LF or CR would have added a further variable of the store writer's choosing to the EnvironmentFile; such values are now refused (MQTT_PASSWORD: nothing rendered, existing file kept). config.example.yaml adds egress_allow [api.eu.mistral.ai] and a disabled mistral provider (kind openai, region eu); selftest_cloud_transport now appends to the example's egress_allow instead of replacing it. New CI test test/selftest_render_env.py runs the real script against a fake secret store (bash/curl/jq; refuses to skip in CI). Threat model EN/DE and register TM-14 updated; docs EN/DE, READMEs, CHANGELOG.",
+  "summary": "Router 0.27.0 adds a start-time posture check from the running process's own view (/proc/self/mountinfo, owner/mode, effective capabilities): the medium finding tls_files_changeable when the router could change or replace control_tls.cert/key or a folder above them (ADR-0081). Read-only: the check opens no file for writing, follows no path the configuration does not name, and never reads certificate or key contents.",
   "findings": [
     {
       "id": "TM-14",
-      "evidence": "secrets.env is the router unit's EnvironmentFile (root). A configurable list of names would let a name such as LD_PRELOAD or PYTHONPATH carry a secret-store value into the root process.",
-      "resolution": "Only names ending in _KEY or _TOKEN with [A-Z0-9_] are rendered; others are reported and skipped. The list lives in render-env.conf (root-only folder, ADR-0073), not in the router-writable config.yaml. Rejected-case test with LD_PRELOAD, PATH, PYTHONPATH; a copy of the script without the suffix rule fails it.",
+      "evidence": "ADR-0073 protects only /etc/skirnir-router/certs. A deployment kept its certificate copy in another folder below /etc/skirnir-router that a root install step writes and that the router (root without capabilities, ReadWritePaths=/etc/skirnir-router) could change or replace; nothing reported it.",
+      "resolution": "The running router reports tls_files_changeable (medium) with the next step. Checks file content (writable mount + owner/mode), every folder above (rename/replace), mount points (cannot be renamed), sticky folders, symlink and target. Tests mirror the unit's mount table; a counter-check with three broken variants (mounts ignored, folders not walked, owner/mode ignored) fails 4, 3 and 3 tests.",
       "disposition": "fixed"
     },
     {
       "id": "TM-14",
-      "evidence": "Pre-existing: render-env.sh wrote KEY=value lines with printf without checking the value; a value with a line break from the secret store (built-in keys included) would have started a further variable in the root unit's environment.",
-      "resolution": "Every rendered value must be a single line (no LF/CR); otherwise the key is skipped and named, MQTT_PASSWORD keeps the existing file. Tests for a built-in key, further keys with LF and with CR, and MQTT_PASSWORD; a copy without the check fails all four tests.",
+      "evidence": "A check that raised at start (stat of a path the process cannot reach, dangling link) would stop the router before it serves.",
+      "resolution": "Paths are checked with lexists before any stat; the target of a link is only stat-ed when it exists; folders of a reachable entry are searchable by construction. No try/except added; a dangling-link test covers both a read-only and a writable folder.",
       "disposition": "fixed"
     },
     {
       "id": "TM-15",
-      "evidence": "New log lines in the renderer name keys that are invalid, missing or multi-line.",
-      "resolution": "Only names are printed, never values; the test asserts that no synthetic secret value or injected fragment appears in the output.",
+      "evidence": "The finding prints configured paths.",
+      "resolution": "Only the setting name and the configured path are printed (as config.yaml already holds them); no file content, owner, or other path.",
       "disposition": "fixed"
-    },
-    {
-      "id": "TM-06",
-      "evidence": "The example adds a further egress host for a disabled provider.",
-      "resolution": "No code change in the cloud path; base_url stays bound to the allowlist and HTTPS by config.py (selftest_cloud_transport cases unchanged). Data classes, privacy check, credential scan and budget apply to the new provider as to OpenAI. Redirect behaviour remains the existing residual risk of TM-06.",
-      "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_render_env.py on a Linux router host (bash/curl/jq), in /tmp with the router venv, live router untouched",
+      "command": "python test/selftest_process_view.py (Windows and WSL Ubuntu with the CI venv)",
       "result": "passed",
-      "evidence": "Ran 4 tests: OK (after the rebase onto 4176f77). Counter-checks with the same tests: script without the suffix rule FAILED (1), script whose line check always passes FAILED (4)."
+      "evidence": "Ran 13 tests: OK (1 skipped per platform); on Linux the current process's own view is checked as well."
     },
     {
-      "command": "All python steps of ci.yml run locally on Windows (75 commands)",
+      "command": "python <scratchpad>/mutate_process_view.py . (counter-check)",
       "result": "passed",
-      "evidence": "74/75 ok; check_public_changes needs the CI base variable and was run separately below."
+      "evidence": "mounts ignored: FAILED (4); folders never checked: FAILED (3); owner/mode ignored: FAILED (3)."
     },
     {
-      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_control_flow.py; python test/selftest_threat_review.py",
+      "command": "python test/selftest_posture.py; python test/selftest_init.py",
       "result": "passed",
-      "evidence": "All checks passed; configuration ok: 5 roles, 7 models; ADR index ok: 80 ADRs; control flow ok."
+      "evidence": "OK; CLI posture unchanged (no view passed)."
+    },
+    {
+      "command": "ruff check .; python test/check_adr_index.py; python test/check_control_flow.py",
+      "result": "passed",
+      "evidence": "All checks passed; ADR index ok: 81 ADRs; control flow ok."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
-      "evidence": "Run after staging this record."
+      "evidence": "Security evidence: 0 error(s)."
     },
     {
-      "command": "python test/check_public_changes.py --base origin/main",
+      "command": "python test/check_public_changes.py",
       "result": "passed",
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
   "limitations": [
-    "selftest_render_env.py skips on Windows (no bash/jq there); it ran on a Linux router host and runs in CI, where a skip is refused.",
-    "The suffix rule is a name rule: a secret the operator names with _KEY still reaches the router's environment by design.",
-    "systemd EnvironmentFile still interprets quotes and backslashes in single-line values (pre-existing, unchanged); the router reads MQTT_PASSWORD raw from the file for that reason.",
-    "Choosing a provider (terms, data retention) is the operator's decision; no request to a provider was part of these tests."
+    "ACLs and security modules are not read; they can only remove rights, so the check may over-report, never under-report.",
+    "The finding only appears in the start log of the running router; router.py --posture cannot see the unit's view."
   ]
 }
