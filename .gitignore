@@ -63,3 +63,8 @@ test/deletions.jsonl
 # go build in agent/ leaves the binary there; never commit it (releases are built by bauen.sh and the provenance workflow)
 /agent/agent
 /agent/agent.exe
+
+# Transcripts of the node scripts name the computer and user accounts. Since ADR-0089 they go to the agent's log folder
+# or TEMP; transcripts left by older versions in a checkout must never be committed.
+/agent/Set-OllamaLoopback-*.log
+/agent/Move-OllamaProtected-*.log

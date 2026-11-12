@@ -67,6 +67,13 @@ Assert-Equal (Get-ChildCmd ($head + $stt + $tail)).State 'refused' 'no Ollama ch
 $two = $head + "  - name: ollama`n    cmd: 'C:\a\ollama.exe'`n    cmd: 'C:\b\ollama.exe'`n" + $tail
 Assert-Equal (Get-ChildCmd $two).State 'refused' 'two cmd lines: refused'
 
+# the transcript goes through the shared Start-RunTranscript (agent log folder, else TEMP; ADR-0089), never next to the
+# script: run from a repository checkout it would put computer and user names into the working tree
+$source = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' | Join-Path -ChildPath 'agent' | Join-Path -ChildPath 'Move-OllamaProtected.ps1')
+Assert-True ($source -notmatch 'PSScriptRoot[^\r\n]*\.log') 'no log file next to the script'
+Assert-Equal ([regex]::Matches($source, 'Start-Transcript').Count) 0 'no Start-Transcript of its own'
+Assert-True ($source -match "Start-RunTranscript 'Move-OllamaProtected'") 'the run starts its transcript through Start-RunTranscript'
+
 if ($Script:Failures -gt 0) { Write-Host "$($Script:Failures) failure(s)"; exit 1 }
 Write-Host 'selftest_ollama_protected: all passed'
 exit 0

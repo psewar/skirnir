@@ -28,7 +28,9 @@ no certificate, no token and no fixed IP. Agent internals (German): [agent/READM
    administrator rights): it detects whether Ollama is the agent's child or a user's desktop app, sets
    `OLLAMA_HOST=127.0.0.1:11434` in the right place, restarts Ollama, checks that it listens on loopback only (else it
    restores the previous state) and disables firewall rules that only opened Ollama. It refuses while other machines are
-   connected to Ollama. `-Check` only reports; the log lands next to the script (ADR-0072).
+   connected to Ollama. `-Check` only reports (ADR-0072). The log goes to the agent's log folder
+   (`C:\ProgramData\skirnir-agent\logs`, without an agent the TEMP folder of the elevated account), never into the
+   checkout; the line `Log:` names the file (ADR-0089).
 3. `OLLAMA_NUM_PARALLEL` should match the node's `max_inflight` in the router (default 2,
    [configuration.md](configuration.md#scheduler-circuit-breaker-admission)).
 4. Windows: the Ollama installer creates firewall rules `ollama.exe` that allow any source. Remove them, Ollama needs no
@@ -114,7 +116,8 @@ without anyone logging in; it can supervise further services the same way. On Wi
   `agent\Move-OllamaProtected.cmd` moves it in one step (double-click; it asks for administrator rights itself):
   it copies the program folder to `C:\Program Files\Ollama` (the copy takes that folder's rights), points the
   child's `cmd` there, lets `check-config` accept it, restarts the service and checks that Ollama answers from the
-  copy - otherwise it restores the configuration. `-Check` only reports; the log lies next to the script. The
+  copy - otherwise it restores the configuration. `-Check` only reports; the log goes to the agent's log folder like
+  that of `Set-OllamaLoopback.cmd` (ADR-0089). The
   router's Ollama updates replace the files in the copy. Otherwise the agent does not
   start the child: `check-config` and the status name the path and who could change it (`refused`), and a self-update
   that would refuse a child keeps the running version. A deliberate exception is
