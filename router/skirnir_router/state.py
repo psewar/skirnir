@@ -58,7 +58,8 @@ def spawn(coro):
 
 def decisions_path():
     import os
-    return os.path.join(os.path.dirname(os.path.abspath(CFG.path)), "events.jsonl") if CFG is not None and getattr(CFG, "path", None) else None
+    from .common import state_dir   # lazy: state is imported before common's dependencies are needed
+    return os.path.join(state_dir(CFG), "events.jsonl") if CFG is not None and getattr(CFG, "path", None) else None
 
 
 def decisions_load():

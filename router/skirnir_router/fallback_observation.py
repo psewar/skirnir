@@ -13,7 +13,7 @@ import os
 import time
 
 from . import admission, decision, scheduler, state
-from .common import log, open_private
+from .common import log, open_private, state_dir
 
 LIGHT_DEFAULT = ("standard", "assist")   # Classes for which a deeper tier might be an option (not Programming, not Analysis)
 CLASSIFY_PATHS = ("/api/chat", "/api/generate")
@@ -69,7 +69,7 @@ def file_path():
     p = (state.CFG.decision or {}).get("observe_path")
     if p:
         return p
-    return os.path.join(os.path.dirname(os.path.abspath(state.CFG.path)), FILE_NAME) if getattr(state.CFG, "path", None) else None
+    return os.path.join(state_dir(state.CFG), FILE_NAME) if getattr(state.CFG, "path", None) else None
 
 
 def adopt_file_before_0_9():

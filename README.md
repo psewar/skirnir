@@ -163,13 +163,14 @@ clients: [docs/clients.md](docs/clients.md).
 - Compare the fingerprint with `skirnir-agent identity` before approving a node, over another channel than the network it
   enrolled through (TM-07).
 - Run `router.py --posture /etc/skirnir-router/config.yaml` before every rollout; the start log repeats the findings.
-- The router runs as root **without capabilities** ([ADR-0044](docs/adr/0044-systemd-hardening-root-kept-for-now.md); a
-  dedicated user would need rights on configuration, log and certificate): the TLS key and other files must be readable by
-  root as their owner. `router.py --check <config> --files` checks that.
+- The router runs as its own account `skirnir-router` **without capabilities**
+  ([ADR-0086](docs/adr/0086-router-runs-as-its-own-account.md)): it reads its configuration and TLS key through its group
+  and writes only `/var/lib/skirnir-router` (`router.state_dir`) and its logs. `install.sh` and `deploy.py` set this up
+  (`router-layout.sh`); `router.py --check <config> --files` checks the files as that account.
 - Never pass passwords on the command line: `router.py --hash` without an argument asks without echo.
 - Whatever shifts the trust base (ports, TLS, identities, provider endpoints, egress, `client_auth.mode` when `locked`) cannot
   be changed via UI or API, only in the configuration file.
-- Secrets live in `secrets.env` (0600) and never appear in logs or `/admin/state`; the router has no write access to the
+- Secrets live in `secrets.env` (root, readable for the router's group) and never appear in logs or `/admin/state`; the router has no write access to the
   secret store. Prompts go to the cloud only with a declared data class and never with recognisable keys in them.
 - Agents log in over WSS with an Ed25519 challenge; MQTT runs over 8883. Ollama updates are fetched by the agent itself from a
   fixed source (`ollama_update.source`, default GitHub releases of ollama/ollama) and checked against that release's

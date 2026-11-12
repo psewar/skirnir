@@ -7,6 +7,10 @@
    (ADR-0082) - and the secret-store folder not at all; every TLS file the repository configures or watches is outside
    what the router may write, and a unit without the tls line is detected (rejected case); the root helper units carry
    the hardening; deploy.py places the access file outside every ReadWritePaths of the router unit.
+   ADR-0086: the router runs as its own account and may write only its state and log folders, not
+   /etc/skirnir-router, where root writes secrets.env for its group; the certificate unit hands a renewed key to the
+   account's group before the restart; every file the router writes itself is one router-layout.sh moves out of the
+   configuration folder (a new one without that entry fails here).
 3. Parity with the agent: every Ollama path the router sends through the tunnel is in the agent's passthrough list
    (agent/passthrough.go), and no path the router forbids for clients is.
     python test/selftest_privilege_paths.py
@@ -40,9 +44,12 @@ def unit_values(text, key):
 def unit_may_write(text, path):
     """Whether a unit lets its service write `path`. The most specific of ReadWritePaths, ReadOnlyPaths and
     InaccessiblePaths that contains the path decides, as systemd mounts deeper paths over shallower ones; with
-    ProtectSystem=strict everything else is read-only (StateDirectory= and LogsDirectory= are not modelled). systemd's '-'
-    (ignore if missing) and '+' prefixes are dropped."""
+    ProtectSystem=strict everything else is read-only; StateDirectory= and LogsDirectory= are writable folders below
+    /var/lib and /var/log. systemd's '-' (ignore if missing) and '+' prefixes are dropped."""
     access = {}
+    for key, base in (("StateDirectory", "/var/lib"), ("LogsDirectory", "/var/log")):
+        for name in (n for v in unit_values(text, key) for n in v.split()):
+            access[f"{base}/{name}"] = "write"
     for key, mode in (("ReadWritePaths", "write"), ("ReadOnlyPaths", "read"), ("InaccessiblePaths", "none")):
         for p in (p for v in unit_values(text, key) for p in v.split()):
             access[p.lstrip("-+").rstrip("/")] = mode
@@ -143,15 +150,36 @@ def units():
     check(len(files) == 7, f"TLS files found: --init defaults, both example configurations, the certificate path unit ({len(files)})")
     for where, path in files:
         check(not unit_may_write(router, path), f"router unit: {where} ({path}) is not router-writable")
-    # ADR-0082: the older location. Rejected case: the same unit without that line leaves certificate and key writable.
+    # ADR-0082: the older location. The read-only lines stay for a drop-in that opens /etc/skirnir-router again.
+    # Rejected case: such a drop-in without the tls line leaves certificate and key writable.
     legacy = ("/etc/skirnir-router/tls/fullchain.pem", "/etc/skirnir-router/tls/privkey.pem")
     check(not any(unit_may_write(router, p) for p in legacy), "router unit: certificate and key under tls are not router-writable")
-    lines = router.splitlines()
+    reopened = router + "\nReadWritePaths=/etc/skirnir-router\n"
+    check(not any(unit_may_write(reopened, p) for p in legacy), "router unit + drop-in opening the folder: tls stays read-only")
+    lines = reopened.splitlines()
     kept = [line for line in lines if line.strip() != "ReadOnlyPaths=-/etc/skirnir-router/tls"]
     check(len(kept) == len(lines) - 1 and all(unit_may_write("\n".join(kept), p) for p in legacy),
-          "rejected case: without the tls line the router could replace its certificate and key")
-    check(unit_may_write(router, "/etc/skirnir-router/roles.yaml") and unit_may_write(router, "/etc/skirnir-router/tlsx/key.pem"),
-          "router unit: its own files in /etc/skirnir-router stay writable; a near-miss name is not read-only")
+          "rejected case: without the tls line such a drop-in would let the router replace its certificate and key")
+    # ADR-0086: own account; it writes its state and logs, nothing in /etc/skirnir-router
+    check(unit_values(router, "User") == ["skirnir-router"] and unit_values(router, "Group") == ["skirnir-router"],
+          "router unit: runs as the account skirnir-router")
+    check(not rw or not any(p.lstrip("-+").rstrip("/") == "/etc/skirnir-router" for p in rw),
+          f"router unit: /etc/skirnir-router is not in ReadWritePaths ({rw})")
+    check(unit_may_write(router, "/var/lib/skirnir-router/roles.yaml") and unit_may_write(router, "/var/log/skirnir-router/audit.jsonl"),
+          "router unit: state and log folders are writable")
+    check(not any(unit_may_write(router, f"/etc/skirnir-router/{f}") for f in ("config.yaml", "roles.yaml", "agent/manifest.json")),
+          "router unit: config.yaml, an old roles.yaml and agent releases are read-only")
+    env_files = unit_values(router, "EnvironmentFile")
+    check(env_files == ["-/etc/skirnir-router/secrets.env"] and not unit_may_write(router, "/etc/skirnir-router/secrets.env"),
+          f"router unit: secrets.env from the root-owned configuration folder, read-only for the router ({env_files})")
+    out = re.search(r"^OUT=\$\{RENDER_ENV_OUT:-([^}]+)\}", read("router/render-env.sh"), re.M)
+    check(out is not None and "-" + out.group(1) == env_files[0] and 'mktemp "$(dirname "$OUT")' in read("router/render-env.sh"),
+          "render-env.sh writes that file through a temporary file in the same folder")
+    check("chgrp skirnir-router" in read("router/render-env.sh"), "render-env.sh hands secrets.env to the router's group")
+    cert = unit_values(read("router/skirnir-router-cert.service"), "ExecStart")
+    check(cert[:1] == ["/opt/skirnir-router/router-layout.sh --tls"] and any("restart skirnir-router" in c for c in cert[1:]),
+          f"certificate unit: key readable for the account's group before the restart ({cert})")
+    state_files_moved()
     for helper in ("skirnir-router-secrets.service", "skirnir-router-secrets-refresh.service", "skirnir-router-cert.service"):
         u = read(f"router/{helper}")
         check(unit_values(u, "NoNewPrivileges") == ["true"] and unit_values(u, "PrivateTmp") == ["true"]
@@ -166,6 +194,25 @@ def units():
         m = re.search(r"^CONF=\$\{RENDER_ENV_CONF:-([^}]+)\}", read(script), re.M)
         check(m is not None and not under_rw(m.group(1)) and dests and m.group(1) == dests[0],
               f"{script}: default access file matches deploy.py and lies outside ReadWritePaths")
+
+
+def state_files_moved():
+    """Every file the router writes into its state folder is in router-layout.sh's list of files it moves out of the
+    configuration folder - otherwise an installation from before ADR-0086 would lose that file's content."""
+    pkg = os.path.join(ROOT, "router", "skirnir_router")
+    written = set()
+    for name in os.listdir(pkg):
+        if name.endswith(".py"):
+            src = open(os.path.join(pkg, name), encoding="utf-8").read()
+            written |= set(re.findall(r'state_dir\((?:state\.)?CFG\), "([^"]+)"\)', src))
+            written |= set(re.findall(r'cfg\.state_dir, "([^"]+)"\)', src))
+            written |= set(re.findall(r'self\.state_dir, "([^"]+)"\)', src))
+    from skirnir_router import fallback_observation
+    written |= {fallback_observation.FILE_NAME, fallback_observation.FILE_NAME_BEFORE_0_9}
+    m = re.search(r'^STATE_FILES="([^"]+)"', read("router/router-layout.sh"), re.M)
+    moved = set(m.group(1).split()) if m else set()
+    check(len(written) >= 9 and written <= moved,
+          f"router-layout.sh moves every file the router writes ({sorted(written)}; missing: {sorted(written - moved)})")
 
 
 def passthrough_parity():

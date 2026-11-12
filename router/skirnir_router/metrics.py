@@ -16,7 +16,7 @@ import time
 
 from . import admission, perf, scheduler, state
 from . import nodes as nodes_mod
-from .common import VERSION, load_json_file, save_json_file
+from .common import VERSION, load_json_file, save_json_file, state_dir
 
 DURATION_BUCKETS = (0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300)
 TTFT_BUCKETS = (0.1, 0.25, 0.5, 1, 2, 5, 15)
@@ -97,11 +97,11 @@ def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion
 # ---------------- Usage ----------------
 
 def usage_path():
-    return os.path.join(os.path.dirname(os.path.abspath(state.CFG.path)), "usage.json")
+    return os.path.join(state_dir(state.CFG), "usage.json")
 
 
 def metrics_path():
-    return os.path.join(os.path.dirname(os.path.abspath(state.CFG.path)), "metrics.json")
+    return os.path.join(state_dir(state.CFG), "metrics.json")
 
 
 def _key_out(key):

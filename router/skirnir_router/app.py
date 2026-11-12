@@ -117,6 +117,12 @@ async def main(cfg_path):
         log.error("configuration invalid, router does not start: %s", cfg.message)
         sys.exit(2)
     state.CFG = cfg
+    # ADR-0086: everything the router writes goes to its state folder; checked first, so a missing or read-only
+    # folder is named instead of failing later on the first write
+    if not os.path.isdir(cfg.state_dir) or not os.access(cfg.state_dir, os.W_OK):
+        log.error("router does not start: state folder %s is missing or not writable by this process "
+                  "(router.state_dir, ADR-0086)", cfg.state_dir)
+        sys.exit(2)
     # ADR-0064: what the configuration allows, as facts on every start; ADR-0083: also with this process's file-system view
     lines, summary = posture.report(cfg, view=process_view.ProcessView.current())
     for line in lines:
@@ -125,7 +131,7 @@ async def main(cfg_path):
     state.INTERNAL_TOKEN = secrets.token_urlsafe(32)   # Self-call of the UI (Try it) in enforce mode, localhost only
     decision.init()   # Auto role (decision_engine), if configured
     state.NODES = {name: nodes.Node(name, spec) for name, spec in state.CFG.nodes.items()}
-    state.REG = registry.NodeRegistry(os.path.join(os.path.dirname(os.path.abspath(cfg_path)), "nodes.json")).load()
+    state.REG = registry.NodeRegistry(os.path.join(cfg.state_dir, "nodes.json")).load()
     for fp, e in list(state.REG.nodes.items()):
         if e.get("state") == "approved":
             registry.activate_node(fp)

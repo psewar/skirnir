@@ -6,9 +6,9 @@
 
 | File | Purpose |
 |---|---|
-| `/etc/skirnir-router/config.yaml` | The configuration (0600). Start from [router/config.minimal.yaml](../router/config.minimal.yaml) (a small, safe start: one role, one client; `router.py --init` fills it in, see [install-router.md](install-router.md#first-configuration)) or [router/config.example.yaml](../router/config.example.yaml) (the full reference with every option and its comment). |
-| `/etc/skirnir-router/roles.yaml` | Overrides written by the web UI next to `config.yaml`; survives deploys and upgrades. |
-| `/etc/skirnir-router/secrets.env` | Secrets as environment ([install-router.md](install-router.md#secrets)). |
+| `/etc/skirnir-router/config.yaml` | The configuration (root, 0640: the router reads it through its group `skirnir-router`, ADR-0086). Start from [router/config.minimal.yaml](../router/config.minimal.yaml) (a small, safe start: one role, one client; `router.py --init` fills it in, see [install-router.md](install-router.md#first-configuration)) or [router/config.example.yaml](../router/config.example.yaml) (the full reference with every option and its comment). |
+| `/var/lib/skirnir-router/roles.yaml` | Overrides written by the web UI into the router's state folder (`router.state_dir`); survives deploys and upgrades. The router writes all its own files there - `roles.yaml`, `nodes.json`, journals, metrics - and nothing in `/etc/skirnir-router` (ADR-0086). Without `state_dir` they lie next to `config.yaml`, which only suits development: the service's account cannot write `/etc/skirnir-router`. |
+| `/etc/skirnir-router/secrets.env` | Secrets as environment (root, 0640 for the router's group; [install-router.md](install-router.md#secrets)). |
 
 Roles, catalogue and most runtime settings are editable in the UI; the UI writes them to `roles.yaml`. Ports, TLS, Basic Auth,
 identities, provider endpoints and the egress allowlist remain deploy matters on purpose. Catalogue entries from both files

@@ -59,9 +59,16 @@ if command -v python3 >/dev/null 2>&1; then
 elif [ -n "$ROOT" ] || [ "$CHECK_ONLY" -eq 1 ]; then
   refuse "python3 is missing."
 fi
-for f in router.py skirnir_router/app.py skirnir-router.service config.minimal.yaml requirements.txt requirements-session.txt ui.html; do
+for f in router.py skirnir_router/app.py skirnir-router.service router-layout.sh config.minimal.yaml requirements.txt requirements-session.txt ui.html; do
   [ -e "$SRC/$f" ] || refuse "Incomplete source folder $SRC: $f is missing. Run install.sh from the router/ folder of a release."
 done
+# ADR-0086: the new unit runs the router under its own account and needs router.state_dir in an existing configuration.
+# Checked before anything changes, so a refusal leaves program files and units as they were.
+PRE_LAYOUT=(bash "$SRC/router-layout.sh" --check)
+[ -n "$ROOT" ] && PRE_LAYOUT+=(--root "$ROOT")
+if [ -f "$CONF/config.yaml" ]; then
+  PRE_OUT="$("${PRE_LAYOUT[@]}" 2>&1)" || { echo "$PRE_OUT" | grep -v '^STATE:'; refuse "Nothing was changed."; }
+fi
 
 # --- packages ---------------------------------------------------------------------------------------------------
 MISSING=""
@@ -93,7 +100,7 @@ STAGE="$(mktemp -d "$DEST/.install.XXXXXX")" || refuse "cannot stage in $DEST"
 cp -R "$SRC/skirnir_router" "$STAGE/skirnir_router" && find "$STAGE/skirnir_router" -name '__pycache__' -prune -exec rm -rf {} + \
   || refuse "copying the package failed"
 for f in router.py ui.html skirnir.png favicon.png config.example.yaml config.minimal.yaml decision-tfidf.json \
-         render-env.sh render-env.conf.example requirements.txt requirements-session.txt requirements-lock.txt install.sh; do
+         render-env.sh router-layout.sh render-env.conf.example requirements.txt requirements-session.txt requirements-lock.txt install.sh; do
   [ -e "$SRC/$f" ] && cp "$SRC/$f" "$STAGE/$f"
 done
 rm -rf "$DEST/skirnir_router.old"
@@ -143,15 +150,26 @@ fi
 if [ -z "$ROOT" ]; then
   systemctl daemon-reload || refuse "systemctl daemon-reload failed"
 fi
+# The service account and the folders it owns (ADR-0086): account, owners and modes, the router's own files moved out of
+# the configuration folder (a router still running as root is stopped first, so it saves them before the move).
+LAYOUT=(bash "$DEST/router-layout.sh")
+[ -n "$ROOT" ] && LAYOUT+=(--root "$ROOT")
+LAYOUT_OUT="$("${LAYOUT[@]}" 2>&1)"
+LAYOUT_RC=$?
+echo "$LAYOUT_OUT" | grep -v '^ROUTER: '
+[ "$LAYOUT_RC" -eq 0 ] || refuse "The service account layout above is not in place; the program files are installed."
 if [ -f "$CONF/config.yaml" ]; then
   CHECK=("$PY" "$DEST/router.py" --check "$CONF/config.yaml" --files)
-  # As the service reads it: root without capabilities (ADR-0044) - a file only readable through a capability fails here.
+  # As the service reads it: its own account without capabilities (ADR-0044, ADR-0086) - a file the account cannot
+  # read fails here.
   if [ -z "$ROOT" ] && command -v setpriv >/dev/null 2>&1; then
-    CHECK=(setpriv --inh-caps=-all --bounding-set=-all "${CHECK[@]}")
+    CHECK=(setpriv --reuid=skirnir-router --regid=skirnir-router --init-groups --inh-caps=-all --bounding-set=-all "${CHECK[@]}")
   fi
   "${CHECK[@]}" || refuse "The configuration $CONF/config.yaml does not pass the check above; the program files are installed, the service was not touched."
   "$PY" "$DEST/router.py" --posture "$CONF/config.yaml"
-  if [ -z "$ROOT" ] && systemctl is-active -q skirnir-router; then
+  if echo "$LAYOUT_OUT" | grep -q '^ROUTER: stopped'; then
+    echo "Next: systemctl start skirnir-router   (stopped above for the move to its own account)"
+  elif [ -z "$ROOT" ] && systemctl is-active -q skirnir-router; then
     echo "Next: systemctl restart skirnir-router   (the running router still has the previous version)"
   else
     echo "Next: systemctl enable --now skirnir-router"
@@ -159,6 +177,7 @@ if [ -f "$CONF/config.yaml" ]; then
 else
   echo "No configuration yet. Next:"
   echo "  $PY $DEST/router.py --init $CONFIG_DIR --public-url https://<router-name>:11435"
-  echo "  then put the TLS certificate and key at the paths in control_tls, and: systemctl enable --now skirnir-router"
+  echo "  then put the TLS certificate and key at the paths in control_tls, run bash $DEST/router-layout.sh again (their"
+  echo "  group and mode for the router's account), and: systemctl enable --now skirnir-router"
 fi
 echo "STATE: installed"

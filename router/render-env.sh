@@ -4,7 +4,9 @@
 #   SECRET_STORE_DOMAIN, SECRET_STORE_CLIENT_ID, SECRET_STORE_CLIENT_SECRET  (Universal Auth, Rolle viewer) - direkt oder
 #   ueber SECRET_STORE_AUTH_FILE (Datei, die diese drei Variablen setzt)
 #   PROJECT_ID           Secret-Store-Projekt des Routers      ENVIRONMENT  z. B. prod
-# Schreibt /etc/skirnir-router/secrets.env (600), das skirnir-router.service als EnvironmentFile liest.
+# Schreibt /etc/skirnir-router/secrets.env (root:skirnir-router 0640, ADR-0086), das skirnir-router.service als
+# EnvironmentFile liest und der Router als mqtt.password_file roh liest. Der Ordner gehoert root, der Router kann ihn
+# nicht schreiben - so folgt dieses root-Skript keinem Link, den er gelegt haette.
 # Bei Ausfall des Secret-Stores bleibt die letzte Datei stehen.
 # Aufruf ohne Argument (als Abhaengigkeit von skirnir-router.service): NUR rendern, NIE den Router anfassen -
 # sonst Job-Verklemmung in systemd (Start wartet auf uns, wir warten auf seinen Restart).
@@ -54,7 +56,10 @@ one_line(){ case "$1" in *$'\n'*|*$'\r'*) return 1 ;; esac; }
 M=$(g MQTT_PASSWORD)
 [ -z "$M" -o "$M" = "null" ] && { echo "Secret-Fetch fehlgeschlagen (Secret-Store nicht erreichbar?) - behalte bestehende $OUT"; exit 0; }
 one_line "$M" || { echo "MQTT_PASSWORD contains a line break - not rendered, keeping the existing $OUT"; exit 0; }
-TMP=$(mktemp); printf 'MQTT_PASSWORD=%s\n' "$M" > "$TMP"; chmod 600 "$TMP"
+# temporary file next to the target, so the final mv is a rename in one folder (atomic, never follows a link)
+TMP=$(mktemp "$(dirname "$OUT")/.secrets.env.XXXXXX"); printf 'MQTT_PASSWORD=%s\n' "$M" > "$TMP"; chmod 600 "$TMP"
+# the router's account reads it through its group (ADR-0086); without the account (older layout) it stays root's 0600
+if getent group skirnir-router >/dev/null 2>&1; then chgrp skirnir-router "$TMP" && chmod 640 "$TMP"; fi
 # Stufe 5 Cloud: Anbieter-Schluessel sind optional (fehlt einer im Secret-Store, bleibt der Anbieter im Router ohne Schluessel = keine Stufe)
 # Optionale Gedaechtnisschicht (design/session-store.md, design/hindsight-memory.md): nur vorhandene Secrets landen in der
 # Datei; ohne sie bleibt die Schicht aus bzw. startet nicht (der Router meldet beim Start, welche Variable fehlt).

@@ -49,13 +49,14 @@ FILES = [  # (local, target path in container, mode); source is ROUTER_DIR, unle
     ("skirnir.png", "/opt/skirnir-router/skirnir.png", "0644"),    # Logo im UI-Kopf
     ("favicon.png", "/opt/skirnir-router/favicon.png", "0644"),    # Tab icon (128 px), also /favicon.ico
     ("decision-tfidf.json", "/etc/skirnir-router/decision-tfidf.json", "0644"),   # Decision Engine tier 1 (train_tfidf.py)
-    (OPS["CONFIG_YAML"], "/etc/skirnir-router/config.yaml", "0600"),
+    (OPS["CONFIG_YAML"], "/etc/skirnir-router/config.yaml", "0640"),   # root's; the router reads it through its group (ADR-0086)
     # Outside /etc/skirnir-router: the root renderers source it, the router may write that folder (ADR-0073)
     (OPS["RENDER_ENV_CONF"], "/etc/skirnir-router-secrets/render-env.conf", "0600"),
     ("skirnir-router.service", "/etc/systemd/system/skirnir-router.service", "0644"),
     ("skirnir-router-cert.path", "/etc/systemd/system/skirnir-router-cert.path", "0644"),
     ("skirnir-router-cert.service", "/etc/systemd/system/skirnir-router-cert.service", "0644"),
     ("render-env.sh", "/opt/skirnir-router/render-env.sh", "0755"),
+    ("router-layout.sh", "/opt/skirnir-router/router-layout.sh", "0755"),   # service account and its folders (ADR-0086)
     ("skirnir-router-secrets.service", "/etc/systemd/system/skirnir-router-secrets.service", "0644"),
     ("skirnir-router-secrets.timer", "/etc/systemd/system/skirnir-router-secrets.timer", "0644"),
     ("skirnir-router-secrets-refresh.service", "/etc/systemd/system/skirnir-router-secrets-refresh.service", "0644"),
@@ -76,7 +77,7 @@ for _root, _dirs, _files in os.walk(PKG_DIR):
             FILES.append((f"skirnir_router/{_sub}{f}", f"/opt/skirnir-router/skirnir_router/{_sub}{f}", "0644"))
 _MKDIRS = " ".join(f"/opt/skirnir-router/skirnir_router/{d}" for d in PKG_SUBDIRS)
 _TMPDIRS = " ".join(f"/tmp/skirnir-router/skirnir_router/{d}" for d in PKG_SUBDIRS)
-# Roles modified in the UI are stored in /etc/skirnir-router/roles.yaml (not in the repo).
+# Roles modified in the UI are stored in roles.yaml in the router's state folder (/var/lib/skirnir-router, ADR-0086; not in the repo).
 # deploy.py leaves this file alone; `--pull-roles` fetches it to the ops folder.
 
 
@@ -289,7 +290,9 @@ def main():
         return
     status_only = "--status" in sys.argv
     if "--pull-roles" in sys.argv:
-        rc, out, err = run(c, ct_exec("cat /etc/skirnir-router/roles.yaml 2>/dev/null || echo '# (no roles.yaml present)'"))
+        # ADR-0086: in the router's state folder; before, next to config.yaml
+        rc, out, err = run(c, ct_exec("cat /var/lib/skirnir-router/roles.yaml 2>/dev/null || cat /etc/skirnir-router/roles.yaml 2>/dev/null "
+                                      "|| echo '# (no roles.yaml present)'"))
         open(OPS["ROLES_YAML"], "w", encoding="utf-8").write(out)
         print("roles.yaml fetched:", len(out), "bytes ->", OPS["ROLES_YAML"])
         c.close()
@@ -301,6 +304,15 @@ def main():
         print("Local schema check:", (chk.stdout + chk.stderr).strip())
         if chk.returncode != 0:
             print("Aborted: config.yaml invalid, nothing rolled out")
+            sys.exit(2)
+        # ADR-0086: the unit runs the router under its own account, which writes only its state folder. router-layout.sh
+        # refuses without router.state_dir - checked here first, so a refusal changes nothing on the router.
+        import yaml
+        local_cfg = yaml.safe_load(open(OPS["CONFIG_YAML"], encoding="utf-8")) or {}
+        state_folder = (local_cfg.get("router") or {}).get("state_dir")
+        if state_folder != "/var/lib/skirnir-router":
+            print(f"Aborted: config.yaml must set router.state_dir: /var/lib/skirnir-router (found: {state_folder!r}), "
+                  "nothing rolled out")
             sys.exit(2)
         # Deploy manifest (Supply Chain): timestamp, router version, and SHA-256 of each deployed file -> /admin/state build
         # (no workspace path, no username: the manifest resides on the router and appears in the UI)
@@ -343,9 +355,17 @@ def main():
         run(c, "rm -rf /tmp/skirnir-router")
         # The previous location is in the router's writable folder; the renderers no longer read it (ADR-0073).
         rc, out, err = run(c, ct_exec("rm -f /etc/skirnir-router/render-env.conf && chmod 0700 /etc/skirnir-router-secrets"))
-        # --files under setpriv: the configured files must be readable without capabilities, as the service runs (ADR-0044);
-        # 2026-11-02 a TLS key owned by another user stopped the hardened service only after the restart.
-        rc, out, err = run(c, ct_exec("P=python3; command -v setpriv >/dev/null && P='setpriv --bounding-set=-all --inh-caps=-all python3'; "
+        # ADR-0086: the service account, owners and modes, the router's own files out of the configuration folder. Refuses
+        # while config.yaml lacks router.state_dir - then the running router keeps going and nothing restarts.
+        rc, out, err = run(c, ct_exec("bash /opt/skirnir-router/router-layout.sh"))
+        print(out.strip(), err.strip())
+        if rc != 0:
+            print("Aborted: router-layout.sh refused - service NOT restarted (the old process keeps running, but the files are already replaced)")
+            c.close()
+            sys.exit(1)
+        # --files as the service reads them: its account without capabilities (ADR-0044, ADR-0086); 2026-11-02 a TLS key
+        # owned by another user stopped the hardened service only after the restart.
+        rc, out, err = run(c, ct_exec("P=python3; command -v setpriv >/dev/null && P='setpriv --reuid=skirnir-router --regid=skirnir-router --init-groups --bounding-set=-all --inh-caps=-all python3'; "
                                   "$P /opt/skirnir-router/router.py --check /etc/skirnir-router/config.yaml --files && "
                                   "python3 -c \"import yaml; yaml.safe_load(open(\\\"/etc/skirnir-router/config.yaml\\\"))\""))
         print(out.strip(), err.strip())

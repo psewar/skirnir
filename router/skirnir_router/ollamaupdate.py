@@ -25,7 +25,7 @@ import aiohttp
 from aiohttp import web
 
 from . import state
-from .common import VERSION, load_json_file, log, save_json_file
+from .common import VERSION, load_json_file, log, save_json_file, state_dir
 from .outcome import bad_gateway, failed, invalid
 
 ASSETS = {("windows", "amd64"): "ollama-windows-amd64.zip", ("windows", "arm64"): "ollama-windows-arm64.zip",
@@ -54,7 +54,7 @@ def _vt(v):
 
 
 def latest_path():
-    return os.path.join(os.path.dirname(os.path.abspath(state.CFG.path)), "ollama-latest.json")
+    return os.path.join(state_dir(state.CFG), "ollama-latest.json")
 
 
 def load_latest():

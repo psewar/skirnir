@@ -123,7 +123,7 @@ The start log lists the posture findings (lines `posture …`). Then open `https
 
 | Unit | Purpose |
 |---|---|
-| `skirnir-router.service` | The router. Runs `/opt/skirnir-router/venv/bin/python router.py /etc/skirnir-router/config.yaml` as root without capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=tmpfs`, `PrivateTmp`, `UMask=0077`. Writes only `/etc/skirnir-router`, its state directory `/var/lib/skirnir-router` and its log directory `/var/log/skirnir-router`. Reads `secrets.env` as environment. |
+| `skirnir-router.service` | The router. Runs `/opt/skirnir-router/venv/bin/python router.py /etc/skirnir-router/config.yaml` as its own account `skirnir-router` without capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=tmpfs`, `PrivateTmp`, `UMask=0077` (ADR-0086). Writes only its state directory `/var/lib/skirnir-router` (`router.state_dir`) and its log directory `/var/log/skirnir-router`; `/etc/skirnir-router` stays root's and is read through the group. Reads `secrets.env` as environment. `install.sh` and `deploy.py` create the account and set owners and modes with `router-layout.sh`. |
 | `skirnir-router-cert.path` + `.service` | Optional: restart on a renewed certificate (see above). |
 | `skirnir-router-secrets.service` | Renders `secrets.env` before the router starts (`render-env.sh`); does nothing without `render-env.conf`. |
 | `skirnir-router-secrets.timer` + `-secrets-refresh.service` | Optional: renders daily and restarts the router when a secret changed. |
@@ -138,7 +138,7 @@ The start log lists the posture findings (lines `posture …`). Then open `https
 
 ## Secrets
 
-The router reads `/etc/skirnir-router/secrets.env` (0600) as environment: `MQTT_PASSWORD`, `OPENAI_API_KEY`,
+The router reads `/etc/skirnir-router/secrets.env` (root, 0640 for its group `skirnir-router`) as environment: `MQTT_PASSWORD`, `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, the keys named in `EXTRA_SECRET_KEYS` (further cloud providers, ADR-0080) and, for the optional memory
 layers, the variables their configuration names. Maintain it by hand, or let
 `render-env.sh` render it from a secret store with a universal-auth API: access goes into
@@ -205,7 +205,8 @@ Without `install.sh` (another distribution, or to see each step):
 - Ollama on every node bound to loopback.
 - Fingerprint compared with `skirnir-agent identity` before approving a node.
 - `router.py --posture` run before every rollout.
-- Key and secret files readable by root without capabilities (`--check <config> --files`).
+- Configuration and key readable for the router's account (`--check <config> --files` as that account; `router-layout.sh`
+  sets group and mode, `router-layout.sh --check` reports).
 - No password on a command line: `router.py --hash` without argument asks.
 
 ## Appendix: the maintainer's LXC deploy

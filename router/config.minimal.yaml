@@ -11,6 +11,7 @@ router:
   listen: 0.0.0.0:11434            # API port for clients (Ollama, OpenAI and Anthropic APIs)
   control_listen: 0.0.0.0:11435    # agents' tunnel and the web UI; firewall it to your GPU nodes and admin machines
   public_url: https://router.example.net:11435   # REPLACE: the name your nodes and browser use to reach this router
+  state_dir: /var/lib/skirnir-router   # files the router writes itself (UI roles, node registry, journals); the router's account owns it, config.yaml stays root's (ADR-0086)
   control_tls:                     # a certificate your nodes' and clients' operating systems trust (e.g. Let's Encrypt)
     cert: /etc/skirnir-router/certs/fullchain.pem
     key: /etc/skirnir-router/certs/privkey.pem

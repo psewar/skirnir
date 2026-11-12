@@ -7,12 +7,12 @@ import time
 from aiohttp import ClientError, ClientTimeout, web
 
 from . import config, nodes, poll, state
-from .common import GIB, load_json_file, log, read_json, save_json_file
+from .common import GIB, load_json_file, log, read_json, save_json_file, state_dir
 from .outcome import bad_gateway, failed, unavailable
 
 
 def perf_path():
-    return os.path.join(os.path.dirname(os.path.abspath(state.CFG.path)), "perf.json")
+    return os.path.join(state_dir(state.CFG), "perf.json")
 
 
 def perf_load():

@@ -9,7 +9,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.27.0"
+VERSION = "0.28.0"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -43,6 +43,12 @@ def load_json_file(path, what):
     except (OSError, ValueError) as e:  # exception-ok: file system and the file's JSON (JSONDecodeError, UnicodeDecodeError)
         log.warning("%s unreadable: %s", what, e)
         return None
+
+
+def state_dir(cfg):
+    """Folder for the files the router writes itself (ADR-0086): router.state_dir, else the folder of config.yaml.
+    Files the operator or a root tool writes (config.yaml, agent/, manifest.json, certificates) stay next to config.yaml."""
+    return getattr(cfg, "state_dir", None) or os.path.dirname(os.path.abspath(cfg.path))
 
 
 def open_private(path, mode):

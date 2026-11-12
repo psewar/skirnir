@@ -22,6 +22,7 @@ from .outcome import failed
 
 TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.minimal.yaml")
 EXAMPLE_HASH = hashlib.sha256(b"changeme").hexdigest()
+ROUTER_GROUP = "skirnir-router"   # the service account's group (router-layout.sh, ADR-0086)
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 MARKERS = {
     "public_url": "  public_url: https://router.example.net:11435   # REPLACE: the name your nodes and browser use to reach this router\n",
@@ -31,6 +32,18 @@ MARKERS = {
     "client": "      my-client:                   # one entry per client application; give each its own token\n",
     "token": f'        token_sha256: "{EXAMPLE_HASH}"   # REPLACE: sha256 of the token ("changeme" here)\n',
 }
+
+
+def readable_for_router(path):
+    """ADR-0086: the service runs as its own account and reads config.yaml through its group. When root writes the
+    file and the account exists (install.sh creates it), hand the file to that group, 0640; otherwise it stays 0600."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    import grp
+    names = {g.gr_name: g.gr_gid for g in grp.getgrall()}
+    if ROUTER_GROUP in names:
+        os.chown(path, 0, names[ROUTER_GROUP])
+        os.chmod(path, 0o640)
 
 
 def refuse(message):
@@ -87,13 +100,14 @@ def init(target, *, public_url=None, user="admin", client="my-client", cert=None
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
+    readable_for_router(path)
 
     cfg = config.Config.load(path, use_overrides=False)
     if failed(cfg):   # the template is part of the release; a failure here is a defect, reported as a fact
         print(f"written, but the configuration does not load: {cfg.message}")
         print("INIT: refused")
         return 2
-    print(f"Configuration written: {path} (owner-only)")
+    print(f"Configuration written: {path} (root only, readable for the router's group if it exists)")
     print(f"Control user: {user} (password stored as a hash only)")
     print(f"Client {client} token, shown only now - store it in the client and your password manager:")
     print(f"  {token}")

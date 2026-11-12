@@ -85,6 +85,7 @@ router:
   listen: 0.0.0.0:11434
   control_listen: 0.0.0.0:11435
   public_url: https://router.example.net:11435
+  state_dir: /var/lib/skirnir-router   # files the router writes itself (UI roles, node registry, journals); the router's account owns it, config.yaml stays root's (ADR-0086)
   control_tls:                   # Zertifikat fuer public_url (z. B. Let's Encrypt); Renewal -> skirnir-router-cert.path startet den Dienst neu
     cert: /etc/skirnir-router/certs/fullchain.pem
     key: /etc/skirnir-router/certs/privkey.pem

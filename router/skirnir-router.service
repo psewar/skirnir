@@ -12,8 +12,14 @@ ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
+# root:skirnir-router 0640 (ADR-0086): render-env.sh writes it, the router reads it (also raw, mqtt.password_file)
 EnvironmentFile=-/etc/skirnir-router/secrets.env
-User=root
+# ADR-0086: own account instead of root. root without capabilities could still read every file only root may read (other
+# services' secrets, SSH host keys, /etc/shadow) and write every root-owned file in its writable folders. install.sh and
+# deploy.py create the account and set the owners: /etc/skirnir-router stays root's (the router reads config.yaml and its
+# certificate through the group), the router writes only its state folder (router.state_dir) and its log folder.
+User=skirnir-router
+Group=skirnir-router
 NoNewPrivileges=true
 CapabilityBoundingSet=
 AmbientCapabilities=
@@ -24,19 +30,25 @@ ProtectControlGroups=true
 LockPersonality=true
 SystemCallArchitectures=native
 ProtectSystem=strict
-# tmpfs, not true: without capabilities root gets EACCES on an inaccessible /root instead of "not found", and asyncpg's
-# lookup of ~/.postgresql client certificates then aborts the session store start. tmpfs hides the homes just as well.
+# tmpfs, not true: an inaccessible home answers EACCES instead of "not found", and asyncpg's lookup of ~/.postgresql
+# client certificates then aborts the session store start. tmpfs hides the homes just as well.
 ProtectHome=tmpfs
 ReadOnlyPaths=/opt/skirnir-router
-ReadWritePaths=/etc/skirnir-router
+# ProtectSystem=strict keeps /etc/skirnir-router read-only (ADR-0086): config.yaml, agent/, certs/, tls/ and manifest.json
+# are written by root tools only. The lines below stay for units with a drop-in that opens the folder again.
 # ADR-0073: the router must not change what root processes read from here. The certificates are written by the
 # ACME client (as root); the secret-store access is sourced by the root renderers and is not needed by the router.
 ReadOnlyPaths=-/etc/skirnir-router/certs
 # ADR-0082: tls is the certificate folder of installations set up before router.py --init; the router only reads it.
 ReadOnlyPaths=-/etc/skirnir-router/tls
 InaccessiblePaths=-/etc/skirnir-router-secrets
+# State (router.state_dir: /var/lib/skirnir-router) and logs; systemd hands both to the account, also on the first start
+# after the change from root (it changes the owner of everything below them).
 StateDirectory=skirnir-router
+StateDirectoryMode=0700
 LogsDirectory=skirnir-router
+LogsDirectoryMode=0700
+Environment=HOME=/var/lib/skirnir-router
 PrivateTmp=true
 # Files the service creates are owner-only (ADR-0056): audit log, journal, registry, token-hash overrides.
 UMask=0077
