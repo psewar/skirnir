@@ -56,7 +56,8 @@ covers any path `control_tls` names.
   folder that is itself a mount point cannot be renamed or removed; a sticky folder protects entries of other owners;
   a symlink is checked as the link and as its target, and a folder reached through a link where it really lies. On a
   writable mount the owner counts as able to write whatever its mode says, because `chmod` needs only ownership.
-  `CAP_DAC_OVERRIDE` and `CAP_FOWNER` count when the process has them.
+  `CAP_DAC_OVERRIDE` and `CAP_FOWNER` count when the process has them. A relative path is judged from the working
+  directory, where the router opens it; the walk always ends at the root, so the check cannot hold up the start.
 * At start, `posture.report(cfg, view=...)` adds the medium finding `tls_files_changeable` (TM-14) for
   `control_tls.cert` and `control_tls.key`. Next step: keep the files in `/etc/skirnir-router/certs` or
   `/etc/skirnir-router/tls`, which the unit sees read-only, or outside the router's writable folders, or make their
@@ -81,7 +82,8 @@ confirms it (an operations step, not part of this repository).
 `/etc/skirnir-router`, read-only `certs` and `tls`) and checks: files in `certs` and `tls` are safe, and the next step
 names both; files in another folder below
 `/etc/skirnir-router` are not; a folder owned by the process above a closed one can be swapped unless it is a mount point;
-sticky folders, symlinks, group write, `CAP_DAC_OVERRIDE`, octal escapes and read-only superblocks; the posture finding
+sticky folders, symlinks, group write, `CAP_DAC_OVERRIDE`, octal escapes and read-only superblocks; relative paths and a
+walk that ends without an absolute path; the posture finding
 with and without a view; and, on Linux, the view of the test process itself. In operation the start log of a deployment
 with certificates outside `certs` and `tls` shows `tls_files_changeable`, and no longer after the move.
 

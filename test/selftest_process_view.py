@@ -11,6 +11,7 @@ only."""
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from types import SimpleNamespace
 
@@ -56,9 +57,9 @@ class FakeFs:
         return path in self.links or self.realpath(path) in self.entries
 
 
-def view(fs, mounts=MOUNTINFO, euid=0, groups=(0,), caps=0):
+def view(fs, mounts=MOUNTINFO, euid=0, groups=(0,), caps=0, cwd="/"):
     return ProcessView(parse_mountinfo(mounts), euid, groups, caps, lstat=fs.lstat, stat=fs.stat, exists=fs.exists,
-                       realpath=fs.realpath)
+                       realpath=fs.realpath, getcwd=lambda: cwd)
 
 
 def router_fs(**extra):
@@ -100,6 +101,25 @@ class ChangeableTest(unittest.TestCase):
         self.assertTrue(v.changeable("/etc/skirnir-router/copy/server.crt"), "root owns it on a writable mount")
         self.assertTrue(v.changeable("/etc/skirnir-router/copy/server.key"))
         self.assertFalse(v.changeable("/etc/skirnir-router/missing.pem"), "a missing file is not reported")
+
+    def test_relative_path(self):
+        # control_tls may name a relative path; it is opened from the working directory and judged there.
+        v = view(router_fs(), cwd="/etc/skirnir-router")
+        self.assertTrue(v.changeable("copy/server.crt"))
+        self.assertFalse(v.changeable("certs/privkey.pem"))
+        self.assertFalse(v.changeable("./tls/../tls/server.key"))
+
+    def test_walk_ends_without_absolute_path(self):
+        # The check runs before the router listens: the walk ends at "" instead of looping on dirname("") == "".
+        fs = FakeFs({}, links={})
+        fs.exists = lambda path: True
+        fs.stat = fs.lstat = lambda path: st(uid=5, mode=0o755)
+        done = []
+        worker = threading.Thread(target=lambda: done.append(view(fs, euid=990, groups=(990,), cwd="")
+                                                             .changeable("certs/key.pem")), daemon=True)
+        worker.start()
+        worker.join(5)
+        self.assertEqual(done, [False], "the walk ends for a path that is not absolute")
 
     def test_folder_alone_is_enough(self):
         fs = router_fs(**{"/etc/skirnir-router/copy/server.crt": st(mode=0o444)})

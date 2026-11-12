@@ -47,7 +47,7 @@ def _within(path, mount_point):
 
 class ProcessView:
     def __init__(self, mounts, euid, groups, caps, lstat=os.lstat, stat=os.stat, exists=os.path.lexists,
-                 realpath=os.path.realpath):
+                 realpath=os.path.realpath, getcwd=os.getcwd):
         self.mounts = tuple(mounts)
         self.mount_points = {m for m, _ in self.mounts}
         self.euid = euid
@@ -55,6 +55,7 @@ class ProcessView:
         self.dac_override = bool(caps >> CAP_DAC_OVERRIDE & 1)
         self.fowner = bool(caps >> CAP_FOWNER & 1)
         self._lstat, self._stat, self._exists, self._realpath = lstat, stat, exists, realpath
+        self._getcwd = getcwd
 
     @classmethod
     def current(cls):
@@ -103,7 +104,8 @@ class ProcessView:
 
     def changeable(self, path):
         """Whether this process could change the file at path or replace it; False for a path that does not exist."""
-        lexical = posixpath.normpath(path)
+        # A relative path is opened from the working directory, so it is judged there, with every folder above it.
+        lexical = posixpath.normpath(posixpath.join(self._getcwd(), path))
         if not self._exists(lexical):
             return False
         real = self._realpath(lexical)
@@ -113,8 +115,9 @@ class ProcessView:
             return True
         for start in ({lexical, real} if real_exists else {lexical}):
             entry = start
-            while entry != "/":
-                folder = posixpath.dirname(entry)
+            # Up to the root, where dirname returns the path itself; "" (no absolute path) ends the walk the same way,
+            # so the check cannot hold up the start.
+            while (folder := posixpath.dirname(entry)) != entry:
                 if self._may_replace_entry(folder, entry):
                     return True
                 entry = folder
