@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "f886838a4864d74206be2a7fa0a5755e240b874d",
-  "change_digest": "9b5419bcfb0c7594b237a75c94d5568055449aac7480525ee27c6875799f2a08",
+  "base_sha": "73f8c9e84a50150efcc8775dfbd8c665ede26cdf",
+  "change_digest": "050bb63a41e27231754f7b7e42886f4ebb291adaced35dedd1712efafdb22816",
   "reviewed_paths": [
     "CHANGELOG.md"
   ],
