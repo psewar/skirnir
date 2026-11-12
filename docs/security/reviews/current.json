@@ -2,110 +2,31 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "b68578e9f97f18616d6b48c79031e8e3c9ceb1f8",
-  "change_digest": "619a3059bc60de174322a7acab339b9f55dbf451b6f2bf5bbbfded6c8e136ed2",
+  "base_sha": "9212977d155748846fd31bba6908967b295fe2b6",
+  "change_digest": "a025ce0ef6815d10ee35e7897249627a62f318c5eec023145ceb6a73d5ead011",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
-    "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "deploy/deploy.py",
-    "docs/adr/0044-systemd-hardening-root-kept-for-now.md",
-    "docs/adr/0086-router-runs-as-its-own-account.md",
-    "docs/adr/README.md",
-    "docs/configuration.de.md",
-    "docs/configuration.md",
-    "docs/install-router.de.md",
-    "docs/install-router.md",
-    "docs/security/risk-register.json",
-    "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md",
-    "router/config.example.yaml",
-    "router/config.minimal.yaml",
-    "router/install.sh",
-    "router/render-env.sh",
-    "router/router-layout.sh",
-    "router/skirnir-router-cert.service",
-    "router/skirnir-router.service",
-    "router/skirnir_router/app.py",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/config.py",
-    "router/skirnir_router/deletion_journal.py",
-    "router/skirnir_router/fallback_observation.py",
-    "router/skirnir_router/metrics.py",
-    "router/skirnir_router/ollamaupdate.py",
-    "router/skirnir_router/perf.py",
-    "router/skirnir_router/setup_init.py",
-    "router/skirnir_router/state.py",
-    "test/selftest_privilege_paths.py",
-    "test/selftest_state_dir.py"
+    "CHANGELOG.md"
   ],
   "risk_ids": [
-    "TM-14",
-    "TM-12",
-    "TM-15"
+    "TM-16"
   ],
   "boundaries": [
-    "B6",
     "B9"
   ],
-  "summary": "Router 0.28.0 (ADR-0086, supersedes ADR-0044 for the router): the router runs as its own account skirnir-router and writes only its state folder (new key router.state_dir, /var/lib/skirnir-router) and its logs; /etc/skirnir-router is root:skirnir-router 0750 and read-only for it, keys and secrets.env 0640 for the group. router/router-layout.sh (root, idempotent) creates the account, refuses without state_dir before any change, stops a router still running as root, moves its files (symlinks removed, never followed), sets owners and modes; install.sh, deploy.py and the certificate unit use it; files are checked as the account.",
+  "summary": "Documentation only: the unreleased CHANGELOG row is named for the next tag, v0.32.0 (router 0.28.0, agent 0.32.0), so the release tool finds exactly one row for the tag at the release commit. No code, configuration or workflow change.",
   "findings": [
     {
-      "id": "TM-14",
-      "evidence": "As root without capabilities the router could read every root-only file on its host: a probe from its namespace on a production host read 14 such files (/etc/shadow, an SSH host key, other services' environment and secret-store access files).",
-      "resolution": "Own account; staging (systemd host, upgrade from main): /etc/shadow not readable, configuration, key and secrets.env readable through the group, only state and log folders writable.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-14",
-      "evidence": "Root tools (ACME/copy step, render-env.sh, deploy.py) wrote into /etc/skirnir-router, which the router could write; an account owning that folder would keep the rename/replace path.",
-      "resolution": "The folder stays root's and read-only for the router; the router writes only router.state_dir. router-layout.sh refuses a symlinked or non-root configuration or certificate folder before changing owners, removes symlinks left in the old writable folder instead of following them, uses chown -h; render-env.sh writes through a temporary file in the same folder and hands the file to the group.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-12",
-      "evidence": "Moving state could lose or resurrect data: a router still running as root saves its files on stop, after a move.",
-      "resolution": "The tool stops a router running as root before moving; an existing file in the state folder is kept; every file the code writes into the state folder must be in the tool's move list (test fails otherwise; counter-check with perf.json removed fails).",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-15",
-      "evidence": "A refused or half-done migration could leave the service unstartable.",
-      "resolution": "install.sh runs the tool with --check before any file changes and deploy.py checks state_dir in the local configuration before connecting; the router itself refuses to start with the folder's name when the state folder is missing or not writable.",
+      "id": "TM-16",
+      "evidence": "The release tool reads router and agent version from the CHANGELOG row of the tag at the target commit; a wrong row would publish wrong version claims next to the attested binaries.",
+      "resolution": "Only the tag cell changes; router 0.28.0 matches common.py at the target, agent 0.32.0 matches the built binaries; release_anlegen.py --pruefen checks both before anything is published.",
       "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "WSL Ubuntu as root: install.sh from main (root router), then this branch without and with router.state_dir, verify, certificate renewal, cleanup",
+      "command": "git diff origin/main -- CHANGELOG.md",
       "result": "passed",
-      "evidence": "refused without state_dir, nothing changed; with it: old router stopped, metrics/usage moved, planted perf.json symlink removed; router as skirnir-router answers; /etc/shadow not readable; only state/log writable; second run 'layout is current'; renewed key root 0600 -> root:skirnir-router 0640 via the certificate unit; secrets.env reached the environment; all removed afterwards."
-    },
-    {
-      "command": "python test/selftest_state_dir.py; selftest_privilege_paths.py; selftest_process_view.py (Linux and Windows)",
-      "result": "passed",
-      "evidence": "OK; privilege paths: all passed."
-    },
-    {
-      "command": "selftest_init, selftest_install, selftest_render_env, selftest_posture, selftest_config_load, selftest_deletion_lifecycle, selftest_memory, selftest_security, selftest_control_flow (Linux)",
-      "result": "passed",
-      "evidence": "all OK."
-    },
-    {
-      "command": "ruff check .; check_adr_index; check_control_flow; check_pinned_references; router.py --check config.example.yaml --pure",
-      "result": "passed",
-      "evidence": "All checks passed; ADR index ok: 86 ADRs."
-    },
-    {
-      "command": "python test/run_tests.py (Windows, after the rebase onto main with #131 and #132)",
-      "result": "passed",
-      "evidence": "332 PASS, 0 failures."
-    },
-    {
-      "command": "full local CI python job (ci.yml steps, WSL) plus pinned references, pydeps, lock check, SBOM and PowerShell self-tests on Windows",
-      "result": "passed",
-      "evidence": "CI had failed in selftest_log_hygiene: test configurations built from config.example.yaml inherited state_dir=/var/lib/skirnir-router and the token rotation wrote there; the example now shows state_dir as a commented, required-for-the-service line. All steps green (the five WSL-only environment gaps checked on Windows)."
+      "evidence": "one line: tag cell v0.31.1 (unreleased) -> v0.32.0 (unreleased)."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -119,7 +40,6 @@
     }
   ],
   "limitations": [
-    "An ACME client writing its key outside certs/tls or through a symlink needs its own step to make the key group-readable; the router then refuses to start with the file named.",
-    "Not yet rolled out: production needs router.state_dir in its configuration and operations scripts that read /etc/skirnir-router/roles.yaml updated first."
+    "The release itself is created after the merge; the follow-up PR turns the row into a link with the date."
   ]
 }
