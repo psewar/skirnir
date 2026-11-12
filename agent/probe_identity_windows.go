@@ -19,6 +19,9 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+// probeSettle: after the health port answers, the longest wait for CUDA and GPU memory (a variable for the tests).
+var probeSettle = 60 * time.Second
+
 var (
 	probeAdvapi            = windows.NewLazySystemDLL("advapi32.dll")
 	pCreateRestrictedToken = probeAdvapi.NewProc("CreateRestrictedToken")
@@ -196,13 +199,21 @@ func probeChild(sp ChildSpec, kind string, tok windows.Token, grace time.Duratio
 		}
 	}
 	if res.Healthy {
-		time.Sleep(5 * time.Second) // let it settle its GPU context
-		if vram, err := gpuProcessVRAM(); err == nil && tree != nil {
-			var sum uint64
-			for _, pid := range tree.pids() {
-				sum += vram[pid]
+		// Children load onto the GPU after they listen (the STT service waits until the node has been free for 20 s): watch
+		// up to settle for a CUDA proof in the output and GPU memory on the tree, and keep the highest value seen.
+		settle := time.Now().Add(probeSettle)
+		for time.Now().Before(settle) {
+			if vram, err := gpuProcessVRAM(); err == nil && tree != nil {
+				var sum uint64
+				for _, pid := range tree.pids() {
+					sum += vram[pid]
+				}
+				res.VRAMMiB = max(res.VRAMMiB, sum/(1<<20))
 			}
-			res.VRAMMiB = sum / (1 << 20)
+			if res.VRAMMiB > 0 && cudaInOutput(out.all()) == "seen" {
+				break
+			}
+			time.Sleep(3 * time.Second)
 		}
 	}
 	if tree != nil {

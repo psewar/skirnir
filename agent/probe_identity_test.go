@@ -76,6 +76,16 @@ func TestCUDAInOutput(t *testing.T) {
 		"seen":     {`time=... level=INFO msg="inference compute" id=GPU-1 library=cuda compute=12.0`},
 		"not seen": {"listening on 127.0.0.1:41234", "no gpu here"},
 	}
+	// first measurement on a node: Ollama lists CUDA_VISIBLE_DEVICES at every start - no proof of a usable GPU
+	if got := cudaInOutput([]string{`msg="server config" env="map[CUDA_VISIBLE_DEVICES: GGML_VK_VISIBLE_DEVICES: HIP_VISIBLE_DEVICES:]"`}); got != "not seen" {
+		t.Errorf("an environment variable name is no CUDA proof, got %s", got)
+	}
+	if got := cudaInOutput([]string{"CUDA wird geladen, sobald der Knoten 20 s frei ist"}); got != "not seen" {
+		t.Errorf("an announcement is no CUDA proof, got %s", got)
+	}
+	if got := cudaInOutput([]string{"CUDA wird geladen ...", "CUDA-Whisper bereit in 2.8 s (faster-whisper-large-v3-turbo)"}); got != "seen" {
+		t.Errorf("the STT service's ready line is a CUDA proof, got %s", got)
+	}
 	for want, lines := range cases {
 		if got := cudaInOutput(lines); got != want {
 			t.Errorf("%v: %s, want %s", lines, got, want)

@@ -128,6 +128,15 @@ func main() {
 		}
 		return
 	}
+	if verb == "probe-identity" && containsStr(os.Args, "--inner-rights") {
+		// ADR-0087: the rights check runs under tokens that may not read the configuration (first measurement 2026-11-12:
+		// "Access is denied" before any check) - it needs none.
+		if err := runProbeIdentity(nil, cfgPath, ProbeOptions{InnerRights: true}, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "probe-identity: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if verb == "game" { // 0.17.0: same detection as the module, once - without configuration (until 0.19: "game")
 		probeGame()
 		return
