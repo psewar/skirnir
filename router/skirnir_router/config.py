@@ -59,7 +59,7 @@ _CANARY = {"model": None, "num_ctx": None, "percent": None, "busy_ok": None}
 _MEMORY_SCHEMA = {**dict.fromkeys(CLIENT_MEMORY_FIELDS), "projects": {"*": dict.fromkeys(PROJECT_FIELDS)}}
 SCHEMA = {
     "router": {
-        "listen": None, "control_listen": None, "public_url": None, "control_tls": {"cert": None, "key": None},
+        "listen": None, "control_listen": None, "public_url": None, "state_dir": None, "control_tls": {"cert": None, "key": None},
         "ollama_poll_s": None, "heartbeat_interval_s": None, "heartbeat_stale_s": None, "offline_after_misses": None,
         "agent_missing_problem_s": None, "ram_spill_problem_gib": None, "expose_concrete_models": None, "request_timeout_s": None,
         "toolcall_rescue": None,
@@ -197,7 +197,13 @@ class Config:
 
     def _locate(self, path, use_overrides):
         self.path = path
-        self.overrides_path = os.path.join(os.path.dirname(os.path.abspath(path)), "roles.yaml")
+        # ADR-0086: the router writes roles.yaml (and its other files) into router.state_dir, read here from
+        # config.yaml itself because roles.yaml is merged into it; parse() checks the value
+        raw = load_yaml(path, {}) or {}
+        r = raw.get("router") if isinstance(raw, dict) else None
+        sd = r.get("state_dir") if isinstance(r, dict) else None
+        self.state_dir = sd if isinstance(sd, str) and sd else os.path.dirname(os.path.abspath(path))
+        self.overrides_path = os.path.join(self.state_dir, "roles.yaml")
         self.use_overrides = use_overrides
 
     def merged(self, overrides=None):
@@ -368,6 +374,9 @@ class Config:
         tls = r.get("control_tls") or {}
         self.control_tls = (tls.get("cert"), tls.get("key")) if tls.get("cert") and tls.get("key") else None
         self.public_url = r.get("public_url", "")
+        sd = r.get("state_dir")
+        if sd is not None and not (isinstance(sd, str) and sd.startswith("/")):
+            return invalid("router.state_dir must be an absolute path")
         # Stage 1: Request size limits (413 before backend) and session affinity expiry
         lim = r.get("limits") or {}
         self.limits = {k: int(lim.get(k, _d(f"router.limits.{k}"))) for k in ("max_images", "max_tools", "max_messages")}

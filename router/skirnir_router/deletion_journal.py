@@ -14,7 +14,7 @@ import time
 from uuid import UUID
 
 from . import state
-from .common import log, open_private
+from .common import log, open_private, state_dir
 from .outcome import failed, unavailable
 
 KINDS = ("session", "operation")
@@ -24,7 +24,7 @@ _warned = [False]
 
 def path():
     cfg_path = getattr(state.CFG, "path", None) if state.CFG is not None else None
-    return os.path.join(os.path.dirname(os.path.abspath(cfg_path)), "deletions.jsonl") if cfg_path else None
+    return os.path.join(state_dir(state.CFG), "deletions.jsonl") if cfg_path else None
 
 
 def record(kind, owner, ident):

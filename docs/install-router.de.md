@@ -124,7 +124,7 @@ Das Startlog listet die Befunde der Posture-Prüfung (Zeilen `posture …`). Dan
 
 | Unit | Zweck |
 |---|---|
-| `skirnir-router.service` | Der Router. Startet `/opt/skirnir-router/venv/bin/python router.py /etc/skirnir-router/config.yaml` als root ohne Capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=tmpfs`, `PrivateTmp`, `UMask=0077`. Schreibt nur `/etc/skirnir-router`, sein State-Verzeichnis `/var/lib/skirnir-router` und sein Log-Verzeichnis `/var/log/skirnir-router`. Liest `secrets.env` als Umgebung. |
+| `skirnir-router.service` | Der Router. Startet `/opt/skirnir-router/venv/bin/python router.py /etc/skirnir-router/config.yaml` unter eigenem Konto `skirnir-router` ohne Capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=tmpfs`, `PrivateTmp`, `UMask=0077` (ADR-0086). Schreibt nur seinen Zustandsordner `/var/lib/skirnir-router` (`router.state_dir`) und seinen Log-Ordner `/var/log/skirnir-router`; `/etc/skirnir-router` bleibt root und wird über die Gruppe gelesen. Liest `secrets.env` als Umgebung. `install.sh` und `deploy.py` legen das Konto an und setzen Besitzer und Modi mit `router-layout.sh`. |
 | `skirnir-router-cert.path` + `.service` | Optional: Neustart bei erneuertem Zertifikat (siehe oben). |
 | `skirnir-router-secrets.service` | Rendert `secrets.env`, bevor der Router startet (`render-env.sh`); ohne `render-env.conf` tut es nichts. |
 | `skirnir-router-secrets.timer` + `-secrets-refresh.service` | Optional: rendert täglich und startet den Router bei geändertem Secret neu. |
@@ -139,7 +139,7 @@ Das Startlog listet die Befunde der Posture-Prüfung (Zeilen `posture …`). Dan
 
 ## Secrets
 
-Der Router liest `/etc/skirnir-router/secrets.env` (0600) als Umgebung: `MQTT_PASSWORD`, `OPENAI_API_KEY`,
+Der Router liest `/etc/skirnir-router/secrets.env` (root, 0640 für seine Gruppe `skirnir-router`) als Umgebung: `MQTT_PASSWORD`, `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, die in `EXTRA_SECRET_KEYS` genannten Schlüssel (weitere Cloud-Anbieter, ADR-0080) und für die optionalen
 Gedächtnisschichten die Variablen, die deren Konfiguration nennt. Die Datei von Hand
 pflegen oder von `render-env.sh` aus einem Secret-Store mit Universal-Auth-API rendern lassen: Die Zugangsdaten kommen nach
@@ -207,7 +207,8 @@ Ohne `install.sh` (andere Distribution, oder um jeden Schritt zu sehen):
 - Ollama auf jedem Knoten an Loopback gebunden.
 - Fingerprint vor der Freigabe eines Knotens mit `skirnir-agent identity` verglichen.
 - `router.py --posture` vor jedem Rollout.
-- Schlüssel- und Secret-Dateien für root ohne Capabilities lesbar (`--check <config> --files`).
+- Konfiguration und Schlüssel für das Konto des Routers lesbar (`--check <config> --files` als dieses Konto;
+  `router-layout.sh` setzt Gruppe und Modus, `router-layout.sh --check` meldet).
 - Kein Passwort auf der Befehlszeile: `router.py --hash` ohne Argument fragt.
 
 ## Anhang: LXC-Deploy des Betreuers

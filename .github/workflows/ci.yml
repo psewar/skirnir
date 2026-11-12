@@ -45,6 +45,7 @@ jobs:
       - run: pwsh -NoProfile -File test/selftest_ollama_loopback.ps1
       - run: pwsh -NoProfile -File test/selftest_ollama_protected.ps1
       - run: python test/selftest_privilege_paths.py
+      - run: python test/selftest_state_dir.py
       - name: render-env.sh renders further secret keys (ADR-0080)
         run: python test/selftest_render_env.py
       - name: Python locks are consistent (ADR-0074)

@@ -164,13 +164,14 @@ Tab *Clients*). Weitere Clients: [docs/clients.de.md](docs/clients.de.md).
 - Vor der Freigabe eines Knotens den Fingerprint mit `skirnir-agent identity` vergleichen, über einen anderen Weg als das Netz,
   über das er sich angemeldet hat (TM-07).
 - Vor jedem Rollout `router.py --posture /etc/skirnir-router/config.yaml` laufen lassen; das Startlog wiederholt die Befunde.
-- Der Router läuft als root **ohne Capabilities** ([ADR-0044](docs/adr/0044-systemd-hardening-root-kept-for-now.md); ein
-  eigener Benutzer bräuchte Rechte auf Konfiguration, Log und Zertifikat): Der TLS-Schlüssel und andere Dateien müssen für
-  root als Eigentümer lesbar sein. `router.py --check <config> --files` prüft das.
+- Der Router läuft unter eigenem Konto `skirnir-router` **ohne Capabilities**
+  ([ADR-0086](docs/adr/0086-router-runs-as-its-own-account.md)): Konfiguration und TLS-Schlüssel liest er über seine
+  Gruppe, schreiben darf er nur `/var/lib/skirnir-router` (`router.state_dir`) und seine Logs. `install.sh` und
+  `deploy.py` richten das ein (`router-layout.sh`); `router.py --check <config> --files` prüft die Dateien als dieses Konto.
 - Passwörter nie auf der Befehlszeile übergeben: `router.py --hash` ohne Argument fragt ohne Echo.
 - Was die Vertrauensbasis verschiebt (Ports, TLS, Identitäten, Anbieter-Endpunkte, Egress, `client_auth.mode` bei `locked`),
   ist nicht über UI oder API änderbar, nur über die Konfigurationsdatei.
-- Secrets liegen in `secrets.env` (0600) und erscheinen nie in Logs oder `/admin/state`; der Router hat keinen Schreibzugriff
+- Secrets liegen in `secrets.env` (root, lesbar für die Gruppe des Routers) und erscheinen nie in Logs oder `/admin/state`; der Router hat keinen Schreibzugriff
   auf den Secret-Store. Prompts gehen nur mit deklarierter Datenklasse in die Cloud und nie mit erkennbaren Schlüsseln darin.
 - Agenten melden sich über WSS mit einer Ed25519-Challenge an; MQTT läuft über 8883. Ollama-Updates lädt der Agent selbst von
   einer festen Quelle (`ollama_update.source`, Standard GitHub-Releases von ollama/ollama) und prüft sie gegen die

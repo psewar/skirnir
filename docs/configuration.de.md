@@ -6,9 +6,9 @@
 
 | Datei | Zweck |
 |---|---|
-| `/etc/skirnir-router/config.yaml` | Die Konfiguration (0600). Ausgangspunkt ist [router/config.minimal.yaml](../router/config.minimal.yaml) (ein kleiner, sicherer Start: eine Rolle, ein Client; `router.py --init` füllt sie aus, siehe [install-router.de.md](install-router.de.md#erste-konfiguration)) oder [router/config.example.yaml](../router/config.example.yaml) (die volle Referenz mit jeder Option und ihrem Kommentar). |
-| `/etc/skirnir-router/roles.yaml` | Overrides, die die Web-UI neben die `config.yaml` schreibt; überlebt Deploys und Aktualisierungen. |
-| `/etc/skirnir-router/secrets.env` | Secrets als Umgebung ([install-router.de.md](install-router.de.md#secrets)). |
+| `/etc/skirnir-router/config.yaml` | Die Konfiguration (root, 0640: der Router liest sie über seine Gruppe `skirnir-router`, ADR-0086). Ausgangspunkt ist [router/config.minimal.yaml](../router/config.minimal.yaml) (ein kleiner, sicherer Start: eine Rolle, ein Client; `router.py --init` füllt sie aus, siehe [install-router.de.md](install-router.de.md#erste-konfiguration)) oder [router/config.example.yaml](../router/config.example.yaml) (die volle Referenz mit jeder Option und ihrem Kommentar). |
+| `/var/lib/skirnir-router/roles.yaml` | Overrides, die die Web-UI in den Zustandsordner des Routers schreibt (`router.state_dir`); überlebt Deploys und Aktualisierungen. Der Router schreibt alle eigenen Dateien dorthin - `roles.yaml`, `nodes.json`, Journale, Metriken - und nichts in `/etc/skirnir-router` (ADR-0086). Ohne `state_dir` liegen sie neben der `config.yaml`, was nur für die Entwicklung taugt: das Konto des Dienstes kann `/etc/skirnir-router` nicht schreiben. |
+| `/etc/skirnir-router/secrets.env` | Secrets als Umgebung (root, 0640 für die Gruppe des Routers; [install-router.de.md](install-router.de.md#secrets)). |
 
 Rollen, Katalog und die meisten Laufzeit-Einstellungen sind in der UI editierbar; die UI schreibt sie in die `roles.yaml`.
 Ports, TLS, Basic-Auth, Identitäten, Anbieter-Endpunkte und Egress-Allowlist bleiben bewusst Deploy-Sache. Katalogeinträge aus
