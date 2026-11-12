@@ -15,7 +15,7 @@ from aiohttp import ClientSession, web
 from . import admin, agentupdate, anthropic_api, auth, cloud, config, ha, metrics, nodes, ollamaupdate, openai_api, perf, poll, proxy, registry, state
 from . import decision, fallback_observation, memory, quiet, rerank, session_api, context_ops
 from .unexpected import unexpected_error_middleware
-from . import posture
+from . import posture, process_view
 from . import browser_headers
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 from .outcome import failed
@@ -117,7 +117,8 @@ async def main(cfg_path):
         log.error("configuration invalid, router does not start: %s", cfg.message)
         sys.exit(2)
     state.CFG = cfg
-    lines, summary = posture.report(cfg)   # ADR-0064: what the configuration allows, as facts on every start
+    # ADR-0064: what the configuration allows, as facts on every start; ADR-0081: also with this process's file-system view
+    lines, summary = posture.report(cfg, view=process_view.ProcessView.current())
     for line in lines:
         log.warning("posture %s", line)
     log.info("%s", summary)

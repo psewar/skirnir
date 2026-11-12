@@ -5,7 +5,9 @@ model calls risky: an API port that serves unknown callers, a client policy chan
 only by their source address or sharing one token, a control port open without login, plaintext transport to a node's
 Ollama, the session store, or an API port without TLS. Each finding names its code, severity, the risk it maps to and
 the next step; no secret, token, hash or connection string is printed. The check reads the configuration and, for the
-session store, the sslmode of the DSN in the environment (never the DSN itself).
+session store, the sslmode of the DSN in the environment (never the DSN itself). At start the router also passes its own
+view of the file system (process_view.py, ADR-0081) and reports TLS files it could change; the CLI runs outside the
+unit and cannot see that view, so it leaves this check out.
 
 Findings are facts, not errors: the router still starts. A finding the operator accepts stays visible on every start.
 """
@@ -42,9 +44,19 @@ def _loopback(host):
         return False
 
 
-def findings(cfg, environ=None):
+def findings(cfg, environ=None, view=None):
     environ = os.environ if environ is None else environ
     out = []
+    # TM-14, ADR-0081: root helpers write the certificates; a file the router could change or replace would let a
+    # compromised router steer what they write and where. Only the running router knows its unit's view (view).
+    control_tls = getattr(cfg, "control_tls", None)
+    if view is not None and control_tls:
+        for setting, path in (("control_tls.cert", control_tls[0]), ("control_tls.key", control_tls[1])):
+            if view.changeable(path):
+                out.append(Finding("tls_files_changeable", MEDIUM, "TM-14",
+                                   f"the router could change or replace {setting} ({path}).",
+                                   "keep the files in /etc/skirnir-router/certs, which the router unit sees read-only, "
+                                   "or make their folder read-only for it (ReadOnlyPaths= in a unit drop-in)"))
     ca = cfg.client_auth or {}
     clients = ca.get("clients") or {}
     # TM-01: who may call the API port, and how the policy can change
@@ -127,9 +139,9 @@ def findings(cfg, environ=None):
     return out
 
 
-def report(cfg, environ=None):
+def report(cfg, environ=None, view=None):
     """(lines, summary) for the CLI and the start log."""
-    found = findings(cfg, environ)
+    found = findings(cfg, environ, view)
     order = {HIGH: 0, MEDIUM: 1, INFO: 2}
     lines = [f.line() for f in sorted(found, key=lambda f: (order[f.severity], f.code))]
     counts = {s: sum(1 for f in found if f.severity == s) for s in (HIGH, MEDIUM, INFO)}

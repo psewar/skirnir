@@ -39,6 +39,7 @@ jobs:
       - run: python test/selftest_log_hygiene_paths.py
       - run: python test/selftest_client_limits.py
       - run: python test/selftest_posture.py
+      - run: python test/selftest_process_view.py
       - run: python test/selftest_init.py
       - run: python test/selftest_install.py
       - run: pwsh -NoProfile -File test/selftest_ollama_loopback.ps1

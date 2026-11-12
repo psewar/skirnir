@@ -189,7 +189,7 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 
 | Pfad | Inhalt |
 |---|---|
-| `router/router.py`, `router/skirnir_router/` | Dienst: `app`, `config` (Schema), `proxy` (Ollama-API), `openai_api`, `request` (routing-Block), `scheduler`, `admission`, `nodes`, `poll` (Zustandsautomat, Prewarm), `registry` (Agenten-Register), `tunnel`, `auth`, `cloud`, `decision/` (Engines), `metrics`, `perf`, `ops` (Idempotency, Canary, Shadow, Manifest), `ha` (MQTT), `admin`, `settings` (UI-Allowlist), `toolcall_rescue` (Tool-Calls, die Ollamas Parser als Text verliert, werden zurückgeholt), `wol`, `posture`, `setup_init` (`--init`) |
+| `router/router.py`, `router/skirnir_router/` | Dienst: `app`, `config` (Schema), `proxy` (Ollama-API), `openai_api`, `request` (routing-Block), `scheduler`, `admission`, `nodes`, `poll` (Zustandsautomat, Prewarm), `registry` (Agenten-Register), `tunnel`, `auth`, `cloud`, `decision/` (Engines), `metrics`, `perf`, `ops` (Idempotency, Canary, Shadow, Manifest), `ha` (MQTT), `admin`, `settings` (UI-Allowlist), `toolcall_rescue` (Tool-Calls, die Ollamas Parser als Text verliert, werden zurückgeholt), `wol`, `posture`, `process_view` (was der laufende Router ändern könnte), `setup_init` (`--init`) |
 | `router/ui.html`, `router/skirnir.png`, `router/favicon.png` | Web-UI und Logo |
 | `router/install.sh` | Router unter Debian/Ubuntu installieren oder aktualisieren |
 | `router/config.minimal.yaml`, `router/config.example.yaml` | Minimale erste Konfiguration (Vorlage für `--init`) und volle Referenz |
