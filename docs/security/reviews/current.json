@@ -2,29 +2,12 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "676eb727403e88ed5a8750b54590615100218998",
-  "change_digest": "eabc520624fa8458f3902e02ceaac9d83086e389d84fb58db9160f22ac5a2ac7",
+  "base_sha": "45f7959016dd70b39c5bdddc53941fe33b302289",
+  "change_digest": "00ca52d7e0e125fb2d557423d34d0b1da449ffeb076c79717e3d9e4d40c26d79",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "agent/app.go",
-    "agent/childidentity.go",
-    "agent/childidentity_other.go",
-    "agent/childidentity_test.go",
-    "agent/childidentity_windows.go",
-    "agent/childidentity_windows_test.go",
-    "agent/childpath_test.go",
-    "agent/config.example.yaml",
-    "agent/config.go",
-    "agent/main.go",
-    "agent/probe_identity_windows.go",
-    "agent/supervisor.go",
     "docs/adr/0088-windows-children-run-as-local-service.md",
-    "docs/adr/README.md",
-    "docs/install-agent.de.md",
-    "docs/install-agent.md",
-    "docs/security/risk-register.json",
-    "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md"
+    "docs/adr/README.md"
   ],
   "risk_ids": [
     "TM-14"
@@ -33,46 +16,20 @@
     "B3",
     "B8"
   ],
-  "summary": "Agent 0.34.0 (ADR-0088): on Windows the children run as NT AUTHORITY\\LOCAL SERVICE instead of LocalSystem. Before every start the agent derives the folders a child needs from cmd, cwd, env and args (plus read_paths/write_paths), checks each one by impersonating LOCAL SERVICE and grants what is missing with icacls /L: read outside its data folder, modify only on the child's own folder below it. Never granted: drive roots, system folders, whole user profiles, the agent's own files, paths behind links; modify outside the data folder only where nobody besides the administrators can change the path. A child whose access cannot be established is refused, never started as SYSTEM. run_as: system needs run_as_reason. check-config checks without granting.",
+  "summary": "Documentation only: ADR-0088 (Windows children run as LOCAL SERVICE) is accepted by the operator; status in the ADR, the ADR index and the CHANGELOG row. No code or configuration change.",
   "findings": [
     {
       "id": "TM-14",
-      "evidence": "Children (llama.cpp, the STT stack, Strata) handle network input and ran as LocalSystem; a memory-safety bug yielded SYSTEM (ADR-0087).",
-      "resolution": "They run as LOCAL SERVICE (no administrator rights; measured: NVML set denied, 19 of 666 process paths, 0 user hives). Grants are derived, checked as that account and minimal; refusal instead of fallback.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-14",
-      "evidence": "Found in this review: icacls follows links by default. Whoever may replace a configured folder (a model folder in a user's profile) with a junction could choose where the agent, as LocalSystem, grants LOCAL SERVICE access; with write_paths, a program folder.",
-      "resolution": "A path that is or lies below a reparse point is never granted (checked per component, so 8.3 names are not mistaken for links); icacls runs with /L; modify outside the child's own data folder only where the ADR-0085 exposure check finds nobody besides the system and administrators. Residual: a read grant on a user-changeable folder keeps a check-to-grant race that could move a read entry; documented in ADR-0088.",
+      "evidence": "PR #139 merged with ADR-0088 still proposed; the operator accepted it the same day.",
+      "resolution": "Status set to accepted (proposed -> accepted, the only change allowed besides typos and links).",
       "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "go test ./... (Windows, not elevated), go vet (Windows, GOOS=linux), gofmt",
+      "command": "python test/check_adr_index.py",
       "result": "passed",
-      "evidence": "ok; derivation, too-broad rule, ensureAccess states, link and user-folder refusal, grant ACE incl. inheritance, run_as validation, supervisor refusal."
-    },
-    {
-      "command": "go test (Windows, elevated, as on the CI runner): AccessAs|GrantLocalService|EnsureAccess|ChildAccess|Exposure|Refuses|ProbeChildRestricted",
-      "result": "passed",
-      "evidence": "impersonation: a folder only administrators may read is denied to the restricted token, readable after an Everyone grant, not writable; the caller keeps its identity."
-    },
-    {
-      "command": "go vet + go test ./... on Linux (WSL)",
-      "result": "passed",
-      "evidence": "ok"
-    },
-    {
-      "command": "check-config of the built 0.34.0-pre once as LocalSystem on a Windows node (check only, no grant)",
-      "result": "passed",
-      "evidence": "every child reported as localservice; derived access matches the earlier measurement: model folder read needs grant, the children's own data folders modify needs grant, program folders and the STT model ok."
-    },
-    {
-      "command": "python test/check_adr_index.py; python test/check_control_flow.py",
-      "result": "passed",
-      "evidence": "ADR index ok: 88 ADRs; control flow ok."
+      "evidence": "ADR index ok: 88 ADRs"
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -85,8 +42,5 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": [
-    "Starting children under LOCAL SERVICE through the supervisor needs LocalSystem and is confirmed by the node check during the rollout (Ollama with a loaded model, STT CUDA, Strata on request, guard power limit).",
-    "Strata's model folder is named only in its run file and needs read_paths on the node."
-  ]
+  "limitations": []
 }
