@@ -16,7 +16,7 @@ from uuid import UUID
 
 from aiohttp import web
 
-from . import auth, cloud, metrics, session_api, state
+from . import auth, cloud, metrics, recall_skips, session_api, state
 from .hindsight import BANK_MISSING, HindsightClient, endpoint_from_env
 from .memory_config import HindsightConfig
 from .outcome import Problem, conflict, denied, failed, invalid, unauthenticated, unavailable
@@ -679,7 +679,10 @@ async def prepare(request, path, body, req):
             # reach it only where the grant opts in. Reported like any skipped recall, never as missing knowledge.
             req.memory_state = "skipped:tools"
             count("recall", "skipped_tools")
+            # ADR-0090: also a state of the client, so one that never reads the header does not lose knowledge unseen.
+            recall_skips.skipped(scope.principal, spec["project"])
             return None
+        recall_skips.passed(scope.principal)
         query, skipped = recall_query(messages)
         if skipped:
             # A recall that never ran is a state too: without it, "no facts" looked like "no knowledge" (2026-10-23, the

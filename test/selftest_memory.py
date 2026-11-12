@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic loopback HTTP contract/inference tests. No real service or user data."""
 import asyncio
+import base64
 import copy
 import hashlib
 import json
@@ -15,7 +16,7 @@ from aiohttp import ClientSession, web
 from aiohttp.test_utils import TestClient, TestServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "router"))
-from skirnir_router import app, cloud, config, context_ops, memory, nodes, ops, proxy, state  # noqa: E402
+from skirnir_router import app, auth, cloud, config, context_ops, memory, metrics, nodes, ops, proxy, recall_skips, state  # noqa: E402
 from skirnir_router.hindsight import endpoint_from_env  # noqa: E402
 from skirnir_router.outcome import failed  # noqa: E402
 from skirnir_router.memory_config import HindsightConfig, parse_client_memory, parse_hindsight, parse_memory_request  # noqa: E402
@@ -167,6 +168,37 @@ class ConfigurationTests(unittest.TestCase):
                 self.assertTrue(failed(parse_client_memory(spec, ["personal"])))
 
 
+class RecallSkipRunTests(unittest.TestCase):
+    """ADR-0090: a run of recalls skipped for tools, its window and the rate of its warning line (explicit clock)."""
+    def setUp(self):
+        recall_skips.reset()
+        self.addCleanup(recall_skips.reset)
+
+    def test_a_run_counts_requests_expires_after_its_window_and_warns_at_most_hourly(self):
+        window, start = recall_skips.RUN_WINDOW_S, 1_000_000
+        with patch.object(recall_skips.log, "warning") as warning:
+            self.assertTrue(recall_skips.skipped("client-a", PROJECT, now=start)["warned"])
+            run = recall_skips.skipped("client-a", PROJECT, now=start + 100)
+            self.assertEqual((run["requests"], run["warned"]), (2, False))
+            self.assertEqual(recall_skips.view(now=start + 100),
+                             {"client-a": {"project": PROJECT, "since": start, "last": start + 100, "requests": 2}})
+            # Still reported at the end of the window, gone after it: a client that stopped asking drops out.
+            self.assertEqual(list(recall_skips.view(now=start + 100 + window)), ["client-a"])
+            self.assertEqual(recall_skips.view(now=start + 101 + window), {})
+            # A skip after the window starts a new run; an hour since the last line has passed, so it warns again.
+            run = recall_skips.skipped("client-a", PROJECT, now=start + 200 + window)
+            self.assertEqual((run["since"], run["requests"], run["warned"]), (start + 200 + window, 1, True))
+            # A recall that passes the tools check ends the run; a new run within the hour writes no line.
+            self.assertEqual((recall_skips.passed("client-a"), recall_skips.passed("client-a")), (True, False))
+            self.assertEqual(recall_skips.view(now=start + 300 + window), {})
+            self.assertFalse(recall_skips.skipped("client-a", PROJECT, now=start + 300 + window)["warned"])
+            self.assertEqual(warning.call_count, 2)
+            # Each client has its own run and its own line.
+            self.assertTrue(recall_skips.skipped("client-b", "other-project", now=start + 300 + window)["warned"])
+            self.assertEqual(sorted(recall_skips.view(now=start + 300 + window)), ["client-a", "client-b"])
+            self.assertEqual(warning.call_count, 3)
+
+
 TOOLS = [{"type": "function", "function": {"name": "example_tool", "description": "Synthetic tool",
                                            "parameters": {"type": "object", "properties": {}}}}]
 
@@ -184,6 +216,7 @@ class MemoryHarness(unittest.IsolatedAsyncioTestCase):
         cfg.client_auth["clients"]["client-owned"] = {"token_sha256": hashlib.sha256(b"client-owned").hexdigest(), "memory": policy(owner="client"),
                                                       "models": True}
         state.CFG = cfg
+        recall_skips.reset()
         self.calls, self.operations, self.upstream_bodies = [], {}, []
         self.failure_status, self.delay, self.bad_json, self.large_response = 0, 0, False, False
         self.retain_failures = 0
@@ -413,6 +446,59 @@ class MemoryHttpTests(MemoryHarness):
         self.assertEqual((await self.infer(extra={"tools": TOOLS})).headers.get("X-Skirnir-Memory-State"), "skipped:tools")
         self.assertEqual((await self.infer(extra={"tools": TOOLS}, token="client-b")).headers.get("X-Skirnir-Memory-State"),
                          "skipped:tools")
+
+    async def test_a_client_whose_recalls_are_skipped_for_tools_is_reported_as_a_state(self):
+        # ADR-0090: a client configured for automatic recall that starts sending tools (ADR-0059 skips the recall) shows
+        # up per client in /admin/context, in one aggregate gauge and in one warning line, not only per request.
+        def skipped_clients():
+            return context_ops.snapshot()["recall_skipped_for_tools"]
+
+        def gauge():
+            line = next(x for x in metrics.render().splitlines() if x.startswith("skirnir_memory_recall_skipped_for_tools_clients"))
+            return float(line.split()[-1])
+
+        state.CFG.client_auth["clients"]["client-a"]["memory"].update(strategy="hybrid", default_project=PROJECT)
+        self.assertEqual((skipped_clients(), gauge()), ({}, 0))
+        with patch.object(recall_skips.log, "warning") as warning:
+            for _ in range(3):
+                r = await self.infer(enabled=False, extra={"tools": TOOLS})
+                self.assertEqual((r.status, r.headers.get("X-Skirnir-Memory-State")), (200, "skipped:tools"))
+            run = skipped_clients()["client-a"]
+            self.assertEqual((list(skipped_clients()), run["project"], run["requests"]), (["client-a"], PROJECT, 3))
+            self.assertLessEqual(run["since"], run["last"])
+            self.assertEqual(gauge(), 1)
+            self.assertEqual(warning.call_count, 1, "one line for the run, not one per request")
+            line = warning.call_args.args[0] % warning.call_args.args[1:]
+            self.assertIn("1 client(s)", line)
+            for leaked in ("client-a", PROJECT, "Synthetic question", "example_tool"):   # memory logs name no principal or project
+                self.assertNotIn(leaked, line)
+            # Named only behind the control port's login: without it 401 and no client name, with it the run.
+            state.CFG.control_users = {"operator": auth.hash_password("synthetic-operator-password", iterations=1000)}
+            _, ctl = app.build_apps()
+            async with TestClient(TestServer(ctl)) as control:
+                refused = await control.get("/admin/context")
+                self.assertEqual(refused.status, 401)
+                self.assertNotIn("client-a", await refused.text())
+                login = "Basic " + base64.b64encode(b"operator:synthetic-operator-password").decode()
+                shown = await control.get("/admin/context", headers={"Authorization": login})
+                self.assertEqual(shown.status, 200)
+                self.assertEqual((await shown.json())["recall_skipped_for_tools"]["client-a"]["requests"], 3)
+            # Another client is reported on its own; the gauge counts clients, without naming them.
+            await self.infer(extra={"tools": TOOLS}, token="client-b")
+            self.assertEqual((sorted(skipped_clients()), gauge(), warning.call_count), (["client-a", "client-b"], 2, 2))
+            self.assertNotIn("client-a", "".join(x for x in metrics.render().splitlines() if "recall_skipped" in x))
+            # A recall without tools ends client-a's run; client-b's stays.
+            r = await self.infer(enabled=False)
+            self.assertEqual(r.headers.get("X-Skirnir-Memory-State"), "available")
+            self.assertEqual((list(skipped_clients()), gauge()), (["client-b"], 1))
+            # A new run within the hour is reported again but writes no second line for the same client.
+            await self.infer(enabled=False, extra={"tools": TOOLS})
+            self.assertEqual((skipped_clients()["client-a"]["requests"], warning.call_count), (1, 2))
+            # The grant's opt-in ends the run as well: the recall runs again.
+            state.CFG.client_auth["clients"]["client-a"]["memory"]["projects"][PROJECT]["recall_into_tools"] = True
+            r = await self.infer(enabled=False, extra={"tools": TOOLS})
+            self.assertEqual(r.headers.get("X-Skirnir-Memory-State"), "available")
+            self.assertEqual(list(skipped_clients()), ["client-b"])
 
     async def test_writing_a_shared_scope_needs_the_scopes_writer_list_at_runtime(self):
         # ADR-0060 (TM-10): checked per request too, so a live policy can never widen what loading refused.
