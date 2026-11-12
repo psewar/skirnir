@@ -106,7 +106,7 @@ sudo setpriv --inh-caps=-all --bounding-set=-all /opt/skirnir-router/venv/bin/py
 
 The router only reads certificate and key. Its unit shows it `/etc/skirnir-router/certs` and `/etc/skirnir-router/tls`
 (the folder of installations set up before `router.py --init`) read-only, so a compromised router cannot replace them
-([ADR-0073](adr/0073-close-router-paths-to-host-privileges.md), [ADR-0081](adr/0081-older-certificate-folder-read-only-for-the-router.md)).
+([ADR-0073](adr/0073-close-router-paths-to-host-privileges.md), [ADR-0082](adr/0082-older-certificate-folder-read-only-for-the-router.md)).
 The rest of `/etc/skirnir-router` stays writable for the router: keep certificate and key in one of these two folders or
 outside the router's writable folders (`/etc/skirnir-router`, `/var/lib/skirnir-router`, `/var/log/skirnir-router`).
 Make `certs` and `tls` real folders, not symlinks: systemd protects a link's target, but the router could replace the

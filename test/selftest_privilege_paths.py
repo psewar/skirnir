@@ -4,7 +4,7 @@
    outside the router's writable paths, owned by root and not group/other writable - also when reached through a symlink,
    and the same for SECRET_STORE_AUTH_FILE. Run in a temporary tree with the scripts' test overrides (Linux, bash).
 2. The units: the router sees both certificate folders read-only - certs, and tls of installations older than --init
-   (ADR-0081) - and the secret-store folder not at all; every TLS file the repository configures or watches is outside
+   (ADR-0082) - and the secret-store folder not at all; every TLS file the repository configures or watches is outside
    what the router may write, and a unit without the tls line is detected (rejected case); the root helper units carry
    the hardening; deploy.py places the access file outside every ReadWritePaths of the router unit.
 3. Parity with the agent: every Ollama path the router sends through the tunnel is in the agent's passthrough list
@@ -143,7 +143,7 @@ def units():
     check(len(files) == 7, f"TLS files found: --init defaults, both example configurations, the certificate path unit ({len(files)})")
     for where, path in files:
         check(not unit_may_write(router, path), f"router unit: {where} ({path}) is not router-writable")
-    # ADR-0081: the older location. Rejected case: the same unit without that line leaves certificate and key writable.
+    # ADR-0082: the older location. Rejected case: the same unit without that line leaves certificate and key writable.
     legacy = ("/etc/skirnir-router/tls/fullchain.pem", "/etc/skirnir-router/tls/privkey.pem")
     check(not any(unit_may_write(router, p) for p in legacy), "router unit: certificate and key under tls are not router-writable")
     lines = router.splitlines()

@@ -107,7 +107,7 @@ liegt `control_tls.cert` anderswo, `PathChanged=` in `/etc/systemd/system/skirni
 Der Router liest Zertifikat und Schlüssel nur. Seine Unit zeigt ihm `/etc/skirnir-router/certs` und `/etc/skirnir-router/tls`
 (den Ordner von Installationen, die vor `router.py --init` eingerichtet wurden) nur lesend, ein kompromittierter Router kann
 sie also nicht ersetzen ([ADR-0073](adr/0073-close-router-paths-to-host-privileges.md),
-[ADR-0081](adr/0081-older-certificate-folder-read-only-for-the-router.md)). Der Rest von `/etc/skirnir-router` bleibt für den
+[ADR-0082](adr/0082-older-certificate-folder-read-only-for-the-router.md)). Der Rest von `/etc/skirnir-router` bleibt für den
 Router beschreibbar: Zertifikat und Schlüssel in einen dieser beiden Ordner legen oder außerhalb der Ordner, die der Router
 schreiben darf (`/etc/skirnir-router`, `/var/lib/skirnir-router`, `/var/log/skirnir-router`).
 `certs` und `tls` als echte Ordner anlegen, nicht als symbolische Links: systemd schützt das Ziel eines Links, den Link
