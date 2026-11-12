@@ -22,7 +22,9 @@ What it does, each step checked before the next:
   4. The child's cmd in the agent configuration points at the copy (backup next to it), `check-config` of the installed
      agent accepts it, the service restarts, Ollama answers on 127.0.0.1 from the copy. Otherwise the configuration is
      restored, a copy made by this run is removed, and the service restarts.
-A log is written next to this file. The last line is always STATE: moved | current | checked | refused | restored.
+The log goes to the agent's log folder (logs next to its configuration, by default C:\ProgramData\skirnir-agent\logs;
+without it the TEMP folder of the elevated account), never next to this file; the line "Log:" names it. The last line
+is always STATE: moved | current | checked | refused | restored.
 Afterwards disable the autostart of the Ollama desktop app; the router's Ollama updates replace the files in the copy.
 #>
 param(
@@ -32,8 +34,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Script:Opt = @{ Check = [bool]$Check; Target = $Target; Elevated = [bool]$Elevated }
-# Find-OllamaChild, Split-Lines, Test-Content, Wait-Loopback helpers: shared with the loopback script (dot-sourcing it
-# does not run it). Its parameters would shadow ours, hence the copy in $Script:Opt above.
+# Find-OllamaChild, Split-Lines, Test-Content, Wait-Loopback, Start-RunTranscript helpers: shared with the loopback
+# script (dot-sourcing it does not run it). Its parameters would shadow ours, hence the copy in $Script:Opt above.
 . (Join-Path $PSScriptRoot 'Set-OllamaLoopback.ps1')
 $Elevated = $Script:Opt.Elevated
 
@@ -146,6 +148,7 @@ function Find-Exposure([string] $exe) {
 
 function Finish([string] $state, [string] $text, [int] $code) {
     Write-Host $text
+    if ($Script:Transcript) { Write-Host "Log: $Script:Transcript" }
     Write-Host "STATE: $state"
     if ($Script:Transcript) { Stop-Transcript | Out-Null }
     if ($Elevated) { Read-Host 'Press Enter to close' | Out-Null }
@@ -181,18 +184,10 @@ function Invoke-Move {
             # exception-ok: a declined UAC prompt is reported only as an error of Start-Process
             Finish 'refused' "Elevation did not happen: $($_.Exception.Message)" 4
         }
-        Write-Host "The elevated run ended with exit code $($p.ExitCode); its log is next to this script."
+        Write-Host "The elevated run ended with exit code $($p.ExitCode); its window named the log file (agent log folder, without it the elevated account's TEMP folder)."
         exit $p.ExitCode
     }
-    $Script:Transcript = $false
-    $log = Join-Path $PSScriptRoot "Move-OllamaProtected-$($env:COMPUTERNAME)-$(Get-Date -Format yyyyMMdd-HHmmss).log"
-    try {
-        Start-Transcript -Path $log | Out-Null
-        $Script:Transcript = $true
-    } catch {
-        # exception-ok: whether the script folder is writable shows only on the attempt; the run works without a log
-        Write-Host "No log file ($($_.Exception.Message)); continuing without one."
-    }
+    $Script:Transcript = Start-RunTranscript 'Move-OllamaProtected'
     $targetDir = [System.IO.Path]::GetFullPath($Script:Opt.Target)
     $targetExe = Join-Path $targetDir 'ollama.exe'
     Write-Host "Node $env:COMPUTERNAME  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  target $targetDir"

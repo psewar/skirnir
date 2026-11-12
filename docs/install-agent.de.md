@@ -29,7 +29,8 @@ am Knoten, kein Zertifikat, kein Token und keine feste IP. Interna des Agenten: 
    Ollama ein Kind des Agenten oder die Desktop-App eines Benutzers ist, setzt `OLLAMA_HOST=127.0.0.1:11434` an der richtigen
    Stelle, startet Ollama neu, prüft, dass es nur noch auf Loopback lauscht (sonst stellt es den alten Stand wieder her), und
    deaktiviert Firewall-Regeln, die nur Ollama öffneten. Es lehnt ab, solange andere Rechner mit Ollama verbunden sind.
-   `-Check` meldet nur; das Protokoll liegt neben dem Skript (ADR-0072).
+   `-Check` meldet nur (ADR-0072). Das Protokoll landet im Log-Ordner des Agenten (`C:\ProgramData\skirnir-agent\logs`,
+   ohne Agent im TEMP-Ordner des erhöhten Kontos), nie im Checkout; die Zeile `Log:` nennt die Datei (ADR-0089).
 3. `OLLAMA_NUM_PARALLEL` sollte `max_inflight` des Knotens im Router entsprechen (Standard 2,
    [configuration.de.md](configuration.de.md#scheduler-circuit-breaker-admission)).
 4. Windows: Der Ollama-Installer legt Firewall-Regeln `ollama.exe` an, die jede Quelle zulassen. Diese entfernen, Ollama braucht
@@ -121,8 +122,8 @@ Anmeldung bereit ist; weitere Dienste beaufsichtigt er auf dieselbe Weise. Unter
   `agent\Move-OllamaProtected.cmd` zieht es in einem Schritt um (Doppelklick; fragt selbst nach Administratorrechten):
   Es kopiert den Programmordner nach `C:\Program Files\Ollama` (die Kopie übernimmt dessen Rechte), stellt `cmd` des
   Kindes dorthin, lässt `check-config` zustimmen, startet den Dienst neu und prüft, dass Ollama aus der Kopie
-  antwortet - sonst stellt es die Konfiguration wieder her. `-Check` meldet nur; das Protokoll liegt neben dem
-  Skript. Die Ollama-Updates des Routers ersetzen die Dateien in der Kopie. Sonst startet der Agent das Kind nicht: `check-config` und der Status nennen den Pfad und wer ihn ändern könnte
+  antwortet - sonst stellt es die Konfiguration wieder her. `-Check` meldet nur; das Protokoll landet wie bei
+  `Set-OllamaLoopback.cmd` im Log-Ordner des Agenten (ADR-0089). Die Ollama-Updates des Routers ersetzen die Dateien in der Kopie. Sonst startet der Agent das Kind nicht: `check-config` und der Status nennen den Pfad und wer ihn ändern könnte
   (`refused`), und ein Selbst-Update, das ein Kind ablehnen würde, behält die laufende Version. Eine bewusste Ausnahme ist
   `user_writable_reason: "<warum>"` am Kind; der Grund bleibt im Status und im Log sichtbar.
 - Die Tray-App `ollama app.exe` darf daneben **nicht** laufen (sie versucht ständig, einen eigenen Server zu starten); ihren
