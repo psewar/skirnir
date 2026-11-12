@@ -52,8 +52,9 @@ root-only files and the writable folder shared with root tools.
 * `router.state_dir` (new key, absolute path): every file the router writes itself goes there - `roles.yaml`,
   `nodes.json`, `deletions.jsonl`, `events.jsonl`, `usage.json`, `metrics.json`, `perf.json`, `ollama-latest.json`,
   `requests.jsonl`. Without the key they stay next to `config.yaml` (development, tests). The router checks at start that
-  the folder exists and is writable and refuses with its name otherwise. `config.minimal.yaml`, `config.example.yaml` and
-  `router.py --init` set it.
+  the folder exists and is writable and refuses with its name otherwise. `config.minimal.yaml` and `router.py --init` set
+  it; `config.example.yaml`, the full reference that many tests build their configurations from, shows it as a commented
+  line marked as required for the service.
 * `router/router-layout.sh`, root tool, idempotent, `STATE:` line: creates the system account, refuses while
   `config.yaml` lacks the state folder (before anything changes), stops a router that still runs as root so it saves its
   files, moves them into the state folder (keeps a file already there, removes symlinks instead of following them), sets `/etc/skirnir-router` to `root:skirnir-router` 0750 with nothing writable for the group, and the
