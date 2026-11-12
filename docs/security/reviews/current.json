@@ -2,85 +2,97 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "ed239dc2f1ba8ff8b2c4732b384d24756f3d95c2",
-  "change_digest": "ec07d51a2f55d6d48a6e28cfac95fef714df19a1509c9e1f533e1004de1e5ae2",
+  "base_sha": "b8bc2ce66ac29bef757b7f39360b9e7dc08a94c4",
+  "change_digest": "376b62e75098a3ac4349f8797887d0717d5a500ac69992f8c1bd24ef98e92f4a",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
+    ".gitignore",
     "CHANGELOG.md",
-    "docs/adr/0083-router-reports-tls-files-it-could-change.md",
+    "agent/Move-OllamaProtected.cmd",
+    "agent/Move-OllamaProtected.ps1",
+    "agent/README.md",
+    "agent/childpath.go",
+    "agent/childpath_other.go",
+    "agent/childpath_test.go",
+    "agent/childpath_windows.go",
+    "agent/config.example.yaml",
+    "agent/config.go",
+    "agent/main.go",
+    "agent/setup_linux.go",
+    "agent/setup_linux_test.go",
+    "agent/skirnir-agent.service",
+    "agent/supervisor.go",
+    "docs/adr/0084-linux-agent-unit-without-program-folder-writes.md",
+    "docs/adr/0085-children-start-only-from-folders-users-cannot-change.md",
     "docs/adr/README.md",
-    "docs/install-router.de.md",
-    "docs/install-router.md",
-    "docs/reference.de.md",
-    "docs/reference.md",
+    "docs/install-agent.de.md",
+    "docs/install-agent.md",
+    "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "router/skirnir_router/app.py",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/posture.py",
-    "router/skirnir_router/process_view.py",
-    "test/selftest_process_view.py"
+    "test/selftest_ollama_protected.ps1"
   ],
   "risk_ids": [
     "TM-14",
+    "TM-13",
     "TM-15"
   ],
   "boundaries": [
-    "B8",
-    "B9"
+    "B3",
+    "B8"
   ],
-  "summary": "Router 0.27.0 on top of main with ADR-0082: at start the router checks its own view (/proc/self/mountinfo, owner and mode, effective capabilities) and reports the medium posture finding tls_files_changeable (TM-14, ADR-0083) when it could change or replace control_tls.cert or control_tls.key or a folder above them. The next step names /etc/skirnir-router/certs and /etc/skirnir-router/tls (read-only for the unit since ADR-0073 and ADR-0082), or keeping the files outside the router's writable folders. The check only reads /proc/self and stat results of the configured paths; it writes nothing, reads no certificate or key content, and router.py --posture leaves it out. Reviewed: process_view.py in full, its caller in app.main (runs before unreadable_files and the TLS context), the posture finding, CI wiring, the unit lines it relies on (router/skirnir-router.service on main) and the docs.",
+  "summary": "Agent 0.32.0. ADR-0085: before every start the agent checks who besides SYSTEM/Administrators/TrustedInstaller (Windows: owner + DACL) or root (Linux: owner + mode) could change a child's program, its folder or a folder above, and refuses the child unless children[].user_writable_reason accepts it; check-config fails for a refused child, so the self-update gate keeps the running version; agent/Move-OllamaProtected.cmd moves a per-user Ollama child into C:\\Program Files\\Ollama with verification and restore. ADR-0084: Linux unit runs the binary from /opt/skirnir-agent (link in /usr/local/bin), ProtectSystem=strict, ProtectHome=read-only, CapabilityBoundingSet=CAP_SYS_ADMIN (GPU power limit) behind SystemCallFilter=@system-service; setup moves an existing node and restarts it.",
   "findings": [
     {
       "id": "TM-14",
-      "evidence": "ADR-0073 and ADR-0082 make only /etc/skirnir-router/certs and /etc/skirnir-router/tls read-only for the router unit (root without capabilities, ReadWritePaths=/etc/skirnir-router). A certificate or key in any other folder below the router's writable folders, or under a unit override without those lines, stays replaceable by a compromised router, and nothing reported it.",
-      "resolution": "The running router reports tls_files_changeable with the next step. It checks the file (writable mount plus owner, group or mode), every folder above it (rename or replace), mount points, sticky folders, symlink and target, CAP_DAC_OVERRIDE and CAP_FOWNER; an owner on a writable mount counts as writer because chmod needs only ownership. The self-test mirrors the current unit (certs and tls read-only): files there give no finding, files in another folder below /etc/skirnir-router do.",
+      "evidence": "The agent (LocalSystem) started its Ollama child from the per-user install folder, which that user owns; any process of the user could replace ollama.exe or a library and run as SYSTEM on the next start.",
+      "resolution": "childExposure checks program, folder (incl. add-file for library planting) and every folder above (delete-child, DAC, owner); untrusted owner counts; inherit-only skipped; deny ignored (over-report only). Supervisor refuses, rechecks every minute, failed check refuses too. Verified on a real node: per-user Ollama refused (owner named), Program Files\\Git and System32\\cmd.exe accepted.",
       "disposition": "fixed"
     },
     {
       "id": "TM-14",
-      "evidence": "Found in this review: changeable() walked up with `while entry != \"/\"`. control_tls accepts relative paths (no absolute-path check in config.py), and for a relative path the walk reaches \"\" where dirname(\"\") is \"\", so the start-time check looped forever before the router listened. Trigger is the operator's configuration (control_tls is not editable in the web UI); impact is a router that does not start serving.",
-      "resolution": "The path is joined to the working directory, where the router opens it, and the walk ends when dirname returns its input. test_relative_path and test_walk_ends_without_absolute_path fail against the previous code (wrong verdict; thread still looping after 5 s) and pass now.",
+      "evidence": "Linux unit allowed writes to /usr/local/bin (first on PATH): a compromised agent could plant commands root or users run; ProtectSystem=full left /var, homes writable; full capability set incl. CAP_SYS_ADMIN could remount.",
+      "resolution": "Binary in /opt/skirnir-agent; ProtectSystem=strict, ProtectHome=read-only, only CAP_SYS_ADMIN, SystemCallFilter=@system-service. On a systemd host: only the three folders writable in the service namespace, CapBnd = CAP_SYS_ADMIN, seccomp active; a transient unit with the same restrictions could not remount / (control without the filter could and then wrote /etc).",
       "disposition": "fixed"
     },
     {
-      "id": "TM-14",
-      "evidence": "A check that raised at start (stat of a path the process cannot reach, a dangling link) would stop the router before it serves.",
-      "resolution": "Paths are checked with lexists before any stat; a link target is only stat-ed when it exists; folders above an existing entry are reachable by construction. No try/except added (check_control_flow: 0 findings). Dangling links in read-only and writable folders are tested.",
+      "id": "TM-13",
+      "evidence": "A refused child after an automatic update would take a node's Ollama away.",
+      "resolution": "check-config of the new binary fails for a refused child; the updater runs it before swapping, so the node keeps the running version and the order fails with the refusal line as reason.",
       "disposition": "fixed"
     },
     {
       "id": "TM-15",
-      "evidence": "The finding writes configured paths to the start log.",
-      "resolution": "Only the setting name and the configured path (as config.yaml holds it) are printed; no file content, owner or other path.",
+      "evidence": "Move-OllamaProtected.ps1 runs elevated, rewrites the agent configuration and restarts the service.",
+      "resolution": "Checks before acting (admin, service, exactly one Ollama child with one cmd line, source exposed, target protected by the same rule, target empty or same version); each step names its failure; any failure restores the configuration backup, removes a copy it created and restarts; transcript next to the script; pure parts tested under PS 5.1 and 7. No secret handled or printed.",
       "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_process_view.py (Windows)",
+      "command": "go test ./... (Windows and Linux/WSL), gofmt -l, go vet (linux, windows)",
       "result": "passed",
-      "evidence": "Ran 17 tests: OK (skipped=1, the Linux-only check of the test process's own view)."
+      "evidence": "ok on both platforms; new childpath_test.go and setup_linux_test.go cases."
     },
     {
-      "command": "counter-checks on a copy of the code: previous next-step text; previous walk in process_view.changeable",
+      "command": "skirnir-agent check-config with children in the per-user Ollama folder, Program Files\\Git, System32\\cmd.exe (Windows node)",
       "result": "passed",
-      "evidence": "previous next step: test_finding FAILED ('/etc/skirnir-router/tls' not in the next step); previous walk: test_relative_path and test_walk_ends_without_absolute_path FAILED (2 failures)."
+      "evidence": "refused only the per-user Ollama, owner named, exit 1."
     },
     {
-      "command": "python test/selftest_posture.py; python test/selftest_init.py; python test/selftest_privilege_paths.py; python test/selftest_dependency_audit.py; python test/selftest_english_names.py",
+      "command": "WSL Ubuntu as root: old layout, new setup, namespace probes, remount with and without filter",
       "result": "passed",
-      "evidence": "all OK; the CLI posture is unchanged (no view passed)."
+      "evidence": "service active from /opt, GPU via nvidia-smi, only /opt/skirnir-agent, /var/lib, /var/log writable; CapBnd 0x200000; remount denied with filter, allowed in the control run; systemd-analyze security 2.7; all files cleaned up."
     },
     {
-      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check; python test/selftest_control_flow.py; python test/check_control_flow.py; python test/check_training_data.py",
+      "command": "pwsh / powershell -File test/selftest_ollama_protected.ps1 and selftest_ollama_loopback.ps1",
       "result": "passed",
-      "evidence": "All checks passed; configuration ok; ADR index ok: 83 ADRs; 0 pinned-reference findings; 0 lock problems; control flow ok; training data 0 findings."
+      "evidence": "all passed under PowerShell 7 and Windows PowerShell 5.1."
     },
     {
-      "command": "python test/run_tests.py (end-to-end suite, Windows)",
+      "command": "ruff check .; python test/check_adr_index.py",
       "result": "passed",
-      "evidence": "0 failures, 332 PASS."
+      "evidence": "All checks passed; ADR index ok: 85 ADRs."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -90,14 +102,12 @@
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s); synthetic paths only."
+      "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
   "limitations": [
-    "The Linux-only test of the running process's own view ran in CI (Ubuntu), not locally: the local WSL Python lacks aiohttp.",
-    "ACLs, security modules and immutable attributes are not read; they can only remove rights, so the check may over-report, never under-report.",
-    "A configured path with '..' through a symlink is walked after lexical normalisation as well as at its resolved target; the link swapped by such a '..' is judged only through the folders above it.",
-    "The finding only appears in the start log of the running router; router.py --posture cannot see the unit's view.",
-    "No end-to-end run on a real systemd unit for this change; the unit lines themselves were verified with systemd for ADR-0082."
+    "Only the program and the folders on its path are checked, not every file below the program folder nor script arguments.",
+    "Move-OllamaProtected.ps1 has not run on a production node yet (it needs administrator rights there; the operator runs it).",
+    "CAP_SYS_ADMIN remains for the Linux GPU guard, contained by the system call filter."
   ]
 }
