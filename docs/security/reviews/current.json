@@ -2,29 +2,12 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "676eb727403e88ed5a8750b54590615100218998",
-  "change_digest": "eabc520624fa8458f3902e02ceaac9d83086e389d84fb58db9160f22ac5a2ac7",
+  "base_sha": "aa6223e2f028a342b659739f4a861e1c355b4e6d",
+  "change_digest": "81e478e74b891c4b542a62dcb24b814572bdeb7fec63c643dd714794520b4dc0",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "agent/app.go",
-    "agent/childidentity.go",
-    "agent/childidentity_other.go",
-    "agent/childidentity_test.go",
-    "agent/childidentity_windows.go",
-    "agent/childidentity_windows_test.go",
-    "agent/childpath_test.go",
-    "agent/config.example.yaml",
-    "agent/config.go",
-    "agent/main.go",
-    "agent/probe_identity_windows.go",
-    "agent/supervisor.go",
     "docs/adr/0088-windows-children-run-as-local-service.md",
-    "docs/adr/README.md",
-    "docs/install-agent.de.md",
-    "docs/install-agent.md",
-    "docs/security/risk-register.json",
-    "docs/security/threat-model.de.md",
-    "docs/security/threat-model.md"
+    "docs/adr/README.md"
   ],
   "risk_ids": [
     "TM-14"
