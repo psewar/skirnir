@@ -3,7 +3,7 @@
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
   "base_sha": "b68578e9f97f18616d6b48c79031e8e3c9ceb1f8",
-  "change_digest": "9d699b63947621629c773f097ae8d4a75e637a5b7af7880095a815818da9755f",
+  "change_digest": "619a3059bc60de174322a7acab339b9f55dbf451b6f2bf5bbbfded6c8e136ed2",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
@@ -101,6 +101,11 @@
       "command": "python test/run_tests.py (Windows, after the rebase onto main with #131 and #132)",
       "result": "passed",
       "evidence": "332 PASS, 0 failures."
+    },
+    {
+      "command": "full local CI python job (ci.yml steps, WSL) plus pinned references, pydeps, lock check, SBOM and PowerShell self-tests on Windows",
+      "result": "passed",
+      "evidence": "CI had failed in selftest_log_hygiene: test configurations built from config.example.yaml inherited state_dir=/var/lib/skirnir-router and the token rotation wrote there; the example now shows state_dir as a commented, required-for-the-service line. All steps green (the five WSL-only environment gaps checked on Windows)."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
