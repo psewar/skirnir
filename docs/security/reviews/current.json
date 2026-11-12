@@ -2,84 +2,65 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "503ebf873bc5ed23d4a46c3a7559a80eb3bb1968",
-  "change_digest": "4d98f3b6ea67f549105d4103cd04f94ceec5b7ccdb730e0682f85ce4c192bb38",
+  "base_sha": "cf0a4d3429462cef372f8cd966e35f786530da5e",
+  "change_digest": "3dd7a9c70d56dfbe1a3cf3beb9d20892799907877646e02e474eb1e10d69f235",
   "reviewed_paths": [
-    ".gitignore",
     "CHANGELOG.md",
-    "agent/Move-OllamaProtected.ps1",
-    "agent/Set-OllamaLoopback.ps1",
-    "docs/adr/0089-node-scripts-keep-their-logs-outside-the-script-folder.md",
+    "agent/childidentity.go",
+    "agent/childidentity_windows.go",
+    "agent/childidentity_windows_test.go",
+    "agent/config.example.yaml",
+    "agent/supervisor.go",
+    "docs/adr/0091-windows-children-keep-their-data-outside-the-agents-folder.md",
     "docs/adr/README.md",
     "docs/install-agent.de.md",
     "docs/install-agent.md",
-    "test/selftest_ollama_loopback.ps1",
-    "test/selftest_ollama_protected.ps1",
-    "agent/config.go",
-    "agent/install_windows.go",
-    "agent/childidentity_windows.go",
-    "agent/logging.go",
-    "agent/Set-OllamaLoopback.cmd",
-    "agent/Move-OllamaProtected.cmd",
-    ".github/workflows/ci.yml",
-    "docs/adr/0072-windows-node-ollama-loopback-script.md",
-    "docs/adr/0085-children-start-only-from-folders-users-cannot-change.md",
-    "docs/security/threat-model.md",
-    "docs/security/risk-register.json"
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md"
   ],
   "risk_ids": [
-    "TM-14",
-    "TM-15"
+    "TM-14"
   ],
   "boundaries": [
-    "B8",
-    "B9"
+    "B3",
+    "B8"
   ],
-  "summary": "The node scripts Set-OllamaLoopback.ps1 and Move-OllamaProtected.ps1 wrote the transcript of their elevated run next to themselves; run from a repository checkout it landed untracked in agent/ with computer and user names, configuration paths and remote addresses, one 'git add -A' away from a public commit. Both now start it through one helper, Start-RunTranscript: the agent's default log folder (logs next to the configuration named on the SkirnirAgent service command line, which the agent restricts to SYSTEM, Administrators and its service account in applyRules), else the TEMP folder of the elevated account; a 'Log:' line before STATE names the file. The folder is derived only from the service configuration (administrators only) and checked with Directory.Exists (no exception as control flow); Start-Transcript keeps its marked boundary catch. The file name uses [Environment]::MachineName instead of the caller-settable %COMPUTERNAME%. .gitignore ignores leftovers of both scripts. Traced: elevation re-launch and caller message, Finish (Log line before STATE, transcript stopped before exit), the shared helper under dot-sourcing in Move-OllamaProtected, the agent's log-folder default (config.go applyDefaults), the config-folder ACL (install_windows.go applyRules), the LOCAL SERVICE grant logic for first-level folders under the data folder (childidentity_windows.go classifyAccess) and the agent's lumberjack rotation (deletes only its own backups). No router, agent binary, configuration schema, authentication or network path changes.",
+  "summary": "Agent 0.34.1 (ADR-0091, amends ADR-0088): a LOCAL SERVICE child's own data folder moves from the agent's data folder to a children's data folder next to it (<data>-children). The agent creates that folder only when starting a child, with a protected access list of its own (SYSTEM and Administrators full, LOCAL SERVICE list this folder only, nothing inherited), and refuses children with data there when it is a link or anyone besides the system and the administrators can change it or a folder above. Each access entry also reports resolve (the real filepath.EvalSymlinks under the child's token; on failure the first folder above the child cannot list) and, for data still in the agent's folder, move_to. Cause: Ollama as LOCAL SERVICE could open its manifests but not resolve them, because LOCAL SERVICE may not list the agent's folder.",
   "findings": [
     {
-      "id": "TM-15",
-      "evidence": "Set-OllamaLoopback.ps1:245 and Move-OllamaProtected.ps1:188 on origin/main build the transcript path from $PSScriptRoot; a repository review on 2026-11-12 found such a transcript untracked in a checkout's agent/ folder. .gitignore had no rule for it.",
-      "resolution": "Transcript moved to the agent's log folder (administrators only) or the elevated account's TEMP folder through Start-RunTranscript; .gitignore ignores /agent/Set-OllamaLoopback-*.log and /agent/Move-OllamaProtected-*.log; both self-tests fail on the old scripts and pass on the new ones, and on Windows a real transcript is written outside the checkout (ADR-0089).",
+      "id": "TM-14",
+      "evidence": "Rollout of agent 0.34.0: Ollama as LOCAL SERVICE reported every manifest as Access is denied; a probe showed open/read/os.Root succeed and only filepath.EvalSymlinks fails, since Go's path normalisation lists every folder above and the agent's folder (configuration, keys) is closed to LOCAL SERVICE. The stopgap was run_as: system for Ollama.",
+      "resolution": "Children's data goes to a separate folder LOCAL SERVICE may list; the agent's folder stays closed, including file names (listing it was rejected in ADR-0091). Ollama can return to LOCAL SERVICE after its models move.",
       "disposition": "fixed"
     },
     {
       "id": "TM-14",
-      "evidence": "With install.account set (NT SERVICE\\SkirnirAgent), the service account has modify on the configuration folder and could replace logs with a junction, so the elevated script would create its .log transcript elsewhere. In the TEMP fallback with UAC admin-approval mode the unelevated half of the same administrator owns TEMP. A child naming a path inside logs in env/args gets modify on logs through ADR-0088's grants (operator configuration).",
-      "resolution": "Not introduced by this change: before it, the elevated run wrote into the script folder, which in a checkout is writable by the non-elevated user. The primitive is creating a new, timestamped .log file with non-attacker content; the service account already writes the agent's own logs there, and UAC split tokens of one administrator are not a security boundary. Over-the-shoulder elevation uses the administrator account's own TEMP.",
-      "disposition": "baseline"
+      "evidence": "Found in this review: users may create folders in ProgramData, so anyone could create the children's data folder first, or a subfolder in it, and later swap that for a link to redirect the agent's modify grant.",
+      "resolution": "The agent creates the folder with an explicit protected security descriptor in one call (CreateDirectory with SDDL); an existing folder is used only when it is no link and the ADR-0085 exposure check finds nobody besides the system and administrators who can change it or a folder above; otherwise every child with data there is refused without a grant. Inside a clean folder only the system and administrators can create a child's folder, and icacls still runs with /L.",
+      "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "pwsh -NoProfile -File test/selftest_ollama_loopback.ps1",
+      "command": "go test ./... (Windows, not elevated), go vet (Windows, GOOS=linux), gofmt",
       "result": "passed",
-      "evidence": "selftest_ollama_loopback: all passed (pwsh 7 on Windows; includes the real transcript written to TEMP and removed)"
+      "evidence": "ok; children's data folder derivation (own folder, folder itself and files never granted, move_to for data in the agent's folder), ensureChildRoot (check only creates nothing, created folder protected with LOCAL SERVICE list-only and no inheritance, a folder others can change refuses without grant), existing ADR-0088 tests unchanged."
     },
     {
-      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File test/selftest_ollama_loopback.ps1",
-      "result": "passed",
-      "evidence": "selftest_ollama_loopback: all passed (Windows PowerShell 5.1)"
+      "command": "TestResolveAsNamesTheFolderItCannotList (Windows, elevated)",
+      "result": "not_run",
+      "evidence": "Skipped locally (not elevated); it runs in the agent's Windows CI job on the elevated runner: a readable folder below an administrators-only folder opens, does not resolve, and resolve names the folder above; once listable it is no longer named."
     },
     {
-      "command": "pwsh -NoProfile -File test/selftest_ollama_protected.ps1 (and powershell 5.1)",
+      "command": "ls-manifest-probe as LocalSystem and as a LOCAL SERVICE process on a Windows node, model folder in the agent's data folder",
       "result": "passed",
-      "evidence": "selftest_ollama_protected: all passed in both shells"
+      "evidence": "LOCAL SERVICE: every open/read/os.Root/DirFS operation ok, filepath.EvalSymlinks Access is denied; LocalSystem: all ok. Reproduces the incident and names the call the resolve fact uses."
     },
     {
-      "command": "new self-tests against the origin/main scripts (copied to a scratch tree)",
+      "command": "python test/check_control_flow.py",
       "result": "passed",
-      "evidence": "Rejected case confirmed: loopback test stops with 'Split-ServiceCommand is not recognized'; protected test reports 3 failures (log next to the script, own Start-Transcript, no Start-RunTranscript)."
-    },
-    {
-      "command": "git check-ignore -v agent/Set-OllamaLoopback-NODE-01-20260101-000000.log agent/Move-OllamaProtected-NODE-01-20260101-000000.log",
-      "result": "passed",
-      "evidence": ".gitignore:69 and .gitignore:70 match; agent/Set-OllamaLoopback.ps1 is not ignored"
-    },
-    {
-      "command": "ruff check . ; python test/check_adr_index.py ; python test/check_pinned_references.py ; python tools/security/lock_requirements.py check ; python test/selftest_control_flow.py ; python test/check_control_flow.py ; python router/router.py --check router/config.example.yaml --pure ; python test/check_training_data.py",
-      "result": "passed",
-      "evidence": "All checks passed; ADR index ok: 89 ADRs; 0 pinned findings; 0 lock problems; control flow ok (0 findings); configuration ok; training data 0 findings"
+      "evidence": "control flow ok"
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -90,21 +71,10 @@
       "command": "python test/check_public_changes.py",
       "result": "passed",
       "evidence": "Public-change scan: 0 finding(s)."
-    },
-    {
-      "command": "Set-OllamaLoopback.cmd / Move-OllamaProtected.cmd elevated on a node",
-      "result": "not_run",
-      "evidence": "Needs an interactive UAC prompt and changes the node; the elevated branch (agent log folder chosen, Log: line in the elevated window) was not exercised. Get-AgentLogFolder was checked against the real SkirnirAgent service command line of a development machine (C:\\ProgramData\\skirnir-agent\\logs), and the non-elevated fallback to TEMP there."
-    },
-    {
-      "command": "python test/run_tests.py",
-      "result": "not_run",
-      "evidence": "No router code changed; the end-to-end suite does not exercise the node scripts."
     }
   ],
   "limitations": [
-    "The elevated run was not executed (UAC); the agent-log-folder branch is covered by the pure derivation test and the Directory.Exists check, not by a real elevated transcript.",
-    "Transcripts written by earlier versions stay in agent/ of existing checkouts until the operator deletes them; the new .gitignore rules keep them out of commits.",
-    "Linux pwsh in CI covers only the pure parts; the host-side transcript check runs in the Windows PowerShell 5.1 CI job."
+    "The ADR index check reports a gap at 0090 until PR #142 (ADR-0090) is merged; this branch is updated from main afterwards.",
+    "Moving existing data from the agent's folder is an operator step per node (reported as move_to); Ollama's switch back to run_as: localservice is confirmed by the node check during the rollout."
   ]
 }

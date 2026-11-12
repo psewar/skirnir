@@ -67,6 +67,84 @@ func TestChildAccessPlan(t *testing.T) {
 	if a := got[strings.ToLower(filepath.Join(data, "stt"))]; !a.ownData {
 		t.Fatalf("the child's folder under the data folder is its own: %+v", a)
 	}
+	if a := got[strings.ToLower(filepath.Join(data, "stt"))]; a.inRoot || !strings.EqualFold(a.MoveTo, filepath.Join(root, "agent-children", "stt")) {
+		t.Fatalf("data in the agent's own folder names where it belongs (ADR-0091): %+v", a)
+	}
+}
+
+// ADR-0091: the children's data folder sits next to the agent's; a child's folder there is its own, the folder itself and
+// files directly in it are never granted.
+func TestChildAccessPlanChildrenRoot(t *testing.T) {
+	base := t.TempDir()
+	data := filepath.Join(base, "skirnir-agent")
+	root := childDataRoot(data)
+	if !strings.EqualFold(root, filepath.Join(base, "skirnir-agent-children")) {
+		t.Fatalf("children's data folder: %s", root)
+	}
+	sp := ChildSpec{Name: "ollama", Cmd: "never-on-path-xyz",
+		Env:       []string{"OLLAMA_MODELS=" + filepath.Join(root, "ollama-models"), "USERPROFILE=" + filepath.Join(root, "ollama-home")},
+		Args:      []string{"--cache=" + filepath.Join(root, "ollama-models", "cache", "x.bin")},
+		ReadPaths: []string{root, filepath.Join(root, "notes.txt")}}
+	got := map[string]ChildAccess{}
+	for _, a := range childAccessPlan(sp, data) {
+		got[strings.ToLower(a.Path)] = a
+	}
+	for _, n := range []string{"ollama-models", "ollama-home"} {
+		a := got[strings.ToLower(filepath.Join(root, n))]
+		if a.Need != needModify || !a.ownData || !a.inRoot || a.MoveTo != "" || a.noGrant != "" {
+			t.Fatalf("%s: want the child's own folder in the children's data folder, got %+v", n, a)
+		}
+	}
+	for _, p := range []string{root, filepath.Join(root, "notes.txt")} {
+		if a := got[strings.ToLower(p)]; !strings.Contains(a.noGrant, "children's data folder itself") {
+			t.Fatalf("%s: the children's data folder itself is never granted, got %+v", p, a)
+		}
+	}
+	if len(got) != 4 {
+		t.Fatalf("want 4 entries, got %+v", got)
+	}
+}
+
+// ensureChildRoot creates the children's data folder protected (system and administrators full, LOCAL SERVICE may only
+// list it, nothing inherited), creates nothing when only checking, and refuses a folder others can change.
+func TestEnsureChildRoot(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "agent-children")
+	if issue := ensureChildRoot(root, false); issue != "" {
+		t.Fatalf("check only, missing: want no issue, got %q", issue)
+	}
+	if _, err := os.Lstat(root); err == nil {
+		t.Fatal("check only must not create the folder")
+	}
+	// in a user's temp folder that user can change the folders above, so the created folder is still refused - its access
+	// list must be the protected one all the same
+	if issue := ensureChildRoot(root, true); !strings.Contains(issue, "can change it or a folder above") {
+		t.Fatalf("a folder below a user's temp folder: want refused, got %q", issue)
+	}
+	sd, err := windows.GetNamedSecurityInfo(root, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctl, _, err := sd.Control()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctl&windows.SE_DACL_PROTECTED == 0 {
+		t.Fatal("the children's data folder must not inherit from the folder above")
+	}
+	mask, flags := localServiceACE(t, root)
+	const fileWriteData, fileListDirectory = 0x2, 0x1
+	if mask&fileListDirectory == 0 || mask&fileWriteData != 0 || flags&(windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE) != 0 {
+		t.Fatalf("LOCAL SERVICE: want list on this folder only, got mask %#x flags %#x", mask, flags)
+	}
+	plan := []ChildAccess{{Path: filepath.Join(root, "ollama"), Need: needModify, ownData: true, inRoot: true}}
+	granted := false
+	ensureAccess(plan, filepath.Join(base, "agent"), func(ChildAccess) error { return errors.New("Access is denied.") },
+		func(ChildAccess) error { granted = true; return nil })
+	if !plan[0].refuses() || !strings.Contains(plan[0].State, "children's data folder") || granted {
+		t.Fatalf("a child's folder in an unsafe children's data folder: want refused without grant, got %q (granted %v)",
+			plan[0].State, granted)
+	}
 }
 
 func TestTooBroad(t *testing.T) {
@@ -298,5 +376,54 @@ func TestAccessAsImpersonates(t *testing.T) {
 	}
 	if err := accessAs(tok, ChildAccess{Path: dir, Need: needModify, dir: true}); err == nil {
 		t.Fatal("read for everyone must not allow the restricted token to write")
+	}
+}
+
+// The Ollama incident of ADR-0091: a folder the child may read, below a folder it may not list. Opening works (bypass
+// traverse), resolving the path as Go's filepath.EvalSymlinks does fails, and resolveAs names the folder above.
+func TestResolveAsNamesTheFolderItCannotList(t *testing.T) {
+	var self windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &self); err != nil {
+		t.Fatal(err)
+	}
+	elevated := self.IsElevated()
+	self.Close()
+	if !elevated {
+		t.Skip("needs an elevated test process (the Windows CI runner is)")
+	}
+	tok, err := probeToken("restricted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tok.Close()
+	outer := filepath.Join(t.TempDir(), "agent")
+	inner := filepath.Join(outer, "ollama-models")
+	if err := os.MkdirAll(filepath.Join(inner, "manifests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("icacls.exe", outer, "/inheritance:r", "/grant", "*S-1-5-32-544:(OI)(CI)F",
+		"/grant", "*S-1-5-18:(OI)(CI)F").CombinedOutput(); err != nil {
+		t.Fatalf("icacls: %v %s", err, out)
+	}
+	if out, err := exec.Command("icacls.exe", inner, "/grant", "*S-1-1-0:(OI)(CI)RX").CombinedOutput(); err != nil {
+		t.Fatalf("icacls: %v %s", err, out)
+	}
+	if err := accessAs(tok, ChildAccess{Path: inner, Need: needRead, dir: true}); err != nil {
+		t.Fatalf("the folder itself is readable for the child: %v", err)
+	}
+	got := resolveAs(tok, filepath.Join(inner, "manifests"))
+	if !strings.HasPrefix(got, outer+" cannot be listed") {
+		t.Fatalf("want %s named as the folder the child cannot list, got %q", outer, got)
+	}
+	plan := []ChildAccess{{Path: inner, State: "ok"}, {Path: outer, State: "denied: x"}}
+	markResolve(plan, func(p string) string { return resolveAs(tok, p) })
+	if !strings.HasPrefix(plan[0].Resolve, outer+" cannot be listed") || plan[1].Resolve != "" {
+		t.Fatalf("resolve is checked only where the child has access: %+v", plan)
+	}
+	if out, err := exec.Command("icacls.exe", outer, "/grant", "*S-1-1-0:(RX)").CombinedOutput(); err != nil {
+		t.Fatalf("icacls: %v %s", err, out)
+	}
+	if got := resolveAs(tok, filepath.Join(inner, "manifests")); strings.HasPrefix(got, outer+" ") {
+		t.Fatalf("listable now, so %s is no longer the obstacle: %q", outer, got)
 	}
 }

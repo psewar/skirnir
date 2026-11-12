@@ -139,8 +139,16 @@ configuration (`probe\probe-identity-<time>.json`). The upstream child (a large 
 `NT AUTHORITY\LOCAL SERVICE` instead of the service's LocalSystem, so a bug in Ollama, the STT service or Strata no longer
 yields the system. Before every start the agent derives the folders the child needs from its `cmd`, `cwd`, `env` and
 `args` (every value that is one absolute path), checks each one as LOCAL SERVICE and grants what is missing: read on
-folders outside the agent's data folder (the Ollama models, for example), modify only on the child's own folder below it
-(`C:\ProgramData\skirnir-agent\<folder>`; the configuration and keys there are never granted). A drive root, a system
+folders outside the agent's data folder, modify only on the child's own folder in the **children's data folder**
+`C:\ProgramData\skirnir-agent-children\<folder>` (ADR-0091; the agent's data folder with `-children` appended). The agent
+creates that folder itself before the first start, readable for nobody but the system and the administrators (LOCAL
+SERVICE may only list it), and refuses children with data there if anyone else can change it - remove it then, the agent
+creates it anew. Keep the children's data (Ollama's models and home, caches, logs a child writes itself) there, not in
+the agent's own folder: LOCAL SERVICE may not list the agent's folder, and a program that resolves its paths (Ollama,
+any Go program) fails below it with "Access is denied" although it may open the files. Data still in the agent's folder
+keeps working for other programs; the log and `check-config` name it with `move to <folder>` - stop the child, move the
+folder, change the path in the configuration. For every path the status also reports whether the child can resolve it
+(`children[].access[].resolve`: `ok`, or the folder above it the child cannot list). A drive root, a system
 folder or a whole user profile is only checked, never granted - name a narrower folder. Nor is a path behind a link
 (junction, symbolic link, cloud folder) - name the folder it leads to - and `write_paths` outside the data folder are
 granted only where nobody besides the system and the administrators can change them. Folders the command line does not
