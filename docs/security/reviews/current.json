@@ -2,83 +2,63 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "4176f771b9fd2724d22f16441e3a2a25367ffebf",
-  "change_digest": "26d031b2fc405246733b189771efa2d7c3708fd1fecd1f9f4f2fff5057d952fe",
+  "base_sha": "07e37ea7bb646be11d72932a9d805c86b59eecfc",
+  "change_digest": "8dc5563bf88215563b2be7b4c25d901e0946c0b665c4f3847ff9ca2ee079ceb6",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
+    ".github/workflows/security.yml",
     "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "docs/adr/0080-further-secret-keys-named-in-render-env-conf.md",
+    "docs/adr/0081-dependency-audit-also-runs-weekly.md",
     "docs/adr/README.md",
-    "docs/configuration.de.md",
-    "docs/configuration.md",
-    "docs/install-router.de.md",
-    "docs/install-router.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "router/config.example.yaml",
-    "router/render-env.conf.example",
-    "router/render-env.sh",
-    "router/skirnir_router/common.py",
-    "router/skirnir-router.service",
-    "router/skirnir_router/cloud.py",
-    "router/skirnir_router/config.py",
-    "test/selftest_cloud_transport.py",
-    "test/selftest_render_env.py"
+    "test/selftest_dependency_audit.py",
+    ".github/workflows/threat-model.yml",
+    ".github/workflows/threat-review.yml",
+    ".github/workflows/trusted-security-gate.yml",
+    ".github/workflows/release-provenance.yml",
+    ".github/workflows/live-memory.yml",
+    ".github/dependabot.yml",
+    "docs/adr/0045-dependency-scanning-in-ci.md",
+    "docs/adr/0074-hash-locked-python-installs.md",
+    "design/continuous-security-review.md"
   ],
   "risk_ids": [
-    "TM-14",
-    "TM-15",
-    "TM-06"
+    "TM-16"
   ],
   "boundaries": [
-    "B6",
     "B9"
   ],
-  "summary": "Router 0.26.0, ADR-0080 (renumbered after ADR-0076 to ADR-0079 landed on main; rebased onto main after v0.31.0, entry in the v0.31.1 row). render-env.sh (run as root by the secrets units, access file in the root-only folder of ADR-0073) additionally renders the secrets named in EXTRA_SECRET_KEYS from render-env.conf into /etc/skirnir-router/secrets.env, so a further OpenAI-compatible cloud provider (example: Mistral's EU endpoint) is configuration only. Traced: secrets.env is the EnvironmentFile of skirnir-router.service (root); cloud.py reads a provider key only from the env name in api_key_env; config.py validates base_url against the egress allowlist and HTTPS (loopback HTTP only). Controls added in the renderer: names must start with a capital letter, contain only [A-Z0-9_] (they become part of the secret-store query path) and end in _KEY or _TOKEN, so LD_PRELOAD, PATH, PYTHONPATH and similar never reach the root unit's environment; globbing is off while splitting; built-in names are not fetched twice; a missing name is reported by name only. While tracing, a pre-existing path was found and closed for every key: a secret value with LF or CR would have added a further variable of the store writer's choosing to the EnvironmentFile; such values are now refused (MQTT_PASSWORD: nothing rendered, existing file kept). config.example.yaml adds egress_allow [api.eu.mistral.ai] and a disabled mistral provider (kind openai, region eu); selftest_cloud_transport now appends to the example's egress_allow instead of replacing it. New CI test test/selftest_render_env.py runs the real script against a fake secret store (bash/curl/jq; refuses to skip in CI). Threat model EN/DE and register TM-14 updated; docs EN/DE, READMEs, CHANGELOG.",
+  "summary": "CI only, no router or agent code. security.yml (pip-audit over the runtime and optional requirement sets and both hash locks, lock_requirements.py verify-pypi, govulncheck) gains a weekly schedule trigger (Monday 04:29 UTC); push, pull_request and workflow_dispatch stay, top-level permissions stay contents: read, no secrets, no new actions or tools (pins unchanged, check_pinned_references passes). Traced: a schedule runs the default branch's workflow; threat-review.yml and trusted-security-gate.yml react to workflow_run of CI only, release-provenance.yml to releases, live-memory.yml to dispatch, so a scheduled Security checks run triggers nothing downstream and gives no candidate code any credentials. New test/selftest_dependency_audit.py (added to ci.yml) parses security.yml with yaml.safe_load and rejects a missing or less than weekly schedule, a dropped push or pull_request trigger, a conditional or missing job, and missing or conditional lock/Go audit steps. ADR-0081 records the decision (refines ADR-0045, implements the weekly run ADR-0074 assumes); threat model EN/DE and register TM-16 controls/test_refs name the weekly run. TM-16 stays open; no status was weakened.",
   "findings": [
     {
-      "id": "TM-14",
-      "evidence": "secrets.env is the router unit's EnvironmentFile (root). A configurable list of names would let a name such as LD_PRELOAD or PYTHONPATH carry a secret-store value into the root process.",
-      "resolution": "Only names ending in _KEY or _TOKEN with [A-Z0-9_] are rendered; others are reported and skipped. The list lives in render-env.conf (root-only folder, ADR-0073), not in the router-writable config.yaml. Rejected-case test with LD_PRELOAD, PATH, PYTHONPATH; a copy of the script without the suffix rule fails it.",
+      "id": "TM-16",
+      "evidence": "Pre-existing: ADR-0074 states that a CVE in the hash-locked Python sets 'shows in the weekly pip-audit', but security.yml had no schedule trigger and Dependabot alerts are not enabled for the repository; an advisory published after the last push surfaced nowhere until the next commit.",
+      "resolution": "Weekly schedule on security.yml; test/selftest_dependency_audit.py in CI fails if the schedule or an audit step goes away (run against the previous workflow it fails with exit 1). ADR-0081.",
       "disposition": "fixed"
-    },
-    {
-      "id": "TM-14",
-      "evidence": "Pre-existing: render-env.sh wrote KEY=value lines with printf without checking the value; a value with a line break from the secret store (built-in keys included) would have started a further variable in the root unit's environment.",
-      "resolution": "Every rendered value must be a single line (no LF/CR); otherwise the key is skipped and named, MQTT_PASSWORD keeps the existing file. Tests for a built-in key, further keys with LF and with CR, and MQTT_PASSWORD; a copy without the check fails all four tests.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-15",
-      "evidence": "New log lines in the renderer name keys that are invalid, missing or multi-line.",
-      "resolution": "Only names are printed, never values; the test asserts that no synthetic secret value or injected fragment appears in the output.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-06",
-      "evidence": "The example adds a further egress host for a disabled provider.",
-      "resolution": "No code change in the cloud path; base_url stays bound to the allowlist and HTTPS by config.py (selftest_cloud_transport cases unchanged). Data classes, privacy check, credential scan and budget apply to the new provider as to OpenAI. Redirect behaviour remains the existing residual risk of TM-06.",
-      "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_render_env.py on a Linux router host (bash/curl/jq), in /tmp with the router venv, live router untouched",
+      "command": "python test/selftest_dependency_audit.py",
       "result": "passed",
-      "evidence": "Ran 4 tests: OK (after the rebase onto 4176f77). Counter-checks with the same tests: script without the suffix rule FAILED (1), script whose line check always passes FAILED (4)."
+      "evidence": "10 checks PASS: seven rejected variants (no schedule, monthly, go job skipped on schedule, router lock audit removed, govulncheck removed, lock audits limited to push, pull_request trigger removed), non-mapping rejected, daily accepted, shipped workflow accepted."
     },
     {
-      "command": "All python steps of ci.yml run locally on Windows (75 commands)",
+      "command": "python test/selftest_dependency_audit.py against security.yml without the schedule (change stashed)",
       "result": "passed",
-      "evidence": "74/75 ok; check_public_changes needs the CI base variable and was run separately below."
+      "evidence": "Counter-check as intended: exit 1, 6 checks FAIL, including 'shipped security.yml runs weekly' with 'no schedule trigger'."
     },
     {
-      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_control_flow.py; python test/selftest_threat_review.py",
+      "command": "All python steps of ci.yml run locally on Windows (70 commands, including the new test)",
       "result": "passed",
-      "evidence": "All checks passed; configuration ok: 5 roles, 7 models; ADR index ok: 80 ADRs; control flow ok."
+      "evidence": "70/70 exit 0. check_public_changes and the PostgreSQL/end-to-end suites are not in this list; see below and limitations."
+    },
+    {
+      "command": "ruff check .; python test/check_adr_index.py; python test/selftest_pinned_references.py && python test/check_pinned_references.py; python test/selftest_threat_review.py; python test/selftest_trusted_gate.py; python test/selftest_control_flow.py && python test/check_control_flow.py; risk-register.json parsed as JSON",
+      "result": "passed",
+      "evidence": "All checks passed; ADR index ok: 81 ADRs; 0 pinning failures/findings; threat review and trusted gate tests ok; control flow ok."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -86,15 +66,20 @@
       "evidence": "Run after staging this record."
     },
     {
-      "command": "python test/check_public_changes.py --base origin/main",
+      "command": "python test/check_public_changes.py",
       "result": "passed",
       "evidence": "Public-change scan: 0 finding(s)."
+    },
+    {
+      "command": "The scheduled run itself",
+      "result": "not_run",
+      "evidence": "A schedule only fires on the default branch after merge; this PR's push/pull_request run of the same workflow exercises the same jobs."
     }
   ],
   "limitations": [
-    "selftest_render_env.py skips on Windows (no bash/jq there); it ran on a Linux router host and runs in CI, where a skip is refused.",
-    "The suffix rule is a name rule: a secret the operator names with _KEY still reaches the router's environment by design.",
-    "systemd EnvironmentFile still interprets quotes and backslashes in single-line values (pre-existing, unchanged); the router reads MQTT_PASSWORD raw from the file for that reason.",
-    "Choosing a provider (terms, data retention) is the operator's decision; no request to a provider was part of these tests."
+    "The schedule only detects advisories; refreshing the Python locks stays a manual pin/resolve in a PR (TM-16 next action unchanged).",
+    "GitHub disables scheduled workflows of a public repository after 60 days without repository activity; the failure notice of a scheduled run goes to the account that last changed the cron line.",
+    "Dependabot alerts (a repository setting) were not changed; enabling them is the maintainer's choice and not verifiable from the repository.",
+    "The end-to-end suite and the PostgreSQL integrations were not run; no router or agent code changed."
   ]
 }
