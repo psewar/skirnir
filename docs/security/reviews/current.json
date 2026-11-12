@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "9212977d155748846fd31bba6908967b295fe2b6",
-  "change_digest": "f38f1c17b7f1d474a72cd69b868bd04a3c6845ab7903269fdce0f5120d13d28a",
+  "base_sha": "f886838a4864d74206be2a7fa0a5755e240b874d",
+  "change_digest": "4d46da9725836f2d1e6aaa98382180bd15902d3501f674efa9957bef0256c63d",
   "reviewed_paths": [
     "docs/adr/0087-windows-agent-children-without-system-rights.md",
     "docs/adr/README.md",
