@@ -2,31 +2,39 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "9212977d155748846fd31bba6908967b295fe2b6",
-  "change_digest": "a025ce0ef6815d10ee35e7897249627a62f318c5eec023145ceb6a73d5ead011",
+  "base_sha": "f886838a4864d74206be2a7fa0a5755e240b874d",
+  "change_digest": "4d46da9725836f2d1e6aaa98382180bd15902d3501f674efa9957bef0256c63d",
   "reviewed_paths": [
-    "CHANGELOG.md"
+    "docs/adr/0087-windows-agent-children-without-system-rights.md",
+    "docs/adr/README.md",
+    "docs/security/risk-register.json"
   ],
   "risk_ids": [
-    "TM-16"
+    "TM-14"
   ],
   "boundaries": [
-    "B9"
+    "B3",
+    "B8"
   ],
-  "summary": "Documentation only: the unreleased CHANGELOG row is named for the next tag, v0.32.0 (router 0.28.0, agent 0.32.0), so the release tool finds exactly one row for the tag at the release commit. No code, configuration or workflow change.",
+  "summary": "Documentation only: ADR-0087 (proposed) for the Windows agent - children without SYSTEM rights first (separate low-privilege token per child), the agent's own privileged operations split into a helper later; with the measurement plan that must run on a node before any code. Risk register next action points to it. No code, configuration or workflow change.",
   "findings": [
     {
-      "id": "TM-16",
-      "evidence": "The release tool reads router and agent version from the CHANGELOG row of the tag at the target commit; a wrong row would publish wrong version claims next to the attested binaries.",
-      "resolution": "Only the tag cell changes; router 0.28.0 matches common.py at the target, agent 0.32.0 matches the built binaries; release_anlegen.py --pruefen checks both before anything is published.",
-      "disposition": "fixed"
+      "id": "TM-14",
+      "evidence": "The Windows agent runs as LocalSystem (needed for the GPU guard's NVML power limit and GPU-Z, measured 2026-09-24) and starts Ollama, Strata and the STT service - the code that handles network input - with SYSTEM rights.",
+      "resolution": "Proposal only: options, recommended order and a measurement plan (CUDA, folder access, Strata runtime folder, per-process VRAM attribution, job objects; NVML/GPU-Z/process paths/user hives for the later split). Decision stays with the operator.",
+      "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "git diff origin/main -- CHANGELOG.md",
+      "command": "python test/check_adr_index.py",
       "result": "passed",
-      "evidence": "one line: tag cell v0.31.1 (unreleased) -> v0.32.0 (unreleased)."
+      "evidence": "ADR index ok: 87 ADRs."
+    },
+    {
+      "command": "python test/check_public_changes.py --base origin/main",
+      "result": "passed",
+      "evidence": "0 findings."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -40,6 +48,6 @@
     }
   ],
   "limitations": [
-    "The release itself is created after the merge; the follow-up PR turns the row into a link with the date."
+    "No measurement has run yet; the outline may change with its results."
   ]
 }
