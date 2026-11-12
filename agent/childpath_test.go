@@ -67,8 +67,15 @@ func TestChildExposureUserProgram(t *testing.T) {
 	if e == nil || e.Child != "ollama" || e.Who == "" {
 		t.Fatalf("a program in a user-controlled folder must be reported: %+v", e)
 	}
-	if e.Path != prog && e.Path != filepath.Dir(prog) {
-		t.Fatalf("the report must name the program or its folder, got %s", e.Path)
+	// The check reports resolved paths: a temp folder given in its 8.3 short form (a "~1" name, as on CI runners) comes
+	// back in its long form, so the expectation is resolved the same way; Windows compares paths without case.
+	want, err := filepath.EvalSymlinks(prog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := func(a, b string) bool { return a == b || (runtime.GOOS == "windows" && strings.EqualFold(a, b)) }
+	if !same(e.Path, want) && !same(e.Path, filepath.Dir(want)) {
+		t.Fatalf("the report must name the program or its folder (%s), got %s", want, e.Path)
 	}
 }
 
