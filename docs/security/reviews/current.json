@@ -2,83 +2,84 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "4176f771b9fd2724d22f16441e3a2a25367ffebf",
-  "change_digest": "26d031b2fc405246733b189771efa2d7c3708fd1fecd1f9f4f2fff5057d952fe",
+  "base_sha": "07e37ea7bb646be11d72932a9d805c86b59eecfc",
+  "change_digest": "346daf7f5d2e62d84229e75b41e7e53f6e49ed39b047e1512dd5004126d21105",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "docs/adr/0080-further-secret-keys-named-in-render-env-conf.md",
+    "docs/adr/0081-older-certificate-folder-read-only-for-the-router.md",
     "docs/adr/README.md",
-    "docs/configuration.de.md",
-    "docs/configuration.md",
     "docs/install-router.de.md",
     "docs/install-router.md",
     "docs/security/risk-register.json",
     "docs/security/threat-model.de.md",
     "docs/security/threat-model.md",
-    "router/config.example.yaml",
-    "router/render-env.conf.example",
-    "router/render-env.sh",
-    "router/skirnir_router/common.py",
     "router/skirnir-router.service",
-    "router/skirnir_router/cloud.py",
+    "router/skirnir_router/common.py",
+    "test/selftest_privilege_paths.py",
+    "router/skirnir_router/app.py",
     "router/skirnir_router/config.py",
-    "test/selftest_cloud_transport.py",
-    "test/selftest_render_env.py"
+    "router/skirnir_router/nodes.py",
+    "router/skirnir_router/setup_init.py",
+    "router/skirnir-router-cert.path",
+    "router/skirnir-router-cert.service",
+    "router/skirnir-router-secrets.service",
+    "router/skirnir-router-secrets-refresh.service",
+    "router/skirnir-router-secrets.timer",
+    "router/install.sh",
+    "deploy/deploy.py"
   ],
   "risk_ids": [
-    "TM-14",
-    "TM-15",
-    "TM-06"
+    "TM-14"
   ],
   "boundaries": [
-    "B6",
+    "B8",
     "B9"
   ],
-  "summary": "Router 0.26.0, ADR-0080 (renumbered after ADR-0076 to ADR-0079 landed on main; rebased onto main after v0.31.0, entry in the v0.31.1 row). render-env.sh (run as root by the secrets units, access file in the root-only folder of ADR-0073) additionally renders the secrets named in EXTRA_SECRET_KEYS from render-env.conf into /etc/skirnir-router/secrets.env, so a further OpenAI-compatible cloud provider (example: Mistral's EU endpoint) is configuration only. Traced: secrets.env is the EnvironmentFile of skirnir-router.service (root); cloud.py reads a provider key only from the env name in api_key_env; config.py validates base_url against the egress allowlist and HTTPS (loopback HTTP only). Controls added in the renderer: names must start with a capital letter, contain only [A-Z0-9_] (they become part of the secret-store query path) and end in _KEY or _TOKEN, so LD_PRELOAD, PATH, PYTHONPATH and similar never reach the root unit's environment; globbing is off while splitting; built-in names are not fetched twice; a missing name is reported by name only. While tracing, a pre-existing path was found and closed for every key: a secret value with LF or CR would have added a further variable of the store writer's choosing to the EnvironmentFile; such values are now refused (MQTT_PASSWORD: nothing rendered, existing file kept). config.example.yaml adds egress_allow [api.eu.mistral.ai] and a disabled mistral provider (kind openai, region eu); selftest_cloud_transport now appends to the example's egress_allow instead of replacing it. New CI test test/selftest_render_env.py runs the real script against a fake secret store (bash/curl/jq; refuses to skip in CI). Threat model EN/DE and register TM-14 updated; docs EN/DE, READMEs, CHANGELOG.",
+  "summary": "Router 0.26.1, ADR-0081 (complements ADR-0073). skirnir-router.service gains ReadOnlyPaths=-/etc/skirnir-router/tls next to the certs line: installations set up before router.py --init keep certificate and key in /etc/skirnir-router/tls, which lay inside ReadWritePaths=/etc/skirnir-router, so a compromised router could replace its TLS key and certificate there or plant a symlink for an ACME client that writes in place. Verified first that the router never writes below tls: control_tls is only read (config.unreadable_files with os.access R_OK, app.py load_cert_chain, config.cert_fingerprint for node certificates); every router write targets a fixed file name next to config.yaml (roles.yaml, nodes.json, metrics/usage/perf/ollama-latest JSON, events.jsonl, deletions.jsonl), /var/lib/skirnir-router or /var/log/skirnir-router, or an operator-set log path; router.py --init writes only config.yaml; no code generates certificates; install.sh, deploy.py, the certificate path/service and the secrets units never write there (the certificate is written by the ACME client as root outside the router's mount namespace; the router is restarted by skirnir-router-cert.path). The leading '-' keeps hosts without the folder starting. selftest_privilege_paths now requires both read-only lines with '-', checks that the --init defaults, both example configurations and the watched path of skirnir-router-cert.path are not router-writable under the unit (most specific path setting decides), that the router's own files stay writable, and as the rejected case that the same unit without the tls line leaves certificate and key writable. Threat model EN/DE and register TM-14 controls, install guide EN/DE (TLS section, checklist), CHANGELOG v0.31.1 row.",
   "findings": [
     {
       "id": "TM-14",
-      "evidence": "secrets.env is the router unit's EnvironmentFile (root). A configurable list of names would let a name such as LD_PRELOAD or PYTHONPATH carry a secret-store value into the root process.",
-      "resolution": "Only names ending in _KEY or _TOKEN with [A-Z0-9_] are rendered; others are reported and skipped. The list lives in render-env.conf (root-only folder, ADR-0073), not in the router-writable config.yaml. Rejected-case test with LD_PRELOAD, PATH, PYTHONPATH; a copy of the script without the suffix rule fails it.",
+      "evidence": "router/skirnir-router.service had ReadWritePaths=/etc/skirnir-router and made only /etc/skirnir-router/certs read-only; certificate and key of older installations in /etc/skirnir-router/tls were writable by the router process (uid 0 without capabilities, owner bits suffice). Impact: a compromised router replaces the certificate it presents to nodes and clients persistently, and with an ACME client that writes into the existing file a planted symlink turns renewal into a root write.",
+      "resolution": "ReadOnlyPaths=-/etc/skirnir-router/tls. Under systemd 259 append, unlink, create and rename in tls are refused while roles.yaml in the parent stays writable; without the line all four are allowed. selftest_privilege_paths fails without the line (3 failures) and without the '-' prefix (2 failures).",
       "disposition": "fixed"
     },
     {
       "id": "TM-14",
-      "evidence": "Pre-existing: render-env.sh wrote KEY=value lines with printf without checking the value; a value with a line break from the secret store (built-in keys included) would have started a further variable in the root unit's environment.",
-      "resolution": "Every rendered value must be a single line (no LF/CR); otherwise the key is skipped and named, MQTT_PASSWORD keeps the existing file. Tests for a built-in key, further keys with LF and with CR, and MQTT_PASSWORD; a copy without the check fails all four tests.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-15",
-      "evidence": "New log lines in the renderer name keys that are invalid, missing or multi-line.",
-      "resolution": "Only names are printed, never values; the test asserts that no synthetic secret value or injected fragment appears in the output.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "TM-06",
-      "evidence": "The example adds a further egress host for a disabled provider.",
-      "resolution": "No code change in the cloud path; base_url stays bound to the allowlist and HTTPS by config.py (selftest_cloud_transport cases unchanged). Data classes, privacy check, credential scan and budget apply to the new provider as to OpenAI. Redirect behaviour remains the existing residual risk of TM-06.",
+      "evidence": "Pre-existing, unchanged in kind: certificate and key in any other folder below /etc/skirnir-router (or /var/lib, /var/log/skirnir-router) stay router-writable; if certs or tls is a symlink, systemd mounts its target read-only but the link is an entry in the router-writable /etc/skirnir-router and can be swapped (confirmed under systemd 259: write through the link refused, replacing the link allowed). Same for certs since ADR-0073.",
+      "resolution": "Documented in install-router EN/DE (keep certificate and key in certs, tls or outside the writable folders; real folders, not symlinks) and in ADR-0081's consequences. Removed for good by the dedicated router user that TM-14's next action already plans.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/selftest_render_env.py on a Linux router host (bash/curl/jq), in /tmp with the router venv, live router untouched",
+      "command": "python test/selftest_privilege_paths.py (Windows; unit, deploy and passthrough checks)",
       "result": "passed",
-      "evidence": "Ran 4 tests: OK (after the rebase onto 4176f77). Counter-checks with the same tests: script without the suffix rule FAILED (1), script whose line check always passes FAILED (4)."
+      "evidence": "selftest_privilege_paths: all passed (22 static checks). Counter-checks on a copy of the unit: without ReadOnlyPaths=-/etc/skirnir-router/tls 3 failures (folder line, tls certificate/key writable, rejected case); with the line but without '-' 2 failures."
     },
     {
-      "command": "All python steps of ci.yml run locally on Windows (75 commands)",
-      "result": "passed",
-      "evidence": "74/75 ok; check_public_changes needs the CI base variable and was run separately below."
+      "command": "Renderer cases of selftest_privilege_paths.py (bash, Linux)",
+      "result": "not_run",
+      "evidence": "They skip on Windows; the renderers are unchanged by this PR and CI runs the cases on Linux."
     },
     {
-      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_control_flow.py; python test/selftest_threat_review.py",
+      "command": "systemd-run --user --wait --pipe -p ProtectSystem=strict -p ReadWritePaths=<tmp>/etc -p ReadOnlyPaths=-<tmp>/etc/certs -p ReadOnlyPaths=-<tmp>/etc/tls -p ReadOnlyPaths=-<tmp>/etc/missing ... (WSL Ubuntu, systemd 259, user manager, throwaway tree)",
       "result": "passed",
-      "evidence": "All checks passed; configuration ok: 5 roles, 7 models; ADR index ok: 80 ADRs; control flow ok."
+      "evidence": "With the tls line: append/rm/create/rename in tls refused, certs refused, roles.yaml allowed, a missing '-' folder does not stop the start; write through a listed symlink refused, swapping the link allowed. Without the tls line: all tls operations allowed."
+    },
+    {
+      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check; python test/selftest_control_flow.py && python test/check_control_flow.py",
+      "result": "passed",
+      "evidence": "All checks passed; configuration ok: 5 roles, 7 models; ADR index ok: 81 ADRs; pinned references 0 findings; Python locks 0 problems; control flow ok."
+    },
+    {
+      "command": "python test/selftest_threat_review.py, selftest_install.py, selftest_init.py, selftest_english_names.py, selftest_posture.py, selftest_log_hygiene_paths.py, selftest_config_load.py, selftest_trusted_gate.py",
+      "result": "passed",
+      "evidence": "All exit 0 on Windows (selftest_install: OK, 3 skipped as on Windows before)."
+    },
+    {
+      "command": "python test/run_tests.py (end-to-end suite, Windows, loopback ports)",
+      "result": "passed",
+      "evidence": "Second run: 0 failures, 332 PASS. The first run had 1 failure, 'Residency: rank-1 prewarmed again after evictor idle' (model loaded, but no residency prewarm event within the test's 12 heartbeat polls); the suite is timing-sensitive and runs nightly in CI for that reason, and this change touches no router logic (unit file and version string)."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -86,15 +87,16 @@
       "evidence": "Run after staging this record."
     },
     {
-      "command": "python test/check_public_changes.py --base origin/main",
+      "command": "python test/check_public_changes.py",
       "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s)."
+      "evidence": "Public-change scan: 0 finding(s); manual review of the added lines: example paths and synthetic folder names only."
     }
   ],
   "limitations": [
-    "selftest_render_env.py skips on Windows (no bash/jq there); it ran on a Linux router host and runs in CI, where a skip is refused.",
-    "The suffix rule is a name rule: a secret the operator names with _KEY still reaches the router's environment by design.",
-    "systemd EnvironmentFile still interprets quotes and backslashes in single-line values (pre-existing, unchanged); the router reads MQTT_PASSWORD raw from the file for that reason.",
-    "Choosing a provider (terms, data retention) is the operator's decision; no request to a provider was part of these tests."
+    "No production host was inspected; that a deployment keeps its TLS files in /etc/skirnir-router/tls comes from the operator. deploy.py prefers a skirnir-router.service from the operator's ops folder if one exists; such an override needs the same line.",
+    "The systemd check ran under the WSL user manager, not as the root system service; there ProtectSystem=strict did not make an unlisted folder under $HOME read-only, so it evidences the precedence of ReadWritePaths/ReadOnlyPaths, not ProtectSystem.",
+    "systemd mounts the folder when the router starts: a tls folder created later is read-only from the next restart; a running router keeps an older directory if the whole folder is replaced, until the restart skirnir-router-cert.path triggers.",
+    "unit_may_write in the self-test models only ReadWritePaths, ReadOnlyPaths and InaccessiblePaths with the most specific match; StateDirectory/LogsDirectory and symlinks are not modelled.",
+    "The router still runs as root; this closes one more writable location, not the root identity (TM-14 stays open)."
   ]
 }
