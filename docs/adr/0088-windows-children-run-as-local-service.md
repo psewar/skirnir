@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-12
 decision-makers: operator
 ---
@@ -48,7 +48,7 @@ collection folder, an OpenVINO cache), traverse on the folders above. The agent'
 
 ## Decision Outcome
 
-Chosen: **option 1.**
+Chosen (accepted by the operator 2026-11-12): **option 1.**
 
 * Option 2 is out by measurement: NVML cannot even initialise and the STT service cannot load its modules.
 * Option 3 would leave a child broken after a configuration change (a new model folder) until someone runs setup again.
