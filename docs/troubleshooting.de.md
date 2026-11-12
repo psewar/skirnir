@@ -70,7 +70,7 @@ Anfragen mit Gedächtnis-Recall tragen `X-Skirnir-Memory-State` ([design/hindsig
 
 Ein Client, der den Header nicht liest, fällt trotzdem auf, wenn sein Recall wegen Werkzeugen übersprungen wird, etwa
 ein Home-Assistant-Eintrag, nachdem dort eine Werkzeug-API eingeschaltet wurde
-([ADR-0089](adr/0089-report-recall-skipped-for-tools-per-client.md)): Die Übersicht und `/admin/context`
+([ADR-0090](adr/0090-report-recall-skipped-for-tools-per-client.md)): Die Übersicht und `/admin/context`
 (`recall_skipped_for_tools`) nennen den Client, sein Projekt, seit wann und wie viele Anfragen, bis eine Stunde nach
 seiner letzten solchen Anfrage. `skirnir_memory_recall_skipped_for_tools_clients` zählt diese Clients, und das Log meldet
 einmal je Client und Stunde, dass es geschehen ist, ohne Namen. Soll der Client die Fakten bekommen,

@@ -169,7 +169,7 @@ class ConfigurationTests(unittest.TestCase):
 
 
 class RecallSkipRunTests(unittest.TestCase):
-    """ADR-0089: a run of recalls skipped for tools, its window and the rate of its warning line (explicit clock)."""
+    """ADR-0090: a run of recalls skipped for tools, its window and the rate of its warning line (explicit clock)."""
     def setUp(self):
         recall_skips.reset()
         self.addCleanup(recall_skips.reset)
@@ -448,7 +448,7 @@ class MemoryHttpTests(MemoryHarness):
                          "skipped:tools")
 
     async def test_a_client_whose_recalls_are_skipped_for_tools_is_reported_as_a_state(self):
-        # ADR-0089: a client configured for automatic recall that starts sending tools (ADR-0059 skips the recall) shows
+        # ADR-0090: a client configured for automatic recall that starts sending tools (ADR-0059 skips the recall) shows
         # up per client in /admin/context, in one aggregate gauge and in one warning line, not only per request.
         def skipped_clients():
             return context_ops.snapshot()["recall_skipped_for_tools"]

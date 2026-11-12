@@ -679,7 +679,7 @@ async def prepare(request, path, body, req):
             # reach it only where the grant opts in. Reported like any skipped recall, never as missing knowledge.
             req.memory_state = "skipped:tools"
             count("recall", "skipped_tools")
-            # ADR-0089: also a state of the client, so one that never reads the header does not lose knowledge unseen.
+            # ADR-0090: also a state of the client, so one that never reads the header does not lose knowledge unseen.
             recall_skips.skipped(scope.principal, spec["project"])
             return None
         recall_skips.passed(scope.principal)

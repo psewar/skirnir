@@ -1,4 +1,4 @@
-"""Recalls skipped because the request carries tools, as a state per client (ADR-0089).
+"""Recalls skipped because the request carries tools, as a state per client (ADR-0090).
 
 ADR-0059 skips automatic recall into a request with tools unless the project grant sets `recall_into_tools: true`. Each
 such request already says so (`X-Skirnir-Memory-State: skipped:tools`, journal, an aggregate counter), but a client

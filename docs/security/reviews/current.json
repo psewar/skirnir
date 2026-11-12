@@ -9,7 +9,7 @@
     "design/hindsight-memory.md",
     "design/shared-memory-interoperability.de.md",
     "design/shared-memory-interoperability.md",
-    "docs/adr/0089-report-recall-skipped-for-tools-per-client.md",
+    "docs/adr/0090-report-recall-skipped-for-tools-per-client.md",
     "docs/adr/README.md",
     "docs/troubleshooting.de.md",
     "docs/troubleshooting.md",
@@ -37,7 +37,7 @@
     "B5",
     "B9"
   ],
-  "summary": "Router 0.29.0 (ADR-0089, proposed): a recall skipped because the request carries tools (ADR-0059) is also recorded as a run per client in the new module recall_skips.py, called from memory.prepare after scope_for, keyed by the authenticated principal. /admin/context (control port, basic_auth_middleware on every route) lists the runs with client, project, since, last and request count; the Overview renders them with textContent. A gauge without labels counts the clients, and one warning line per run (at most one per client and hour) gives only a count, no client or project, following the memory logging rule. Traced: memory.prepare (the tools check and the recall decision are unchanged, the recall is still skipped; passed() is called only after the check), the control app middleware, context_ops.snapshot and its callers (handle, metrics.render), and the UI rendering. Memory is bounded by the configured principals, because only requests that passed scope_for reach the tracking. No request content reaches the state, the log or the metric. The project name in a run is a granted project of that client. The log's next step names recall_into_tools: true together with the risk it accepts (TM-10) and does not change policy. No finding was introduced.",
+  "summary": "Re-reviewed after merging main (PR #141 took ADR-0089, so this decision is now ADR-0090; main's agent script and docs changes are not part of this PR's diff, the CHANGELOG row joins both entries; the router code is unchanged except for the ADR number in comments). Router 0.29.0 (ADR-0090, proposed): a recall skipped because the request carries tools (ADR-0059) is also recorded as a run per client in the new module recall_skips.py, called from memory.prepare after scope_for, keyed by the authenticated principal. /admin/context (control port, basic_auth_middleware on every route) lists the runs with client, project, since, last and request count; the Overview renders them with textContent. A gauge without labels counts the clients, and one warning line per run (at most one per client and hour) gives only a count, no client or project, following the memory logging rule. Traced: memory.prepare (the tools check and the recall decision are unchanged, the recall is still skipped; passed() is called only after the check), the control app middleware, context_ops.snapshot and its callers (handle, metrics.render), and the UI rendering. Memory is bounded by the configured principals, because only requests that passed scope_for reach the tracking. No request content reaches the state, the log or the metric. The project name in a run is a granted project of that client. The log's next step names recall_into_tools: true together with the risk it accepts (TM-10) and does not change policy. No finding was introduced.",
   "findings": [],
   "tests": [
     {

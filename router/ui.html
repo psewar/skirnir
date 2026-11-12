@@ -1297,7 +1297,7 @@ async function renderContextServices() {
     const counts = document.createElement('div'); counts.className = 'tile';
     counts.textContent = 'Outbox: ' + Object.entries(s.outbox_counts || {}).map(([k,v]) => k + ': ' + v).join(' · ');
     root.append(counts);
-    // ADR-0089: clients whose recalls are all skipped because their requests carry tools (ADR-0059)
+    // ADR-0090: clients whose recalls are all skipped because their requests carry tools (ADR-0059)
     const skipped = Object.entries(s.recall_skipped_for_tools || {});
     if (skipped.length) {
       const tile = document.createElement('div'); tile.className = 'tile warn';

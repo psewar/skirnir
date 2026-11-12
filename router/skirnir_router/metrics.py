@@ -257,9 +257,9 @@ def render():
     gauge("skirnir_memory_outbox_jobs", "durable outbox counts, refreshed every ten seconds",
           [({"status": k}, (services.get("outbox_counts") or {}).get(k, 0)) for k in
            ("pending", "processing", "accepted", "completed", "dead", "revoked", "cancelled", "delete_pending", "deleted")])
-    # ADR-0089: a count without client label like the other memory metrics; only /admin/context names the clients.
+    # ADR-0090: a count without client label like the other memory metrics; only /admin/context names the clients.
     gauge("skirnir_memory_recall_skipped_for_tools_clients",
-          "clients whose recent recalls were all skipped because the request carried tools (ADR-0059, ADR-0089)",
+          "clients whose recent recalls were all skipped because the request carried tools (ADR-0059, ADR-0090)",
           [({}, len(services.get("recall_skipped_for_tools") or {}))])
     gauge("skirnir_sessions", "active session affinities", [({}, len(state.SESSIONS))])
     rows = []

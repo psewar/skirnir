@@ -42,7 +42,7 @@ Router keine Fakten ein und meldet `skipped:tools` (Header `X-Skirnir-Memory-Sta
 (erfordert `read`); die Fakten kommen dann wie bisher als nicht vertrauenswürdige Daten, und die Werkzeugaufrufe
 dieses Clients sollte der Client bestätigen oder begrenzen. Explizite Recall-Schnittstellen sind nicht betroffen.
 
-Das Überspringen ist auch ein Zustand des Clients (ADR-0089, Router 0.29.0; `recall_skips.py`). Eine Serie beginnt mit
+Das Überspringen ist auch ein Zustand des Clients (ADR-0090, Router 0.29.0; `recall_skips.py`). Eine Serie beginnt mit
 dem ersten wegen Werkzeugen übersprungenen Recall eines Clients und endet mit seinem nächsten Recall, der die
 Werkzeugprüfung besteht; sie hält das Projekt der letzten Anfrage, `since`, `last` und die Zahl der Anfragen.
 `/admin/context` listet die Serien unter `recall_skipped_for_tools`, solange ihre letzte Anfrage höchstens eine Stunde
@@ -306,7 +306,7 @@ extern verwaltetes Backup erstellen; Integrationstests nur auf Wegwerfdatenbanke
 Die geschützte Control-API `/admin/context` und Overview-Kacheln zeigen nur
 aggregierte Zustände von Session Store, Context Manager, Hindsight und Outbox,
 dazu die Clients, deren Recall wegen Werkzeugen übersprungen wird
-(`recall_skipped_for_tools`, ADR-0089).
+(`recall_skipped_for_tools`, ADR-0090).
 Hindsight bleibt bis zur ersten echten Anfrage `unknown`. Prometheus erfasst
 Recall-/Retain-Latenzen und Fehler, Outbox-Zustände, Kontextschätzungen/-einsparungen,
 Compactions, Handoffs und Backend-Verfügbarkeit. Labels enthalten keine Clients,

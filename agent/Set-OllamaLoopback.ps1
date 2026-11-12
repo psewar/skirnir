@@ -19,8 +19,9 @@ Checks before acting: administrator rights; exactly one way Ollama runs; no agen
 network address (the agent would lose its own Ollama); no other machine connected to port 11434 right now (else
 -Force with a reason). After the restart: Ollama answers on 127.0.0.1 and listens on loopback only, else the backup is
 restored. Then inbound firewall rules that only opened Ollama (port 11434 alone, or the Ollama program) are disabled
-(not deleted). A log is written next to this file. The last line is always STATE: changed | current | checked |
-refused | restored.
+(not deleted). The log goes to the agent's log folder (logs next to its configuration, by default
+C:\ProgramData\skirnir-agent\logs; without an agent the TEMP folder of the elevated account), never next to this file;
+the line "Log:" names it. The last line is always STATE: changed | current | checked | refused | restored.
 #>
 param(
     [switch] $Check,
@@ -172,10 +173,58 @@ function Find-NetworkUpstream([string] $text) {
     return $out
 }
 
+function Split-ServiceCommand([string] $pathName) {
+    # The agent service's command line, "<exe>" --config "<file>". Returns @{Exe; Config}, both '' when not recognised.
+    if ("$pathName" -match '^"?(?<exe>[^"]+\.exe)"?\s+--config\s+"?(?<cfg>[^"]+?)"?\s*$') { return @{ Exe = $Matches.exe; Config = $Matches.cfg } }
+    return @{ Exe = ''; Config = '' }
+}
+
+function Get-AgentLogFolder([string] $servicePathName) {
+    # The agent's default log folder: "logs" next to its configuration (applyDefaults in agent/config.go). The agent
+    # restricts the configuration folder to SYSTEM, Administrators and its service account (applyRules in
+    # agent/install_windows.go), and "logs" inherits that. '' when the command line names no configuration folder, and
+    # for a configuration at a drive root (C:\logs would be a folder any user may have created). Windows paths are taken
+    # apart as text, so the self-test gives the same answer on every OS.
+    $cfg = (Split-ServiceCommand $servicePathName).Config
+    if ($cfg -match '^(?<dir>.*[^\\/:])[\\/][^\\/]+$') { return "$($Matches.dir)\logs" }
+    return ''
+}
+
 # ---------------------------------------------------------------- host side
+
+function Get-TranscriptFolder {
+    # The transcript names this computer, user accounts, configuration paths and remote addresses. It goes where only
+    # administrators read it and never into the folder of this script: run from a repository checkout, it would land in
+    # the working tree, one "git add" away from a public commit. The agent's log folder is chosen over a "logging.dir"
+    # of the configuration because the agent itself restricts that folder; without an agent (or with that folder
+    # missing) the TEMP folder of the elevated account takes it. Directory.Exists, not Test-Path: without administrator
+    # rights Test-Path fails with "access denied" on that folder, Directory.Exists answers false.
+    $service = Get-CimInstance Win32_Service -Filter "Name='SkirnirAgent'"
+    if ($service) {
+        $folder = Get-AgentLogFolder $service.PathName
+        if ($folder -ne '' -and [System.IO.Directory]::Exists($folder)) { return $folder }
+    }
+    return [System.IO.Path]::GetTempPath()
+}
+
+function Start-RunTranscript([string] $name) {
+    # Starts the transcript of an elevated run and returns its file, '' when none could be started (the run goes on).
+    # Shared with Move-OllamaProtected.ps1, which dot-sources this file. The computer name comes from the system, not from
+    # %COMPUTERNAME%, which the caller's environment could set to a value with path separators.
+    $path = Join-Path (Get-TranscriptFolder) "$name-$([Environment]::MachineName)-$(Get-Date -Format yyyyMMdd-HHmmss).log"
+    try {
+        Start-Transcript -Path $path | Out-Null
+    } catch {
+        # exception-ok: whether the folder takes the file shows only on the attempt; the run works without a log
+        Write-Host "No log file ($($_.Exception.Message)); continuing without one."
+        return ''
+    }
+    return $path
+}
 
 function Finish([string] $state, [string] $text, [int] $code) {
     Write-Host $text
+    if ($Script:Transcript) { Write-Host "Log: $Script:Transcript" }
     Write-Host "STATE: $state"
     if ($Script:Transcript) { Stop-Transcript | Out-Null }
     if ($Elevated) { Read-Host 'Press Enter to close' | Out-Null }
@@ -238,18 +287,10 @@ function Invoke-Main {
             # exception-ok: a declined UAC prompt is reported only as an error of Start-Process
             Finish 'refused' "Elevation did not happen: $($_.Exception.Message)" 4
         }
-        Write-Host "The elevated run ended with exit code $($p.ExitCode); its log is next to this script."
+        Write-Host "The elevated run ended with exit code $($p.ExitCode); its window named the log file (agent log folder, without an agent the elevated account's TEMP folder)."
         exit $p.ExitCode
     }
-    $Script:Transcript = $false
-    $log = Join-Path $PSScriptRoot "Set-OllamaLoopback-$($env:COMPUTERNAME)-$(Get-Date -Format yyyyMMdd-HHmmss).log"
-    try {
-        Start-Transcript -Path $log | Out-Null
-        $Script:Transcript = $true
-    } catch {
-        # exception-ok: whether the script folder is writable shows only on the attempt; the run works without a log
-        Write-Host "No log file ($($_.Exception.Message)); continuing without one."
-    }
+    $Script:Transcript = Start-RunTranscript 'Set-OllamaLoopback'
     Write-Host "Node $env:COMPUTERNAME  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  target OLLAMA_HOST=$Script:Target"
 
     # --- what is there
@@ -263,8 +304,9 @@ function Invoke-Main {
     $service = Get-CimInstance Win32_Service | Where-Object { $_.Name -eq 'SkirnirAgent' }
     $exe = ''; $cfg = ''; $cfgText = ''; $child = @{ Count = 0 }
     if ($service) {
-        if ($service.PathName -notmatch '^"?(?<exe>[^"]+\.exe)"?\s+--config\s+"?(?<cfg>[^"]+?)"?\s*$') { Finish 'refused' "Service command line not recognised: $($service.PathName)" 4 }
-        $exe, $cfg = $Matches.exe, $Matches.cfg
+        $command = Split-ServiceCommand $service.PathName
+        if ($command.Config -eq '') { Finish 'refused' "Service command line not recognised: $($service.PathName)" 4 }
+        $exe, $cfg = $command.Exe, $command.Config
         if (-not (Test-Path $exe) -or -not (Test-Path $cfg)) { Finish 'refused' "Agent binary or configuration missing: $exe / $cfg" 4 }
         $utf8 = New-Object System.Text.UTF8Encoding $false
         $cfgText = [System.IO.File]::ReadAllText($cfg, $utf8)

@@ -1,5 +1,6 @@
 # Self-test for agent/Set-OllamaLoopback.ps1 (TM-11, ADR-0072): the pure parts - reading OLLAMA_HOST values, finding the
-# Ollama child in an agent configuration and rewriting only its OLLAMA_HOST. Runs with Windows PowerShell 5.1 and pwsh 7
+# Ollama child in an agent configuration and rewriting only its OLLAMA_HOST - and where an elevated run keeps its
+# transcript (ADR-0089; on Windows also a real one). Runs with Windows PowerShell 5.1 and pwsh 7
 # on any OS:  pwsh -NoProfile -File test/selftest_ollama_loopback.ps1   (exit code 0 = all passed)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..' | Join-Path -ChildPath 'agent' | Join-Path -ChildPath 'Set-OllamaLoopback.ps1')
@@ -78,6 +79,31 @@ $found = @(Find-NetworkUpstream $net)
 Assert-Equal $found.Count 1 'network upstream: count'
 Assert-True ($found[0] -like 'upstream: http://192.0.2.20:11434*') 'network upstream: which'
 Assert-Equal @(Find-NetworkUpstream "tunnel:`n  upstream: http://192.0.2.20:8080`n").Count 0 'other port is not Ollama'
+
+# 9. the transcript of an elevated run goes to the agent's log folder (else TEMP), never next to the script: run from a
+#    repository checkout it would put computer and user names into the working tree
+$svc = '"C:\Program Files\skirnir-agent\skirnir-agent.exe" --config "C:\ProgramData\skirnir-agent\config.yaml"'
+Assert-Equal (Split-ServiceCommand $svc).Exe 'C:\Program Files\skirnir-agent\skirnir-agent.exe' 'service command: program'
+Assert-Equal (Split-ServiceCommand $svc).Config 'C:\ProgramData\skirnir-agent\config.yaml' 'service command: configuration'
+Assert-Equal (Split-ServiceCommand 'C:\agent\skirnir-agent.exe run').Config '' 'service command: no --config'
+Assert-Equal (Get-AgentLogFolder $svc) 'C:\ProgramData\skirnir-agent\logs' 'log folder: logs next to the configuration'
+Assert-Equal (Get-AgentLogFolder 'C:\agent\skirnir-agent.exe --config D:\node-data\config.yaml') 'D:\node-data\logs' 'log folder: unquoted command line'
+Assert-Equal (Get-AgentLogFolder '"C:\agent\skirnir-agent.exe" --config "C:\config.yaml"') '' 'log folder: none for a configuration at a drive root'
+Assert-Equal (Get-AgentLogFolder '"C:\agent\skirnir-agent.exe" run') '' 'log folder: none without --config'
+Assert-Equal (Get-AgentLogFolder '') '' 'log folder: none without a service'
+$source = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..' | Join-Path -ChildPath 'agent' | Join-Path -ChildPath 'Set-OllamaLoopback.ps1')
+Assert-True ($source -notmatch 'PSScriptRoot[^\r\n]*\.log') 'no log file next to the script'
+Assert-Equal ([regex]::Matches($source, 'Start-Transcript').Count) 1 'Start-Transcript only in Start-RunTranscript'
+Assert-True ($source -match "Start-RunTranscript 'Set-OllamaLoopback'") 'the run starts its transcript through Start-RunTranscript'
+if ($env:OS -eq 'Windows_NT') {
+    # host side, Windows only: a real transcript is written, and outside this checkout
+    $repo = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    $log = Start-RunTranscript 'selftest-ollama-loopback'
+    if ($log -ne '') { Stop-Transcript | Out-Null }
+    Assert-True ($log -ne '' -and (Test-Path -LiteralPath $log)) "transcript written: $log"
+    Assert-True (-not $log.StartsWith($repo, [System.StringComparison]::OrdinalIgnoreCase)) "transcript outside the checkout ($repo): $log"
+    if ($log -ne '' -and (Test-Path -LiteralPath $log)) { Remove-Item -LiteralPath $log }
+}
 
 if ($Script:Failures -gt 0) { Write-Host "$Script:Failures failure(s)"; exit 1 }
 Write-Host 'selftest_ollama_loopback: all passed'

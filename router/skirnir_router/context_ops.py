@@ -13,7 +13,7 @@ STATUS = {"session_store": "disabled", "context_manager": "disabled", "hindsight
 
 
 def snapshot():
-    # recall_skipped_for_tools (ADR-0089): clients whose recent recalls were all skipped because the request carried
+    # recall_skipped_for_tools (ADR-0090): clients whose recent recalls were all skipped because the request carried
     # tools; read live, it is in memory and cheap.
     return {**STATUS, "recall_skipped_for_tools": recall_skips.view()}
 
