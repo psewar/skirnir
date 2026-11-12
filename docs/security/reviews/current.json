@@ -2,83 +2,78 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "cf0a4d3429462cef372f8cd966e35f786530da5e",
-  "change_digest": "9db912f32876e3f4ef913900ab13b694b9caced315346824446950e81f4aafd3",
+  "base_sha": "27a399d53c9c302379fd9bf85bbc336665e339a4",
+  "change_digest": "eca994500285e85fe3f24a93fbd7d791ed6892a7aadc8a4c1cedccfe51abae3b",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "design/hindsight-memory.md",
-    "design/shared-memory-interoperability.de.md",
-    "design/shared-memory-interoperability.md",
-    "docs/adr/0090-report-recall-skipped-for-tools-per-client.md",
+    "agent/childidentity.go",
+    "agent/childidentity_windows.go",
+    "agent/childidentity_windows_test.go",
+    "agent/config.example.yaml",
+    "agent/supervisor.go",
+    "docs/adr/0091-windows-children-keep-their-data-outside-the-agents-folder.md",
     "docs/adr/README.md",
-    "docs/troubleshooting.de.md",
-    "docs/troubleshooting.md",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/context_ops.py",
-    "router/skirnir_router/memory.py",
-    "router/skirnir_router/metrics.py",
-    "router/skirnir_router/recall_skips.py",
-    "router/ui.html",
-    "test/selftest_memory.py",
-    "router/skirnir_router/app.py",
-    "router/skirnir_router/auth.py",
-    "docs/adr/0059-no-automatic-recall-into-requests-with-tools.md",
-    "docs/security/threat-model.md",
-    "docs/security/risk-register.json"
+    "docs/install-agent.de.md",
+    "docs/install-agent.md",
+    "docs/security/risk-register.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md"
   ],
   "risk_ids": [
-    "TM-03",
-    "TM-10",
-    "TM-15"
+    "TM-14"
   ],
   "boundaries": [
-    "B1",
-    "B2",
-    "B5",
-    "B9"
+    "B3",
+    "B8"
   ],
-  "summary": "Re-reviewed after merging main (PR #141 took ADR-0089, so this decision is now ADR-0090; main's agent script and docs changes are not part of this PR's diff, the CHANGELOG row joins both entries; the router code is unchanged except for the ADR number in comments). Router 0.29.0 (ADR-0090, proposed): a recall skipped because the request carries tools (ADR-0059) is also recorded as a run per client in the new module recall_skips.py, called from memory.prepare after scope_for, keyed by the authenticated principal. /admin/context (control port, basic_auth_middleware on every route) lists the runs with client, project, since, last and request count; the Overview renders them with textContent. A gauge without labels counts the clients, and one warning line per run (at most one per client and hour) gives only a count, no client or project, following the memory logging rule. Traced: memory.prepare (the tools check and the recall decision are unchanged, the recall is still skipped; passed() is called only after the check), the control app middleware, context_ops.snapshot and its callers (handle, metrics.render), and the UI rendering. Memory is bounded by the configured principals, because only requests that passed scope_for reach the tracking. No request content reaches the state, the log or the metric. The project name in a run is a granted project of that client. The log's next step names recall_into_tools: true together with the risk it accepts (TM-10) and does not change policy. No finding was introduced.",
-  "findings": [],
+  "summary": "Agent 0.34.1 (ADR-0091, amends ADR-0088): a LOCAL SERVICE child's own data folder moves from the agent's data folder to a children's data folder next to it (<data>-children). The agent creates that folder only when starting a child, with a protected access list of its own (SYSTEM and Administrators full, LOCAL SERVICE list this folder only, nothing inherited), and refuses children with data there when it is a link or anyone besides the system and the administrators can change it or a folder above. Each access entry also reports resolve (the real filepath.EvalSymlinks under the child's token; on failure the first folder above the child cannot list) and, for data still in the agent's folder, move_to. Cause: Ollama as LOCAL SERVICE could open its manifests but not resolve them, because LOCAL SERVICE may not list the agent's folder.",
+  "findings": [
+    {
+      "id": "TM-14",
+      "evidence": "Rollout of agent 0.34.0: Ollama as LOCAL SERVICE reported every manifest as Access is denied; a probe showed open/read/os.Root succeed and only filepath.EvalSymlinks fails, since Go's path normalisation lists every folder above and the agent's folder (configuration, keys) is closed to LOCAL SERVICE. The stopgap was run_as: system for Ollama.",
+      "resolution": "Children's data goes to a separate folder LOCAL SERVICE may list; the agent's folder stays closed, including file names (listing it was rejected in ADR-0091). Ollama can return to LOCAL SERVICE after its models move.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "TM-14",
+      "evidence": "Found in this review: users may create folders in ProgramData, so anyone could create the children's data folder first, or a subfolder in it, and later swap that for a link to redirect the agent's modify grant.",
+      "resolution": "The agent creates the folder with an explicit protected security descriptor in one call (CreateDirectory with SDDL); an existing folder is used only when it is no link and the ADR-0085 exposure check finds nobody besides the system and administrators who can change it or a folder above; otherwise every child with data there is refused without a grant. Inside a clean folder only the system and administrators can create a child's folder, and icacls still runs with /L.",
+      "disposition": "fixed"
+    }
+  ],
   "tests": [
     {
-      "command": "python test/selftest_memory.py",
+      "command": "go test ./... (Windows, not elevated), go vet (Windows, GOOS=linux), gofmt",
       "result": "passed",
-      "evidence": "Ran 47 tests, OK; includes the new HTTP test (401 without control login and no client name in the refusal, gauge without names, one log line per run without client/project/content) and RecallSkipRunTests (window, hourly limit, per-client runs)"
+      "evidence": "ok; children's data folder derivation (own folder, folder itself and files never granted, move_to for data in the agent's folder), ensureChildRoot (check only creates nothing, created folder protected with LOCAL SERVICE list-only and no inheritance, a folder others can change refuses without grant), existing ADR-0088 tests unchanged."
     },
     {
-      "command": "fault injection: recall_skips.skipped replaced by a no-op, then the new HTTP test",
-      "result": "passed",
-      "evidence": "The test fails (FAILED, errors=1) when the skip is not recorded"
+      "command": "TestResolveAsNamesTheFolderItCannotList (Windows, elevated)",
+      "result": "not_run",
+      "evidence": "Skipped locally (not elevated); it runs in the agent's Windows CI job on the elevated runner: a readable folder below an administrators-only folder opens, does not resolve, and resolve names the folder above; once listable it is no longer named."
     },
     {
-      "command": "python test/selftest_interoperability.py; python test/selftest_client_limits.py; python test/selftest_deletion_lifecycle.py; python test/selftest_rerank.py; python test/selftest_browser.py; python test/selftest_english_names.py",
+      "command": "ls-manifest-probe as LocalSystem and as a LOCAL SERVICE process on a Windows node, model folder in the agent's data folder",
       "result": "passed",
-      "evidence": "all OK"
+      "evidence": "LOCAL SERVICE: every open/read/os.Root/DirFS operation ok, filepath.EvalSymlinks Access is denied; LocalSystem: all ok. Reproduces the incident and names the call the resolve fact uses."
     },
     {
-      "command": "ruff check . && python test/selftest_control_flow.py && python test/check_control_flow.py",
+      "command": "python test/check_control_flow.py; python test/check_adr_index.py (after merging main with ADR-0090)",
       "result": "passed",
-      "evidence": "All checks passed; control flow ok: 0 legacy findings (no new try/except or raise)"
+      "evidence": "control flow ok; ADR index ok: 91 ADRs"
     },
     {
-      "command": "python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check; python test/check_training_data.py",
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
       "result": "passed",
-      "evidence": "configuration ok; ADR index ok: 89 ADRs; 0 pinned-reference findings; 0 lock problems; 0 training-data findings"
-    },
-    {
-      "command": "python test/run_tests.py",
-      "result": "passed",
-      "evidence": "Before the merge: exit 0, 332 PASS, 0 failures. On the merged tree: first run 331 PASS, 1 failure in the timing-dependent check 'Residency: rank-1 prewarmed again after evictor idle' (prewarm wait of about 7 s, code this PR does not touch); rerun exit 0, 332 PASS, 0 failures"
+      "evidence": "Security evidence: 0 error(s)."
     },
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s); added lines reviewed by hand, synthetic names only"
+      "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
   "limitations": [
-    "The per-client state is in memory only; after a restart a client is reported again only with its next skipped request.",
-    "The Overview tile was not checked in a browser; it uses textContent only and selftest_browser's static checks pass.",
-    "A client deliberately working with tools and without recall is listed too (at most one log line per hour); this is documented, not suppressed."
+    "Moving existing data from the agent's folder is an operator step per node (reported as move_to); Ollama's switch back to run_as: localservice is confirmed by the node check during the rollout."
   ]
 }
