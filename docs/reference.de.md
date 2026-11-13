@@ -190,7 +190,10 @@ vorgewärmt.
 
 - Außerhalb des Fensters startet eine Anfrage für das Modell des Servers, etwa über eine eigene Rolle, ihn trotzdem.
 - Außerhalb des Fensters wird ein Server, der `idle_hold_s` (Standard 900 s) lang ungenutzt war, wieder angehalten. Vorwärmen,
-  Residenz und das Ende eines Spiels holen ihn nicht mehr zurück.
+  Residenz und das Ende eines Spiels holen ihn nicht mehr zurück. Es zählt die Meldung des Agenten, dass der Server
+  antwortet, nicht der letzte Befehl des Routers (Router 0.29.1): Ein Agent, der ohne `upstream.json` neu startete, startet
+  den Server einmal, um ihn kennenzulernen, und der Router hält ihn nach `idle_hold_s` wieder an, obwohl sein letzter
+  Befehl schon ein Anhalten war. Ein Anhalten gilt 60 s nach dem Senden als unterwegs.
 - Innerhalb des Fensters wird ein angehaltener Server freigegeben, sobald der Knoten frei ist und der Ersatz ebenso lange
   ungenutzt war, damit eine bewusste Anfrage an den Ersatz in der Nacht nicht hin und her schaltet.
 

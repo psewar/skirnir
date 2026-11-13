@@ -148,6 +148,7 @@ class Node(Breaker):
         self.upstream_blocked = None  # agent report (>= 0.26.0): why it keeps the held server from starting, e.g. RAM
         self.upstream_state = ""      # agent report: "held" (stopped for the GPU), "starting", "" = answering
         self.upstream_order = ""      # last order sent: "hold" / "release" (openai_node.order)
+        self.upstream_order_at = 0.0  # 0.29.1: when it was sent; after HOLD_REPORT_GRACE_S only the agent's report counts
         self.window_order_at = 0.0    # 0.16.0: last order of poll.upstream_window_check (at most one per WINDOW_ORDER_GAP_S)
         self.standby_prewarmed = False   # 0.16.1: the standby was prewarmed once since it began serving (window hold)
         # Router 0.15.0 / agent >= 0.25.0: the standby Ollama's models from its model store (heartbeat standby_models),

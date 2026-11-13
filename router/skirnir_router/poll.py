@@ -504,6 +504,10 @@ def residency_check(node, now):
 
 
 WINDOW_ORDER_GAP_S = 30   # one window order per node at most this often (the agent ignores repeats anyway)
+# 0.29.1: how long a hold counts as under way while the agent still reports the server answering. The agent reports the
+# hold before it stops the server (seconds); its stop waits at most 30 s. After that the report decides: the agent may have
+# restarted and started the server unheld to learn it (without upstream.json), or the order was lost with the connection.
+HOLD_REPORT_GRACE_S = 60
 
 
 def upstream_window_check(node, now):
@@ -535,7 +539,12 @@ def upstream_window_check(node, now):
             node.standby_prewarmed = True
             state.spawn(prewarm(node, 0, "standby", since=node.free_at))
         return
-    if not node.speaks_openai or node.upstream_order == "hold" or node.upstream_state:
+    # 0.29.1: a hold counts as under way only for HOLD_REPORT_GRACE_S after it was sent. Before, the router's memory of its
+    # last order "hold" kept it from ever holding again: an agent that restarted without upstream.json started the server
+    # unheld to learn it, reported it answering, and it kept running idle for hours (2026-11-13, 74 % RAM). As in 0.16.3
+    # above, the agent's report decides, not the router's memory of its order.
+    hold_under_way = node.upstream_order == "hold" and now - node.upstream_order_at < HOLD_REPORT_GRACE_S
+    if not node.speaks_openai or hold_under_way or node.upstream_state:
         return   # the standby already serves, a hold is under way, or the server is still starting
     server_used = [t for m, t in node.last_used.items() if node.serves_openai(m)]
     if server_used and now - max(server_used) < idle_s:

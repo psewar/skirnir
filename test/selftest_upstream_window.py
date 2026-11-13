@@ -31,7 +31,7 @@ ORDERS = []
 
 async def fake_order(node, what, reason):
     ORDERS.append((what, reason))
-    node.upstream_order = what
+    node.upstream_order, node.upstream_order_at = what, time.time()
     return True
 
 
@@ -100,6 +100,24 @@ n.upstream_state = openai_node.STARTING
 check("outside, server still starting (a request released it) -> no hold", run_check(n) == [])
 n = strata_node(serving_standby=True)
 check("outside, standby already serves -> nothing to do", run_check(n) == [])
+# 0.29.1: the router's last order was "hold", but the agent reports the server answering - the agent restarted without
+# its upstream.json and started the server unheld to learn it (2026-11-13: it kept running for hours at 74 % RAM).
+# The agent's report decides, not the router's memory of its order.
+n = strata_node()
+n.upstream_order, n.upstream_order_at = "hold", time.time() - 3600
+n.last_used[STRATA] = time.time() - 901
+check("outside, last order hold long ago but the agent reports the server running, idle > idle_hold_s -> hold again",
+      run_check(n) == [("hold", "outside the night window")])
+n = strata_node()
+n.upstream_order, n.upstream_order_at = "hold", time.time() - 3600
+n.last_used[STRATA] = time.time() - 60
+check("outside, same but the server was used a minute ago -> no hold yet", run_check(n) == [])
+n = strata_node()
+n.upstream_order, n.upstream_order_at = "hold", time.time() - 5
+check("outside, a hold sent seconds ago whose report has not arrived yet -> no second hold", run_check(n) == [])
+n = strata_node()
+n.upstream_order, n.upstream_order_at = "hold", 0.0   # restored state without a time: treated as long ago
+check("outside, last order hold without a time -> the report decides, hold again", run_check(n) == [("hold", "outside the night window")])
 
 # 2) Inside the window: release a held server once the node is free and the standby idle
 window(inside=True)

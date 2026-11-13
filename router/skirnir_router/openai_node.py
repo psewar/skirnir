@@ -51,7 +51,7 @@ async def order(node, what, reason):
         return False
     from .registry import send_ctl   # registry imports poll, which imports this module
     await send_ctl(node.tunnel, {"t": f"upstream-{what}"})
-    node.upstream_order = what
+    node.upstream_order, node.upstream_order_at = what, time.time()
     log.info("node %s: upstream-%s (%s)", node.name, what, reason)
     state.remember({"event": f"upstream_{what}", "node": node.name, "reason": reason})
     return True
