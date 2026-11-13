@@ -2,28 +2,39 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "754293f646b09b1918c37511f093cb1bd826b41b",
-  "change_digest": "edf3d311d02de7b45e81bb7417a195345c1a30bb27a161ca6396a2c95d180ff5",
+  "base_sha": "752fc66b81f527ca75ab673e18ceaddedf9ee5ab",
+  "change_digest": "046992371978a3785fdf23155df985198cf94b9b910916fa27a47a1fc18ca6bd",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "docs/adr/0090-report-recall-skipped-for-tools-per-client.md",
+    "docs/adr/0091-windows-children-keep-their-data-outside-the-agents-folder.md",
     "docs/adr/README.md"
   ],
   "risk_ids": [
-    "TM-10",
-    "TM-15"
+    "TM-14"
   ],
   "boundaries": [
-    "B1",
-    "B9"
+    "B3",
+    "B8"
   ],
-  "summary": "Documentation only: ADR-0090 (report recalls skipped for tools as a state per client) is accepted by the operator; status in the ADR, its Decision Outcome line, the ADR index and the CHANGELOG row. PR #142 merged it while it still said proposed. No code, configuration or behaviour change; the decision text is unchanged (proposed -> accepted is the only change allowed to an ADR besides typos and links). Re-reviewed after merging main with PR #143: the CHANGELOG row is main's (agent 0.34.1, ADR-0091) with only ADR-0090 marked accepted.",
-  "findings": [],
+  "summary": "Documentation only: ADR-0091 (Windows children keep their data outside the agent's folder) accepted by the operator after the node check on 2026-11-13; ADR index regenerated; the CHANGELOG row of the published release v0.33.0 gets its link and date and names ADR-0091 accepted. No code, configuration or version change.",
+  "findings": [
+    {
+      "id": "TM-14",
+      "evidence": "ADR-0091 was proposed in #143 (agent 0.34.1). Its confirmation asked for a node check: the children's data moved out of the agent's folder, Ollama back on LOCAL SERVICE.",
+      "resolution": "Node check on a Windows node with agent 0.34.1 (2026-11-13): Ollama, its home, the STT service's data and cache moved to the children's data folder, which the operator's move created with the agent's protected access list; Ollama runs as localservice, every access entry ok/granted with resolve ok and no move_to, the model list unchanged (8), a model loaded on the GPU and answered; the STT service healthy as localservice. One data folder (Strata's, owned by SYSTEM only) stays in the agent's folder for now and is still reported with move_to, as the ADR foresees.",
+      "disposition": "fixed"
+    }
+  ],
   "tests": [
     {
       "command": "python test/check_adr_index.py",
       "result": "passed",
       "evidence": "ADR index ok: 91 ADRs"
+    },
+    {
+      "command": "Node check on the Windows node: agent /health children[].access and Ollama /api/generate as LOCAL SERVICE",
+      "result": "passed",
+      "evidence": "ollama run_as localservice, healthy, access granted with resolve ok and no move_to; 8 models listed; qwen3.8 loaded (16.9 GB VRAM) and answered; stt localservice healthy, resolve ok."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -36,5 +47,7 @@
       "evidence": "Public-change scan: 0 finding(s)."
     }
   ],
-  "limitations": []
+  "limitations": [
+    "Strata's data folder (SYSTEM only) is moved later as SYSTEM, together with the first check of Strata as LOCAL SERVICE."
+  ]
 }
