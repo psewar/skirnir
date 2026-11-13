@@ -2,39 +2,59 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "752fc66b81f527ca75ab673e18ceaddedf9ee5ab",
-  "change_digest": "046992371978a3785fdf23155df985198cf94b9b910916fa27a47a1fc18ca6bd",
+  "base_sha": "837b279fffd963c280e9eb8b21f664d3aaf01bdc",
+  "change_digest": "8101a963c1fdef8fac3870f43a4264de1ad34031987561b24c195141e35bcc6a",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "docs/adr/0091-windows-children-keep-their-data-outside-the-agents-folder.md",
-    "docs/adr/README.md"
+    "agent/procmem.go",
+    "agent/procmem_other.go",
+    "agent/procmem_windows.go",
+    "agent/procmem_windows_test.go",
+    "agent/supervisor.go",
+    "agent/upstream_hold.go",
+    "agent/upstream_memo.go",
+    "agent/upstream_start_held_test.go",
+    "docs/adr/0092-upstream-ram-need-is-resident-memory-not-commit.md",
+    "docs/adr/README.md",
+    "docs/reference.de.md",
+    "docs/reference.md"
   ],
   "risk_ids": [
-    "TM-14"
+    "TM-08"
   ],
   "boundaries": [
     "B3",
-    "B8"
+    "B9"
   ],
-  "summary": "Documentation only: ADR-0091 (Windows children keep their data outside the agent's folder) accepted by the operator after the node check on 2026-11-13; ADR index regenerated; the CHANGELOG row of the published release v0.33.0 gets its link and date and names ADR-0091 accepted. No code, configuration or version change.",
+  "summary": "Agent 0.35.0 (ADR-0092): the RAM need the agent checks before releasing its held OpenAI-compatible server is now the larger of the peak working set of the server's process tree and the RAM released when a hold stops it, plus 10 %, growing only while the start configuration stays the same; previously the peak commit. Traced: router upstream-release order -> upstreamHold.apply -> ramBlock (the only RAM gate, ADR-0035) -> Supervisor.Release; sampler upstreamHold.sample/observeRun -> Supervisor.childMemory -> procTree.pids (job object) -> procMemory (K32GetProcessMemoryInfo, PROCESS_QUERY_LIMITED_INFORMATION, unchanged access right); hold path -> releasedSince (memoryFact) -> endRun -> saveUpstreamMemo (atomic write in the identity folder, unchanged). No new route, input from the network, privilege, file location or dependency. The gate becomes less strict by design (52.3 GiB commit -> resident need); the review checked that it does not undercount: the release measure covers driver-held pages outside the working set, the need never drops within a configuration, and a 10 % margin covers sampling gaps. upstream.json gains a 64-bit fingerprint of the child's command, folder, arguments and environment; the file lives in the agent's identity folder next to its private key, so it opens no new path to environment values.",
   "findings": [
     {
-      "id": "TM-14",
-      "evidence": "ADR-0091 was proposed in #143 (agent 0.34.1). Its confirmation asked for a node check: the children's data moved out of the agent's folder, Ollama back on LOCAL SERVICE.",
-      "resolution": "Node check on a Windows node with agent 0.34.1 (2026-11-13): Ollama, its home, the STT service's data and cache moved to the children's data folder, which the operator's move created with the agent's protected access list; Ollama runs as localservice, every access entry ok/granted with resolve ok and no move_to, the model list unchanged (8), a model loaded on the GPU and answered; the STT service healthy as localservice. One data folder (Strata's, owned by SYSTEM only) stays in the agent's folder for now and is still reported with move_to, as the ADR foresees.",
+      "id": "TM-08",
+      "evidence": "Replacing commit with a resident measure could undercount the RAM a start takes (the gate exists because a start at 98 % RAM was followed by a bluescreen): pages pinned for the GPU and trimmed from the working set, or allocated by the graphics kernel, are in no per-process counter; and resident memory grows over hours, so a short run (the router often holds the server seconds after it answers) would have lowered a last-run peak.",
+      "resolution": "The need also takes the RAM released when the server's tree ends (read before the stop, right after it and after two seconds, before the standby starts), never drops while the start configuration is the same, and carries a 10 % margin. Tests: TestHoldLearnsWithoutSample (release larger than the working set sets the need), TestSampleLearnsUpstream (commit ignored, a shorter run does not lower the need), TestNeedRelearned, TestChildConfig, TestProcMemory (real call: committed-only memory is not resident).",
       "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "python test/check_adr_index.py",
+      "command": "cd agent && gofmt -l . && go vet ./... && GOOS=linux go vet ./... && go test ./... (Windows)",
       "result": "passed",
-      "evidence": "ADR index ok: 91 ADRs"
+      "evidence": "gofmt clean, vet clean on both targets, ok github.com/psewar/skirnir/agent 17.3s"
     },
     {
-      "command": "Node check on the Windows node: agent /health children[].access and Ollama /api/generate as LOCAL SERVICE",
+      "command": "cd agent && go test ./... (Linux, WSL, go1.27.3, under a systemd memory scope)",
       "result": "passed",
-      "evidence": "ollama run_as localservice, healthy, access granted with resolve ok and no move_to; 8 models listed; qwen3.8 loaded (16.9 GB VRAM) and answered; stt localservice healthy, resolve ok."
+      "evidence": "ok github.com/psewar/skirnir/agent 7.6s"
+    },
+    {
+      "command": "python test/check_adr_index.py; python test/check_pinned_references.py; ruff check .",
+      "result": "passed",
+      "evidence": "ADR index ok: 92 ADRs; Pinned references: 0 finding(s); All checks passed"
+    },
+    {
+      "command": "Node check: one run of the server on a Windows node with agent 0.35.0, then compare upstream.json with the working-set peak and the RAM released at the stop",
+      "result": "not_run",
+      "evidence": "Needs the maintainer's rollout of agent 0.35.0; the PR describes the check."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -48,6 +68,8 @@
     }
   ],
   "limitations": [
-    "Strata's data folder (SYSTEM only) is moved later as SYSTEM, together with the first check of Strata as LOCAL SERVICE."
+    "On the first start of agent 0.35.0 a need stored by an older agent (commit) is discarded, and after a change of the server's start configuration the need is learned again; until the next run is measured, a release has no RAM check, as on the first start since ADR-0037. A first short run learns less than a long one until a longer run raised it.",
+    "The release measure is read from system-wide available RAM and is blurred by other programs that change their memory in the same seconds; a drop (a game starting) is covered by the resident peak, a rise can only overstate.",
+    "How the GPU driver accounts pinned host memory on the node was not measured directly; the server was stopped during the probe. The node check in the PR compares released_bytes with peak_resident_bytes to show it."
   ]
 }

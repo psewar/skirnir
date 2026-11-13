@@ -31,6 +31,12 @@ import (
 // for its model, its window). Before every release the agent checks that the RAM in use plus the upstream's measured
 // need stays within tunnel.upstream_fallback.max_ram_percent; otherwise the upstream stays held and the watcher reports
 // upstream_blocked until there is room again.
+//
+// What the need is (agent 0.35.0, ADR-0092, supersedes the measure of ADR-0037): the larger of the peak working set of
+// the server's process tree (sampled while it runs) and the RAM that became available when it stopped (pages a driver
+// held outside the working set, pinned for the GPU, show only there), plus a margin. The need only grows while the
+// server's start configuration stays the same: resident memory grows over hours, so a short run would otherwise lower
+// it below what a long run takes. A changed configuration, or a need an older agent measured as commit, is learned again.
 
 // holdWait: how long Hold waits for the server's process tree to end. Stopping is a job kill; a few seconds suffice.
 const holdWait = 30 * time.Second
@@ -54,11 +60,13 @@ type upstreamHold struct {
 
 	// 0.26.0, only with a standby: what the agent remembers about the upstream and the RAM check before a release
 	memoPath  string                 // <identity dir>/upstream.json; "" = nothing remembered, no held start
-	memo      upstreamMemo           // models and RAM need (peak private bytes of the last run)
-	runPeak   uint64                 // peak private bytes of the upstream in the current run
+	memo      upstreamMemo           // models and RAM need (ADR-0092)
+	savedNeed uint64                 // memo.NeedBytes as last written; the sampler writes again when it rose by needSaveStep
+	dirty     bool                   // memo changed since the last write
 	maxRAMPct int                    // tunnel.upstream_fallback.max_ram_percent; 0 = no check
 	mem       func() (MemFact, bool) // RAM now (memoryFact; tests replace it)
-	private   func() (uint64, bool)  // private bytes of the running upstream (Supervisor.childPrivateBytes)
+	measure   func() (procMem, bool) // resident and committed memory of the running upstream (Supervisor.childMemory)
+	config    string                 // Supervisor.childConfig of the upstream: a change relearns the need
 	blocked   *UpstreamBlocked       // the last release was refused for this reason; nil = not blocked
 
 	mu        sync.Mutex // one order at a time, in arrival order
@@ -71,7 +79,8 @@ func newUpstreamHold(sup *Supervisor, child string, fb *FallbackCfg, sw *upstrea
 		return nil
 	}
 	u := &upstreamHold{sup: sup, child: child, watch: watch, log: log, mem: memoryFact}
-	u.private = func() (uint64, bool) { return sup.childPrivateBytes(child) }
+	u.measure = func() (procMem, bool) { return sup.childMemory(child) }
+	u.config = sup.childConfig(child)
 	if fb != nil && sw != nil {
 		u.fbChild, u.fbURL, u.sw = fb.Child, fb.Upstream, sw
 		if fb.MaxRAMPercent != nil {
@@ -93,6 +102,22 @@ func (u *upstreamHold) remember(dir string) {
 		u.log.Warnf("upstream: %s not readable (%v) - %s starts once and the agent learns its models and RAM need again", u.memoPath, err, u.child)
 	}
 	u.memo = m
+	u.savedNeed = m.NeedBytes
+	switch {
+	case m.Measure == "" && m.NeedBytes > 0:
+		u.log.Infof("upstream: RAM need of %s (%.1f GiB) was measured as committed memory by an older agent - discarded; the next run learns the resident need (ADR-0092)",
+			u.child, gib(m.NeedBytes))
+	case m.Measure != "" && m.Measure != needMeasure:
+		u.log.Infof("upstream: RAM need of %s was measured as %q - discarded; the next run learns it again", u.child, m.Measure)
+	case m.Measure == needMeasure && m.Config != u.config:
+		u.log.Infof("upstream: the start configuration of %s changed - its RAM need (%.1f GiB) is learned again", u.child, gib(m.NeedBytes))
+	default:
+		return
+	}
+	u.memo.forget(u.config)
+	if m.known() || m.NeedBytes > 0 {
+		u.saveMemo()
+	}
 }
 
 // startHeld: with remembered models the agent starts with the upstream held and the standby serving, so a restart does
@@ -112,6 +137,11 @@ func (u *upstreamHold) startHeld(now time.Time) bool {
 	u.held = true
 	u.watch.StartHeld(u.memo.Tags, now)
 	u.startFallback(now)
+	if u.memo.NeedBytes == 0 {
+		u.log.Infof("upstream: agent starts with %s held (%d remembered models, RAM need not learned yet - the next release has no RAM check); the router releases it when it wants it",
+			u.child, len(u.memo.Tags))
+		return true
+	}
 	u.log.Infof("upstream: agent starts with %s held (%d remembered models, RAM need %.1f GiB); the router releases it when it wants it",
 		u.child, len(u.memo.Tags), gib(u.memo.NeedBytes))
 	return true
@@ -169,50 +199,90 @@ func (u *upstreamHold) sample() {
 		}
 		return
 	}
-	changed := false
-	if tags, ok := u.watch.UpstreamTags(); ok && !sameRaw(tags, u.memo.Tags) {
-		u.memo.Tags, changed = tags, true
-	}
-	if p, ok := u.private(); ok && p > u.runPeak {
-		u.runPeak = p
-		if p > u.memo.NeedBytes {
-			u.memo.NeedBytes, changed = p, true
-		}
-	}
-	if changed {
+	newTags := u.observeRun()
+	if newTags || u.memo.NeedBytes >= u.savedNeed+needSaveStep || (u.savedNeed == 0 && u.memo.NeedBytes > 0) {
 		u.saveMemo()
 	}
 }
 
-// endRun: the upstream is about to stop - its peak in this run becomes the remembered need (so a smaller setup lowers it),
-// and its models are taken once more. 0.26.1: outside its window the router holds the server as soon as it answers -
-// seconds after the start, before the 30-s sampler saw its models - so the first run learned the need but never the
-// models, and every restart would have started the server again to learn.
-func (u *upstreamHold) endRun() {
+// needSaveStep: while the server runs, its resident memory grows page by page; the sampler writes upstream.json again only
+// when the need rose by this much (the hold writes the exact values).
+const needSaveStep = 256 << 20
+
+// releaseSettle: after the server's tree has ended, how long the agent waits before it reads the RAM released a second
+// time (the system returns a dead process's pages, and a driver its pinned pages, shortly after the end). A variable so
+// the tests need not wait.
+var releaseSettle = 2 * time.Second
+
+// observeRun takes the running upstream's models and memory into the memo; true = its models changed.
+func (u *upstreamHold) observeRun() bool {
+	newTags := false
+	if tags, ok := u.watch.UpstreamTags(); ok && !sameRaw(tags, u.memo.Tags) {
+		u.memo.Tags, newTags, u.dirty = tags, true, true
+	}
+	if m, ok := u.measure(); ok {
+		if m.Resident > u.memo.PeakResidentBytes {
+			u.memo.PeakResidentBytes, u.dirty = m.Resident, true
+		}
+		if m.Commit > u.memo.PeakCommitBytes {
+			u.memo.PeakCommitBytes, u.dirty = m.Commit, true
+		}
+	}
+	u.raiseNeed()
+	return newTags
+}
+
+// raiseNeed: the need follows the measured peaks, upwards only (ADR-0092).
+func (u *upstreamHold) raiseNeed() {
+	if n := u.memo.need(); n > u.memo.NeedBytes {
+		u.memo.NeedBytes, u.dirty = n, true
+	}
+}
+
+// releasedSince: how much RAM became available since before (read just before the stop) - what the server's tree held,
+// including pages outside its working set. The larger of a read right away and one after releaseSettle; 0 = nothing
+// measurable. Other programs changing their memory meanwhile blur it (a game starting lowers it); the need takes the
+// larger of this and the resident peak, so a low value costs nothing.
+func (u *upstreamHold) releasedSince(before MemFact) uint64 {
+	best := 0.0
+	for i := range 2 {
+		if i > 0 {
+			time.Sleep(releaseSettle)
+		}
+		if m, ok := u.mem(); ok && m.RAMAvailableGiB-before.RAMAvailableGiB > best {
+			best = m.RAMAvailableGiB - before.RAMAvailableGiB
+		}
+	}
+	return uint64(best * (1 << 30))
+}
+
+// endRun: the upstream has stopped (released = the RAM that became available, 0 = not measured). The memo keeps the
+// largest release; the need follows. The models were taken before the stop (observeRun). 0.26.1: outside its window the
+// router holds the server as soon as it answers - seconds after the start, before the 30-s sampler saw its models - so
+// the hold itself must remember them, or every restart would start the server again to learn.
+func (u *upstreamHold) endRun(released uint64) {
 	if u.memoPath == "" {
 		return
 	}
-	changed := false
-	if tags, ok := u.watch.UpstreamTags(); ok && !sameRaw(tags, u.memo.Tags) {
-		u.memo.Tags, changed = tags, true
+	if released > u.memo.ReleasedBytes {
+		u.memo.ReleasedBytes, u.dirty = released, true
 	}
-	if p, ok := u.private(); ok && p > u.runPeak {
-		u.runPeak = p
-	}
-	if u.runPeak > 0 && u.runPeak != u.memo.NeedBytes {
-		u.memo.NeedBytes, changed = u.runPeak, true
-	}
-	if changed {
+	u.raiseNeed()
+	u.log.Infof("upstream: run of %s ended - peak resident %.1f GiB, released at the stop %.1f GiB, peak commit %.1f GiB (comparison only); RAM need %.1f GiB",
+		u.child, gib(u.memo.PeakResidentBytes), gib(released), gib(u.memo.PeakCommitBytes), gib(u.memo.NeedBytes))
+	if u.dirty {
 		u.saveMemo()
 	}
-	u.runPeak = 0
 }
 
 func (u *upstreamHold) saveMemo() {
 	u.memo.Updated = time.Now().UTC()
+	u.memo.Measure, u.memo.Config = needMeasure, u.config
 	if err := saveUpstreamMemo(u.memoPath, u.memo); err != nil {
 		u.log.Warnf("upstream: %s not written: %v", u.memoPath, err)
+		return
 	}
+	u.savedNeed, u.dirty = u.memo.NeedBytes, false
 }
 
 func sameRaw(a, b []json.RawMessage) bool {
@@ -242,17 +312,28 @@ func (u *upstreamHold) apply(hold bool, now time.Time) {
 		return // repeated order (the router resends while its view lags): nothing to do
 	}
 	if hold {
-		u.endRun()
+		var before MemFact
+		measured := false
+		if u.memoPath != "" {
+			u.observeRun() // models and memory once more: the watcher stops listing them once held
+			before, measured = u.mem()
+		}
 		u.watch.SetHeld(true, now) // report first: no request should go to a server that is about to stop
 		stopped := u.sup.Hold(u.child, holdWait)
 		u.held = true
 		if !stopped {
+			u.endRun(0) // still running: nothing was released to measure
 			u.log.Warnf("upstream-hold: %s did not stop within %s; held anyway, it will not be restarted", u.child, holdWait)
 			if u.fbChild != "" {
 				u.log.Warnf("upstream-hold: standby %s not started - the card is not free", u.fbChild)
 			}
 			return
 		}
+		var released uint64
+		if measured {
+			released = u.releasedSince(before) // before the standby starts and takes its own share
+		}
+		u.endRun(released)
 		u.log.Infof("upstream-hold: %s stopped to free the GPU (router order)", u.child)
 		u.startFallback(now)
 		return

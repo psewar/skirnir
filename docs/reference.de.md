@@ -137,14 +137,39 @@ startet erst dann den Server, sodass sich beide nie die Karte teilen. Das Ollama
 (er ist nicht das vom Agenten verwaltete Ollama).
 
 **Angehalten starten, RAM-Prüfung vor dem Start** (Agent 0.26.0, Router 0.17.0): Der Agent merkt sich die Modelle des
-Servers und seinen RAM-Bedarf (höchster privater Speicher seines Prozessbaums im letzten Lauf) in
-`<identity-Ordner>/upstream.json`. Mit dieser Datei startet er mit angehaltenem Server und laufendem Ersatz – ein Neustart
+Servers und seinen RAM-Bedarf (siehe unten) in `<identity-Ordner>/upstream.json`. Mit dieser Datei startet er mit angehaltenem Server und laufendem Ersatz – ein Neustart
 lädt den Server also nicht, nur damit der Router ihn wieder anhält; der Router gibt ihn frei, wenn er ihn will (Anfrage
 für sein Modell, Vorladen, Fenster). Ohne die Datei (erster Start, neuer Server) startet der Server einmal wie bisher, und
 der Agent lernt beides. Vor jedem Start prüft der Agent, dass belegter RAM plus dieser Bedarf `max_ram_percent` nicht
 übersteigt; sonst bleibt der Server angehalten, und der OLLAMA-Frame trägt `upstream_blocked` (Grund `memory`, verfügbar,
 gesamt, Bedarf, Grenze), bis wieder Platz ist. Der Router bietet dann keinen Freigabe-Kandidaten an und antwortet mit
 `memory_pressure` samt diesen Zahlen; Vorladen und Fenster senden so lange keine Freigabe.
+
+**Was der RAM-Bedarf ist** (Agent 0.35.0, ADR-0092): der größere von zwei Messwerten, plus 10 %. Der eine ist das höchste
+Working Set des Prozessbaums des Servers (Seiten im RAM, private und aus Dateien), alle 30 s während er läuft und noch einmal
+vor dem Anhalten gemessen (nur unter Windows, wo der Agent den Baum auflistet). Der andere ist der RAM, der frei wird, wenn
+das Anhalten den Server stoppt, gelesen gleich nach dem Ende seines Prozessbaums und noch einmal zwei Sekunden später; er
+erfasst auch Seiten, die ein Treiber für den Server außerhalb seines Working Sets hielt, etwa für die GPU festgehaltenen
+Speicher. Der Bedarf wächst nur, solange die Startkonfiguration des Servers (Befehl, Arbeitsordner, Argumente, Umgebung)
+gleich bleibt, denn der belegte Speicher wächst über Stunden, und ein kurzer Lauf würde ihn sonst senken; eine geänderte
+Konfiguration, etwa ein anderes RAM-Budget, lässt den Bedarf neu lernen. Bis Agent 0.34.x war der Bedarf der höchste private
+Speicher (Commit), der auch reservierten Speicher zählt, der nie im RAM liegt; ein solcher Wert wird beim ersten Start von
+0.35.0 verworfen, und der nächste Lauf wird neu gemessen, bis dahin ohne RAM-Prüfung. Die Datei hält fest, wie der Bedarf
+zustande kam:
+
+| Feld | Bedeutung |
+|---|---|
+| `need_bytes` | was die RAM-Prüfung verwendet; 0 = noch nicht gelernt, keine Prüfung |
+| `measure` | `resident`; fehlt = Commit eines älteren Agenten, verworfen |
+| `config` | Fingerabdruck der Startkonfiguration des Servers beim Lernen |
+| `peak_resident_bytes` | höchstes Working Set des Prozessbaums |
+| `released_bytes` | größter RAM, der beim Stoppen des Servers frei wurde |
+| `peak_commit_bytes` | höchster privater Speicher, nur zum Vergleich |
+
+Jedes Anhalten protokolliert diese Werte (`upstream: run of <child> ended - peak resident ..., released at the stop ...,
+peak commit ...; RAM need ...`). Eine Änderung, die die Startkonfiguration nicht zeigt, etwa ein ausgetauschtes Modell hinter
+derselben Befehlszeile, behält den höheren Bedarf; `upstream.json` löschen, damit er neu gelernt wird. Unter Linux ergibt
+allein der beim Stoppen frei gewordene RAM den Bedarf (`MemAvailable`).
 
 **Für eine Anfrage auf den Ersatz umschalten** (Router 0.15.0, Agent 0.25.0): Der Agent meldet die Modelle des Ersatzes auch,
 solange dieser gestoppt ist (Heartbeat `standby_models`, gelesen aus seinem Modellspeicher `OLLAMA_MODELS/manifests`). Eine

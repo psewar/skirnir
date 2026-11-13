@@ -142,7 +142,7 @@ finish (at most two minutes), stops it, and only then starts the server, so the 
 not updated by the router's Ollama update (it is not the agent's managed Ollama).
 
 **Start held, RAM check before a start** (agent 0.26.0, router 0.17.0): the agent remembers the server's models and its
-RAM need (peak private bytes of its process tree in the last run) in `<identity dir>/upstream.json`. With that file it
+RAM need (see below) in `<identity dir>/upstream.json`. With that file it
 starts with the server held and the standby serving, so a restart does not load the server only for the router to hold
 it again; the router releases it when it wants it (a request for its model, prewarm, the window). Without the file
 (first start, new server) the server starts once as before and the agent learns both. Before every start the agent
@@ -150,6 +150,31 @@ checks that the RAM in use plus that need stays within `max_ram_percent`; otherw
 OLLAMA frame carries `upstream_blocked` (reason `memory`, available, total, need, limit) until there is room again. The
 router then offers no release candidate and answers `memory_pressure` with these numbers; prewarm and the window send
 no release meanwhile.
+
+**What the RAM need is** (agent 0.35.0, ADR-0092): the larger of two measures, plus 10 %. One is the peak working set of
+the server's process tree (resident pages, private and file-backed), sampled every 30 s while it runs and once more
+before a hold (Windows only, where the agent lists the tree). The other is the RAM that becomes available when a hold
+stops the server, read right after its process tree ended and again two seconds later; it also covers pages a driver
+held for the server outside its working set, such as memory pinned for the GPU. The need only grows while the server's
+start configuration (command, working folder, arguments, environment) stays the same, because resident memory grows over
+hours and a short run would otherwise lower it; a changed configuration, such as another resident budget, has the need
+learned again. Up to agent 0.34.x the need was the peak private bytes (commit), which also counts reserved memory that
+never becomes resident; such a value is discarded on the first start of 0.35.0, and the next run is measured anew, with no
+RAM check until then. The file records how the need came about:
+
+| Field | Meaning |
+|---|---|
+| `need_bytes` | what the RAM check uses; 0 = not learned yet, no check |
+| `measure` | `resident`; missing = an older agent's commit, discarded |
+| `config` | fingerprint of the server's start configuration when learned |
+| `peak_resident_bytes` | highest working set of the process tree |
+| `released_bytes` | most RAM that became available when the server stopped |
+| `peak_commit_bytes` | highest private bytes, for comparison only |
+
+Each hold logs these values (`upstream: run of <child> ended - peak resident ..., released at the stop ..., peak commit
+...; RAM need ...`). A change that the start configuration does not show, such as a model swapped behind the same command
+line, keeps the higher need; delete `upstream.json` to have it learned again. On Linux the release alone gives the need
+(`MemAvailable`).
 
 **Switching to the standby for a request** (router 0.15.0, agent 0.25.0): the agent also reports the standby's models
 while the standby is stopped (heartbeat `standby_models`, read from its model store `OLLAMA_MODELS/manifests`). A request
