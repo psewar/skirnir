@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -266,9 +268,10 @@ func (s *Supervisor) childrenVRAM() map[string]int {
 	return out
 }
 
-// childPrivateBytes: committed private memory of a running child's process tree (agent 0.26.0: the RAM need of the
-// OpenAI-compatible upstream, upstream_hold.go). false = not running or not measurable (not Windows).
-func (s *Supervisor) childPrivateBytes(name string) (uint64, bool) {
+// childMemory: resident and committed memory of a running child's process tree, summed (agent 0.35.0, ADR-0092: the RAM
+// need of the OpenAI-compatible upstream, upstream_hold.go). Pages two members share count twice - on the safe side.
+// false = not running or not measurable (the tree is listed only on Windows).
+func (s *Supervisor) childMemory(name string) (procMem, bool) {
 	s.mu.Lock()
 	var t *procTree
 	if c, ok := s.children[name]; ok && c.Running {
@@ -276,17 +279,37 @@ func (s *Supervisor) childPrivateBytes(name string) (uint64, bool) {
 	}
 	s.mu.Unlock()
 	if t == nil {
-		return 0, false
+		return procMem{}, false
 	}
-	var sum uint64
+	var sum procMem
 	n := 0
 	for _, pid := range t.pids() {
-		if b, ok := procPrivateBytes(pid); ok {
-			sum += b
+		if m, ok := procMemory(pid); ok {
+			sum.Resident += m.Resident
+			sum.Commit += m.Commit
 			n++
 		}
 	}
 	return sum, n > 0
+}
+
+// childConfig: a fingerprint of how a child is started (command, folder, arguments, environment). The agent relearns
+// the upstream's RAM need when it changes (ADR-0092): a smaller setup is usually a changed argument. "" = no such child.
+func (s *Supervisor) childConfig(name string) string {
+	for _, sp := range s.specs {
+		if sp.Name != name {
+			continue
+		}
+		h := sha256.New()
+		for _, list := range [][]string{{sp.Cmd}, {sp.Cwd}, sp.Args, sp.Env} {
+			fmt.Fprintf(h, "%d\n", len(list)) // length prefixes: moving a word from one list to the next changes the print
+			for _, v := range list {
+				fmt.Fprintf(h, "%d:%s\n", len(v), v)
+			}
+		}
+		return hex.EncodeToString(h.Sum(nil))[:16]
+	}
+	return ""
 }
 
 // Child returns a copy of a child's state (for MQTT and /health).

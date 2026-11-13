@@ -2,6 +2,6 @@
 
 package main
 
-// procPrivateBytes: not measured outside Windows (the OpenAI-compatible upstream with a standby runs on the Windows
-// desktop nodes); the RAM check before a release then has no need to compare and lets the release through.
-func procPrivateBytes(pid uint32) (uint64, bool) { return 0, false }
+// procMemory: not measured per process outside Windows (the supervisor lists the process tree only there, procTree.pids).
+// The agent still learns the upstream's RAM need on Linux from the RAM released when the server stops (upstream_hold.go).
+func procMemory(pid uint32) (procMem, bool) { return procMem{}, false }

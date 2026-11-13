@@ -157,9 +157,20 @@ func TestReleaseRAMCheck(t *testing.T) {
 	}
 }
 
-// While the upstream runs, the sampler remembers its models and the peak of its private bytes; at the hold the run's peak
-// becomes the remembered need, so a smaller setup lowers it again.
+// noSettle: the hold reads the released RAM a second time after releaseSettle; the tests' RAM is a function, no need to wait.
+func noSettle(t *testing.T) {
+	old := releaseSettle
+	releaseSettle = 0
+	t.Cleanup(func() { releaseSettle = old })
+}
+
+// withMargin: the need from a measured peak (needMarginPercent).
+func withMargin(peak uint64) uint64 { return peak + peak*needMarginPercent/100 }
+
+// ADR-0092: while the upstream runs, the sampler remembers its models and the peak of its resident memory (not its
+// commit); the need is that peak plus the margin and only grows - a later, shorter run does not lower it.
 func TestSampleLearnsUpstream(t *testing.T) {
+	noSettle(t)
 	up := &fakeOpenAI{}
 	up.set(`{"id":"big-moe","status":{"value":"loaded"}}`)
 	upSrv := httptest.NewServer(up)
@@ -173,36 +184,55 @@ func TestSampleLearnsUpstream(t *testing.T) {
 	w := newOllamaWatcher(upSrv.URL, upstreamOpenAI, quietLogger())
 	u := newUpstreamHold(sup, "strata", fbCfg, newUpstreamSwitch(fbCfg), w, quietLogger())
 	u.remember(dir)
-	priv := uint64(30) * giB
-	u.private = func() (uint64, bool) { return priv, true }
+	run := procMem{Resident: 20 * giB, Commit: 52 * giB} // commit far above what is resident, as with a RAM budget
+	u.measure = func() (procMem, bool) { return run, true }
 	u.mem = func() (MemFact, bool) { return MemFact{RAMAvailableGiB: 60, RAMTotalGiB: 64}, true } // room for the release
 
 	w.poll(context.Background(), time.Now())
 	u.sample()
-	priv = 42 * giB
+	run.Resident = 28 * giB // pages come in while it runs
 	u.sample()
 	m, err := loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile))
-	if err != nil || !m.known() || m.NeedBytes != 42*giB || !strings.Contains(string(m.Tags[0]), "big-moe") {
-		t.Fatalf("learned while running: models and peak need saved: %+v %v", m, err)
+	if err != nil || !m.known() || !strings.Contains(string(m.Tags[0]), "big-moe") {
+		t.Fatalf("learned while running: models saved: %+v %v", m, err)
+	}
+	if m.NeedBytes != withMargin(28*giB) || m.PeakResidentBytes != 28*giB || m.PeakCommitBytes != 52*giB ||
+		m.Measure != needMeasure || m.Config != u.config {
+		t.Fatalf("need = resident peak + margin, commit only for comparison: %+v", m)
 	}
 	tags, _ := w.UpstreamTags()
 	if !sameRaw(tags, m.Tags) {
 		t.Fatalf("saved models byte-equal to the watcher's, else every sample rewrites the file: %s vs %s", joinRaw(tags), joinRaw(m.Tags))
 	}
 
-	u.apply(true, time.Now()) // end of this run: peak 42 stays
+	run.Resident += needSaveStep / 2 // a small rise: kept in memory, not written at once
+	u.sample()
+	if m, _ = loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile)); m.PeakResidentBytes != 28*giB {
+		t.Fatalf("a rise below needSaveStep is not written by the sampler: %d", m.PeakResidentBytes)
+	}
+	if u.memo.PeakResidentBytes != 28*giB+needSaveStep/2 {
+		t.Fatalf("but it counts at once: %d", u.memo.PeakResidentBytes)
+	}
+
+	u.apply(true, time.Now()) // end of this run: the hold writes the exact values
+	if m, _ = loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile)); m.PeakResidentBytes != 28*giB+needSaveStep/2 {
+		t.Fatalf("the hold writes the exact peak: %d", m.PeakResidentBytes)
+	}
+	want := m.NeedBytes
 	u.apply(false, time.Now())
-	priv = 35 * giB // next run is smaller
+	run.Resident = 10 * giB // next run is short: the router held it before its pages came in
 	u.sample()
 	u.apply(true, time.Now())
-	if m, _ = loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile)); m.NeedBytes != 35*giB {
-		t.Fatalf("the last run's peak becomes the need: %d GiB", m.NeedBytes/giB)
+	if m, _ = loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile)); m.NeedBytes != want {
+		t.Fatalf("a shorter run does not lower the need: %.1f GiB, want %.1f", gib(m.NeedBytes), gib(want))
 	}
 }
 
-// 0.26.1: the router holds the server seconds after it answers, before any sample - the hold itself must remember the
-// models and the need, or the next start learns again.
+// ADR-0092: the RAM that becomes available when the server stops counts too - pages a driver holds for it outside its
+// working set (pinned for the GPU) show only there. Also 0.26.1: the router holds the server seconds after it answers,
+// before any sample - the hold itself must remember the models and the need, or the next start learns again.
 func TestHoldLearnsWithoutSample(t *testing.T) {
+	noSettle(t)
 	up := &fakeOpenAI{}
 	up.set(`{"id":"big-moe","status":{"value":"loaded"}}`)
 	upSrv := httptest.NewServer(up)
@@ -219,12 +249,26 @@ func TestHoldLearnsWithoutSample(t *testing.T) {
 	if u.startHeld(time.Now()) {
 		t.Fatal("setup: nothing remembered, the server starts")
 	}
-	u.private = func() (uint64, bool) { return 41 * giB, true }
+	u.measure = func() (procMem, bool) { return procMem{Resident: 28 * giB, Commit: 52 * giB}, true }
+	reads := 0
+	u.mem = func() (MemFact, bool) { // 20 GiB available before the stop, 52 GiB after: 32 GiB released
+		reads++
+		if reads == 1 {
+			return MemFact{RAMAvailableGiB: 20, RAMTotalGiB: 64}, true
+		}
+		return MemFact{RAMAvailableGiB: 52, RAMTotalGiB: 64}, true
+	}
 	w.poll(context.Background(), time.Now()) // the server answers; no sample has run
 	u.apply(true, time.Now())                // the router holds it at once
 	m, err := loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile))
-	if err != nil || !m.known() || m.NeedBytes != 41*giB {
-		t.Fatalf("the hold remembered models and need: %+v %v", m, err)
+	if err != nil || !m.known() {
+		t.Fatalf("the hold remembered the models: %+v %v", m, err)
+	}
+	if m.ReleasedBytes != 32*giB || m.PeakResidentBytes != 28*giB || m.NeedBytes != withMargin(32*giB) {
+		t.Fatalf("need = the larger of released (32) and resident (28) + margin: %+v", m)
+	}
+	if reads != 3 {
+		t.Fatalf("RAM read before the stop, right after it and after the settle time: %d reads", reads)
 	}
 	sup2 := &Supervisor{children: map[string]*childState{"strata": {}, "ollama": {}}}
 	sup2.Park("ollama")
@@ -232,6 +276,89 @@ func TestHoldLearnsWithoutSample(t *testing.T) {
 	u2.remember(dir)
 	if !u2.startHeld(time.Now()) || !sup2.isHeld("strata") {
 		t.Fatal("next start: held")
+	}
+}
+
+// ADR-0092: a need an older agent stored as commit, or one learned under another start configuration, is discarded and
+// learned again; the models stay, so the agent still starts held.
+func TestNeedRelearned(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, upstreamMemoFile)
+	tags := []json.RawMessage{json.RawMessage(`{"name":"big-moe"}`)}
+	budget16 := []ChildSpec{{Name: "strata", Cmd: "strata.exe", Args: []string{"--resident-budget-gib", "16"}}, {Name: "ollama"}}
+	setup := func(specs []ChildSpec) (*Supervisor, *upstreamHold) {
+		sup := &Supervisor{specs: specs, children: map[string]*childState{"strata": {}, "ollama": {}}}
+		sup.Park("ollama")
+		pct := 90
+		fbCfg := &FallbackCfg{Child: "ollama", Upstream: "http://127.0.0.1:11434", MaxRAMPercent: &pct}
+		u := newUpstreamHold(sup, "strata", fbCfg, newUpstreamSwitch(fbCfg),
+			newOllamaWatcher("http://127.0.0.1:9", upstreamOpenAI, quietLogger()), quietLogger())
+		u.mem = func() (MemFact, bool) { return MemFact{RAMAvailableGiB: 10, RAMTotalGiB: 64}, true }
+		return sup, u
+	}
+
+	// An older agent's file: the commit as need, no measure
+	if err := saveUpstreamMemo(path, upstreamMemo{Tags: tags, NeedBytes: 52 * giB}); err != nil {
+		t.Fatal(err)
+	}
+	sup, u := setup(budget16)
+	u.remember(dir)
+	if u.memo.NeedBytes != 0 || !u.memo.known() || u.ramBlock() != nil {
+		t.Fatalf("commit of an older agent discarded, models kept, no check until learned: %+v", u.memo)
+	}
+	if !u.startHeld(time.Now()) || !sup.isHeld("strata") {
+		t.Fatal("models remembered: still starts held")
+	}
+	m, _ := loadUpstreamMemo(path)
+	if m.NeedBytes != 0 || m.Measure != needMeasure || m.Config != u.config || !m.known() {
+		t.Fatalf("file rewritten with the new measure, models kept: %+v", m)
+	}
+
+	// Learned under budget 16; the same configuration keeps it
+	m.PeakResidentBytes, m.NeedBytes = 28*giB, withMargin(28*giB)
+	if err := saveUpstreamMemo(path, m); err != nil {
+		t.Fatal(err)
+	}
+	_, u = setup(budget16)
+	u.remember(dir)
+	if u.memo.NeedBytes != withMargin(28*giB) || u.ramBlock() == nil {
+		t.Fatalf("same configuration: need kept and checked: %+v", u.memo)
+	}
+
+	// Another budget: learned again
+	budget8 := []ChildSpec{{Name: "strata", Cmd: "strata.exe", Args: []string{"--resident-budget-gib", "8"}}, {Name: "ollama"}}
+	_, u = setup(budget8)
+	u.remember(dir)
+	if u.memo.NeedBytes != 0 || u.memo.PeakResidentBytes != 0 || !u.memo.known() || u.memo.Config != u.config {
+		t.Fatalf("changed configuration: need learned again, models kept: %+v", u.memo)
+	}
+}
+
+// The configuration print changes with every part of how the child starts, and only with that.
+func TestChildConfig(t *testing.T) {
+	print := func(sp ChildSpec) string {
+		sp.Name = "strata"
+		return (&Supervisor{specs: []ChildSpec{{Name: "ollama", Cmd: "ollama.exe"}, sp}}).childConfig("strata")
+	}
+	base := ChildSpec{Cmd: "strata.exe", Args: []string{"serve", "--resident-budget-gib", "16"}, Env: []string{"A=1"}}
+	same := print(base)
+	if same == "" || same != print(base) {
+		t.Fatalf("stable print: %q", same)
+	}
+	changed := []ChildSpec{
+		{Cmd: "strata2.exe", Args: base.Args, Env: base.Env},
+		{Cmd: base.Cmd, Args: []string{"serve", "--resident-budget-gib", "8"}, Env: base.Env},
+		{Cmd: base.Cmd, Args: base.Args, Env: []string{"A=2"}},
+		{Cmd: base.Cmd, Cwd: "work", Args: base.Args, Env: base.Env},
+		{Cmd: base.Cmd, Args: []string{"serve", "--resident-budget-gib"}, Env: []string{"16", "A=1"}}, // moved between lists
+	}
+	for _, sp := range changed {
+		if print(sp) == same {
+			t.Fatalf("change not seen: %+v", sp)
+		}
+	}
+	if (&Supervisor{}).childConfig("strata") != "" {
+		t.Fatal("no such child: empty print")
 	}
 }
 
