@@ -194,7 +194,10 @@ night. During the day the standby Ollama serves and is prewarmed like any Ollama
 
 - Outside the window, a request for the server's model, for instance through a role of its own, still starts it.
 - Outside the window, a server that has been idle for `idle_hold_s` (default 900 s) is held again. Prewarm, residency and
-  the end of a game no longer bring it back.
+  the end of a game no longer bring it back. What counts is the agent's report that the server answers, not the router's
+  last order (router 0.29.1): an agent that restarted without `upstream.json` starts the server once to learn it, and the
+  router holds it again after `idle_hold_s` although its last order was already a hold. A hold counts as under way for
+  60 s after it was sent.
 - Inside the window, a held server is released once the node is free and the standby has been idle for the same time, so a
   deliberate standby request at night does not switch back and forth.
 

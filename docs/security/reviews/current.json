@@ -2,22 +2,17 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "837b279fffd963c280e9eb8b21f664d3aaf01bdc",
-  "change_digest": "8101a963c1fdef8fac3870f43a4264de1ad34031987561b24c195141e35bcc6a",
+  "base_sha": "5e1c61f041b269dd769feee47d93a9f94715cc69",
+  "change_digest": "4dec981c768f55d5d3c60b03f22132938b689911bdf28242d8e5807bfda737d7",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "agent/procmem.go",
-    "agent/procmem_other.go",
-    "agent/procmem_windows.go",
-    "agent/procmem_windows_test.go",
-    "agent/supervisor.go",
-    "agent/upstream_hold.go",
-    "agent/upstream_memo.go",
-    "agent/upstream_start_held_test.go",
-    "docs/adr/0092-upstream-ram-need-is-resident-memory-not-commit.md",
-    "docs/adr/README.md",
     "docs/reference.de.md",
-    "docs/reference.md"
+    "docs/reference.md",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/nodes.py",
+    "router/skirnir_router/openai_node.py",
+    "router/skirnir_router/poll.py",
+    "test/selftest_upstream_window.py"
   ],
   "risk_ids": [
     "TM-08"
@@ -26,35 +21,35 @@
     "B3",
     "B9"
   ],
-  "summary": "Agent 0.35.0 (ADR-0092): the RAM need the agent checks before releasing its held OpenAI-compatible server is now the larger of the peak working set of the server's process tree and the RAM released when a hold stops it, plus 10 %, growing only while the start configuration stays the same; previously the peak commit. Traced: router upstream-release order -> upstreamHold.apply -> ramBlock (the only RAM gate, ADR-0035) -> Supervisor.Release; sampler upstreamHold.sample/observeRun -> Supervisor.childMemory -> procTree.pids (job object) -> procMemory (K32GetProcessMemoryInfo, PROCESS_QUERY_LIMITED_INFORMATION, unchanged access right); hold path -> releasedSince (memoryFact) -> endRun -> saveUpstreamMemo (atomic write in the identity folder, unchanged). No new route, input from the network, privilege, file location or dependency. The gate becomes less strict by design (52.3 GiB commit -> resident need); the review checked that it does not undercount: the release measure covers driver-held pages outside the working set, the need never drops within a configuration, and a 10 % margin covers sampling gaps. upstream.json gains a 64-bit fingerprint of the child's command, folder, arguments and environment; the file lives in the agent's identity folder next to its private key, so it opens no new path to environment values.",
+  "summary": "Router 0.29.1: outside modes.upstream_window the window check held an idle OpenAI-compatible server only if the router's last order was not \"hold\"; a server the agent started unheld after a restart without upstream.json (to learn it) therefore kept running idle and holding RAM. A hold now counts as under way for 60 s after it was sent (new Node.upstream_order_at, set in openai_node.order); after that the agent's report (upstream_state \"\", serving not the standby) decides. Traced: tick_loop -> upstream_window_check -> openai_node.order -> registry.send_ctl {\"t\":\"upstream-hold\"} over the authenticated agent tunnel (unchanged; only to agents reporting upstream_releasable). No new route, input, privilege or configuration key. The change can only send more holds, never more releases; at most one window order per node per WINDOW_ORDER_GAP_S (30 s) and, while the agent still reports the server answering, one hold per 60 s grace; the agent ignores a repeated order.",
   "findings": [
     {
       "id": "TM-08",
-      "evidence": "Replacing commit with a resident measure could undercount the RAM a start takes (the gate exists because a start at 98 % RAM was followed by a bluescreen): pages pinned for the GPU and trimmed from the working set, or allocated by the graphics kernel, are in no per-process counter; and resident memory grows over hours, so a short run (the router often holds the server seconds after it answers) would have lowered a last-run peak.",
-      "resolution": "The need also takes the RAM released when the server's tree ends (read before the stop, right after it and after two seconds, before the standby starts), never drops while the start configuration is the same, and carries a 10 % margin. Tests: TestHoldLearnsWithoutSample (release larger than the working set sets the need), TestSampleLearnsUpstream (commit ignored, a shorter run does not lower the need), TestNeedRelearned, TestChildConfig, TestProcMemory (real call: committed-only memory is not resident).",
+      "evidence": "Pre-existing gap fixed here: an idle server started unheld by the agent was never held outside the window because the router keyed on its own remembered order instead of the agent's report; observed running idle for hours at about 74 % RAM on a desktop node, which keeps the RAM gate of ADR-0037/ADR-0092 from letting anything else in and, on that node, has caused instability before.",
+      "resolution": "upstream_window_check keys on the agent's report after HOLD_REPORT_GRACE_S. Test: selftest_upstream_window.py reproduces it (last order hold an hour ago, agent reports running, idle > idle_hold_s outside the window -> hold sent; failed before the fix), plus the cases a recent use (no hold), a hold sent seconds ago (no second hold) and a remembered order without a time (hold).",
       "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "cd agent && gofmt -l . && go vet ./... && GOOS=linux go vet ./... && go test ./... (Windows)",
+      "command": "python test/selftest_upstream_window.py",
       "result": "passed",
-      "evidence": "gofmt clean, vet clean on both targets, ok github.com/psewar/skirnir/agent 17.3s"
+      "evidence": "0 failures (2 failures before the fix in poll.py)"
     },
     {
-      "command": "cd agent && go test ./... (Linux, WSL, go1.27.3, under a systemd memory scope)",
+      "command": "python test/selftest_openai_node_release.py; selftest_standby_switch.py; selftest_switch_waits_for_gap.py; selftest_upstream_blocked.py",
       "result": "passed",
-      "evidence": "ok github.com/psewar/skirnir/agent 7.6s"
+      "evidence": "ALLE OK; 0 failures; 0 failures; 0 failures"
     },
     {
-      "command": "python test/check_adr_index.py; python test/check_pinned_references.py; ruff check .",
+      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/selftest_control_flow.py && python test/check_control_flow.py",
       "result": "passed",
-      "evidence": "ADR index ok: 92 ADRs; Pinned references: 0 finding(s); All checks passed"
+      "evidence": "All checks passed; configuration ok; control flow ok: 0 legacy findings"
     },
     {
-      "command": "Node check: one run of the server on a Windows node with agent 0.35.0, then compare upstream.json with the working-set peak and the RAM released at the stop",
+      "command": "python test/run_tests.py",
       "result": "not_run",
-      "evidence": "Needs the maintainer's rollout of agent 0.35.0; the PR describes the check."
+      "evidence": "End-to-end suite runs nightly in CI; the change is limited to the window check, covered by its self-test."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -68,8 +63,7 @@
     }
   ],
   "limitations": [
-    "On the first start of agent 0.35.0 a need stored by an older agent (commit) is discarded, and after a change of the server's start configuration the need is learned again; until the next run is measured, a release has no RAM check, as on the first start since ADR-0037. A first short run learns less than a long one until a longer run raised it.",
-    "The release measure is read from system-wide available RAM and is blurred by other programs that change their memory in the same seconds; a drop (a game starting) is covered by the resident peak, a rise can only overstate.",
-    "How the GPU driver accounts pinned host memory on the node was not measured directly; the server was stopped during the probe. The node check in the PR compares released_bytes with peak_resident_bytes to show it."
+    "Not checked against a live node; the reproduction is the self-test with the agent's report as observed.",
+    "The 60 s grace is a fixed constant; an agent that needs longer to report a hold would receive one repeated hold, which it ignores."
   ]
 }
