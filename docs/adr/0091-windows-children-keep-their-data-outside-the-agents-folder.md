@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-12
 decision-makers: operator
 ---
@@ -52,7 +52,7 @@ and fails for programs that resolve them (Ollama, any Go program, others that ca
 
 ## Decision Outcome
 
-Proposed: **option 1.**
+Chosen (accepted by the operator 2026-11-13): **option 1.**
 
 * Option 2 is rejected: every child, and every Windows service running as LOCAL SERVICE, would see the names of the
   configuration, key and identity files, and the agent's folder would no longer be closed to them.
