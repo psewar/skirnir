@@ -2,22 +2,12 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "730b334a15bb8330805531bb5b6ce30e4bff5c45",
-  "change_digest": "7f7ec0c9a7ed03e24a119671a111f3943f6ab082dc2492d8485107227cb8f6e9",
+  "base_sha": "c232c2366bba6f6cb82477d806fdcc10f18b9de2",
+  "change_digest": "0c506b81ce6684957e26c1f30cb77f946b06567e89370d61d14fdf73ab5627d2",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "agent/procmem.go",
-    "agent/procmem_other.go",
-    "agent/procmem_windows.go",
-    "agent/procmem_windows_test.go",
-    "agent/supervisor.go",
-    "agent/upstream_hold.go",
-    "agent/upstream_memo.go",
-    "agent/upstream_start_held_test.go",
     "docs/adr/0092-upstream-ram-need-is-resident-memory-not-commit.md",
-    "docs/adr/README.md",
-    "docs/reference.de.md",
-    "docs/reference.md"
+    "docs/adr/README.md"
   ],
   "risk_ids": [
     "TM-08"
@@ -26,35 +16,25 @@
     "B3",
     "B9"
   ],
-  "summary": "Agent 0.35.1 (ADR-0092 revised before acceptance): the RAM need checked before releasing the held OpenAI-compatible server is the larger of the peak private working set of the server's job (PROCESS_MEMORY_COUNTERS_EX2.PrivateWorkingSetSize, K32GetProcessMemoryInfo with PROCESS_QUERY_LIMITED_INFORMATION as before) and the RAM released at a hold's stop minus the growth of the system cache (K32GetPerformanceInfo, no handle, no privilege), plus 10 %, growing only within one start configuration. Traced: router upstream-release order -> upstreamHold.apply -> ramBlock -> Supervisor.Release; sampler -> observeRun -> Supervisor.childMemory -> procTree.pids -> procMemory; hold -> snapRAM -> releasedSince -> endRun -> saveUpstreamMemo (atomic, identity folder, unchanged). No new route, network input, privilege, file location, configuration key or dependency. The gate becomes less strict on purpose (file pages the server read no longer count). The review checked the undercount side: pages locked in the working set are private and count; pages a driver holds outside the working set appear in the release, which subtracts only cache growth (standby list plus system working set), so freed private and driver-held memory remains; a system without EX2 counters falls back to the whole working set; the need never drops within a configuration and carries a margin.",
+  "summary": "Documentation only: ADR-0092 (the upstream's RAM need counts only memory the system cannot take back) accepted by the operator after the node check on 2026-11-14; the node check result is added to its confirmation; ADR index regenerated; the CHANGELOG row of the published release v0.34.1 names ADR-0092 accepted. No code, configuration or version change.",
   "findings": [
     {
       "id": "TM-08",
-      "evidence": "Counting only private memory could undercount the RAM a start takes if memory pinned for the GPU were neither private in the working set nor freed to the free list at the stop, or if the system cache grew at the stop for reasons other than the server's file pages (another program reading files in the same two seconds), which would lower the release measure.",
-      "resolution": "Pinned pages locked in the process are private working set (counted by the sampler); pages a driver held outside it return to the free list at the stop and stay in the release measure; a coincidental cache growth can only lower the release, which the private peak bounds from below; the need never drops within a configuration and has a 10 % margin. Tests: TestProcMemory, TestProcMemoryMappedFile (real calls: mapped-file pages raise the working set but not the private one), TestSystemCacheBytes, TestHoldLearnsWithoutSample (release minus cache growth sets the need), TestReleasedSince (Linux without cache reading; falling RAM counts nothing), TestSampleLearnsUpstream, TestNeedRelearned (commit and working-set needs discarded).",
+      "evidence": "ADR-0092 was revised in #148 (agent 0.35.1) and left proposed. Its confirmation asked for a node check: one run of the server under a resident budget, with the learned need below the whole working set and far below the commit, and the review's limitation that RAM in use could rise above the limit through file pages the server reads.",
+      "resolution": "Node check on a Windows node with 64 GiB RAM and agent 0.35.1 (2026-11-14), resident budget 8 GiB, other workloads running, prompts up to 54k tokens through the router: the agent discarded the commit-based need (55.7 GiB) on update; the run logged private peak 15.0 GiB, released at the stop 16.6 GiB (0.1 GiB into the cache), whole working set 15.1 GiB, commit 43.0 GiB, need 18.3 GiB; upstream.json measure private. RAM in use peaked at 71 %, the page file wrote nothing, so the file-page limitation did not show in this run. The router held the server again after idle_hold_s.",
       "disposition": "fixed"
     }
   ],
   "tests": [
-    {
-      "command": "cd agent && gofmt -l . && go vet . && GOOS=linux go vet . && go test . (Windows)",
-      "result": "passed",
-      "evidence": "gofmt clean, vet clean on both targets, ok github.com/psewar/skirnir/agent 17.6s; TestProcMemoryMappedFile and TestSystemCacheBytes pass with the real calls"
-    },
-    {
-      "command": "cd agent && go test ./... (Linux, WSL, go1.27.3, under a systemd memory scope)",
-      "result": "passed",
-      "evidence": "ok github.com/psewar/skirnir/agent 7.6s"
-    },
     {
       "command": "python test/check_adr_index.py",
       "result": "passed",
       "evidence": "ADR index ok: 92 ADRs"
     },
     {
-      "command": "Node check: one run of the server with a resident budget of 8 on a Windows node with agent 0.35.1, then compare the agent log line and upstream.json with Task Manager",
-      "result": "not_run",
-      "evidence": "Follows the maintainer's merge and rollout; described in the PR."
+      "command": "Node check on the Windows node: agent log line 'run of strata ended', upstream.json, RAM in use during the run",
+      "result": "passed",
+      "evidence": "peak private working set 15.0 GiB, released 16.6 GiB (+0.1 GiB cache), working set 15.1 GiB, commit 43.0 GiB, RAM need 18.3 GiB; measure private; RAM in use peak 71.4 %, page writes 0."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -68,8 +48,6 @@
     }
   ],
   "limitations": [
-    "RAM in use as the operating system shows it can rise above max_ram_percent through file pages the server reads; the check bounds only memory the system cannot take back. Whether the system trims those pages fast enough under pressure on the node is shown by the node check, not by a test.",
-    "On the first start of agent 0.35.1 a need measured another way is discarded; until the next run is measured a release has no RAM check, as on the first start since ADR-0037.",
-    "The release measure is read from system-wide counters and is blurred by other programs in the same seconds."
+    "One node and one budget measured; RAM in use stayed far from max_ram_percent, so how fast the system trims the server's file pages under real pressure is still not observed."
   ]
 }
