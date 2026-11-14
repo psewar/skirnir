@@ -167,8 +167,9 @@ func noSettle(t *testing.T) {
 // withMargin: the need from a measured peak (needMarginPercent).
 func withMargin(peak uint64) uint64 { return peak + peak*needMarginPercent/100 }
 
-// ADR-0092: while the upstream runs, the sampler remembers its models and the peak of its resident memory (not its
-// commit); the need is that peak plus the margin and only grows - a later, shorter run does not lower it.
+// ADR-0092 (agent 0.35.1): while the upstream runs, the sampler remembers its models and the peak of its private working
+// set - not the whole working set with the expert-file pages it read, not its commit; the need is that peak plus the
+// margin and only grows - a later, shorter run does not lower it.
 func TestSampleLearnsUpstream(t *testing.T) {
 	noSettle(t)
 	up := &fakeOpenAI{}
@@ -184,43 +185,45 @@ func TestSampleLearnsUpstream(t *testing.T) {
 	w := newOllamaWatcher(upSrv.URL, upstreamOpenAI, quietLogger())
 	u := newUpstreamHold(sup, "strata", fbCfg, newUpstreamSwitch(fbCfg), w, quietLogger())
 	u.remember(dir)
-	run := procMem{Resident: 20 * giB, Commit: 52 * giB} // commit far above what is resident, as with a RAM budget
+	// As measured with a resident budget of 8: commit far above everything, the working set grows with read expert pages
+	run := procMem{Private: 12 * giB, Resident: 20 * giB, Commit: 52 * giB}
 	u.measure = func() (procMem, bool) { return run, true }
 	u.mem = func() (MemFact, bool) { return MemFact{RAMAvailableGiB: 60, RAMTotalGiB: 64}, true } // room for the release
+	u.cache = func() (uint64, bool) { return 10 * giB, true }
 
 	w.poll(context.Background(), time.Now())
 	u.sample()
-	run.Resident = 28 * giB // pages come in while it runs
+	run.Private, run.Resident = 14*giB, 29*giB // long prompts: some private memory more, 15 GiB of expert pages read
 	u.sample()
 	m, err := loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile))
 	if err != nil || !m.known() || !strings.Contains(string(m.Tags[0]), "big-moe") {
 		t.Fatalf("learned while running: models saved: %+v %v", m, err)
 	}
-	if m.NeedBytes != withMargin(28*giB) || m.PeakResidentBytes != 28*giB || m.PeakCommitBytes != 52*giB ||
-		m.Measure != needMeasure || m.Config != u.config {
-		t.Fatalf("need = resident peak + margin, commit only for comparison: %+v", m)
+	if m.NeedBytes != withMargin(14*giB) || m.PeakPrivateBytes != 14*giB || m.PeakResidentBytes != 29*giB ||
+		m.PeakCommitBytes != 52*giB || m.Measure != needMeasure || m.Config != u.config {
+		t.Fatalf("need = private peak + margin; working set and commit only for comparison: %+v", m)
 	}
 	tags, _ := w.UpstreamTags()
 	if !sameRaw(tags, m.Tags) {
 		t.Fatalf("saved models byte-equal to the watcher's, else every sample rewrites the file: %s vs %s", joinRaw(tags), joinRaw(m.Tags))
 	}
 
-	run.Resident += needSaveStep / 2 // a small rise: kept in memory, not written at once
+	run.Private += needSaveStep / 2 // a small rise: kept in memory, not written at once
 	u.sample()
-	if m, _ = loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile)); m.PeakResidentBytes != 28*giB {
-		t.Fatalf("a rise below needSaveStep is not written by the sampler: %d", m.PeakResidentBytes)
+	if m, _ = loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile)); m.PeakPrivateBytes != 14*giB {
+		t.Fatalf("a rise below needSaveStep is not written by the sampler: %d", m.PeakPrivateBytes)
 	}
-	if u.memo.PeakResidentBytes != 28*giB+needSaveStep/2 {
-		t.Fatalf("but it counts at once: %d", u.memo.PeakResidentBytes)
+	if u.memo.PeakPrivateBytes != 14*giB+needSaveStep/2 {
+		t.Fatalf("but it counts at once: %d", u.memo.PeakPrivateBytes)
 	}
 
 	u.apply(true, time.Now()) // end of this run: the hold writes the exact values
-	if m, _ = loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile)); m.PeakResidentBytes != 28*giB+needSaveStep/2 {
-		t.Fatalf("the hold writes the exact peak: %d", m.PeakResidentBytes)
+	if m, _ = loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile)); m.PeakPrivateBytes != 14*giB+needSaveStep/2 {
+		t.Fatalf("the hold writes the exact peak: %d", m.PeakPrivateBytes)
 	}
 	want := m.NeedBytes
 	u.apply(false, time.Now())
-	run.Resident = 10 * giB // next run is short: the router held it before its pages came in
+	run.Private = 6 * giB // next run is short: the router held it before its pages came in
 	u.sample()
 	u.apply(true, time.Now())
 	if m, _ = loadUpstreamMemo(filepath.Join(dir, upstreamMemoFile)); m.NeedBytes != want {
@@ -229,8 +232,9 @@ func TestSampleLearnsUpstream(t *testing.T) {
 }
 
 // ADR-0092: the RAM that becomes available when the server stops counts too - pages a driver holds for it outside its
-// working set (pinned for the GPU) show only there. Also 0.26.1: the router holds the server seconds after it answers,
-// before any sample - the hold itself must remember the models and the need, or the next start learns again.
+// working set (pinned for the GPU) show only there - but not the part that went to the file cache (the expert pages it
+// read are available, not freed). Also 0.26.1: the router holds the server seconds after it answers, before any sample -
+// the hold itself must remember the models and the need, or the next start learns again.
 func TestHoldLearnsWithoutSample(t *testing.T) {
 	noSettle(t)
 	up := &fakeOpenAI{}
@@ -249,14 +253,21 @@ func TestHoldLearnsWithoutSample(t *testing.T) {
 	if u.startHeld(time.Now()) {
 		t.Fatal("setup: nothing remembered, the server starts")
 	}
-	u.measure = func() (procMem, bool) { return procMem{Resident: 28 * giB, Commit: 52 * giB}, true }
-	reads := 0
-	u.mem = func() (MemFact, bool) { // 20 GiB available before the stop, 52 GiB after: 32 GiB released
+	u.measure = func() (procMem, bool) { return procMem{Private: 12 * giB, Resident: 28 * giB, Commit: 52 * giB}, true }
+	reads, cacheReads := 0, 0
+	u.mem = func() (MemFact, bool) { // 20 GiB available before the stop, 52 GiB after: 32 GiB more available
 		reads++
 		if reads == 1 {
 			return MemFact{RAMAvailableGiB: 20, RAMTotalGiB: 64}, true
 		}
 		return MemFact{RAMAvailableGiB: 52, RAMTotalGiB: 64}, true
+	}
+	u.cache = func() (uint64, bool) { // of those, 15 GiB went to the standby list (expert pages): 17 GiB freed for good
+		cacheReads++
+		if cacheReads == 1 {
+			return 10 * giB, true
+		}
+		return 25 * giB, true
 	}
 	w.poll(context.Background(), time.Now()) // the server answers; no sample has run
 	u.apply(true, time.Now())                // the router holds it at once
@@ -264,11 +275,11 @@ func TestHoldLearnsWithoutSample(t *testing.T) {
 	if err != nil || !m.known() {
 		t.Fatalf("the hold remembered the models: %+v %v", m, err)
 	}
-	if m.ReleasedBytes != 32*giB || m.PeakResidentBytes != 28*giB || m.NeedBytes != withMargin(32*giB) {
-		t.Fatalf("need = the larger of released (32) and resident (28) + margin: %+v", m)
+	if m.ReleasedBytes != 17*giB || m.ReleasedToCacheBytes != 15*giB || m.PeakPrivateBytes != 12*giB || m.NeedBytes != withMargin(17*giB) {
+		t.Fatalf("need = the larger of released without cache (17) and private (12) + margin: %+v", m)
 	}
-	if reads != 3 {
-		t.Fatalf("RAM read before the stop, right after it and after the settle time: %d reads", reads)
+	if reads != 3 || cacheReads != 3 {
+		t.Fatalf("RAM and cache read before the stop, right after it and after the settle time: %d/%d reads", reads, cacheReads)
 	}
 	sup2 := &Supervisor{children: map[string]*childState{"strata": {}, "ollama": {}}}
 	sup2.Park("ollama")
@@ -314,8 +325,20 @@ func TestNeedRelearned(t *testing.T) {
 		t.Fatalf("file rewritten with the new measure, models kept: %+v", m)
 	}
 
+	// Agent 0.35.0's file: the whole working set as need (measure "resident") - also discarded
+	old := m
+	old.Measure, old.PeakResidentBytes, old.NeedBytes = "resident", 29*giB, withMargin(29*giB)
+	if err := saveUpstreamMemo(path, old); err != nil {
+		t.Fatal(err)
+	}
+	_, u = setup(budget16)
+	u.remember(dir)
+	if u.memo.NeedBytes != 0 || u.memo.PeakResidentBytes != 0 || u.memo.Measure != needMeasure || !u.memo.known() {
+		t.Fatalf("working-set need of agent 0.35.0 discarded, models kept: %+v", u.memo)
+	}
+
 	// Learned under budget 16; the same configuration keeps it
-	m.PeakResidentBytes, m.NeedBytes = 28*giB, withMargin(28*giB)
+	m.PeakPrivateBytes, m.NeedBytes = 28*giB, withMargin(28*giB)
 	if err := saveUpstreamMemo(path, m); err != nil {
 		t.Fatal(err)
 	}
@@ -329,8 +352,36 @@ func TestNeedRelearned(t *testing.T) {
 	budget8 := []ChildSpec{{Name: "strata", Cmd: "strata.exe", Args: []string{"--resident-budget-gib", "8"}}, {Name: "ollama"}}
 	_, u = setup(budget8)
 	u.remember(dir)
-	if u.memo.NeedBytes != 0 || u.memo.PeakResidentBytes != 0 || !u.memo.known() || u.memo.Config != u.config {
+	if u.memo.NeedBytes != 0 || u.memo.PeakPrivateBytes != 0 || !u.memo.known() || u.memo.Config != u.config {
 		t.Fatalf("changed configuration: need learned again, models kept: %+v", u.memo)
+	}
+}
+
+// releasedSince: the rise of available RAM minus the growth of the file cache; without a readable cache (Linux) the
+// whole rise; a shrinking cache or falling RAM count as nothing.
+func TestReleasedSince(t *testing.T) {
+	noSettle(t)
+	// Three snapshots: before the stop, right after it, after the settle time (snapRAM reads RAM, then the cache)
+	avail, cache, cacheOK := []float64{20, 50, 52}, []uint64{10 * giB, 20 * giB, 21 * giB}, true
+	i := 0
+	u := &upstreamHold{}
+	u.mem = func() (MemFact, bool) { return MemFact{RAMAvailableGiB: avail[i], RAMTotalGiB: 64}, true }
+	u.cache = func() (uint64, bool) { v := cache[i]; i++; return v, cacheOK }
+	run := func() release {
+		i = 0
+		before, _ := u.snapRAM()
+		return u.releasedSince(before)
+	}
+	if r := run(); r.Hard != 21*giB || r.ToCache != 11*giB {
+		t.Fatalf("Windows: 32 GiB more available, 11 GiB of it into the cache -> 21 GiB freed: %+v", r)
+	}
+	cacheOK = false
+	if r := run(); r.Hard != 32*giB || r.ToCache != 0 {
+		t.Fatalf("no cache reading (Linux): the whole rise counts: %+v", r)
+	}
+	cacheOK, avail, cache = true, []float64{20, 18, 19}, []uint64{10 * giB, 5 * giB, 5 * giB}
+	if r := run(); r.Hard != 0 || r.ToCache != 0 {
+		t.Fatalf("less RAM available and a smaller cache: nothing released: %+v", r)
 	}
 }
 

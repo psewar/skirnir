@@ -13,10 +13,11 @@ import (
 //   - its models, as the watcher saw them while the server answered. With them the agent can start with the upstream
 //     held and still list its models, so the router can release it for a request without the server ever running.
 //   - its RAM need. Before a release the agent checks it against the free RAM (upstream_hold.go ramBlock). Since agent
-//     0.35.0 (ADR-0092) the need is the larger of the peak resident memory (working set) of the server's process tree and
-//     the RAM that became available when the server stopped, plus needMarginPercent; it only grows while the server's
-//     start configuration stays the same. Agents 0.26.0 to 0.34.x stored the peak private bytes (commit) of the last run,
-//     which overstated the need; such a value (measure "") is discarded and learned again.
+//     0.35.1 (ADR-0092) the need is the larger of the peak private working set of the server's process tree and the RAM
+//     that became available when the server stopped, without what went to the file cache, plus needMarginPercent; it only
+//     grows while the server's start configuration stays the same. Older measures are discarded and learned again:
+//     agents 0.26.0 to 0.34.x stored the peak commit (measure ""), agent 0.35.0 the whole working set ("resident") - both
+//     counted memory the system can take back or never used.
 //
 // Without the file (first start after the update, or a new upstream) the agent starts the upstream once as before and
 // learns both. Trigger 2026-10-24: after every restart the agent started Strata (~38 GB into RAM) although the router
@@ -24,19 +25,22 @@ import (
 type upstreamMemo struct {
 	Tags      []json.RawMessage `json:"tags"`
 	NeedBytes uint64            `json:"need_bytes"` // what the RAM check uses; 0 = not learned yet, no check
-	// Since 0.35.0: how the need was measured and what it comes from
-	Measure           string    `json:"measure,omitempty"`             // needMeasure; "" = commit of an older agent
-	Config            string    `json:"config,omitempty"`              // Supervisor.childConfig of the upstream when learned
-	PeakResidentBytes uint64    `json:"peak_resident_bytes,omitempty"` // highest working set of the tree, sampled
-	ReleasedBytes     uint64    `json:"released_bytes,omitempty"`      // most RAM that became available at a stop
-	PeakCommitBytes   uint64    `json:"peak_commit_bytes,omitempty"`   // highest commit, for comparison only
-	Updated           time.Time `json:"updated"`
+	// How the need was measured and what it comes from (0.35.0; the private fields and measure "private" since 0.35.1)
+	Measure          string `json:"measure,omitempty"`                        // needMeasure; "" = commit of an older agent
+	Config           string `json:"config,omitempty"`                         // Supervisor.childConfig of the upstream when learned
+	PeakPrivateBytes uint64 `json:"peak_private_working_set_bytes,omitempty"` // highest private working set of the tree
+	ReleasedBytes    uint64 `json:"released_bytes,omitempty"`                 // most RAM freed at a stop, without file cache
+	// For comparison only: they do not enter the need
+	PeakResidentBytes    uint64    `json:"peak_working_set_bytes,omitempty"`  // highest whole working set of the tree
+	ReleasedToCacheBytes uint64    `json:"released_to_cache_bytes,omitempty"` // file cache that grew at that stop
+	PeakCommitBytes      uint64    `json:"peak_commit_bytes,omitempty"`       // highest commit
+	Updated              time.Time `json:"updated"`
 }
 
 const upstreamMemoFile = "upstream.json"
 
 // needMeasure names the measure of NeedBytes (ADR-0092). A memo with another measure has its need learned again.
-const needMeasure = "resident"
+const needMeasure = "private"
 
 // needMarginPercent: added to the measured peak. The sampler looks every 30 s and misses short peaks (loading), and the
 // RAM released at a stop shows the end of a run, not its top.
@@ -45,15 +49,17 @@ const needMarginPercent = 10
 // known: enough to start held - the router needs the models to release the upstream for a request.
 func (m upstreamMemo) known() bool { return len(m.Tags) > 0 }
 
-// need: the RAM need from the measured peaks - the larger of resident and released, plus the margin. 0 = nothing measured.
+// need: the RAM need from the measured peaks - the larger of the private working set and the RAM released, plus the
+// margin. 0 = nothing measured.
 func (m upstreamMemo) need() uint64 {
-	p := max(m.PeakResidentBytes, m.ReleasedBytes)
+	p := max(m.PeakPrivateBytes, m.ReleasedBytes)
 	return p + p*needMarginPercent/100
 }
 
 // forget drops what was learned about the RAM need (not the models): the next run learns it again.
 func (m *upstreamMemo) forget(config string) {
-	m.NeedBytes, m.PeakResidentBytes, m.ReleasedBytes, m.PeakCommitBytes = 0, 0, 0, 0
+	m.NeedBytes, m.PeakPrivateBytes, m.ReleasedBytes = 0, 0, 0
+	m.PeakResidentBytes, m.ReleasedToCacheBytes, m.PeakCommitBytes = 0, 0, 0
 	m.Measure, m.Config = needMeasure, config
 }
 

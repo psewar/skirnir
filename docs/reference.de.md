@@ -145,31 +145,38 @@ der Agent lernt beides. Vor jedem Start prüft der Agent, dass belegter RAM plus
 gesamt, Bedarf, Grenze), bis wieder Platz ist. Der Router bietet dann keinen Freigabe-Kandidaten an und antwortet mit
 `memory_pressure` samt diesen Zahlen; Vorladen und Fenster senden so lange keine Freigabe.
 
-**Was der RAM-Bedarf ist** (Agent 0.35.0, ADR-0092): der größere von zwei Messwerten, plus 10 %. Der eine ist das höchste
-Working Set des Prozessbaums des Servers (Seiten im RAM, private und aus Dateien), alle 30 s während er läuft und noch einmal
-vor dem Anhalten gemessen (nur unter Windows, wo der Agent den Baum auflistet). Der andere ist der RAM, der frei wird, wenn
-das Anhalten den Server stoppt, gelesen gleich nach dem Ende seines Prozessbaums und noch einmal zwei Sekunden später; er
-erfasst auch Seiten, die ein Treiber für den Server außerhalb seines Working Sets hielt, etwa für die GPU festgehaltenen
-Speicher. Der Bedarf wächst nur, solange die Startkonfiguration des Servers (Befehl, Arbeitsordner, Argumente, Umgebung)
-gleich bleibt, denn der belegte Speicher wächst über Stunden, und ein kurzer Lauf würde ihn sonst senken; eine geänderte
-Konfiguration, etwa ein anderes RAM-Budget, lässt den Bedarf neu lernen. Bis Agent 0.34.x war der Bedarf der höchste private
-Speicher (Commit), der auch reservierten Speicher zählt, der nie im RAM liegt; ein solcher Wert wird beim ersten Start von
-0.35.0 verworfen, und der nächste Lauf wird neu gemessen, bis dahin ohne RAM-Prüfung. Die Datei hält fest, wie der Bedarf
-zustande kam:
+**Was der RAM-Bedarf ist** (Agent 0.35.1, ADR-0092): der größere von zwei Messwerten, plus 10 %. Der eine ist das
+höchste private Working Set des Prozessbaums des Servers (seine privaten Seiten im RAM, einschließlich des für die GPU
+festgehaltenen Speichers), alle 30 s während er läuft und noch einmal vor dem Anhalten gemessen (nur unter Windows, wo
+der Agent den Baum auflistet). Dateiseiten, die der Server gelesen hat, etwa Teile seiner Expertendatei unter einem
+RAM-Budget, zählen nicht: Das System holt sie sich bei Bedarf zurück. Der andere ist der RAM, der frei wird, wenn das
+Anhalten den Server stoppt, ohne den Teil, der in den Dateicache ging, gelesen gleich nach dem Ende seines Prozessbaums
+und noch einmal zwei Sekunden später; er erfasst auch Seiten, die ein Treiber für den Server außerhalb seines Working
+Sets hielt. Der Bedarf wächst nur, solange die Startkonfiguration des Servers (Befehl, Arbeitsordner, Argumente,
+Umgebung) gleich bleibt, denn der Speicher wächst über Stunden, und ein kurzer Lauf würde ihn sonst senken; eine geänderte
+Konfiguration, etwa ein anderes RAM-Budget, lässt den Bedarf neu lernen. Ein anders gemessener Bedarf wird beim ersten
+Start von 0.35.1 verworfen, und der nächste Lauf wird neu gemessen, bis dahin ohne RAM-Prüfung: Bis Agent 0.34.x war es
+der höchste private Speicher (Commit), der auch reservierten Speicher zählt, der nie im RAM liegt, und in 0.35.0 das ganze
+Working Set, das auch die Dateiseiten zählt. Die Datei hält fest, wie der Bedarf zustande kam:
 
 | Feld | Bedeutung |
 |---|---|
 | `need_bytes` | was die RAM-Prüfung verwendet; 0 = noch nicht gelernt, keine Prüfung |
-| `measure` | `resident`; fehlt = Commit eines älteren Agenten, verworfen |
+| `measure` | `private`; fehlt (Commit) oder `resident` (Working Set) = Maß eines älteren Agenten, verworfen |
 | `config` | Fingerabdruck der Startkonfiguration des Servers beim Lernen |
-| `peak_resident_bytes` | höchstes Working Set des Prozessbaums |
-| `released_bytes` | größter RAM, der beim Stoppen des Servers frei wurde |
-| `peak_commit_bytes` | höchster privater Speicher, nur zum Vergleich |
+| `peak_private_working_set_bytes` | höchstes privates Working Set des Prozessbaums |
+| `released_bytes` | größter RAM, der beim Stoppen des Servers frei wurde, ohne den Dateicache |
+| `peak_working_set_bytes` | höchstes ganzes Working Set, nur zum Vergleich |
+| `released_to_cache_bytes` | Dateicache, der bei diesem Stoppen wuchs, nur zum Vergleich |
+| `peak_commit_bytes` | höchster privater Speicher (Commit), nur zum Vergleich |
 
-Jedes Anhalten protokolliert diese Werte (`upstream: run of <child> ended - peak resident ..., released at the stop ...,
-peak commit ...; RAM need ...`). Eine Änderung, die die Startkonfiguration nicht zeigt, etwa ein ausgetauschtes Modell hinter
-derselben Befehlszeile, behält den höheren Bedarf; `upstream.json` löschen, damit er neu gelernt wird. Unter Linux ergibt
-allein der beim Stoppen frei gewordene RAM den Bedarf (`MemAvailable`).
+Jedes Anhalten protokolliert diese Werte (`upstream: run of <child> ended - peak private working set ..., released at the
+stop ... (plus ... into the file cache); for comparison peak working set ..., peak commit ...; RAM need ...`). Während der
+Server seine Expertendatei liest, kann der belegte RAM über `max_ram_percent` steigen: Die Prüfung begrenzt den
+Speicher, den das System nicht zurückholen kann, nicht die als belegt angezeigten Dateiseiten. Eine Änderung, die die
+Startkonfiguration nicht zeigt, etwa ein ausgetauschtes Modell hinter derselben Befehlszeile, behält den höheren Bedarf;
+`upstream.json` löschen, damit er neu gelernt wird. Unter Linux ergibt allein der beim Stoppen frei gewordene RAM den
+Bedarf (der Anstieg von `MemAvailable`, der den Seitencache auslässt).
 
 **Für eine Anfrage auf den Ersatz umschalten** (Router 0.15.0, Agent 0.25.0): Der Agent meldet die Modelle des Ersatzes auch,
 solange dieser gestoppt ist (Heartbeat `standby_models`, gelesen aus seinem Modellspeicher `OLLAMA_MODELS/manifests`). Eine

@@ -268,9 +268,10 @@ func (s *Supervisor) childrenVRAM() map[string]int {
 	return out
 }
 
-// childMemory: resident and committed memory of a running child's process tree, summed (agent 0.35.0, ADR-0092: the RAM
-// need of the OpenAI-compatible upstream, upstream_hold.go). Pages two members share count twice - on the safe side.
-// false = not running or not measurable (the tree is listed only on Windows).
+// childMemory: private working set, working set and commit of a running child's process tree, summed (agent 0.35.0/0.35.1,
+// ADR-0092: the RAM need of the OpenAI-compatible upstream, upstream_hold.go). Shared pages are not in the private working
+// set; in the working set two members sharing a page count it twice. false = not running or not measurable (the tree is
+// listed only on Windows).
 func (s *Supervisor) childMemory(name string) (procMem, bool) {
 	s.mu.Lock()
 	var t *procTree
@@ -285,6 +286,7 @@ func (s *Supervisor) childMemory(name string) (procMem, bool) {
 	n := 0
 	for _, pid := range t.pids() {
 		if m, ok := procMemory(pid); ok {
+			sum.Private += m.Private
 			sum.Resident += m.Resident
 			sum.Commit += m.Commit
 			n++
