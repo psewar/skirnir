@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-14
 decision-makers: operator
 ---
@@ -59,7 +59,7 @@ counts these pages would keep it from starting there.
 
 ## Decision Outcome
 
-Chosen option: "Peak private working set together with the RAM released at the stop without the file cache", because it
+Chosen option (accepted by the operator 2026-11-14, after the node check): "Peak private working set together with the RAM released at the stop without the file cache", because it
 counts what the server holds for itself, inside its working set and outside it, and nothing the system can take back or
 never handed out.
 
@@ -127,6 +127,10 @@ never handed out.
   log line `run of <child> ended` gives the private peak, the release with the part that went to the cache, and the
   resulting need, below the whole working set and far below the commit. If the release is much larger than the private
   peak, the server holds pinned memory outside its working set and the need rightly follows the release.
+  Done on 2026-11-14 on the Windows node with 64 GiB RAM (agent 0.35.1, resident budget 8 GiB, other workloads
+  running, prompts up to 54k tokens): private peak 15.0 GiB, released at the stop 16.6 GiB (0.1 GiB of it into the
+  cache), whole working set 15.1 GiB, commit 43.0 GiB, need 18.3 GiB; the need learned from commit before was
+  55.7 GiB. RAM in use peaked at 71 %.
 
 ## Pros and Cons of the Options
 
