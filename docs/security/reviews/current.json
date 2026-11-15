@@ -2,39 +2,36 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "c232c2366bba6f6cb82477d806fdcc10f18b9de2",
-  "change_digest": "0c506b81ce6684957e26c1f30cb77f946b06567e89370d61d14fdf73ab5627d2",
+  "base_sha": "8b6fefcbd6918391e7133a78e255baff02b38033",
+  "change_digest": "14cd10aa5dec871ccd56988c3c866c0599059564d3ab42890891d7f3bc194307",
   "reviewed_paths": [
-    "CHANGELOG.md",
-    "docs/adr/0092-upstream-ram-need-is-resident-memory-not-commit.md",
-    "docs/adr/README.md"
+    "monitoring/compose.yaml"
   ],
   "risk_ids": [
-    "TM-08"
+    "TM-16"
   ],
   "boundaries": [
-    "B3",
     "B9"
   ],
-  "summary": "Documentation only: ADR-0092 (the upstream's RAM need counts only memory the system cannot take back) accepted by the operator after the node check on 2026-11-14; the node check result is added to its confirmation; ADR index regenerated; the CHANGELOG row of the published release v0.34.1 names ADR-0092 accepted. No code, configuration or version change.",
+  "summary": "Dependabot bump of the monitoring Grafana image from 13.3.0 to 13.3.1 in monitoring/compose.yaml; only the tag and its digest change. The digest sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf equals the current multi-arch index digest of grafana/grafana:13.3.1 on Docker Hub, so the reference stays immutable (ADR-0055). Compose bumps are outside the narrow Dependabot exemption of ADR-0050, hence this record. Read the v13.3.1 release notes (published 2026-11-10): six security fixes (CVE-2026-102589, -107509, -110992, -111024, -13721, -14242) plus small fixes (time zone data, provisioning of connection-backed repositories); a patch release with no configuration change for this stack (GF_SERVER_* TLS settings, admin password from a file secret, provisioning and dashboards read-only, user from GRAFANA_UID, loopback-free port as before). No new trust boundary, port, credential or network destination.",
   "findings": [
     {
-      "id": "TM-08",
-      "evidence": "ADR-0092 was revised in #148 (agent 0.35.1) and left proposed. Its confirmation asked for a node check: one run of the server under a resident budget, with the learned need below the whole working set and far below the commit, and the review's limitation that RAM in use could rise above the limit through file pages the server reads.",
-      "resolution": "Node check on a Windows node with 64 GiB RAM and agent 0.35.1 (2026-11-14), resident budget 8 GiB, other workloads running, prompts up to 54k tokens through the router: the agent discarded the commit-based need (55.7 GiB) on update; the run logged private peak 15.0 GiB, released at the stop 16.6 GiB (0.1 GiB into the cache), whole working set 15.1 GiB, commit 43.0 GiB, need 18.3 GiB; upstream.json measure private. RAM in use peaked at 71 %, the page file wrote nothing, so the file-page limitation did not show in this run. The router held the server again after idle_hold_s.",
-      "disposition": "fixed"
+      "id": "TM-16",
+      "evidence": "A third-party container image is updated; a compromised release would run with the stack's Grafana admin secret and the router certificate.",
+      "resolution": "Pre-existing and unchanged in scope: the image stays pinned by digest (verified against the registry); release notes reviewed. The update itself closes six Grafana CVEs.",
+      "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "python test/check_adr_index.py",
+      "command": "Docker Hub registry HEAD /v2/grafana/grafana/manifests/13.3.1 (index media types)",
       "result": "passed",
-      "evidence": "ADR index ok: 92 ADRs"
+      "evidence": "Docker-Content-Digest sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf, identical to the pinned digest; tag pushed 2026-11-10T17:23Z."
     },
     {
-      "command": "Node check on the Windows node: agent log line 'run of strata ended', upstream.json, RAM in use during the run",
+      "command": "python test/check_pinned_references.py",
       "result": "passed",
-      "evidence": "peak private working set 15.0 GiB, released 16.6 GiB (+0.1 GiB cache), working set 15.1 GiB, commit 43.0 GiB, RAM need 18.3 GiB; measure private; RAM in use peak 71.4 %, page writes 0."
+      "evidence": "Pinned references: 0 finding(s)."
     },
     {
       "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -48,6 +45,7 @@
     }
   ],
   "limitations": [
-    "One node and one budget measured; RAM in use stayed far from max_ram_percent, so how fast the system trims the server's file pages under real pressure is still not observed."
+    "The image was not started; monitoring/deploy_ct.py checks Grafana health when it rolls out.",
+    "13.3.1 was published on 2026-11-10; the operator's 7-day minimum image age is reached on 2026-11-17 - roll out from then on, or earlier only by the operator's decision for the security fixes."
   ]
 }
