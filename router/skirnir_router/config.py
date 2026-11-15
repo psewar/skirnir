@@ -55,6 +55,11 @@ def load_yaml(path, default=None):
 # "*" = any names. Unknown keys are an error (typos like `limitz` were previously silently ignored).
 _TIER = {"model": None, "num_ctx": None, "busy_ok": None}
 _CANARY = {"model": None, "num_ctx": None, "percent": None, "busy_ok": None}
+# Sampling defaults a role gives its local tiers for what the client leaves out (ADR-0093): Ollama option names,
+# (type, lowest, highest). A cloud tier never gets them (gpt-5 models refuse a temperature other than their default).
+ROLE_OPTIONS = {"temperature": (float, 0.0, 2.0), "top_p": (float, 0.0, 1.0), "top_k": (int, 1, 1000),
+                "min_p": (float, 0.0, 1.0), "presence_penalty": (float, -2.0, 2.0),
+                "frequency_penalty": (float, -2.0, 2.0), "repeat_penalty": (float, 0.0, 2.0)}
 # from fields accepted by parse_client_memory - single source, otherwise schema rejects valid keys
 _MEMORY_SCHEMA = {**dict.fromkeys(CLIENT_MEMORY_FIELDS), "projects": {"*": dict.fromkeys(PROJECT_FIELDS)}}
 SCHEMA = {
@@ -109,7 +114,8 @@ SCHEMA = {
                      "max_parallel": None}},
     "nodes": {"*": {"ollama": None, "vram_total_gib": None, "wol": None, "weight": None, "mac": None, "foreign_vram_baseline_gib": None,
                     "gpu": None, "ollama_tls_fingerprint": None, "ollama_tls_cert": None, "max_inflight": None}},
-    "roles": {"*": {"exposed_as": None, "tiers": [_TIER], "latency_first": None, "priority": None, "canary": _CANARY, "shadow": _CANARY}},
+    "roles": {"*": {"exposed_as": None, "tiers": [_TIER], "latency_first": None, "priority": None, "canary": _CANARY, "shadow": _CANARY,
+                    "options": dict.fromkeys(ROLE_OPTIONS)}},
     # Decision Engine (2026-09-16): Auto-role, whose role selects a chain of engines (decision/__init__.py)
     "decision_engine": {"enabled": None, "role": None, "options": None, "default": None, "chain": None, "context_chars": None,
                         "policy": {"min_top_probability": None, "min_margin": None, "max_entropy_ratio": None},
@@ -632,9 +638,12 @@ class Config:
             prio = r.get("priority", "normal")   # Stage 3: Standard class of the role (routing.priority overrides)
             if prio not in PRIORITIES:
                 return invalid(f"role {rname}: priority must be one of {PRIORITIES}")
+            options = role_options(rname, r.get("options"))
+            if failed(options):
+                return options
             role = {"name": rname, "exposed": exposed, "tiers": tiers,
                     "latency_first": self.warm_first if lf is None else bool(lf),
-                    "latency_first_override": lf, "priority": prio}
+                    "latency_first_override": lf, "priority": prio, "options": options}
             for kind in ("canary", "shadow"):   # Stage 6: Measure candidate model with real traffic
                 spec = r.get(kind)
                 if spec:
@@ -785,8 +794,29 @@ def settings_view(lang="de"):
     return settings_mod.view(state.CFG, state.CFG.base(), ov.get("settings") or {}, lang=lang)
 
 
+def role_options(role, raw):
+    """A role's `options` (sampling defaults, ADR-0093) as a checked dict, or a Problem naming the bad key. None/{} = none."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        return invalid(f"role {role}: options must be a mapping option -> value")
+    out = {}
+    for key, value in raw.items():
+        rule = ROLE_OPTIONS.get(key)
+        if rule is None:
+            return invalid(f"role {role}: options.{key} is not a sampling option ({', '.join(ROLE_OPTIONS)})")
+        kind, low, high = rule
+        whole = isinstance(value, int) and not isinstance(value, bool)
+        if not (whole or (kind is float and isinstance(value, float))):
+            return invalid(f"role {role}: options.{key} must be {'an integer' if kind is int else 'a number'}")
+        if not low <= value <= high:
+            return invalid(f"role {role}: options.{key} must be between {low} and {high}")
+        out[key] = kind(value)
+    return out
+
+
 def roles_as_config():
     return {r["name"]: {"exposed_as": r["exposed"], "latency_first": r["latency_first_override"],
                         "latency_first_effective": r["latency_first"], "priority": r["priority"],
-                        "canary": r.get("canary"), "shadow": r.get("shadow"),
+                        "canary": r.get("canary"), "shadow": r.get("shadow"), "options": dict(r.get("options") or {}),
                         "tiers": [dict(t) for t in r["tiers"]]} for r in state.CFG.roles.values()}
