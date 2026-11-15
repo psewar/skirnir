@@ -2,10 +2,10 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "8b6fefcbd6918391e7133a78e255baff02b38033",
-  "change_digest": "14cd10aa5dec871ccd56988c3c866c0599059564d3ab42890891d7f3bc194307",
+  "base_sha": "3bea22ac6c2b0258e53838de5331895cbf583d31",
+  "change_digest": "655e1d4d5aac4f04e219e3742b575d6e0b87426dd0aad7eecac45b4fc9b5a999",
   "reviewed_paths": [
-    "monitoring/compose.yaml"
+    "decision-embed/Dockerfile"
   ],
   "risk_ids": [
     "TM-16"
@@ -13,20 +13,30 @@
   "boundaries": [
     "B9"
   ],
-  "summary": "Dependabot bump of the monitoring Grafana image from 13.3.0 to 13.3.1 in monitoring/compose.yaml; only the tag and its digest change. The digest sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf equals the current multi-arch index digest of grafana/grafana:13.3.1 on Docker Hub, so the reference stays immutable (ADR-0055). Compose bumps are outside the narrow Dependabot exemption of ADR-0050, hence this record. Read the v13.3.1 release notes (published 2026-11-10): six security fixes (CVE-2026-102589, -107509, -110992, -111024, -13721, -14242) plus small fixes (time zone data, provisioning of connection-backed repositories); a patch release with no configuration change for this stack (GF_SERVER_* TLS settings, admin password from a file secret, provisioning and dashboards read-only, user from GRAFANA_UID, loopback-free port as before). No new trust boundary, port, credential or network destination.",
+  "summary": "Base image of decision-embed from python:3.11-slim to python:3.14-slim (Dependabot proposed 3.15-slim). onnxruntime 1.32.0 publishes no Python 3.15 wheel yet, so the image build on 3.15-slim fails ('No matching distribution found for onnxruntime', reproduced with podman); 3.14-slim is the newest base for which numpy, onnxruntime and tokenizers all have wheels. The digest sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f equals the current index digest of python:3.14-slim on Docker Hub (pushed 2026-11-08), so the reference stays immutable (ADR-0055). Built with podman: Python 3.14.10, numpy 2.5.5, onnxruntime 1.32.0, tokenizers 0.23.3; server.py's embedder module imports. The pip install line, the loopback-only port binding in compose.yaml, the /models volume and the entrypoint are unchanged. No new trust boundary, port, credential or network destination at runtime.",
   "findings": [
     {
       "id": "TM-16",
-      "evidence": "A third-party container image is updated; a compromised release would run with the stack's Grafana admin secret and the router certificate.",
-      "resolution": "Pre-existing and unchanged in scope: the image stays pinned by digest (verified against the registry); release notes reviewed. The update itself closes six Grafana CVEs.",
+      "evidence": "A third-party base image is updated; the decision service runs the router's routing classifier.",
+      "resolution": "Pre-existing and unchanged in scope: the base image stays pinned by digest (verified against the registry); the Python packages are installed unpinned as before (unchanged by this PR).",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "Docker Hub registry HEAD /v2/grafana/grafana/manifests/13.3.1 (index media types)",
+      "command": "Docker Hub registry HEAD /v2/library/python/manifests/3.14-slim (index media types)",
       "result": "passed",
-      "evidence": "Docker-Content-Digest sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf, identical to the pinned digest; tag pushed 2026-11-10T17:23Z."
+      "evidence": "Docker-Content-Digest sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f, identical to the pinned digest."
+    },
+    {
+      "command": "podman build decision-embed on python:3.15-slim (Dependabot's proposal)",
+      "result": "passed",
+      "evidence": "Fails as expected: ERROR: No matching distribution found for onnxruntime - the reason 3.15 is not taken."
+    },
+    {
+      "command": "podman build decision-embed on python:3.14-slim, then python -c 'import numpy, onnxruntime, tokenizers, embedder'",
+      "result": "passed",
+      "evidence": "3.14.10 numpy 2.5.5 onnxruntime 1.32.0 tokenizers 0.23.3 embedder ok"
     },
     {
       "command": "python test/check_pinned_references.py",
@@ -45,7 +55,7 @@
     }
   ],
   "limitations": [
-    "The image was not started; monitoring/deploy_ct.py checks Grafana health when it rolls out.",
-    "13.3.1 was published on 2026-11-10; the operator's 7-day minimum image age is reached on 2026-11-17 - roll out from then on, or earlier only by the operator's decision for the security fixes."
+    "The service was not started with the real model; the router CT's image is only replaced when the operator rebuilds and restarts the embed service.",
+    "python:3.14-slim was pushed on 2026-11-08; the operator's 7-day minimum image age is reached on 2026-11-15."
   ]
 }
