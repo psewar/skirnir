@@ -1,24 +1,51 @@
 {
   "schema_version": 1,
   "status": "completed",
-  "base_sha": "1a3413bbd244f1cae43b05917eaec2944030dff5",
-  "change_digest": "b8bb74a6234b22539e9fa44b1a38cc97fe3aee68953e64b8bb2aab3a3fb00907",
-  "reviewer": "coding agent (Claude Code), skirnir-security-review skill",
-  "summary": "Documentation only: ADR-0093 status proposed -> accepted with the operator's acceptance and the result of the check in operation added to its confirmation, the ADR index regenerated, and the CHANGELOG row of the published release v0.35.0 naming ADR-0093 accepted. No code, configuration, version, workflow or review-policy change. The added text contains no hostnames, addresses, names or real prompts.",
+  "reviewer": "Claude Code (Opus 5.5) repository security review",
+  "base_sha": "8b6fefcbd6918391e7133a78e255baff02b38033",
+  "change_digest": "14cd10aa5dec871ccd56988c3c866c0599059564d3ab42890891d7f3bc194307",
   "reviewed_paths": [
-    "CHANGELOG.md",
-    "docs/adr/0093-sampling-defaults-per-role.md",
-    "docs/adr/README.md"
+    "monitoring/compose.yaml"
   ],
-  "boundaries": ["B6", "B9"],
-  "risk_ids": ["TM-05", "TM-08"],
-  "findings": [],
+  "risk_ids": [
+    "TM-16"
+  ],
+  "boundaries": [
+    "B9"
+  ],
+  "summary": "Dependabot bump of the monitoring Grafana image from 13.3.0 to 13.3.1 in monitoring/compose.yaml; only the tag and its digest change. The digest sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf equals the current multi-arch index digest of grafana/grafana:13.3.1 on Docker Hub, so the reference stays immutable (ADR-0055). Compose bumps are outside the narrow Dependabot exemption of ADR-0050, hence this record. Read the v13.3.1 release notes (published 2026-11-10): six security fixes (CVE-2026-102589, -107509, -110992, -111024, -13721, -14242) plus small fixes (time zone data, provisioning of connection-backed repositories); a patch release with no configuration change for this stack (GF_SERVER_* TLS settings, admin password from a file secret, provisioning and dashboards read-only, user from GRAFANA_UID, loopback-free port as before). No new trust boundary, port, credential or network destination.",
+  "findings": [
+    {
+      "id": "TM-16",
+      "evidence": "A third-party container image is updated; a compromised release would run with the stack's Grafana admin secret and the router certificate.",
+      "resolution": "Pre-existing and unchanged in scope: the image stays pinned by digest (verified against the registry); release notes reviewed. The update itself closes six Grafana CVEs.",
+      "disposition": "baseline"
+    }
+  ],
   "tests": [
-    {"command": "python test/check_adr_index.py", "result": "passed", "evidence": "ADR index ok: 93 ADRs"},
-    {"command": "python test/check_public_changes.py", "result": "passed", "evidence": "0 finding(s)"}
+    {
+      "command": "Docker Hub registry HEAD /v2/grafana/grafana/manifests/13.3.1 (index media types)",
+      "result": "passed",
+      "evidence": "Docker-Content-Digest sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf, identical to the pinned digest; tag pushed 2026-11-10T17:23Z."
+    },
+    {
+      "command": "python test/check_pinned_references.py",
+      "result": "passed",
+      "evidence": "Pinned references: 0 finding(s)."
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "result": "passed",
+      "evidence": "Security evidence: 0 error(s)."
+    },
+    {
+      "command": "python test/check_public_changes.py",
+      "result": "passed",
+      "evidence": "Public-change scan: 0 finding(s)."
+    }
   ],
   "limitations": [
-    "Documentation only; the behaviour it records was reviewed in the record of PR 154 (router 0.30.0).",
-    "The operational check covers one voice question on one node."
+    "The image was not started; monitoring/deploy_ct.py checks Grafana health when it rolls out.",
+    "13.3.1 was published on 2026-11-10; the operator's 7-day minimum image age is reached on 2026-11-17 - roll out from then on, or earlier only by the operator's decision for the security fixes."
   ]
 }
