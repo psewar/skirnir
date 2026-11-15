@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "8b6fefcbd6918391e7133a78e255baff02b38033",
-  "change_digest": "dc917e1a5622513873308b5bf0610ab792dc3294fdecf158c1607ba5e3da8503",
+  "base_sha": "3bea22ac6c2b0258e53838de5331895cbf583d31",
+  "change_digest": "faff4ebfe2ae17f4c0f808a85ddd132bf06acb9993537c8526a965e98d2e4675",
   "reviewed_paths": [
     "decision-jevlike/Dockerfile"
   ],
