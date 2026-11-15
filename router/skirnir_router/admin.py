@@ -248,7 +248,7 @@ def _roles_from(raw):
             return problem
         if r.get("latency_first") is not None:
             roles[name]["latency_first"] = bool(r["latency_first"])
-        for k in ("priority", "canary", "shadow"):   # Stage 3/6: the UI may set them; if missing, config.yaml remains
+        for k in ("priority", "canary", "shadow", "options"):   # the UI/API may set them; if missing, config.yaml remains
             if r.get(k) is not None:
                 roles[name][k] = r[k]
     return roles

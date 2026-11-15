@@ -75,9 +75,18 @@ roles:
       - { model: granite4.2:8b,   num_ctx: 32768, busy_ok: true }   # darf auf einer spielenden GPU laufen
   assist:
     priority: interactive
+    options: { temperature: 0 }           # Sampling-Vorgaben für die lokalen Stufen (ADR-0093)
     tiers: [...]
 ```
 
+- **Sampling-Vorgaben je Rolle** (`roles.<r>.options`, Router 0.30.0, [ADR-0093](adr/0093-sampling-defaults-per-role.md)).
+  Schlüssel: `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`, `frequency_penalty`, `repeat_penalty`
+  (Ollama-Namen). Der Router ergänzt sie in einer Anfrage an die Rolle, wenn der Client sie weglässt; ein Wert des Clients
+  gewinnt. Sie gelten nur für die lokalen Stufen der Rolle: Ollama-Knoten bekommen sie als Optionen, OpenAI-kompatible
+  Knoten (llama.cpp, Strata) als Felder der Anfrage (`repeat_penalty` als `repetition_penalty`); eine Cloud-Stufe bekommt
+  sie nie, weil manche Cloud-Modelle eine andere als ihre Standard-Temperatur ablehnen. Eine Anfrage für ein konkretes
+  Modell bekommt keine. Unbekannte Schlüssel, falsche Typen und Werte außerhalb des Bereichs verhindern das Laden der
+  Konfiguration. Wie `priority` gehören sie in `config.yaml`: Eine in der Web-UI gespeicherte Rolle trägt sie nicht mit.
 - **Rangliste = Qualitätsobergrenze und Kaltstart-Reihenfolge.** Ist ein Listenmodell auf irgendeinem Knoten schon geladen,
   gewinnt es (unter mehreren warmen das ranghöchste). Global `modes.warm_first`, je Rolle `latency_first`.
 - **Kontextleiter.** Dasselbe Modell mit kleinerem `num_ctx` ist die nächste Stufe, wenn der Kontext nicht ins VRAM passt.

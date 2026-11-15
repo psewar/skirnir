@@ -139,6 +139,9 @@ def dispatch(node, tier, ctx):
     body.model            = tier.model
     body.options.num_ctx  = ctx
     body.keep_alive       = keep_alive[node.state]     # Client-Wert wird überschrieben
+    if request is for a role and not tier.cloud:        # Router 0.30.0, ADR-0093
+        for key, value in role.options:                # Sampling-Vorgaben der Rolle, nur was der Client nicht schickt
+            body.options.setdefault(key, value)        # OpenAI-Knoten: als Felder, repeat_penalty -> repetition_penalty
     inflight[node] += 1
     try:
         antwort = stream POST node.ollama + request.path, body

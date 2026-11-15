@@ -1,53 +1,60 @@
 {
   "schema_version": 1,
   "status": "completed",
-  "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "c232c2366bba6f6cb82477d806fdcc10f18b9de2",
-  "change_digest": "0c506b81ce6684957e26c1f30cb77f946b06567e89370d61d14fdf73ab5627d2",
+  "base_sha": "a9dac5d13c61f5632895643dccd15f7e027c3de5",
+  "change_digest": "ad95a69b482b3cb81c6baa38239eaefff55d8419f8c6368bc87d697bbede4147",
+  "reviewer": "coding agent (Claude Code), skirnir-security-review skill",
+  "summary": "Router 0.30.0 adds roles.<r>.options (sampling defaults, ADR-0093). Traced: config load and schema (config.py _parse_roles, role_options, SCHEMA), admin PUT/GET (admin.py _roles_from, config.roles_as_config), request building (proxy._backend_body, dispatch, _Relay), the OpenAI-compatible node path (openai_node.run -> cloud.openai_exchange local_server=True) and the cloud provider path (cloud.run -> openai_exchange local_server=False, _oa_body unchanged). Two issues found during the review and fixed before the PR: (1) non-numeric client sampling values would have been forwarded raw to OpenAI-compatible nodes - now only int/float (not bool) pass; (2) role defaults would have reached a cloud model used as canary/shadow, because those tier dicts carry no cloud key - the node's is_cloud now decides as well. Role values are validated (known keys, types, ranges, NaN/inf refused). No new route, no change to authentication, CSRF, data classes or the final cloud payload.",
   "reviewed_paths": [
+    ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "docs/adr/0092-upstream-ram-need-is-resident-memory-not-commit.md",
-    "docs/adr/README.md"
+    "design/routing-algorithm.md",
+    "docs/adr/0093-sampling-defaults-per-role.md",
+    "docs/adr/README.md",
+    "docs/configuration.de.md",
+    "docs/configuration.md",
+    "router/config.example.yaml",
+    "router/skirnir_router/admin.py",
+    "router/skirnir_router/cloud.py",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/config.py",
+    "router/skirnir_router/proxy.py",
+    "test/selftest_role_options.py",
+    "router/skirnir_router/openai_node.py",
+    "router/skirnir_router/nodes.py",
+    "router/skirnir_router/ops.py",
+    "router/skirnir_router/managed.py"
   ],
-  "risk_ids": [
-    "TM-08"
-  ],
-  "boundaries": [
-    "B3",
-    "B9"
-  ],
-  "summary": "Documentation only: ADR-0092 (the upstream's RAM need counts only memory the system cannot take back) accepted by the operator after the node check on 2026-11-14; the node check result is added to its confirmation; ADR index regenerated; the CHANGELOG row of the published release v0.34.1 names ADR-0092 accepted. No code, configuration or version change.",
+  "boundaries": ["B1", "B2", "B6", "B9"],
+  "risk_ids": ["TM-03", "TM-05", "TM-08"],
   "findings": [
     {
-      "id": "TM-08",
-      "evidence": "ADR-0092 was revised in #148 (agent 0.35.1) and left proposed. Its confirmation asked for a node check: one run of the server under a resident budget, with the learned need below the whole working set and far below the commit, and the review's limitation that RAM in use could rise above the limit through file pages the server reads.",
-      "resolution": "Node check on a Windows node with 64 GiB RAM and agent 0.35.1 (2026-11-14), resident budget 8 GiB, other workloads running, prompts up to 54k tokens through the router: the agent discarded the commit-based need (55.7 GiB) on update; the run logged private peak 15.0 GiB, released at the stop 16.6 GiB (0.1 GiB into the cache), whole working set 15.1 GiB, commit 43.0 GiB, need 18.3 GiB; upstream.json measure private. RAM in use peaked at 71 %, the page file wrote nothing, so the file-page limitation did not show in this run. The router held the server again after idle_hold_s.",
+      "id": "RS-1",
+      "evidence": "cloud.openai_exchange forwarded options.top_k/min_p/penalties for local_server as given; a client value of any JSON type (string, object) would have reached the node unchecked.",
+      "resolution": "Only int/float values that are not bool are forwarded; test 'rejected case: a client's non-numeric sampling values never reach the node' in test/selftest_role_options.py.",
+      "disposition": "fixed"
+    },
+    {
+      "id": "RS-2",
+      "evidence": "proxy._backend_body skipped role defaults only when tier['cloud'] was set; canary/shadow tiers (config._parse_roles, ops.py) carry no cloud key, so a cloud canary would have received e.g. temperature 0 (refused by gpt-5 models, B6 payload change).",
+      "resolution": "Defaults are skipped when tier['cloud'] or node.is_cloud; test 'rejected case: a canary tier on a cloud provider (no `cloud` key) gets no role defaults'.",
       "disposition": "fixed"
     }
   ],
   "tests": [
-    {
-      "command": "python test/check_adr_index.py",
-      "result": "passed",
-      "evidence": "ADR index ok: 92 ADRs"
-    },
-    {
-      "command": "Node check on the Windows node: agent log line 'run of strata ended', upstream.json, RAM in use during the run",
-      "result": "passed",
-      "evidence": "peak private working set 15.0 GiB, released 16.6 GiB (+0.1 GiB cache), working set 15.1 GiB, commit 43.0 GiB, RAM need 18.3 GiB; measure private; RAM in use peak 71.4 %, page writes 0."
-    },
-    {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
-      "result": "passed",
-      "evidence": "Security evidence: 0 error(s)."
-    },
-    {
-      "command": "python test/check_public_changes.py",
-      "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s)."
-    }
+    {"command": "python test/selftest_role_options.py", "result": "passed", "evidence": "ALL GREEN, including the rejected cases (unknown key, typo, bool, string, float top_k, out of range, invalid override unchanged, cloud tier, cloud canary, non-numeric client values, cloud provider unchanged)"},
+    {"command": "python test/run_tests.py", "result": "passed", "evidence": "332 PASS, 0 failures on the final code (second run after the two fixes)"},
+    {"command": "ruff check .", "result": "passed", "evidence": "All checks passed!"},
+    {"command": "python router/router.py --check router/config.example.yaml --pure", "result": "passed", "evidence": "configuration ok: 5 roles, 7 models in the catalog"},
+    {"command": "python test/check_adr_index.py", "result": "passed", "evidence": "ADR index ok: 93 ADRs"},
+    {"command": "python test/selftest_control_flow.py && python test/check_control_flow.py", "result": "passed", "evidence": "OK; control flow ok: 0 legacy findings"},
+    {"command": "python test/selftest_openai_node.py; selftest_context_sharing.py; selftest_cloud_final_payload.py; selftest_english_names.py", "result": "passed", "evidence": "each exited 0"},
+    {"command": "python test/check_public_changes.py", "result": "passed", "evidence": "0 finding(s)"}
   ],
   "limitations": [
-    "One node and one budget measured; RAM in use stayed far from max_ram_percent, so how fast the system trims the server's file pages under real pressure is still not observed."
+    "Not run against a real Ollama node or a real OpenAI-compatible server; node behaviour for the newly forwarded keys (top_k clamping, penalty windows) is the server's.",
+    "The effect on answer quality is measured for one voice question only (ADR-0093).",
+    "PostgreSQL integrations not run (no session store touched).",
+    "A role's options also apply to every local fallback tier of the role, including other models; operators choose values that suit all of them (documented)."
   ]
 }

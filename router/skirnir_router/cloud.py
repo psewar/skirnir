@@ -592,6 +592,10 @@ async def openai_embed(post, body, model, model_id):
     return {"p_tok": p_tok, "c_tok": 0, "finish": "stop"}, out
 
 
+LOCAL_SAMPLING = {"top_k": "top_k", "min_p": "min_p", "presence_penalty": "presence_penalty",
+                  "frequency_penalty": "frequency_penalty", "repeat_penalty": "repetition_penalty"}
+
+
 async def openai_exchange(post, path, body, model, model_id, stream, local_server=False):
     """One chat/generate exchange with an OpenAI-compatible endpoint: the native Ollama request as /chat/completions,
     the answer back in Ollama form. Shared by cloud providers (run) and OpenAI-compatible nodes (openai_node.run).
@@ -608,6 +612,14 @@ async def openai_exchange(post, path, body, model, model_id, stream, local_serve
             req["max_tokens"] = req["max_completion_tokens"]
         if body.get("think") is False:
             req["reasoning_effort"] = "none"
+        # ADR-0093: sampling keys a cloud API refuses but local servers (llama.cpp, Strata) take; Ollama's repeat_penalty
+        # is their repetition_penalty. Without this a role's top_k or presence_penalty never reached such a node.
+        # Only numbers: a client's options are not validated like a role's, and a string or object would reach the server raw.
+        opts = body.get("options") or {}
+        for key, name in LOCAL_SAMPLING.items():
+            value = opts.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                req[name] = value
     info = {"p_tok": 0, "c_tok": 0, "finish": "stop"}
     if not stream:
         async with post(req) as r:
