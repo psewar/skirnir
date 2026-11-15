@@ -2,10 +2,10 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "3bea22ac6c2b0258e53838de5331895cbf583d31",
-  "change_digest": "faff4ebfe2ae17f4c0f808a85ddd132bf06acb9993537c8526a965e98d2e4675",
+  "base_sha": "2714b97c60b9a873570e2bddaf6125d3be978162",
+  "change_digest": "685e3bbd144e3875be4280a8f8083b0dd2bf0e4f4478ba8a15acea71a83c82ca",
   "reviewed_paths": [
-    "decision-jevlike/Dockerfile"
+    "decision-embed/Dockerfile"
   ],
   "risk_ids": [
     "TM-16"
@@ -13,36 +13,30 @@
   "boundaries": [
     "B9"
   ],
-  "summary": "Dependabot bump of the decision-jevlike base image from python:3.11-slim to python:3.15-slim, plus a fix of a pre-existing build failure. The new digest sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 equals the current index digest of python:3.15-slim on Docker Hub (pushed 2026-11-07), so the reference stays immutable (ADR-0055). The build ran pip install git+https://github.com/vinnylarouge/jevlike@<commit>, but slim images contain no git, so it failed on every base (reproduced with the unchanged 3.11 Dockerfile and with 3.15); jevlike now comes from the archive of the same pinned commit (https://github.com/vinnylarouge/jevlike/archive/94f5fd1b0b11d52bbdfdf4e0ee6aa96b568f8452.tar.gz), which needs no git and is as pinned as before (same commit, same host). Built with podman on python:3.15-slim: Python 3.15.2, torch 2.15.0+cpu (cp315 wheel from download.pytorch.org/whl/cpu), numpy 2.5.5; every import server.py needs (torch, jevlike.data, jevlike.model, jevlike.train) works. Offline variables, the loopback-only port binding in compose.yaml, the /models volume and the entrypoint are unchanged. No new trust boundary, port, credential or network destination at runtime.",
+  "summary": "Base image of decision-embed from python:3.11-slim to python:3.14-slim (Dependabot proposed 3.15-slim). onnxruntime 1.32.0 publishes no Python 3.15 wheel yet, so the image build on 3.15-slim fails ('No matching distribution found for onnxruntime', reproduced with podman); 3.14-slim is the newest base for which numpy, onnxruntime and tokenizers all have wheels. The digest sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f equals the current index digest of python:3.14-slim on Docker Hub (pushed 2026-11-08), so the reference stays immutable (ADR-0055). Built with podman: Python 3.14.10, numpy 2.5.5, onnxruntime 1.32.0, tokenizers 0.23.3; server.py's embedder module imports. The pip install line, the loopback-only port binding in compose.yaml, the /models volume and the entrypoint are unchanged. No new trust boundary, port, credential or network destination at runtime.",
   "findings": [
     {
       "id": "TM-16",
-      "evidence": "A third-party base image and a pinned third-party package are fetched at build time.",
-      "resolution": "Pre-existing and unchanged in scope: the base image stays pinned by digest (verified against the registry) and jevlike stays pinned to the same commit; only the transport changes from git to the commit archive of the same host.",
+      "evidence": "A third-party base image is updated; the decision service runs the router's routing classifier.",
+      "resolution": "Pre-existing and unchanged in scope: the base image stays pinned by digest (verified against the registry); the Python packages are installed unpinned as before (unchanged by this PR).",
       "disposition": "baseline"
-    },
-    {
-      "id": "TM-16",
-      "evidence": "Found in this review: the image could not be built at all (git missing in python:*-slim), so a rebuild for a security fix would have failed.",
-      "resolution": "Install from the pinned commit archive; image built and imports checked on python:3.15-slim.",
-      "disposition": "fixed"
     }
   ],
   "tests": [
     {
-      "command": "Docker Hub registry HEAD /v2/library/python/manifests/3.15-slim (index media types)",
+      "command": "Docker Hub registry HEAD /v2/library/python/manifests/3.14-slim (index media types)",
       "result": "passed",
-      "evidence": "Docker-Content-Digest sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928, identical to the pinned digest."
+      "evidence": "Docker-Content-Digest sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f, identical to the pinned digest."
     },
     {
-      "command": "podman build decision-jevlike (unchanged main Dockerfile on python:3.11-slim, and PR head on python:3.15-slim)",
+      "command": "podman build decision-embed on python:3.15-slim (Dependabot's proposal)",
       "result": "passed",
-      "evidence": "Both failed before the fix with: Cannot find command 'git' - reproduces the pre-existing failure independent of the Python version."
+      "evidence": "Fails as expected: ERROR: No matching distribution found for onnxruntime - the reason 3.15 is not taken."
     },
     {
-      "command": "podman build decision-jevlike with the archive URL on python:3.15-slim, then python -c 'import torch, jevlike; from jevlike.model import load_checkpoint, select_device; from jevlike.data import ChoiceExample; from jevlike.train import move'",
+      "command": "podman build decision-embed on python:3.14-slim, then python -c 'import numpy, onnxruntime, tokenizers, embedder'",
       "result": "passed",
-      "evidence": "3.15.2 torch 2.15.0+cpu numpy 2.5.5 jevlike ok"
+      "evidence": "3.14.10 numpy 2.5.5 onnxruntime 1.32.0 tokenizers 0.23.3 embedder ok"
     },
     {
       "command": "python test/check_pinned_references.py",
@@ -61,7 +55,7 @@
     }
   ],
   "limitations": [
-    "The service was not started with a real checkpoint; the router CT's image is only replaced when the operator rebuilds and restarts the jevlike service.",
-    "python:3.15-slim was pushed on 2026-11-07; the operator's 7-day minimum image age is reached on 2026-11-14."
+    "The service was not started with the real model; the router CT's image is only replaced when the operator rebuilds and restarts the embed service.",
+    "python:3.14-slim was pushed on 2026-11-08; the operator's 7-day minimum image age is reached on 2026-11-15."
   ]
 }
