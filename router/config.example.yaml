@@ -386,6 +386,7 @@ roles:
   assist:
     exposed_as: "assist:latest"
     priority: interactive   # Sprachassistent: wird beim Warten auf einen Platz vor normal/batch zugelassen (Stufe 3)
+    # options: { temperature: 0 }   # Sampling-Vorgaben fuer die lokalen Stufen, wenn der Client keine schickt (ADR-0093)
     tiers:
       - { model: qwen3.6:35b-a3b, num_ctx: 65536 }
       - { model: qwen3.6:35b-a3b, num_ctx: 32768 }

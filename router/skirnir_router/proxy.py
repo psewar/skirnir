@@ -378,6 +378,11 @@ def _backend_body(body, role, tier, ctx, node):
         ctx = node.loaded_context(tier["model"]) or None
         if ctx:
             opts["num_ctx"] = ctx
+    if _is_role(role) and not (tier.get("cloud") or getattr(node, "is_cloud", False)):
+        # ADR-0093: the role's sampling defaults for what the client left out; a cloud tier keeps the client's own.
+        # The node decides too: a canary/shadow tier carries no `cloud` key even when its model is a cloud model.
+        for key, value in (role.get("options") or {}).items():
+            opts.setdefault(key, value)
     out["options"] = opts
     out["keep_alive"] = state.CFG.keep_alive.get(node.state, "5m")   # Number (seconds, -1) or duration like 5m - Ollama accepts both
     return out, ctx
