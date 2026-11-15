@@ -75,9 +75,18 @@ roles:
       - { model: granite4.2:8b,   num_ctx: 32768, busy_ok: true }   # may run on a GPU that is gaming
   assist:
     priority: interactive
+    options: { temperature: 0 }           # sampling defaults for the local tiers (ADR-0093)
     tiers: [...]
 ```
 
+- **Sampling defaults per role** (`roles.<r>.options`, router 0.30.0, [ADR-0093](adr/0093-sampling-defaults-per-role.md)). Keys:
+  `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`, `frequency_penalty`, `repeat_penalty` (Ollama names). The
+  router fills them into a request for the role when the client leaves them out; a value the client sends wins. They go to
+  the role's local tiers only: Ollama nodes get them as options, OpenAI-compatible nodes (llama.cpp, Strata) as request
+  fields (`repeat_penalty` as `repetition_penalty`); a cloud tier never gets them, since some cloud models refuse a
+  temperature other than their default. A request for a concrete model gets none. Unknown keys, wrong types and values out
+  of range stop the configuration from loading. Like `priority`, put them in `config.yaml`: a role saved from the web UI
+  does not carry them.
 - **Ranking = quality ceiling and cold-start order.** If a listed model is already loaded on any node, it wins (among several warm
   ones, the highest ranked). Globally `modes.warm_first`, per role `latency_first`.
 - **Context ladder.** The same model with a smaller `num_ctx` is the next tier when the context does not fit into VRAM.

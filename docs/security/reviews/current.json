@@ -1,53 +1,24 @@
 {
   "schema_version": 1,
   "status": "completed",
-  "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "c232c2366bba6f6cb82477d806fdcc10f18b9de2",
-  "change_digest": "0c506b81ce6684957e26c1f30cb77f946b06567e89370d61d14fdf73ab5627d2",
+  "base_sha": "1a3413bbd244f1cae43b05917eaec2944030dff5",
+  "change_digest": "b8bb74a6234b22539e9fa44b1a38cc97fe3aee68953e64b8bb2aab3a3fb00907",
+  "reviewer": "coding agent (Claude Code), skirnir-security-review skill",
+  "summary": "Documentation only: ADR-0093 status proposed -> accepted with the operator's acceptance and the result of the check in operation added to its confirmation, the ADR index regenerated, and the CHANGELOG row of the published release v0.35.0 naming ADR-0093 accepted. No code, configuration, version, workflow or review-policy change. The added text contains no hostnames, addresses, names or real prompts.",
   "reviewed_paths": [
     "CHANGELOG.md",
-    "docs/adr/0092-upstream-ram-need-is-resident-memory-not-commit.md",
+    "docs/adr/0093-sampling-defaults-per-role.md",
     "docs/adr/README.md"
   ],
-  "risk_ids": [
-    "TM-08"
-  ],
-  "boundaries": [
-    "B3",
-    "B9"
-  ],
-  "summary": "Documentation only: ADR-0092 (the upstream's RAM need counts only memory the system cannot take back) accepted by the operator after the node check on 2026-11-14; the node check result is added to its confirmation; ADR index regenerated; the CHANGELOG row of the published release v0.34.1 names ADR-0092 accepted. No code, configuration or version change.",
-  "findings": [
-    {
-      "id": "TM-08",
-      "evidence": "ADR-0092 was revised in #148 (agent 0.35.1) and left proposed. Its confirmation asked for a node check: one run of the server under a resident budget, with the learned need below the whole working set and far below the commit, and the review's limitation that RAM in use could rise above the limit through file pages the server reads.",
-      "resolution": "Node check on a Windows node with 64 GiB RAM and agent 0.35.1 (2026-11-14), resident budget 8 GiB, other workloads running, prompts up to 54k tokens through the router: the agent discarded the commit-based need (55.7 GiB) on update; the run logged private peak 15.0 GiB, released at the stop 16.6 GiB (0.1 GiB into the cache), whole working set 15.1 GiB, commit 43.0 GiB, need 18.3 GiB; upstream.json measure private. RAM in use peaked at 71 %, the page file wrote nothing, so the file-page limitation did not show in this run. The router held the server again after idle_hold_s.",
-      "disposition": "fixed"
-    }
-  ],
+  "boundaries": ["B6", "B9"],
+  "risk_ids": ["TM-05", "TM-08"],
+  "findings": [],
   "tests": [
-    {
-      "command": "python test/check_adr_index.py",
-      "result": "passed",
-      "evidence": "ADR index ok: 92 ADRs"
-    },
-    {
-      "command": "Node check on the Windows node: agent log line 'run of strata ended', upstream.json, RAM in use during the run",
-      "result": "passed",
-      "evidence": "peak private working set 15.0 GiB, released 16.6 GiB (+0.1 GiB cache), working set 15.1 GiB, commit 43.0 GiB, RAM need 18.3 GiB; measure private; RAM in use peak 71.4 %, page writes 0."
-    },
-    {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
-      "result": "passed",
-      "evidence": "Security evidence: 0 error(s)."
-    },
-    {
-      "command": "python test/check_public_changes.py",
-      "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s)."
-    }
+    {"command": "python test/check_adr_index.py", "result": "passed", "evidence": "ADR index ok: 93 ADRs"},
+    {"command": "python test/check_public_changes.py", "result": "passed", "evidence": "0 finding(s)"}
   ],
   "limitations": [
-    "One node and one budget measured; RAM in use stayed far from max_ram_percent, so how fast the system trims the server's file pages under real pressure is still not observed."
+    "Documentation only; the behaviour it records was reviewed in the record of PR 154 (router 0.30.0).",
+    "The operational check covers one voice question on one node."
   ]
 }
