@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-15
 decision-makers: operator
 ---
@@ -49,7 +49,7 @@ OpenAI-compatible node, so a client's `top_k` or `presence_penalty` never reache
 
 ## Decision Outcome
 
-Chosen option: **sampling defaults per role**.
+Chosen option (accepted by the operator 2026-11-15, after the check in operation): **sampling defaults per role**.
 
 - `roles.<r>.options` takes Ollama option names: `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`,
   `frequency_penalty`, `repeat_penalty`. The configuration check refuses unknown keys, wrong types and values out of
@@ -86,3 +86,8 @@ and the client's value wins, that a cloud tier and a concrete model get none, th
 invalid override changes nothing, and what an OpenAI-compatible node and a cloud provider receive. In operation, the
 router journal names the tier of each request; the same voice question is repeated against the role after setting
 `options`.
+
+Checked in operation on 2026-11-15 with router 0.30.0 and `options: { temperature: 0 }` on the voice role, the 2-bit
+mixture-of-experts model as its first tier and no sampling set on the server itself: the same question through the
+voice pipeline answered **6 of 6** correctly, each with 2 tool calls, in 1.9-4.7 s; the router journal shows all 18
+calls on that first tier. Before, with the server's default sampling, 5 of 12.

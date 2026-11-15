@@ -1,60 +1,24 @@
 {
   "schema_version": 1,
   "status": "completed",
-  "base_sha": "a9dac5d13c61f5632895643dccd15f7e027c3de5",
-  "change_digest": "ad95a69b482b3cb81c6baa38239eaefff55d8419f8c6368bc87d697bbede4147",
+  "base_sha": "1a3413bbd244f1cae43b05917eaec2944030dff5",
+  "change_digest": "b8bb74a6234b22539e9fa44b1a38cc97fe3aee68953e64b8bb2aab3a3fb00907",
   "reviewer": "coding agent (Claude Code), skirnir-security-review skill",
-  "summary": "Router 0.30.0 adds roles.<r>.options (sampling defaults, ADR-0093). Traced: config load and schema (config.py _parse_roles, role_options, SCHEMA), admin PUT/GET (admin.py _roles_from, config.roles_as_config), request building (proxy._backend_body, dispatch, _Relay), the OpenAI-compatible node path (openai_node.run -> cloud.openai_exchange local_server=True) and the cloud provider path (cloud.run -> openai_exchange local_server=False, _oa_body unchanged). Two issues found during the review and fixed before the PR: (1) non-numeric client sampling values would have been forwarded raw to OpenAI-compatible nodes - now only int/float (not bool) pass; (2) role defaults would have reached a cloud model used as canary/shadow, because those tier dicts carry no cloud key - the node's is_cloud now decides as well. Role values are validated (known keys, types, ranges, NaN/inf refused). No new route, no change to authentication, CSRF, data classes or the final cloud payload.",
+  "summary": "Documentation only: ADR-0093 status proposed -> accepted with the operator's acceptance and the result of the check in operation added to its confirmation, the ADR index regenerated, and the CHANGELOG row of the published release v0.35.0 naming ADR-0093 accepted. No code, configuration, version, workflow or review-policy change. The added text contains no hostnames, addresses, names or real prompts.",
   "reviewed_paths": [
-    ".github/workflows/ci.yml",
     "CHANGELOG.md",
-    "design/routing-algorithm.md",
     "docs/adr/0093-sampling-defaults-per-role.md",
-    "docs/adr/README.md",
-    "docs/configuration.de.md",
-    "docs/configuration.md",
-    "router/config.example.yaml",
-    "router/skirnir_router/admin.py",
-    "router/skirnir_router/cloud.py",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/config.py",
-    "router/skirnir_router/proxy.py",
-    "test/selftest_role_options.py",
-    "router/skirnir_router/openai_node.py",
-    "router/skirnir_router/nodes.py",
-    "router/skirnir_router/ops.py",
-    "router/skirnir_router/managed.py"
+    "docs/adr/README.md"
   ],
-  "boundaries": ["B1", "B2", "B6", "B9"],
-  "risk_ids": ["TM-03", "TM-05", "TM-08"],
-  "findings": [
-    {
-      "id": "RS-1",
-      "evidence": "cloud.openai_exchange forwarded options.top_k/min_p/penalties for local_server as given; a client value of any JSON type (string, object) would have reached the node unchecked.",
-      "resolution": "Only int/float values that are not bool are forwarded; test 'rejected case: a client's non-numeric sampling values never reach the node' in test/selftest_role_options.py.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "RS-2",
-      "evidence": "proxy._backend_body skipped role defaults only when tier['cloud'] was set; canary/shadow tiers (config._parse_roles, ops.py) carry no cloud key, so a cloud canary would have received e.g. temperature 0 (refused by gpt-5 models, B6 payload change).",
-      "resolution": "Defaults are skipped when tier['cloud'] or node.is_cloud; test 'rejected case: a canary tier on a cloud provider (no `cloud` key) gets no role defaults'.",
-      "disposition": "fixed"
-    }
-  ],
+  "boundaries": ["B6", "B9"],
+  "risk_ids": ["TM-05", "TM-08"],
+  "findings": [],
   "tests": [
-    {"command": "python test/selftest_role_options.py", "result": "passed", "evidence": "ALL GREEN, including the rejected cases (unknown key, typo, bool, string, float top_k, out of range, invalid override unchanged, cloud tier, cloud canary, non-numeric client values, cloud provider unchanged)"},
-    {"command": "python test/run_tests.py", "result": "passed", "evidence": "332 PASS, 0 failures on the final code (second run after the two fixes)"},
-    {"command": "ruff check .", "result": "passed", "evidence": "All checks passed!"},
-    {"command": "python router/router.py --check router/config.example.yaml --pure", "result": "passed", "evidence": "configuration ok: 5 roles, 7 models in the catalog"},
     {"command": "python test/check_adr_index.py", "result": "passed", "evidence": "ADR index ok: 93 ADRs"},
-    {"command": "python test/selftest_control_flow.py && python test/check_control_flow.py", "result": "passed", "evidence": "OK; control flow ok: 0 legacy findings"},
-    {"command": "python test/selftest_openai_node.py; selftest_context_sharing.py; selftest_cloud_final_payload.py; selftest_english_names.py", "result": "passed", "evidence": "each exited 0"},
     {"command": "python test/check_public_changes.py", "result": "passed", "evidence": "0 finding(s)"}
   ],
   "limitations": [
-    "Not run against a real Ollama node or a real OpenAI-compatible server; node behaviour for the newly forwarded keys (top_k clamping, penalty windows) is the server's.",
-    "The effect on answer quality is measured for one voice question only (ADR-0093).",
-    "PostgreSQL integrations not run (no session store touched).",
-    "A role's options also apply to every local fallback tier of the role, including other models; operators choose values that suit all of them (documented)."
+    "Documentation only; the behaviour it records was reviewed in the record of PR 154 (router 0.30.0).",
+    "The operational check covers one voice question on one node."
   ]
 }
