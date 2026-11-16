@@ -163,8 +163,9 @@ roles:
   `max_wait_batch_s` (1800 s).
 - **Interactive requests do not queue behind a busy warm model** if another local tier can serve right away: first a free
   warm tier, then a free cold one, other nodes before the busy one (never a cloud tier on this path); the decision log shows
-  `reason: fallback`. Without a busy warm model, warm first decides as before; if no tier is free, the request waits
-  within its interactive budget.
+  `reason: fallback`. A cold tier on the busy node is taken only if it fits beside the model that is answering there;
+  one that would need that model's memory would evict it as soon as its request ends (ADR-0097). Without a busy warm
+  model, warm first decides as before; if no tier is free, the request waits within its interactive budget.
 - **Observation mode** (`decision_engine.observe_blocked`): when a request for a role has to wait, the decision engine
   classifies it in the background with its CPU chain only (embedding, TF-IDF, rules; never the LLM, which would queue on
   the very GPU being waited for), and the decision log records `decision_observe`: class, confidence, the first free lower

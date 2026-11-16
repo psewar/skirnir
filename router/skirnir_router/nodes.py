@@ -490,6 +490,19 @@ class Node(Breaker):
             return self.vram_free_gib + self.ollama_vram_gib() - reserve
         return self.vram_total_gib - reserve
 
+    def answering_vram_gib(self):
+        """VRAM of the loaded models that are answering a request right now (measured occupancy like ollama_vram_gib).
+        budget_gib counts them as evictable; a load beside them that needs their memory makes Ollama evict them as soon
+        as their request ends (0.32.1, ADR-0097)."""
+        total = 0.0
+        for name, ps_gib in self.loaded.items():
+            if not any(c > 0 and self.same_blob(m, name) for m, c in self.inflight_models.items()):
+                continue
+            d = self.digest_of.get(name)
+            real = state.CFG.real_gib(name, self.loaded_ctx.get(d) if d is not None else None)
+            total += max(ps_gib, real) if real is not None else ps_gib
+        return total
+
     @property
     def speaks_openai(self):
         """The tunnel reaches an OpenAI-compatible server now - not while the standby Ollama stands in for it (then the
