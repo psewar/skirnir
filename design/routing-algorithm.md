@@ -142,6 +142,9 @@ def dispatch(node, tier, ctx):
     if request is for a role and not tier.cloud:        # Router 0.30.0, ADR-0093
         for key, value in role.options:                # Sampling-Vorgaben der Rolle, nur was der Client nicht schickt
             body.options.setdefault(key, value)        # OpenAI-Knoten: als Felder, repeat_penalty -> repetition_penalty
+    if request is for a role and body.messages and role.system_append[tier.model]:   # Router 0.31.0, ADR-0094
+        body.messages = with_system_append(body.messages, role.system_append[tier.model])
+        # an die fuehrende Systemnachricht angehaengt (sonst neue); nur das Modell, das bedient; Client-Body bleibt
     inflight[node] += 1
     try:
         antwort = stream POST node.ollama + request.path, body

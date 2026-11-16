@@ -76,6 +76,8 @@ roles:
   assist:
     priority: interactive
     options: { temperature: 0 }           # sampling defaults for the local tiers (ADR-0093)
+    system_append:                        # text only for the model that serves (ADR-0094)
+      granite4.2:8b: "Answer in at most two sentences."
     tiers: [...]
 ```
 
@@ -87,6 +89,15 @@ roles:
   temperature other than their default. A request for a concrete model gets none. Unknown keys, wrong types and values out
   of range stop the configuration from loading. Like `priority`, put them in `config.yaml`: a role saved from the web UI
   does not carry them.
+- **System text per model** (`roles.<r>.system_append`, router 0.31.0, [ADR-0094](adr/0094-system-text-per-model-of-a-role.md)).
+  Maps catalogue models to text (at most 8000 characters each). When a model with an entry serves a chat request for
+  the role, the router appends its text to the leading system message (or sends it as a new leading system message);
+  every tier with that model gets it, including a canary, no other model does. Use it for prompt rules one model
+  needs and another one does not. `/api/generate`, embeddings and requests for a concrete model are unchanged. The
+  route entry in the journal records the appended length, not the text. A model missing from the catalogue, non-text
+  or an over-long text stops the configuration from loading. Like `options`, put it in `config.yaml`; a role saved
+  from the web UI keeps it. The text reaches a cloud tier like the client's system prompt and is not classified by
+  the privacy check, so it must not contain personal data.
 - **Ranking = quality ceiling and cold-start order.** If a listed model is already loaded on any node, it wins (among several warm
   ones, the highest ranked). Globally `modes.warm_first`, per role `latency_first`.
 - **Context ladder.** The same model with a smaller `num_ctx` is the next tier when the context does not fit into VRAM.

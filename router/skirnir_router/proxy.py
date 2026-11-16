@@ -385,7 +385,30 @@ def _backend_body(body, role, tier, ctx, node):
             opts.setdefault(key, value)
     out["options"] = opts
     out["keep_alive"] = state.CFG.keep_alive.get(node.state, "5m")   # Number (seconds, -1) or duration like 5m - Ollama accepts both
+    append = system_append_for(role, tier, out)
+    if append:
+        out["messages"] = with_system_append(out["messages"], append)
     return out, ctx
+
+
+def system_append_for(role, tier, out):
+    """ADR-0094: the role's text for exactly the model that serves this request, or None. Only for a role's chat request
+    (a list of messages); a request for a concrete model and /api/generate get none. Keyed by model, so every tier with
+    that model (context ladder, canary, fallback) gets it and no other model does."""
+    if not _is_role(role) or not isinstance(out.get("messages"), list):
+        return None
+    return (role.get("system_append") or {}).get(tier["model"]) or None
+
+
+def with_system_append(messages, text):
+    """Chat messages with `text` appended to the leading system message, or a new leading system message (ADR-0094).
+    Returns a new list; the client's messages stay untouched. A leading system message with non-text content is left
+    as it is and the text goes into its own system message in front of it."""
+    first = messages[0] if messages else None
+    if isinstance(first, dict) and first.get("role") == "system" and isinstance(first.get("content"), str):
+        current = first["content"].rstrip()
+        return [{**first, "content": f"{current}\n\n{text}" if current else text}, *messages[1:]]
+    return [{"role": "system", "content": text}, *messages]
 
 
 async def _awaited(awaitable):
@@ -488,7 +511,9 @@ class _Relay:
                  "ctx": self.ctx, "node": node.name, "node_state": node.state, "warm": self.warm, "via": via,
                  "request_id": self.req.request_id, "session_id": self.req.session_id, "client": self.request.get("client"),
                  "reason": self.req.reason, "skipped": len(self.req.skipped), "think": self.out.get("think"),
-                 "canary": bool(self.req.canary) and model == self.req.canary}
+                 "canary": bool(self.req.canary) and model == self.req.canary,
+                 # ADR-0094: whether this tier's text went into the system message (length only, never the text)
+                 "system_append": len(system_append_for(self.role, self.tier, self.out) or "")}
         if self.req.memory_state:   # the automatic recall's state and how many facts it added, per request in the journal
             entry.update(memory_state=self.req.memory_state, memory_facts=len(self.req.memory_items))
         state.remember(entry)

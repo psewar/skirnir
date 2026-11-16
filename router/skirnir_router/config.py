@@ -54,6 +54,8 @@ def load_yaml(path, default=None):
 # Stage 6: Config schema. dict = allowed subkeys, None = leaf (any value, type check in parse),
 # "*" = any names. Unknown keys are an error (typos like `limitz` were previously silently ignored).
 _TIER = {"model": None, "num_ctx": None, "busy_ok": None}
+# Text a role appends to the system message of its chat request when exactly that model serves it (ADR-0094).
+SYSTEM_APPEND_MAX_CHARS = 8000
 _CANARY = {"model": None, "num_ctx": None, "percent": None, "busy_ok": None}
 # Sampling defaults a role gives its local tiers for what the client leaves out (ADR-0093): Ollama option names,
 # (type, lowest, highest). A cloud tier never gets them (gpt-5 models refuse a temperature other than their default).
@@ -115,7 +117,7 @@ SCHEMA = {
     "nodes": {"*": {"ollama": None, "vram_total_gib": None, "wol": None, "weight": None, "mac": None, "foreign_vram_baseline_gib": None,
                     "gpu": None, "ollama_tls_fingerprint": None, "ollama_tls_cert": None, "max_inflight": None}},
     "roles": {"*": {"exposed_as": None, "tiers": [_TIER], "latency_first": None, "priority": None, "canary": _CANARY, "shadow": _CANARY,
-                    "options": dict.fromkeys(ROLE_OPTIONS)}},
+                    "options": dict.fromkeys(ROLE_OPTIONS), "system_append": None}},
     # Decision Engine (2026-09-16): Auto-role, whose role selects a chain of engines (decision/__init__.py)
     "decision_engine": {"enabled": None, "role": None, "options": None, "default": None, "chain": None, "context_chars": None,
                         "policy": {"min_top_probability": None, "min_margin": None, "max_entropy_ratio": None},
@@ -641,9 +643,12 @@ class Config:
             options = role_options(rname, r.get("options"))
             if failed(options):
                 return options
+            append = role_system_append(rname, r.get("system_append"), self.models)
+            if failed(append):
+                return append
             role = {"name": rname, "exposed": exposed, "tiers": tiers,
                     "latency_first": self.warm_first if lf is None else bool(lf),
-                    "latency_first_override": lf, "priority": prio, "options": options}
+                    "latency_first_override": lf, "priority": prio, "options": options, "system_append": append}
             for kind in ("canary", "shadow"):   # Stage 6: Measure candidate model with real traffic
                 spec = r.get(kind)
                 if spec:
@@ -815,8 +820,30 @@ def role_options(role, raw):
     return out
 
 
+def role_system_append(role, raw, catalog):
+    """A role's `system_append` (ADR-0094): {model: text} as a checked dict, or a Problem naming the bad entry.
+    Every model must be in the catalogue; blank text drops the entry. None/{} = none."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        return invalid(f"role {role}: system_append must be a mapping model -> text")
+    out = {}
+    for model, text in raw.items():
+        if model not in catalog:
+            return invalid(f"role {role}: system_append.{model} names a model missing from the model catalog")
+        if not isinstance(text, str):
+            return invalid(f"role {role}: system_append.{model} must be text")
+        text = text.strip()
+        if len(text) > SYSTEM_APPEND_MAX_CHARS:
+            return invalid(f"role {role}: system_append.{model} is longer than {SYSTEM_APPEND_MAX_CHARS} characters")
+        if text:
+            out[model] = text
+    return out
+
+
 def roles_as_config():
     return {r["name"]: {"exposed_as": r["exposed"], "latency_first": r["latency_first_override"],
                         "latency_first_effective": r["latency_first"], "priority": r["priority"],
                         "canary": r.get("canary"), "shadow": r.get("shadow"), "options": dict(r.get("options") or {}),
+                        "system_append": dict(r.get("system_append") or {}),
                         "tiers": [dict(t) for t in r["tiers"]]} for r in state.CFG.roles.values()}
