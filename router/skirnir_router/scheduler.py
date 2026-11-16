@@ -132,6 +132,22 @@ def loading_for(tiers, now, exclude=()):
     return None
 
 
+def tier_loading(tiers, now, exclude=()):
+    """A node loading the model of one of these local tiers itself (unexpired claim from announce_load, same model or
+    blob): (node, model) or None. Unlike loading_for, a load of some other model on the node does not count - the request
+    waits only for a load that will serve one of these tiers (ADR-0095 before a cloud tier, ADR-0096 before a cold one)."""
+    for t in tiers:
+        if t.get("cloud"):
+            continue
+        for n in state.NODES.values():
+            if n.name in exclude or n.state == "offline" or (n.state == "busy" and not t["busy_ok"]):
+                continue
+            for m, (_gib, deadline) in n.loading.items():
+                if now < deadline and not n.is_loaded(m) and n.same_blob(m, t["model"]):
+                    return n, m
+    return None
+
+
 def _interactive_pick(per_tier, req):
     """Interactive requests (voice commands) do not wait behind a running request if another local tier can serve
     immediately. Warm-first otherwise sticks to the busy warm node: with max_parallel 1 (qwen3.8, since 0.6.5) a
