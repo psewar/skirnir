@@ -2,88 +2,28 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "4b7e4205d6279b05dbe9fd10b2476ee152f0ac45",
- "change_digest": "94032bbf08c77f5175553333a8069083ff679f72d6a74091f8641a4f3c3e7dca",
+ "base_sha": "024d52826bb0c097caaad06f7e457161bfc2d075",
+ "change_digest": "80d071836dcaeabfa924b0dde7264343dcb9c753ee9cd3a62da0e08025bacf93",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "design/routing-algorithm.md",
-  "docs/adr/0094-system-text-per-model-of-a-role.md",
-  "docs/adr/README.md",
-  "docs/configuration.de.md",
-  "docs/configuration.md",
-  "docs/security/reviews/current.json",
-  "router/config.example.yaml",
-  "router/skirnir_router/admin.py",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/proxy.py",
-  "test/selftest_system_append.py"
+  "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-03",
-  "TM-05",
-  "TM-08",
-  "TM-15"
+  "TM-13"
  ],
  "boundaries": [
-  "B2",
-  "B6",
-  "B9"
+  "B8"
  ],
- "summary": "New optional role key roles.<r>.system_append {model: text} (ADR-0094, router 0.31.0). proxy._backend_body appends the text of exactly the serving model to the leading system message of a role's chat request (or prepends a new system message); the client's body object is not mutated (new list, dict copy), requests for a concrete model and /api/generate are untouched, a canary/fallback/context-ladder tier gets it only when its model has an entry. The value comes only from operator configuration: config.yaml, or PUT /admin/config on the control port, whose authentication, the UI header requirement and the existing role validation path are unchanged (admin._roles_from passes the key through like options; config._parse_roles validates it: mapping, catalogue models only, text only, at most 8000 characters per model; an invalid override is refused and leaves the running configuration unchanged). No new route, port, credential, network destination or dependency. The route journal entry gains the appended length only, never the text. Traced destinations of the modified backend body: node request (nodes.nreq), OpenAI-compatible node (openai_node.run), cloud path (privacy.check classifies user texts and redacts tool results on self.out, so the appended system text is sent to a cloud tier unclassified, like the client's own system prompt), context_check token estimate, fallback_observation classification input (not logged as text). Memory capture and session handling use the client's original body, so the text is not stored in memory or sessions. Router version 0.30.1 -> 0.31.0.",
+ "summary": "Documentation only: the v0.36.0 changelog row names agent 0.35.2 instead of 0.35.1 and states that it is the same code as 0.35.1, built with golang.org/x/sys 0.50.0 (#153), because the v0.35.1 provenance rebuild diverged after #153 updated the dependency once 0.35.1 had been built. No code, configuration, workflow, dependency or agent source changes; building, signing and releasing the agent stay with the maintainer's release process (release_anlegen.py refuses a release when agent/ changed since its files were built).",
  "findings": [
   {
-   "id": "TM-05",
-   "evidence": "privacy.check/user_texts classify only user messages and redact_body only tool messages; an operator text configured for a cloud model reaches the provider unclassified.",
-   "resolution": "Same treatment as the client's own system prompt; documented in docs/configuration(.de).md and ADR-0094 that the text must not contain personal data. The value is operator configuration, not client input.",
+   "id": "TM-13",
+   "evidence": "The row announces a rebuilt agent binary for the next release.",
+   "resolution": "Pre-existing update-trust controls (signing, provenance rebuild, release tool check) apply unchanged; this change only documents the version.",
    "disposition": "baseline"
-  },
-  {
-   "id": "TM-03",
-   "evidence": "PUT /admin/config can now set prompt text that is appended to every request of a role for one model.",
-   "resolution": "No new capability class: the same authenticated control call can already change a role's models, cloud tiers and sampling. Existing control-port authentication and UI header checks apply unchanged; the web UI does not render or send the key.",
-   "disposition": "baseline"
-  },
-  {
-   "id": "TM-08",
-   "evidence": "Appended text enlarges every affected request.",
-   "resolution": "Bounded by SYSTEM_APPEND_MAX_CHARS (8000 per model) at load and at PUT; over-long values are refused (rejected-case test). context_check estimates the enlarged request.",
-   "disposition": "fixed"
-  },
-  {
-   "id": "TM-15",
-   "evidence": "Route journal entry gains a field.",
-   "resolution": "Only the length is logged (system_append), never the configured text.",
-   "disposition": "fixed"
   }
  ],
  "tests": [
-  {
-   "command": "python test/selftest_system_append.py",
-   "result": "passed",
-   "evidence": "ALL GREEN: validation incl. refused cases (unknown model, non-text, over-long, wrong shape), invalid override changes nothing, role save without the key keeps config.yaml's text, GET/PUT /admin/config round trip, only the serving model gets the text (also context ladder and canary), other model, concrete model and /api/generate unchanged, client body untouched."
-  },
-  {
-   "command": "mutants of proxy.system_append_for run against selftest_system_append.py (never applied / any model / also concrete models)",
-   "result": "passed",
-   "evidence": "Each mutant fails the self-test: 5, 3 and 1 failing checks respectively."
-  },
-  {
-   "command": "python test/selftest_<name>.py for every self-test listed in .github/workflows/ci.yml",
-   "result": "passed",
-   "evidence": "No failing self-test."
-  },
-  {
-   "command": "python test/run_tests.py",
-   "result": "passed",
-   "evidence": "0 failures: []"
-  },
-  {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_adr_index.py ; python test/check_pinned_references.py ; python test/selftest_control_flow.py && python test/check_control_flow.py",
-   "result": "passed",
-   "evidence": "All checks passed; configuration ok; ADR index ok: 94 ADRs; Pinned references: 0 finding(s); control flow ok."
-  },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
@@ -96,8 +36,6 @@
   }
  ],
  "limitations": [
-  "Not yet run against a live router; the effect on a real model is confirmed after deployment by the route journal's system_append length and a question set per model.",
-  "The decision engine's observation classification (fallback_observation, logging only) sees the appended text as part of the request; routing decisions are taken before the tier is chosen and are unaffected.",
-  "A text set only through PUT /admin/config lives in roles.yaml and is dropped by a later save that does not carry it (same as options, ADR-0093); config.yaml is the documented place."
+  "The agent binary 0.35.2 itself is not built or verified by this change."
  ]
 }
