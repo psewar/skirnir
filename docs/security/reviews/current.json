@@ -2,61 +2,65 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "c0dee4cbee592d777b0447e781ec2d21cd46ff32",
- "change_digest": "652ac7130eabcdd684494e0026a5ff8a2583be210fb9708915956f9d70c75cd9",
+ "base_sha": "53046af001a7c8438d8ffb0a789685ba1f1087c7",
+ "change_digest": "695d7e7fd7f8d989b976fedabf3544acedfde3ee51cd83d79cb988565298b5e0",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0096-a-loading-tier-comes-before-a-cold-lower-tier.md",
+  "docs/adr/0097-the-interactive-fallback-does-not-evict-the-answering-model.md",
   "docs/adr/README.md",
   "docs/configuration.de.md",
   "docs/configuration.md",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/proxy.py",
-  "router/skirnir_router/scheduler.py",
-  "test/selftest_cloud_wait_for_load.py",
-  "router/skirnir_router/request.py",
   "router/skirnir_router/nodes.py",
-  "router/skirnir_router/cloud.py",
+  "router/skirnir_router/scheduler.py",
+  "test/selftest_fallback_keeps_busy_model.py",
+  "router/skirnir_router/admission.py",
+  "router/skirnir_router/proxy.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-05",
-  "TM-08"
+  "TM-08",
+  "TM-16"
  ],
  "boundaries": [
-  "B6",
   "B9"
  ],
- "summary": "Router 0.32.0 (ADR-0096, extends ADR-0095): _Acquire.next_candidate now waits once before any cold pick (a cloud tier, or a local tier whose model is not loaded on the picked node) for a running router-triggered load of the model of a tier ranked before it (new scheduler.tier_loading: claim model equals the tier model or the same blob), at most until the admission deadline, then selects again. For a cloud pick the trigger narrows from any load on a node with a tier's model (loading_for) to a load of the tier's own model. A warm lower tier is still taken at once, so the interactive fallback past a busy loaded model is unchanged. No route, configuration key, destination, payload or CI change.",
+ "summary": "Router 0.32.1 (ADR-0097): the scheduler's interactive fallback takes a cold tier on a node whose warm model is at its limit only if the tier fits beside the models answering there (new Node.answering_vram_gib: measured occupancy of loaded models with a request in flight, same model or blob). Before, the VRAM budget counted the answering model as evictable, so a large cold fallback evicted it once its request ended; the waiting requests then went to the cloud. Read-only arithmetic on existing node state; no route, configuration key, destination, payload or cloud-path change. CI gains one self-test run.",
  "findings": [
   {
-   "id": "TM-05",
-   "evidence": "Cloud tiers are still reached only through scheduler.choose, which applies Routing.tier_blocked (data class, client floor, provider guards, privacy opt-in) on every selection, including the re-selection after a wait. The change can only replace a cold pick by a higher-ranked tier after its load; it never adds a cloud pick.",
-   "resolution": "Existing cloud controls apply unchanged; fewer requests reach the cloud or a second local model during loads.",
+   "id": "TM-08",
+   "evidence": "Fewer cold loads beside a busy model; a voice command that previously took a large cold fallback now waits for the warm model within its existing interactive budget (admission deadline, max_queue unchanged). answering_vram_gib iterates the node's loaded models and inflight counter only.",
+   "resolution": "Bounded by the existing admission controls; the change reduces model evictions and cloud spill-over under load.",
    "disposition": "baseline"
   },
   {
-   "id": "TM-08",
-   "evidence": "More requests may wait (cold local picks in addition to cloud picks). The wait reuses _wait_for_load: once per (node, model) via waited_loads, 0.5 s polling, bounded by routing.deadline_ms or max_wait_*, no node slot held. tier_loading only matches unexpired router claims (announce_load, 300 s) for the role's own tier models, so an unrelated load cannot hold requests. A client cannot create claims except by sending ordinary requests that are already admission-limited.",
-   "resolution": "Bounded as the existing load wait. As before, requests waiting for a load are not counted in admission's max_queue (pre-existing). VRAM use during loads decreases (no second cold model beside a load).",
+   "id": "TM-16",
+   "evidence": "ci.yml adds `python test/selftest_fallback_keeps_busy_model.py` to the existing test job; no new action, permission, secret or trigger.",
+   "resolution": "No change to CI trust; the test runs without network, router process or credentials.",
    "disposition": "baseline"
   }
  ],
  "tests": [
   {
-   "command": "python test/selftest_cloud_wait_for_load.py",
+   "command": "python test/selftest_fallback_keeps_busy_model.py",
    "result": "passed",
-   "evidence": "all PASS (18 checks); with proxy.py from origin/main (0.31.1) the two new waiting checks fail (instrument validated)."
+   "evidence": "all PASS (8 checks); with scheduler.py from origin/main (0.32.0) the two fallback checks fail (instrument validated)."
   },
   {
-   "command": "all 68 test/selftest_*.py (180 s timeout each)",
+   "command": "all 69 test/selftest_*.py (180 s timeout each)",
    "result": "passed",
    "evidence": "0 failed, 0 timed out."
   },
   {
-   "command": "ruff check .; python test/check_adr_index.py; python test/selftest_control_flow.py; python test/check_control_flow.py",
+   "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "All checks passed; ADR index ok: 96 ADRs; control flow ok: 0 legacy findings."
+   "evidence": "no FAIL lines; the 0.6.6 interactive fallback to a small tier on another node still passes."
+  },
+  {
+   "command": "ruff check .; python test/check_adr_index.py; python test/selftest_control_flow.py; python test/check_control_flow.py; python test/selftest_english_names.py",
+   "result": "passed",
+   "evidence": "All checks passed; ADR index ok: 97 ADRs; control flow ok: 0 legacy findings."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -70,7 +74,7 @@
   }
  ],
  "limitations": [
-  "The behaviour during a real model switch is verified after rollout by the staged-question measurement named in ADR-0096, not by this change.",
-  "Whether the concurrent second load slowed the first model's load (36 s vs about 15 s) was not isolated."
+  "Production runs 0.31.1 (0.32.0 was rolled back); this change ships 0.32.0 and 0.32.1 together and is verified after rollout by the staged-question measurement in ADR-0097.",
+  "Why the loaded lower tier did not count as a warm candidate at 13:36:49 in the failed measurement was not determined from the available logs."
  ]
 }

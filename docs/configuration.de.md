@@ -165,8 +165,10 @@ roles:
   und `max_wait_batch_s` (1800 s).
 - **Interaktive Anfragen warten nicht hinter einem belegten warmen Modell**, wenn eine andere lokale Stufe sofort bedienen
   kann: zuerst eine freie warme, dann eine freie kalte Stufe, andere Knoten vor dem belegten (nie eine Cloud-Stufe auf
-  diesem Weg); im Entscheidungslog steht `reason: fallback`. Ist nichts Warmes belegt, entscheidet warm zuerst wie
-  bisher; ist keine Stufe frei, wartet die Anfrage innerhalb ihres interactive-Budgets.
+  diesem Weg); im Entscheidungslog steht `reason: fallback`. Eine kalte Stufe auf dem belegten Knoten kommt nur in
+  Frage, wenn sie neben dem antwortenden Modell Platz hat; eine, die dessen Speicher bräuchte, würde es verdrängen, sobald
+  seine Anfrage endet (ADR-0097). Ist nichts Warmes belegt, entscheidet warm zuerst wie bisher; ist keine Stufe frei,
+  wartet die Anfrage innerhalb ihres interactive-Budgets.
 - **Beobachtungsmodus** (`decision_engine.observe_blocked`): Muss eine Anfrage an eine Rolle warten, ordnet die Decision Engine
   sie im Hintergrund ein, nur mit ihrer CPU-Kette (Embedding, TF-IDF, Regeln; nie das LLM, das sich auf genau der GPU
   anstellen würde, auf die gewartet wird), und das Entscheidungslog hält `decision_observe` fest: Klasse, Sicherheit, die

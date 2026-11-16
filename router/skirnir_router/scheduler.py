@@ -148,12 +148,20 @@ def tier_loading(tiers, now, exclude=()):
     return None
 
 
-def _interactive_pick(per_tier, req):
+def _fits_beside_answering(n, model, ctx, now):
+    """A cold load of `model` on node n fits without evicting a model that is answering there (0.32.1, ADR-0097)."""
+    return state.CFG.need_gib(model, ctx, n) <= n.budget_gib(now, model) - n.answering_vram_gib()
+
+
+def _interactive_pick(per_tier, req, now):
     """Interactive requests (voice commands) do not wait behind a running request if another local tier can serve
     immediately. Warm-first otherwise sticks to the busy warm node: with max_parallel 1 (qwen3.8, since 0.6.5) a
     voice command waited up to 60 s behind a minute-long agent request, although a free tier was ready on a second node.
     Order: free warm tier (tier rank), then free cold tier. Never cloud tiers (cost, data class -
-    handled by the normal path). None = no free tier: proceed normally, then wait at the warm node."""
+    handled by the normal path). None = no free tier: proceed normally, then wait at the warm node.
+    A cold tier on the busy node only if it fits beside the answering model (ADR-0097): on 2026-11-16 a cold fallback
+    loaded next to the busy first model evicted it as soon as its request ended, and the requests waiting for it went
+    to the cloud."""
     local = [pt for pt in per_tier if not pt[1].get("cloud")]
     busy = {n.name for _i, t, _c, _n, cands in local for n in cands if n.is_loaded(t["model"]) and admission.saturated(n, t["model"])}
     if not busy:
@@ -164,7 +172,8 @@ def _interactive_pick(per_tier, req):
         for warm_only in (True, False):
             for i, t, ctx, _need, cands in local:
                 free = [n for n in cands if not admission.saturated(n, t["model"]) and (n.is_loaded(t["model"]) or not warm_only)
-                        and (n.name not in busy or not other_only)]
+                        and (n.name not in busy or not other_only)
+                        and (n.is_loaded(t["model"]) or n.name not in busy or _fits_beside_answering(n, t["model"], ctx, now))]
                 if free:
                     req.reason = "fallback"
                     return i, t, ctx, rank(free, t["model"], req)[0]
@@ -208,7 +217,7 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
                     rank(cands, t["model"], req)
                     return i, t, ctx, n
     if role.get("latency_first") and req is not None and req.priority == "interactive":
-        pick = _interactive_pick(per_tier, req)
+        pick = _interactive_pick(per_tier, req, now)
         if pick is not None:
             return pick
     if role.get("latency_first"):
