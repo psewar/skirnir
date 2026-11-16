@@ -62,11 +62,23 @@ def ram_spill_gib(ps_entry):
     return max(0.0, (size - vram) / GIB)
 
 
-def apply_ollama_state(node, tag_models, ps_models, now):
+def note_models_changed(node, new, source):
+    """Journal line when a node's model list changes, with where the new list came from (agent report or router poll).
+    0.32.3 (issue #162): after a router restart a held server's model was missing for one report interval, and neither the
+    journal nor /admin/state showed which source had set the list."""
+    added, removed = sorted(new - node.models), sorted(node.models - new)
+    if added or removed:
+        log.info("node %s: models from %s: %d (+%s -%s)", node.name, source, len(new),
+                 ",".join(added) or "none", ",".join(removed) or "none")
+
+
+def apply_ollama_state(node, tag_models, ps_models, now, source="poll"):
     """Adopt Ollama state of a node: installed (/api/tags) and loaded models (/api/ps), transition offline ->
     free, reload capabilities, state machine. Shared for router polling and agent reporting
-    (OLLAMA frame, apply_ollama_push)."""
-    node.models = {m["name"] for m in tag_models}
+    (OLLAMA frame, apply_ollama_push; `source` names it in the journal)."""
+    new_models = {m["name"] for m in tag_models}
+    note_models_changed(node, new_models, source)
+    node.models = new_models
     node.model_details = {m["name"]: m for m in tag_models}
     if node.models:
         node.last_known_models = set(node.models)
@@ -456,7 +468,7 @@ def apply_ollama_push(node, msg, now):
         state.remember({"event": "upstream_blocked", "node": node.name, "blocked": blocked})
         state.MQTT_DIRTY.append(True)
     node.upstream_blocked = blocked
-    apply_ollama_state(node, _named(tags), _named(ps), now)
+    apply_ollama_state(node, _named(tags), _named(ps), now, source=f"agent report (rev {msg.get('rev')})")
 
 
 async def poll_loop():
