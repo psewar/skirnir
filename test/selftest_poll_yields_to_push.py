@@ -7,6 +7,7 @@ before the agent's first OLLAMA report (standby models plus the held server's) a
 with what the poll saw - the standby answering /v1/models with its own models only - until the agent's next report 30 s
 later. Runs without network, agent or server."""
 import asyncio
+import logging
 import os
 import sys
 import time
@@ -124,6 +125,31 @@ async def main():
     finally:
         nodes.nreq = real_nreq
     check("failed poll without a report: one miss", n.misses == 1, f"misses {n.misses}")
+
+    # 5) 0.32.3: the journal names where a changed model list came from (agent report with its revision, or a poll)
+    lines = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            lines.append(record.getMessage())
+    cap = Capture()
+    poll.log.addHandler(cap)
+    level = poll.log.level
+    poll.log.setLevel(logging.INFO)   # the router runs at INFO; without its logging setup the logger would drop the line
+    try:
+        n = fresh_node()
+        push(n)
+        push(n)   # same list again: no line
+        poll.apply_ollama_state(n, *openai_node.models_to_ollama(standby_v1), time.time())
+    finally:
+        poll.log.removeHandler(cap)
+        poll.log.setLevel(level)
+    models_lines = [x for x in lines if "models from" in x]
+    check("journal: one line per change, naming the agent report and its revision",
+          len(models_lines) == 2 and "agent report (rev 1)" in models_lines[0] and f"+{SERVER},{SMALL}" in models_lines[0],
+          str(models_lines))
+    check("journal: a poll that drops a model says so", len(models_lines) == 2 and "from poll" in models_lines[1]
+          and f"-{SERVER}" in models_lines[1], str(models_lines))
 
 
 asyncio.run(main())

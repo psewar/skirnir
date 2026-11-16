@@ -2,39 +2,28 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "4c6e540c4e4bd403d6bc7c7f8d3b42b51e89816c",
- "change_digest": "c3441ed7a5af711658c3edb8293bc72746b23cf1fccb5709a3e5534594a14e44",
+ "base_sha": "c5be9cad4a864f98b7bab602969ec645c14585dc",
+ "change_digest": "dca987dc34058816ae03ae82f30b448bd6b235e23192546d5a4fbb2a610a12b6",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
   "CHANGELOG.md",
   "router/skirnir_router/common.py",
   "router/skirnir_router/poll.py",
   "test/selftest_poll_yields_to_push.py",
-  "router/skirnir_router/nodes.py",
   "router/skirnir_router/tunnel.py",
-  "router/skirnir_router/openai_node.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-07",
-  "TM-16"
+  "TM-15"
  ],
  "boundaries": [
-  "B3",
   "B9"
  ],
- "summary": "Router 0.32.2 (#162): poll_node drops its answer, and does not count a failed poll as a miss, when the agent's OLLAMA report (frame over the authenticated tunnel, apply_ollama_push) arrived after the poll began. Before, a poll answer that came back after the agent's first report replaced the reported model list until the next report. No route, configuration, protocol, payload or agent change; the agent's report already was the authority while fresh (no polling then). CI gains one self-test run.",
+ "summary": "Router 0.32.3 (diagnostics for #162): apply_ollama_state logs one journal line when a node's model list changes, naming the source (`agent report (rev N)` or `poll`), the count and the added/removed model names. No behaviour, route, configuration or payload change.",
  "findings": [
   {
-   "id": "TM-07",
-   "evidence": "The change gives an agent report precedence over a concurrent router poll of the same node. Reports only arrive over the node's own authenticated tunnel (approved key); a node can already set its own model list through that report today. A compromised agent gains nothing new: it could suppress its node's poll answers, which it controls anyway since the poll also goes through its tunnel.",
-   "resolution": "No new capability for an agent; the trust boundary of node-reported state is unchanged.",
-   "disposition": "baseline"
-  },
-  {
-   "id": "TM-16",
-   "evidence": "ci.yml adds `python test/selftest_poll_yields_to_push.py` to the existing test job; no new action, permission, secret or trigger.",
-   "resolution": "No change to CI trust; the test runs without network, router process or credentials.",
+   "id": "TM-15",
+   "evidence": "The new line writes model names reported by a node (agent report or poll) and the agent's report revision into the router journal. Model names already appear in the journal (route lines) and in /admin/state; no prompt, user data, credential or address is logged. A node could choose long or odd model names; they are logged as reported, like in the existing route lines.",
+   "resolution": "Same data class as existing journal lines; logged only on a change, so a stable node adds no volume.",
    "disposition": "baseline"
   }
  ],
@@ -42,7 +31,7 @@
   {
    "command": "python test/selftest_poll_yields_to_push.py",
    "result": "passed",
-   "evidence": "all PASS (7 checks); with poll.py from origin/main 3 checks fail and the standby's model carries an openai: digest (the observed state reproduced)."
+   "evidence": "all PASS (9 checks), including one journal line per change with source and revision, none for an unchanged list."
   },
   {
    "command": "all 70 test/selftest_*.py (180 s timeout each)",
@@ -71,6 +60,6 @@
   }
  ],
  "limitations": [
-  "The race is reconstructed from timing in the journal (failure 26 s after the tunnel connected, model back 36 s after, both within one 30 s report interval) and reproduced in the self-test; it is confirmed in operation by the journal line `poll answer dropped` after the next router restart."
+  "Diagnostics only; #162 itself stays open until the journal of the next router restart shows which report set the incomplete list."
  ]
 }
