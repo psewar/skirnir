@@ -257,17 +257,19 @@ class _Acquire:
             now = time.time()
             pick = scheduler.choose(self.role, self.tiers, self.client_ctx, now, self.tried, self.req)
             if pick is None:
-                if await self._wait_for_load(now, self.tiers):
+                if await self._wait_for_load(now, scheduler.loading_for(self.tiers, now, self.tried)):
                     continue   # Loading finished (or deadline reached): re-select
                 refused = await self._wake_or_refuse()
                 if refused:
                     return refused
                 continue
-            if pick[1].get("cloud") and await self._wait_for_load(now, self.tiers[:pick[0]]):
-                # ADR-0095: a local tier before the cloud tier is loading on a node (its claim takes the budget, so it has
-                # no candidate yet) - wait once for that load like a request without any candidate, then re-select.
-                continue
             node, model = pick[3], pick[1]["model"]
+            if not node.is_loaded(model) and await self._wait_for_load(
+                    now, scheduler.tier_loading(self.tiers[:pick[0]], now, self.tried)):
+                # ADR-0095/0096: the pick is cold (a cloud tier is never warm) while a tier before it is loading its model on
+                # a node (the load's claim takes the budget, so that tier has no candidate yet) - wait once for that load
+                # instead of starting a second, lower model or going to the cloud, then re-select.
+                continue
             if admission.saturated(node, model):
                 refused = await self._wait_for_slot(node, now, model)
                 if refused:
@@ -278,15 +280,14 @@ class _Acquire:
             self.tried.add(node.name)
             return pick
 
-    async def _wait_for_load(self, now, tiers):
+    async def _wait_for_load(self, now, found):
         """No candidate, but a matching node is currently loading a model (VRAM claim from announce_load): wait for the end
         of loading instead of immediate 503. Measured 2026-09-25: when switching qwen3.6 -> gemma4:26b, ~30 s long
         all further requests got 'no node available' (778 of 1142), because the old model counted as loaded until the
         next /api/ps poll and the new one's claim broke the budget. Waits per (node, model) once, until /api/ps shows
         the model or the claim is gone (then two more poll intervals), at most until the Admission deadline.
-        `tiers`: all of the role's tiers when nothing was picked, only the local tiers before a picked cloud tier (0.31.1,
-        ADR-0095: on 2026-11-16 a request went to the cloud while the first tier's model was loading)."""
-        found = scheduler.loading_for(tiers, now, self.tried)
+        `found`: (node, loading model) from scheduler.loading_for when nothing was picked, from scheduler.tier_loading for
+        the tiers before a cold pick (ADR-0095 for a cloud pick, 0.31.1; ADR-0096 for a cold local one, 0.32.0). None: no wait."""
         if found is None or now >= self.deadline_at:
             return False
         node, model = found

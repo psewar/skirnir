@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Self-test (Router 0.31.1, ADR-0095): a cloud tier waits once for a local tier before it that is loading.
+"""Self-test (Router 0.31.1 ADR-0095, 0.32.0 ADR-0096): a cold pick waits once for a tier before it that is loading.
 
 Trigger 2026-11-16: right after a node switched from an OpenAI-compatible server back to its Ollama, the first request
 started loading the role's first model. A request ten seconds later found no local candidate (the load's VRAM claim took
 the budget), so the cloud tier further down counted as the first ready one and answered - five seconds before the local
-model was ready. Waiting for a loading model existed only for requests without any candidate. Runs without router
-process, network, agent or provider."""
+model was ready (fixed in 0.31.1). The re-measurement showed the same with a small local tier: it fitted next to the claim,
+was loaded cold as a second model (7.6 GiB) for one tool round, and the answer round still waited for the first model
+(0.32.0). Waiting for a loading model existed only for requests without any candidate. Runs without router process,
+network, agent or provider."""
 import asyncio
 import os
 import sys
@@ -27,9 +29,11 @@ def check(name, cond, info=""):
 state.CFG = config.Config(os.path.join(HERE, "..", "router", "config.example.yaml"), use_overrides=False)
 state.CFG.mqtt = None
 state.spawn = lambda coro: coro.close()
-LOCAL, CLOUD_MODEL = "example-dense:27b", "synthetic-cloud-small"
+LOCAL, SMALL, OTHER, CLOUD_MODEL = "example-dense:27b", "example-small:8b", "example-other:12b", "synthetic-cloud-small"
 state.CFG.models[LOCAL] = {"weights_gib": 17.0, "kv_gib_per_1k": 0.05, "real": True}
+state.CFG.models[SMALL] = {"weights_gib": 5.0, "kv_gib_per_1k": 0.01, "real": True}
 LOCAL_TIER = {"model": LOCAL, "num_ctx": 8192, "busy_ok": False}
+SMALL_TIER = {"model": SMALL, "num_ctx": 8192, "busy_ok": False}
 CLOUD_TIER = {"model": CLOUD_MODEL, "num_ctx": 32768, "busy_ok": False, "cloud": "synthetic"}
 state.CLOUD = {"synthetic": cloud.CloudTarget("synthetic", {"kind": "openai", "base_url": "https://provider.invalid/"})}
 
@@ -41,14 +45,15 @@ class OpenRouting(request.Routing):
         return None
 
 
-def loading_node():
-    """A node whose router-triggered load of LOCAL is still running: the claim leaves no budget for any local tier."""
+def loading_node(free_gib=1.0, loading=LOCAL):
+    """A node whose router-triggered load of `loading` is still running; with 1 GiB free no local tier fits beside the
+    claim, with 9 GiB the small tier does (as on 2026-11-16 11:21)."""
     now = time.time()
     n = nodes.Node("gpu-node", {"vram_total_gib": 32.0})
     n.state, n.hb_ts, n.free_at = "free", now, now
-    n.gpu_util, n.vram_total_gib, n.vram_used_gib, n.vram_free_gib = 30, 32.0, 31.0, 1.0
-    n.models = {LOCAL}
-    n.loading[LOCAL] = (19.0, now + 300)
+    n.gpu_util, n.vram_total_gib, n.vram_used_gib, n.vram_free_gib = 30, 32.0, 32.0 - free_gib, free_gib
+    n.models = {LOCAL, SMALL, OTHER}
+    n.loading[loading] = (19.0, now + 300)
     return n
 
 
@@ -70,6 +75,12 @@ def finish_load(n, after_s):
     return run()
 
 
+async def picked_at_once(acq):
+    t0 = time.time()
+    pick = await acq.next_candidate()
+    return pick, time.time() - t0
+
+
 async def main():
     tiers = [LOCAL_TIER, CLOUD_TIER]
 
@@ -78,13 +89,13 @@ async def main():
     state.NODES = {n.name: n}
     _, _, cands = scheduler.candidates_for(LOCAL_TIER, None, time.time())
     check("setup: the loading node is no candidate for the local tier (claim takes the budget)", cands == [], str(cands))
-    check("setup: loading_for sees the load", scheduler.loading_for([LOCAL_TIER], time.time()) == (n, LOCAL))
+    check("setup: tier_loading sees the load of the tier's own model", scheduler.tier_loading([LOCAL_TIER], time.time()) == (n, LOCAL))
     acq, role, req = acquire(tiers)
     pick = scheduler.choose(role, tiers, None, time.time(), (), req)
     check("setup: choose() alone picks the cloud tier (reason cloud)", pick is not None and pick[0] == 1 and req.reason == "cloud",
           f"{pick and pick[0]} {req.reason}")
 
-    # 1) The fix: the request waits for the load and then takes the local tier
+    # 1) ADR-0095: the request waits for the load and then takes the local tier
     acq, role, req = acquire(tiers)
     t0 = time.time()
     done = asyncio.ensure_future(finish_load(n, 0.6))
@@ -109,30 +120,57 @@ async def main():
     # 3) Deadline already over: no wait at all
     n = loading_node()
     state.NODES = {n.name: n}
-    acq, role, req = acquire(tiers, deadline_s=-1.0)
-    t0 = time.time()
-    pick = await acq.next_candidate()
-    check("deadline over: cloud tier at once", isinstance(pick, tuple) and pick[0] == 1 and time.time() - t0 < 0.3, str(pick))
+    pick, s = await picked_at_once(acquire(tiers, deadline_s=-1.0)[0])
+    check("deadline over: cloud tier at once", isinstance(pick, tuple) and pick[0] == 1 and s < 0.3, str(pick))
 
     # 4) Nothing loading: the cloud tier is taken at once (the previous behaviour)
     n = loading_node()
     n.loading.clear()
     state.NODES = {n.name: n}
-    acq, role, req = acquire(tiers)
-    t0 = time.time()
-    pick = await acq.next_candidate()
-    check("no load running: cloud tier at once", isinstance(pick, tuple) and pick[0] == 1 and time.time() - t0 < 0.3,
-          f"{pick} {time.time() - t0:.2f} s")
+    pick, s = await picked_at_once(acquire(tiers)[0])
+    check("no load running: cloud tier at once", isinstance(pick, tuple) and pick[0] == 1 and s < 0.3, f"{pick} {s:.2f} s")
 
     # 5) A load for a tier AFTER the cloud tier is no reason to wait (the role ranks the cloud first)
     n = loading_node()
     state.NODES = {n.name: n}
-    cloud_first = [CLOUD_TIER, LOCAL_TIER]
-    acq, role, req = acquire(cloud_first)
+    pick, s = await picked_at_once(acquire([CLOUD_TIER, LOCAL_TIER])[0])
+    check("cloud tier ranked first: no wait for a later local tier", isinstance(pick, tuple) and pick[0] == 0 and s < 0.3,
+          f"{pick} {s:.2f} s")
+
+    # 6) ADR-0096: a lower local tier that would be loaded cold beside the claim waits for the higher tier's load
+    small_tiers = [LOCAL_TIER, SMALL_TIER, CLOUD_TIER]
+    n = loading_node(free_gib=9.0)
+    state.NODES = {n.name: n}
+    _, _, cands = scheduler.candidates_for(SMALL_TIER, None, time.time())
+    check("setup: the small tier fits beside the claim (cold candidate)", cands == [n], str(cands))
+    acq, role, req = acquire(small_tiers)
+    pick = scheduler.choose(role, small_tiers, None, time.time(), (), req)
+    check("setup: choose() alone picks the small tier cold", pick is not None and pick[0] == 1 and not n.is_loaded(SMALL), str(pick))
+    acq, role, req = acquire(small_tiers)
     t0 = time.time()
+    done = asyncio.ensure_future(finish_load(n, 0.6))
     pick = await acq.next_candidate()
-    check("cloud tier ranked first: no wait for a later local tier", isinstance(pick, tuple) and pick[0] == 0 and time.time() - t0 < 0.3,
-          f"{pick} {time.time() - t0:.2f} s")
+    waited = time.time() - t0
+    await done
+    check("a cold lower tier waits for the loading first tier and then takes it", isinstance(pick, tuple) and pick[0] == 0,
+          str(pick))
+    check("that wait lasted until the load finished", 0.5 <= waited < 3.0, f"{waited:.2f} s")
+
+    # 7) A WARM lower tier is still taken at once (no second model is loaded; the warm-first rule stands)
+    n = loading_node(free_gib=9.0)
+    n.loaded[SMALL] = 5.1
+    state.NODES = {n.name: n}
+    pick, s = await picked_at_once(acquire(small_tiers)[0])
+    check("warm lower tier: taken at once while the first tier loads", isinstance(pick, tuple) and pick[0] == 1 and s < 0.3,
+          f"{pick} {s:.2f} s")
+
+    # 8) A load of a model that is no tier of the role is no reason to wait (it will not serve this request)
+    n = loading_node(free_gib=9.0, loading=OTHER)
+    state.NODES = {n.name: n}
+    check("setup: tier_loading ignores a load of another model", scheduler.tier_loading([LOCAL_TIER], time.time()) is None)
+    pick, s = await picked_at_once(acquire([LOCAL_TIER, SMALL_TIER])[0])
+    check("another model loading: no wait (first tier taken cold or the small one, at once)", isinstance(pick, tuple) and s < 0.3,
+          f"{pick} {s:.2f} s")
 
 
 asyncio.run(main())

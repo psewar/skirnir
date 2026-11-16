@@ -147,9 +147,10 @@ roles:
 - **Circuit breaker per node** (`modes.breaker`): three backend errors in 60 s → `open` (30 s), then `half_open` with exactly
   one probe. A restart of the node resets it. Retry on another node on connection error or 5xx before the first byte.
 - **Model switch:** while a node is loading a model, further requests that would need that node wait for the load to
-  finish instead of getting 503 (event `wait_load`). The same holds before a cloud tier: if a local tier ranked before it
-  is loading, the request waits once for that load (at most until its admission deadline) before it goes to the cloud
-  (ADR-0095).
+  finish instead of getting 503 (event `wait_load`). The same holds before a cold pick: if a local tier ranked before the
+  picked tier is loading its own model, the request waits once for that load (at most until its admission deadline)
+  instead of going to the cloud (ADR-0095) or loading a lower model beside it (ADR-0096). A lower tier that is already
+  loaded is still taken at once.
 - **Admission** (`modes.admission`): at most `max_inflight` concurrent requests per node (policy in the registry, default 2 –
   should match the node's `OLLAMA_NUM_PARALLEL`). Further requests wait in the router; when a slot frees up, the best rank from
   priority class and age wins (`aging_s` 30 s so that batch does not starve). `max_queue` exceeded → 503 immediately.
