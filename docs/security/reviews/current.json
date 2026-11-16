@@ -2,60 +2,64 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "2714b97c60b9a873570e2bddaf6125d3be978162",
-  "change_digest": "685e3bbd144e3875be4280a8f8083b0dd2bf0e4f4478ba8a15acea71a83c82ca",
+  "base_sha": "a9351a7f1824ee17240511c43998cc7b5ba024b7",
+  "change_digest": "6da8e2e26c4747cf7185ef5328b5878fefe5db5abf7a382e2d336a1b78c30333",
   "reviewed_paths": [
-    "decision-embed/Dockerfile"
+    "CHANGELOG.md",
+    "docs/security/reviews/current.json",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/proxy.py",
+    "test/selftest_standby_switch.py"
   ],
   "risk_ids": [
-    "TM-16"
+    "TM-15"
   ],
   "boundaries": [
-    "B9"
+    "B1"
   ],
-  "summary": "Base image of decision-embed from python:3.11-slim to python:3.14-slim (Dependabot proposed 3.15-slim). onnxruntime 1.32.0 publishes no Python 3.15 wheel yet, so the image build on 3.15-slim fails ('No matching distribution found for onnxruntime', reproduced with podman); 3.14-slim is the newest base for which numpy, onnxruntime and tokenizers all have wheels. The digest sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f equals the current index digest of python:3.14-slim on Docker Hub (pushed 2026-11-08), so the reference stays immutable (ADR-0055). Built with podman: Python 3.14.10, numpy 2.5.5, onnxruntime 1.32.0, tokenizers 0.23.3; server.py's embedder module imports. The pip install line, the loopback-only port binding in compose.yaml, the /models volume and the entrypoint are unchanged. No new trust boundary, port, credential or network destination at runtime.",
+  "summary": "GET /api/tags (client API) looked up the details of a role's first model with an unconditional dict index on the node returned by scheduler.any_online_node_with. That node may offer the model only through a switch to its standby Ollama (Node.standby_switch), whose models have no entry in model_details, so the listing answered 500 for every client. The lookup now falls back to the existing placeholder details (digest router-<role>, size 0, empty details), the same output as for a role whose model no online node has. The response shape, the authentication and authorization of the route, the set of listed roles and the concrete-model listing are unchanged; no new route, port, credential, network destination or logged value. Router version 0.30.0 -> 0.30.1.",
   "findings": [
     {
-      "id": "TM-16",
-      "evidence": "A third-party base image is updated; the decision service runs the router's routing classifier.",
-      "resolution": "Pre-existing and unchanged in scope: the base image stays pinned by digest (verified against the registry); the Python packages are installed unpinned as before (unchanged by this PR).",
+      "id": "TM-15",
+      "evidence": "The failure path ran through the last-resort error middleware (fixed 500 with a reference, exception logged without its message).",
+      "resolution": "Pre-existing and unchanged: the fix removes this occurrence of the error path; the middleware and its logging are not touched.",
       "disposition": "baseline"
     }
   ],
   "tests": [
     {
-      "command": "Docker Hub registry HEAD /v2/library/python/manifests/3.14-slim (index media types)",
+      "command": "python test/selftest_standby_switch.py (new check 2b before the fix)",
       "result": "passed",
-      "evidence": "Docker-Content-Digest sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f, identical to the pinned digest."
+      "evidence": "Without the proxy.py change the new check raises KeyError: 'example-dense:27b' in tags_list, the same error as reported in operation."
     },
     {
-      "command": "podman build decision-embed on python:3.15-slim (Dependabot's proposal)",
+      "command": "python test/selftest_standby_switch.py",
       "result": "passed",
-      "evidence": "Fails as expected: ERROR: No matching distribution found for onnxruntime - the reason 3.15 is not taken."
+      "evidence": "0 failures: []"
     },
     {
-      "command": "podman build decision-embed on python:3.14-slim, then python -c 'import numpy, onnxruntime, tokenizers, embedder'",
+      "command": "python test/selftest_control_flow.py && python test/check_control_flow.py",
       "result": "passed",
-      "evidence": "3.14.10 numpy 2.5.5 onnxruntime 1.32.0 tokenizers 0.23.3 embedder ok"
+      "evidence": "control flow ok: 0 legacy findings in 0 files (baseline)"
     },
     {
-      "command": "python test/check_pinned_references.py",
+      "command": "python test/run_tests.py",
       "result": "passed",
-      "evidence": "Pinned references: 0 finding(s)."
-    },
-    {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
-      "result": "passed",
-      "evidence": "Security evidence: 0 error(s)."
+      "evidence": "0 failures: []"
     },
     {
       "command": "python test/check_public_changes.py",
       "result": "passed",
       "evidence": "Public-change scan: 0 finding(s)."
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "result": "passed",
+      "evidence": "Security evidence: 0 error(s)."
     }
   ],
   "limitations": [
-    "The service was not started with the real model; the router CT's image is only replaced when the operator rebuilds and restarts the embed service.",
-    "python:3.14-slim was pushed on 2026-11-08; the operator's 7-day minimum image age is reached on 2026-11-15."
+    "The placeholder details carry no size or family for a standby-only model; clients that read them see the same values as for a role without an online node.",
+    "Not yet verified against the running router; that follows the operator's deployment of 0.30.1."
   ]
 }
