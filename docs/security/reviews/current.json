@@ -2,40 +2,81 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "024d52826bb0c097caaad06f7e457161bfc2d075",
- "change_digest": "80d071836dcaeabfa924b0dde7264343dcb9c753ee9cd3a62da0e08025bacf93",
+ "base_sha": "26d5c8faa50455ddb4a60bece32eb63adcc13fcf",
+ "change_digest": "e7c428b7c489f8fa65ba590ad76d70b6af16894af64a94af7447952515f775c6",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
+  "docs/adr/0095-a-loading-local-tier-comes-before-the-cloud.md",
+  "docs/adr/README.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/proxy.py",
+  "test/selftest_cloud_wait_for_load.py",
+  "router/skirnir_router/scheduler.py",
+  "router/skirnir_router/request.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-13"
+  "TM-05",
+  "TM-08",
+  "TM-16"
  ],
  "boundaries": [
-  "B8"
+  "B6",
+  "B9"
  ],
- "summary": "Documentation only: the v0.36.0 changelog row names agent 0.35.2 instead of 0.35.1 and states that it is the same code as 0.35.1, built with golang.org/x/sys 0.50.0 (#153), because the v0.35.1 provenance rebuild diverged after #153 updated the dependency once 0.35.1 had been built. No code, configuration, workflow, dependency or agent source changes; building, signing and releasing the agent stay with the maintainer's release process (release_anlegen.py refuses a release when agent/ changed since its files were built).",
+ "summary": "Router 0.31.1 (ADR-0095): when the scheduler picks a cloud tier, _Acquire.next_candidate first waits once for a running router-triggered load of a local tier ranked before that cloud tier (existing _wait_for_load, now given the tier slice), at most until the request's admission deadline, then selects again. The change only delays or avoids a cloud pick; it adds no route, configuration key, destination or payload change. After the wait the request goes through scheduler.choose again, so Routing.tier_blocked (data class, client floor, provider guards, privacy opt-in) still decides every cloud tier. CI gains one self-test run.",
  "findings": [
   {
-   "id": "TM-13",
-   "evidence": "The row announces a rebuilt agent binary for the next release.",
-   "resolution": "Pre-existing update-trust controls (signing, provenance rebuild, release tool check) apply unchanged; this change only documents the version.",
+   "id": "TM-05",
+   "evidence": "The cloud tier is still chosen only through scheduler.choose, which calls req.tier_blocked for every tier on each selection, including the re-selection after the wait (proxy.py next_candidate loop).",
+   "resolution": "No bypass: the change can only replace a cloud pick by a local one, never add a cloud pick. Fewer requests leave the house during model loads.",
+   "disposition": "baseline"
+  },
+  {
+   "id": "TM-08",
+   "evidence": "A request may now wait for a load where it previously went to the cloud at once. The wait reuses _wait_for_load: once per (node, model) via waited_loads, polling every 0.5 s, bounded by the admission deadline (routing.deadline_ms or max_wait_*), holding no node slot.",
+   "resolution": "Bounded as the existing no-candidate load wait. As before for that path, requests waiting for a load are not counted in admission's max_queue; this is pre-existing and unchanged in kind. Cloud cost exposure decreases.",
+   "disposition": "baseline"
+  },
+  {
+   "id": "TM-16",
+   "evidence": "ci.yml adds `python test/selftest_cloud_wait_for_load.py` to the existing test job; no new action, permission, secret or trigger.",
+   "resolution": "No change to CI trust; the test runs without network, router process or credentials.",
    "disposition": "baseline"
   }
  ],
  "tests": [
   {
-   "command": "python test/check_public_changes.py",
+   "command": "python test/selftest_cloud_wait_for_load.py",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
+   "evidence": "all PASS (11 checks); with proxy.py reverted to origin/main 4 checks fail (instrument validated)."
+  },
+  {
+   "command": "python test/selftest_standby_switch.py; selftest_system_append.py; selftest_privacy_check.py; selftest_openai_node_standby.py; selftest_context.py; selftest_memory.py",
+   "result": "passed",
+   "evidence": "each reported its pass line with exit code 0."
+  },
+  {
+   "command": "ruff check .; python test/check_adr_index.py; python test/selftest_control_flow.py; python test/check_control_flow.py; python test/selftest_english_names.py",
+   "result": "passed",
+   "evidence": "All checks passed; ADR index ok: 95 ADRs; control flow ok: 0 legacy findings."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
    "result": "passed",
-   "evidence": "Security evidence: 0 error(s)."
+   "evidence": "run after staging this record."
+  },
+  {
+   "command": "python test/check_public_changes.py",
+   "result": "passed",
+   "evidence": "Public-change scan: 0 finding(s)."
   }
  ],
  "limitations": [
-  "The agent binary 0.35.2 itself is not built or verified by this change."
+  "The behaviour during a real model switch is verified after rollout by the staged-question measurement named in ADR-0095, not by this change.",
+  "The full self-test suite runs in CI; locally only the tests listed above were run."
  ]
 }

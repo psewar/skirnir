@@ -149,7 +149,9 @@ roles:
   einer Probe. Ein Neustart des Knotens setzt ihn zurück. Retry auf einen anderen Knoten bei Verbindungsfehler oder 5xx vor dem
   ersten Byte.
 - **Modellwechsel:** Lädt ein Knoten gerade ein Modell, warten weitere Anfragen, die diesen Knoten bräuchten, auf das
-  Ende des Ladens statt 503 zu bekommen (Ereignis `wait_load`).
+  Ende des Ladens statt 503 zu bekommen (Ereignis `wait_load`). Das gilt auch vor einer Cloud-Stufe: Lädt gerade eine
+  lokale Stufe, die vor ihr steht, wartet die Anfrage einmal auf dieses Laden (höchstens bis zu ihrer Admission-Frist),
+  bevor sie in die Cloud geht (ADR-0095).
 - **Admission** (`modes.admission`): höchstens `max_inflight` gleichzeitige Anfragen je Knoten (Policy im Register, Vorgabe 2 –
   sollte `OLLAMA_NUM_PARALLEL` des Knotens entsprechen). Weitere warten im Router; beim Freiwerden gewinnt der beste Rang aus
   Prioritätsklasse und Alter (`aging_s` 30 s, damit Batch nicht verhungert). `max_queue` überschritten → 503 sofort.
