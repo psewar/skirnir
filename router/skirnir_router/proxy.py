@@ -257,11 +257,15 @@ class _Acquire:
             now = time.time()
             pick = scheduler.choose(self.role, self.tiers, self.client_ctx, now, self.tried, self.req)
             if pick is None:
-                if await self._wait_for_load(now):
+                if await self._wait_for_load(now, self.tiers):
                     continue   # Loading finished (or deadline reached): re-select
                 refused = await self._wake_or_refuse()
                 if refused:
                     return refused
+                continue
+            if pick[1].get("cloud") and await self._wait_for_load(now, self.tiers[:pick[0]]):
+                # ADR-0095: a local tier before the cloud tier is loading on a node (its claim takes the budget, so it has
+                # no candidate yet) - wait once for that load like a request without any candidate, then re-select.
                 continue
             node, model = pick[3], pick[1]["model"]
             if admission.saturated(node, model):
@@ -274,13 +278,15 @@ class _Acquire:
             self.tried.add(node.name)
             return pick
 
-    async def _wait_for_load(self, now):
+    async def _wait_for_load(self, now, tiers):
         """No candidate, but a matching node is currently loading a model (VRAM claim from announce_load): wait for the end
         of loading instead of immediate 503. Measured 2026-09-25: when switching qwen3.6 -> gemma4:26b, ~30 s long
         all further requests got 'no node available' (778 of 1142), because the old model counted as loaded until the
         next /api/ps poll and the new one's claim broke the budget. Waits per (node, model) once, until /api/ps shows
-        the model or the claim is gone (then two more poll intervals), at most until the Admission deadline."""
-        found = scheduler.loading_for(self.tiers, now, self.tried)
+        the model or the claim is gone (then two more poll intervals), at most until the Admission deadline.
+        `tiers`: all of the role's tiers when nothing was picked, only the local tiers before a picked cloud tier (0.31.1,
+        ADR-0095: on 2026-11-16 a request went to the cloud while the first tier's model was loading)."""
+        found = scheduler.loading_for(tiers, now, self.tried)
         if found is None or now >= self.deadline_at:
             return False
         node, model = found
