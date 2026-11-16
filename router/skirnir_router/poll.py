@@ -44,6 +44,13 @@ async def poll_node(node):
         return
     node.misses = 0
     node.polled_ok = time.time()
+    if node.ollama_push_active(time.time()):
+        # 0.32.4 (issue #162): callers that poll on demand (end of a prewarm, after a cold load, a measurement) still
+        # refresh the loaded models, but while the agent's reports are fresh its model list stands. Polled, a node whose
+        # OpenAI-compatible server is held answers with its standby's models only: on 2026-11-16 the poll at the end of
+        # the prewarm one second after a router restart removed the held server's model until the agent's next report
+        # 30 s later, and a request for it got 503 "no node has this model".
+        tag_models = list(node.model_details.values())
     apply_ollama_state(node, tag_models, ps_models, time.time())
     if node.speaks_openai:   # no Ollama, no /api/version
         return

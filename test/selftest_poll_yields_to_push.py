@@ -5,7 +5,8 @@ Trigger 2026-11-16: twice, a request for the model of a node's held OpenAI-compa
 model" in the first 30 s after a router restart. The poll loop and the agent's tunnel start together; a poll that went out
 before the agent's first OLLAMA report (standby models plus the held server's) and came back after it replaced that list
 with what the poll saw - the standby answering /v1/models with its own models only - until the agent's next report 30 s
-later. Runs without network, agent or server."""
+later. Router 0.32.4: the remaining source was an on-demand poll (the one at the end of a prewarm) while the agent's
+reports were fresh; such a poll now keeps the agent's model list and refreshes only what is loaded. Runs without network, agent or server."""
 import asyncio
 import logging
 import os
@@ -150,6 +151,42 @@ async def main():
           str(models_lines))
     check("journal: a poll that drops a model says so", len(models_lines) == 2 and "from poll" in models_lines[1]
           and f"-{SERVER}" in models_lines[1], str(models_lines))
+
+    # 6) 0.32.4: an on-demand poll (end of a prewarm, after a cold load) while the agent's reports are fresh refreshes
+    #    the loaded models but keeps the agent's model list - reproduced 2026-11-16: the prewarm's poll one second after
+    #    the restart removed the held server's model
+    sent = []
+    loaded_now = [{"name": SMALL, "digest": "sha256:aa", "size": 5 << 30, "size_vram": 5 << 30}]
+    answers = {"/api/tags": {"models": STANDBY_TAGS}, "/api/ps": {"models": loaded_now}}
+
+    def recording(node, method, path, **kw):
+        sent.append(path)
+        return InFlight(node, answers[path], push_during=False)
+    n = fresh_node()
+    push(n)
+    n.ollama_push_ts = time.time() - 1   # as in production: the report came a second before the poll (not the same tick)
+    nodes.nreq = recording
+    try:
+        await poll.poll_node(n)
+    finally:
+        nodes.nreq = real_nreq
+    check("fresh agent report: the on-demand poll keeps the held server's model offered",
+          sent and SERVER in n.models and n.offers(SERVER) and n.releases_server_for(SERVER), f"sent {sent}, models {sorted(n.models)}")
+    check("... and still refreshes what is loaded", n.is_loaded(SMALL) and n.digest_of.get(SERVER) == f"openai:{SERVER}",
+          f"loaded {n.loaded}, digests {n.digest_of}")
+
+    # 7) A stale report (agent silent for longer than PUSH_STALE_S): the poll answer applies in full as before
+    n = fresh_node()
+    push(n)
+    n.ollama_push_ts = time.time() - nodes.PUSH_STALE_S - 1
+    sent.clear()
+    nodes.nreq = recording
+    try:
+        await poll.poll_node(n)
+    finally:
+        nodes.nreq = real_nreq
+    check("stale agent report: the poll answer applies in full", sent and n.models == {SMALL},
+          f"sent {sent}, models {sorted(n.models)}")
 
 
 asyncio.run(main())
