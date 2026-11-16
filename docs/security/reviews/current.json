@@ -2,28 +2,28 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "c5be9cad4a864f98b7bab602969ec645c14585dc",
- "change_digest": "dca987dc34058816ae03ae82f30b448bd6b235e23192546d5a4fbb2a610a12b6",
+ "base_sha": "740b21131220ea269c8b49a2f0ed59d7213a1c67",
+ "change_digest": "e78024d0da9f8b29ddb97913427a35234db64be0c15d3f40bfdb4be919c0b440",
  "reviewed_paths": [
   "CHANGELOG.md",
   "router/skirnir_router/common.py",
   "router/skirnir_router/poll.py",
   "test/selftest_poll_yields_to_push.py",
-  "router/skirnir_router/tunnel.py",
+  "router/skirnir_router/nodes.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-15"
+  "TM-07"
  ],
  "boundaries": [
-  "B9"
+  "B3"
  ],
- "summary": "Router 0.32.3 (diagnostics for #162): apply_ollama_state logs one journal line when a node's model list changes, naming the source (`agent report (rev N)` or `poll`), the count and the added/removed model names. No behaviour, route, configuration or payload change.",
+ "summary": "Router 0.32.4 (fixes #162): while a node's agent reports are fresh (Node.ollama_push_active), poll_node keeps the model list of the agent's last report and applies only the polled loaded models. Before, an on-demand poll (end of a prewarm, after a cold load, a measurement, a wake-up) replaced the reported list with the standby Ollama's models and hid a held server's model for up to 30 s.",
  "findings": [
   {
-   "id": "TM-15",
-   "evidence": "The new line writes model names reported by a node (agent report or poll) and the agent's report revision into the router journal. Model names already appear in the journal (route lines) and in /admin/state; no prompt, user data, credential or address is logged. A node could choose long or odd model names; they are logged as reported, like in the existing route lines.",
-   "resolution": "Same data class as existing journal lines; logged only on a change, so a stable node adds no volume.",
+   "id": "TM-07",
+   "evidence": "The model list of a node with fresh reports now comes only from its agent's OLLAMA reports, not from a router poll in between. Both the report and the poll travel through the same authenticated agent tunnel and are assertions of that host (B3), so an approved agent already controlled both; the change does not widen what a node can claim. A stale or invalid report (ollama_push_ts reset to 0, or older than PUSH_STALE_S) falls back to the full poll answer as before; a tunnel loss resets the timestamp. No route, authentication, payload or configuration change.",
+   "resolution": "Same trust as the existing push path (poll_loop already skipped nodes with fresh reports); covered by the self-test for fresh and stale reports.",
    "disposition": "baseline"
   }
  ],
@@ -31,10 +31,10 @@
   {
    "command": "python test/selftest_poll_yields_to_push.py",
    "result": "passed",
-   "evidence": "all PASS (9 checks), including one journal line per change with source and revision, none for an unchanged list."
+   "evidence": "all PASS (12 checks); the two new checks fail without the fix (models lose the held server's model, as observed in production)."
   },
   {
-   "command": "all 70 test/selftest_*.py (180 s timeout each)",
+   "command": "all test/selftest_*.py (180 s timeout each)",
    "result": "passed",
    "evidence": "0 failed, 0 timed out."
   },
@@ -44,9 +44,9 @@
    "evidence": "exit code 0, 332 PASS lines, no FAIL."
   },
   {
-   "command": "ruff check .; python test/check_adr_index.py; python test/selftest_control_flow.py; python test/check_control_flow.py; python test/selftest_english_names.py",
+   "command": "ruff check .; python test/selftest_control_flow.py; python test/check_control_flow.py; python test/selftest_english_names.py",
    "result": "passed",
-   "evidence": "All checks passed; ADR index ok: 97 ADRs; control flow ok: 0 legacy findings."
+   "evidence": "All checks passed; control flow ok: 0 legacy findings."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -60,6 +60,6 @@
   }
  ],
  "limitations": [
-  "Diagnostics only; #162 itself stays open until the journal of the next router restart shows which report set the incomplete list."
+  "Reproduced and diagnosed in a live deployment through the 0.32.3 journal line; the fix is verified by self-test and will be confirmed by a router restart followed by an immediate request for the held server's model."
  ]
 }
