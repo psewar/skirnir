@@ -11,8 +11,18 @@ from .common import GIB, log, read_json
 NODE_FAULTS = (ClientError, asyncio.TimeoutError, OSError, ValueError)   # Netz, Tunnel, Ollamas JSON (ValueError)
 
 
+def push_since(node, started):
+    """The agent reported its Ollama state (frame OLLAMA) after `started`: its report is newer than a poll that began then
+    and is the authority - the poll's answer is dropped, also a failed one (0.32.2, issue #162)."""
+    return node.ollama_push_ts >= started
+
+
 async def poll_node(node):
     t = ClientTimeout(total=4)
+    # 0.32.2 (issue #162): right after a router restart the poll loop and the agent's tunnel start together. A poll that
+    # went out before the agent's first report and came back after it replaced the reported models with what the poll saw
+    # (a held server's standby answers /v1/models with its own models only), until the agent's next report 30 s later.
+    started = time.time()
     try:
         if node.speaks_openai:   # one list for both (openai_node.models_to_ollama)
             async with nodes.nreq(node, "get", openai_node.MODELS_PATH, timeout=t) as r:
@@ -23,9 +33,14 @@ async def poll_node(node):
             async with nodes.nreq(node, "get", "/api/ps", timeout=t) as r:
                 ps_models = (await r.json()).get("models", [])
     except NODE_FAULTS as e:  # exception-ok: network boundary to the node and its JSON; a miss counts toward offline
+        if push_since(node, started):
+            return
         node.misses += 1
         if node.misses >= state.CFG.offline_after and node.state != "offline":
             node.go_offline(type(e).__name__)
+        return
+    if push_since(node, started):
+        log.info("node %s: poll answer dropped, the agent reported its state meanwhile", node.name)
         return
     node.misses = 0
     node.polled_ok = time.time()

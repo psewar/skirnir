@@ -2,60 +2,57 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "53046af001a7c8438d8ffb0a789685ba1f1087c7",
- "change_digest": "695d7e7fd7f8d989b976fedabf3544acedfde3ee51cd83d79cb988565298b5e0",
+ "base_sha": "4c6e540c4e4bd403d6bc7c7f8d3b42b51e89816c",
+ "change_digest": "c3441ed7a5af711658c3edb8293bc72746b23cf1fccb5709a3e5534594a14e44",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0097-the-interactive-fallback-does-not-evict-the-answering-model.md",
-  "docs/adr/README.md",
-  "docs/configuration.de.md",
-  "docs/configuration.md",
   "router/skirnir_router/common.py",
+  "router/skirnir_router/poll.py",
+  "test/selftest_poll_yields_to_push.py",
   "router/skirnir_router/nodes.py",
-  "router/skirnir_router/scheduler.py",
-  "test/selftest_fallback_keeps_busy_model.py",
-  "router/skirnir_router/admission.py",
-  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/tunnel.py",
+  "router/skirnir_router/openai_node.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-08",
+  "TM-07",
   "TM-16"
  ],
  "boundaries": [
+  "B3",
   "B9"
  ],
- "summary": "Router 0.32.1 (ADR-0097): the scheduler's interactive fallback takes a cold tier on a node whose warm model is at its limit only if the tier fits beside the models answering there (new Node.answering_vram_gib: measured occupancy of loaded models with a request in flight, same model or blob). Before, the VRAM budget counted the answering model as evictable, so a large cold fallback evicted it once its request ended; the waiting requests then went to the cloud. Read-only arithmetic on existing node state; no route, configuration key, destination, payload or cloud-path change. CI gains one self-test run.",
+ "summary": "Router 0.32.2 (#162): poll_node drops its answer, and does not count a failed poll as a miss, when the agent's OLLAMA report (frame over the authenticated tunnel, apply_ollama_push) arrived after the poll began. Before, a poll answer that came back after the agent's first report replaced the reported model list until the next report. No route, configuration, protocol, payload or agent change; the agent's report already was the authority while fresh (no polling then). CI gains one self-test run.",
  "findings": [
   {
-   "id": "TM-08",
-   "evidence": "Fewer cold loads beside a busy model; a voice command that previously took a large cold fallback now waits for the warm model within its existing interactive budget (admission deadline, max_queue unchanged). answering_vram_gib iterates the node's loaded models and inflight counter only.",
-   "resolution": "Bounded by the existing admission controls; the change reduces model evictions and cloud spill-over under load.",
+   "id": "TM-07",
+   "evidence": "The change gives an agent report precedence over a concurrent router poll of the same node. Reports only arrive over the node's own authenticated tunnel (approved key); a node can already set its own model list through that report today. A compromised agent gains nothing new: it could suppress its node's poll answers, which it controls anyway since the poll also goes through its tunnel.",
+   "resolution": "No new capability for an agent; the trust boundary of node-reported state is unchanged.",
    "disposition": "baseline"
   },
   {
    "id": "TM-16",
-   "evidence": "ci.yml adds `python test/selftest_fallback_keeps_busy_model.py` to the existing test job; no new action, permission, secret or trigger.",
+   "evidence": "ci.yml adds `python test/selftest_poll_yields_to_push.py` to the existing test job; no new action, permission, secret or trigger.",
    "resolution": "No change to CI trust; the test runs without network, router process or credentials.",
    "disposition": "baseline"
   }
  ],
  "tests": [
   {
-   "command": "python test/selftest_fallback_keeps_busy_model.py",
+   "command": "python test/selftest_poll_yields_to_push.py",
    "result": "passed",
-   "evidence": "all PASS (8 checks); with scheduler.py from origin/main (0.32.0) the two fallback checks fail (instrument validated)."
+   "evidence": "all PASS (7 checks); with poll.py from origin/main 3 checks fail and the standby's model carries an openai: digest (the observed state reproduced)."
   },
   {
-   "command": "all 69 test/selftest_*.py (180 s timeout each)",
+   "command": "all 70 test/selftest_*.py (180 s timeout each)",
    "result": "passed",
    "evidence": "0 failed, 0 timed out."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "no FAIL lines; the 0.6.6 interactive fallback to a small tier on another node still passes."
+   "evidence": "exit code 0, 332 PASS lines, no FAIL."
   },
   {
    "command": "ruff check .; python test/check_adr_index.py; python test/selftest_control_flow.py; python test/check_control_flow.py; python test/selftest_english_names.py",
@@ -74,7 +71,6 @@
   }
  ],
  "limitations": [
-  "Production runs 0.31.1 (0.32.0 was rolled back); this change ships 0.32.0 and 0.32.1 together and is verified after rollout by the staged-question measurement in ADR-0097.",
-  "Why the loaded lower tier did not count as a warm candidate at 13:36:49 in the failed measurement was not determined from the available logs."
+  "The race is reconstructed from timing in the journal (failure 26 s after the tunnel connected, model back 36 s after, both within one 30 s report interval) and reproduced in the self-test; it is confirmed in operation by the journal line `poll answer dropped` after the next router restart."
  ]
 }
