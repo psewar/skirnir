@@ -976,7 +976,9 @@ def tags_list():
     for exposed, role in state.CFG.roles.items():
         first = role["tiers"][0]["model"]
         n = scheduler.any_online_node_with(first)
-        d = dict(n.model_details[first]) if n else {}
+        # A node also offers a model it can only serve after switching to its standby Ollama (Node.standby_switch);
+        # model_details lists only what the serving upstream reports, so such a model has no details yet (0.30.1).
+        d = dict(n.model_details.get(first, {})) if n else {}
         out.append({"name": exposed, "model": exposed, "modified_at": d.get("modified_at", "2026-01-01T00:00:00Z"),
                     "size": d.get("size", 0), "digest": d.get("digest", "router-" + role["name"]),
                     "details": d.get("details", {})})

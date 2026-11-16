@@ -81,6 +81,19 @@ state.NODES = {n.name: n}
 check("no 'model_missing' while a switch can serve it", scheduler.unavailable([TIER], None, time.time(), exclude=(n.name,))["code"]
       != scheduler.MODEL_MISSING)
 
+# 2b) /api/tags (0.30.1): a role whose first tier is a standby-only model is listed with placeholder details. The node
+#     offers the model, but model_details holds only the serving upstream's models; 0.30.0 answered 500 (KeyError).
+from skirnir_router import proxy   # noqa: E402
+
+n.model_details = {STRATA: {"name": STRATA, "size": 1}}
+roles = state.CFG.roles
+state.CFG.roles = {"assistant": {"name": "assistant", "tiers": [dict(TIER)]}}
+tags = proxy.tags_list()
+state.CFG.roles = roles
+entry = next((t for t in tags if t["name"] == "assistant"), None)
+check("api/tags: role with a standby-only first model is listed with placeholder details",
+      entry is not None and entry["digest"] == "router-assistant" and entry["size"] == 0 and entry["details"] == {}, str(entry))
+
 # 3) When no switch applies
 n.state = "busy"
 _, _, cands = scheduler.candidates_for(TIER, None, time.time())
