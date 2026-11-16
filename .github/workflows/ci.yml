@@ -97,6 +97,7 @@ jobs:
       - run: python test/selftest_openai_node_release.py
       - run: python test/selftest_openai_node_standby.py
       - run: python test/selftest_role_options.py
+      - run: python test/selftest_system_append.py
       - run: python test/selftest_privacy_check.py
       - run: python test/integration_live_memory.py
       - run: python test/benchmark_context.py

@@ -76,6 +76,8 @@ roles:
   assist:
     priority: interactive
     options: { temperature: 0 }           # Sampling-Vorgaben für die lokalen Stufen (ADR-0093)
+    system_append:                        # Text nur für das Modell, das antwortet (ADR-0094)
+      granite4.2:8b: "Antworte in höchstens zwei Sätzen."
     tiers: [...]
 ```
 
@@ -87,6 +89,16 @@ roles:
   sie nie, weil manche Cloud-Modelle eine andere als ihre Standard-Temperatur ablehnen. Eine Anfrage für ein konkretes
   Modell bekommt keine. Unbekannte Schlüssel, falsche Typen und Werte außerhalb des Bereichs verhindern das Laden der
   Konfiguration. Wie `priority` gehören sie in `config.yaml`: Eine in der Web-UI gespeicherte Rolle trägt sie nicht mit.
+- **Systemtext je Modell** (`roles.<r>.system_append`, Router 0.31.0, [ADR-0094](adr/0094-system-text-per-model-of-a-role.md)).
+  Ordnet Katalogmodellen einen Text zu (je höchstens 8000 Zeichen). Bedient ein Modell mit Eintrag eine Chat-Anfrage
+  an die Rolle, hängt der Router seinen Text an die führende Systemnachricht (oder schickt ihn als neue führende
+  Systemnachricht); jede Stufe mit diesem Modell bekommt ihn, auch ein Canary, kein anderes Modell. Gedacht für
+  Prompt-Regeln, die ein Modell braucht und ein anderes nicht. `/api/generate`, Embeddings und Anfragen für ein
+  konkretes Modell bleiben unverändert. Der Routen-Eintrag im Journal hält die angehängte Länge fest, nicht den Text.
+  Ein Modell, das im Katalog fehlt, ein Nicht-Text oder ein zu langer Text verhindern das Laden der Konfiguration.
+  Wie `options` gehört es in `config.yaml`; eine in der Web-UI gespeicherte Rolle behält es. Der Text erreicht eine
+  Cloud-Stufe wie der Systemprompt des Clients und wird von der Datenschutzprüfung nicht eingestuft, darf also keine
+  persönlichen Daten enthalten.
 - **Rangliste = Qualitätsobergrenze und Kaltstart-Reihenfolge.** Ist ein Listenmodell auf irgendeinem Knoten schon geladen,
   gewinnt es (unter mehreren warmen das ranghöchste). Global `modes.warm_first`, je Rolle `latency_first`.
 - **Kontextleiter.** Dasselbe Modell mit kleinerem `num_ctx` ist die nächste Stufe, wenn der Kontext nicht ins VRAM passt.
