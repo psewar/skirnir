@@ -2,95 +2,27 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "627268b43e7d3c2117f9f6f6ca9045bf90a8ed54",
- "change_digest": "492689be0e917a6a62cc48df6e133a4651b745cc7d01fc11b905a882f1913c8d",
+ "base_sha": "ce8beda10185eae2633f38fc8b98c96f5165662a",
+ "change_digest": "76ae012ca34193eb8cacace044f83ba5cb6dac95401edcce9f131082d08a6d0d",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "README.de.md",
-  "README.md",
   "docs/adr/0099-institutional-providers-take-their-own-data-class-limit.md",
   "docs/adr/README.md",
-  "docs/configuration.de.md",
-  "docs/configuration.md",
-  "docs/security/risk-register.json",
-  "docs/security/threat-model.de.md",
-  "docs/security/threat-model.md",
-  "router/config.example.yaml",
-  "router/skirnir_router/cloud.py",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/proxy.py",
-  "router/skirnir_router/settings.py",
-  "router/ui.html",
-  "test/selftest_cloud_final_payload.py",
-  "test/selftest_institutional_provider.py",
-  "test/selftest_privacy_check.py",
-  "router/skirnir_router/request.py",
-  "router/skirnir_router/scheduler.py",
-  "router/skirnir_router/fallback_observation.py",
-  "router/skirnir_router/memory.py",
-  "router/skirnir_router/managed.py",
-  "router/skirnir_router/admin.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-05",
-  "TM-03",
-  "TM-06"
+  "TM-05"
  ],
  "boundaries": [
-  "B2",
-  "B6",
-  "B7",
-  "B9"
+  "B6"
  ],
- "summary": "Router 0.34.0 (ADR-0099 proposed): a cloud provider may carry trust: institutional (config.yaml only). It then receives data up to its own max_data_class instead of max_cloud_data_class, at most the class below the highest. Every other provider keeps the old rule (its own class only narrows). request_block_reason now cuts off at the widest limit of an enabled provider; provider_block_reason closes each provider not cleared for the class (traced: every cloud selection runs through Routing.tier_blocked in scheduler.select and fallback_observation). The content check runs only for a provider whose limit is below the request's class. Opt-outs (execution local, cloud: false, memory allow_cloud: false, managed sessions), the credential scan, HTTPS-only destinations, egress allowlist and budget apply unchanged. /admin/state and the UI report trust and the effective ceiling. Re-reviewed after re-applying the change onto main 627268b (PR #166, ADR-0098 reasoning_off, router 0.33.0): renumbered to ADR-0099 and router 0.34.0; the conflicts in common.py, config.py, the configuration docs, the changelog and the ADR index were resolved by keeping both sides. The two changes touch independent parts of the cloud path (reasoning_effort value and returned thought vs. which provider may receive a data class), so the combined code adds no new crossing.",
- "findings": [
-  {
-   "id": "TM-05",
-   "evidence": "Intended widening: with an enabled institutional provider whose max_data_class is personal, personal requests (also undeclared ones, which default to personal) reach that provider's tiers, and the content check and its redaction of house context are skipped for it. The router cannot verify the organisation's data protection or no-storage promise; a data class says how sensitive data is, not whose it is, so a role that falls back to an institutional tier would send household data to the organisation. Not reachable without the operator writing trust: institutional into config.yaml; the highest class is refused (also from the web UI and for custom class lists); a disabled provider widens nothing.",
-   "resolution": "ADR-0099 records the operator's decision and its consequences; configuration docs (EN/DE) advise a dedicated role granted only to the clients whose data the organisation may process; TM-05 controls updated; selftest_institutional_provider covers accepted and rejected cases. The maintainer must accept ADR-0099 for the residual risk.",
-   "disposition": "baseline"
-  },
-  {
-   "id": "TM-03",
-   "evidence": "Pre-existing, not widened: a web UI session (or stolen admin credentials) can already raise the global router.cloud.max_cloud_data_class to any class, which opens every provider. The new trust key is not in settings.EDITABLE (settings.coerce refuses it, tested), and the UI-editable max_data_class of an institutional provider passes the same _parse_cloud check that refuses the highest class (tested via Config.reload with a settings override).",
-   "resolution": "No new UI path to personal data; the pre-existing global setting stays as decided in ADR-0016's allowlist. Noted for the maintainer as a possible follow-up (make max_cloud_data_class config-only).",
-   "disposition": "baseline"
-  },
-  {
-   "id": "TM-06",
-   "evidence": "An institutional provider is an ordinary cloud provider for transport: _parse_cloud still requires an allowlisted HTTPS final URL without credentials, query or fragment, HTTP only on literal loopback, and cloud.run refuses 3xx. A plain-HTTP address inside an organisation's network is refused like any other. Keys come from api_key_env/secrets_file and are never logged; the new log lines name provider, trust and class only.",
-   "resolution": "Unchanged controls apply; no new destination type.",
-   "disposition": "baseline"
-  }
- ],
+ "summary": "Documentation only: ADR-0099 status proposed -> accepted on the operator's decision of 2026-11-18 (after the merge of router 0.34.0, before its rollout), with a sentence that the operator takes on the residual risk the ADR names (the organisation's no-storage promise); the ADR index regenerated, and the unreleased CHANGELOG row v0.39.0 naming ADR-0099 accepted. No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
+ "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_institutional_provider.py",
+   "command": "python test/check_adr_index.py",
    "result": "passed",
-   "evidence": "28 PASS, ALLE OK. Fault injection (institution gate always open, trust ignored, request gate fixed at the global limit) makes 5, 1 and 4 checks fail respectively."
-  },
-  {
-   "command": "every python test/selftest_*.py listed in .github/workflows (68 files, 240 s timeout each), on the re-applied tree",
-   "result": "passed",
-   "evidence": "68 files, 0 failed, 0 timed out (includes selftest_institutional_provider and selftest_cloud_reasoning); selftest_privacy_check and selftest_cloud_final_payload only gained the new fields on their fake request and target."
-  },
-  {
-   "command": "python test/run_tests.py (on the re-applied tree)",
-   "result": "passed",
-   "evidence": "exit code 0, 332 PASS lines, 0 failures."
-  },
-  {
-   "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python test/selftest_control_flow.py; python test/check_control_flow.py",
-   "result": "passed",
-   "evidence": "All checks passed; configuration ok; ADR index ok (99); 0 pinned-reference findings; control flow ok, 0 findings."
-  },
-  {
-   "command": "manual live run (by the session that built the change, on the same logic before the renumbering, base 90f7697): local router (loopback, synthetic clients and prompts) with an ordinary provider on an unreachable loopback port and an institutional OpenAI-compatible endpoint",
-   "result": "passed",
-   "evidence": "personal and undeclared requests answered by the institutional tier with the ordinary tier skipped (data class personal > internal for provider ordinary (trust cloud)); declared internal failed over from the unreachable ordinary provider; secret, execution local, cloud: false and a credential in the prompt answered 400 with the reason per tier; streaming answered; the endpoint does not redirect; the key appears in no log, journal or state file; UI cloud table shows ceiling and trust."
+   "evidence": "ADR index ok: 99 ADRs (0099 accepted)."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -100,12 +32,12 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s); added lines also searched by hand for the organisation's name, hosts and addresses."
+   "evidence": "Public-change scan: 0 finding(s)."
   }
  ],
  "limitations": [
-  "The organisation's promise not to store data is outside the router's control; the operator vouches for it by setting trust: institutional.",
-  "The live run used one organisation's endpoint and synthetic prompts only, before the re-application onto main; it was not repeated on the renumbered tree. Thinking control for such a server is configured per catalog entry with reasoning_off (ADR-0098, already on main), not by this change.",
-  "The end-to-end suite has no institutional provider; the new behaviour is covered by the self-test and the manual live run."
+  "Documentation only; the behaviour it records was reviewed in the record of PR 167 (router 0.34.0).",
+  "Accepting the ADR is not a time-limited risk acceptance in docs/security/risk-register.json; TM-05 stays open with the controls ADR-0099 describes.",
+  "Router 0.34.0 is not yet rolled out; the ADR records no check in operation."
  ]
 }
