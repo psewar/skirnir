@@ -17,7 +17,7 @@ from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig
 from .rerank_config import RerankConfig, parse_rerank_config
 from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
 from . import settings as settings_mod
-from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, THINK_MODES, log, open_private, tls_fingerprint
+from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, REASONING_OFF, THINK_MODES, log, open_private, tls_fingerprint
 from .outcome import Problem, failed, invalid
 
 
@@ -112,6 +112,8 @@ SCHEMA = {
                      # since 0.3.5: real = weights/kv from nvidia-smi delta (not /api/ps), both values per context
                      "real": None, "vram_real_gib": None, "vram_ps_gib": None,
                      "cloud": None, "provider_model": None, "price_chf_per_m": None, "context_tokens": None, "reasoning": None,
+                     # since 0.33.0 (ADR-0098): the reasoning_effort value that turns a cloud model's reasoning off
+                     "reasoning_off": None,
                      # since 0.6.5: max concurrent requests per node (qwen3.8: 1, Ollama cannot parallelize qwen35)
                      "max_parallel": None}},
     "nodes": {"*": {"ollama": None, "vram_total_gib": None, "wol": None, "weight": None, "mac": None, "foreign_vram_baseline_gib": None,
@@ -623,6 +625,13 @@ class Config:
                     return invalid(f"models.{mname}.cloud: provider {spec['cloud']} is not configured under router.cloud.providers")
             elif (spec or {}).get("weights_gib") is None:
                 return invalid(f"models.{mname}: weights_gib missing (local model) or cloud: <provider> (cloud model)")
+            off = (spec or {}).get("reasoning_off")
+            if off is not None:
+                if off not in REASONING_OFF:
+                    return invalid(f"models.{mname}.reasoning_off: one of {', '.join(REASONING_OFF)}, not {off!r}")
+                if not spec.get("cloud") or spec.get("reasoning") is not True:
+                    return invalid(f"models.{mname}.reasoning_off needs cloud: <provider> and reasoning: true - it names the "
+                                   "reasoning_effort value that turns a cloud model's reasoning off (ADR-0098)")
 
     def _parse_roles(self, roles):
         self.roles = {}

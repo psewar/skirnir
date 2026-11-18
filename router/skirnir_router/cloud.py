@@ -29,7 +29,7 @@ from contextlib import asynccontextmanager
 from aiohttp import ClientTimeout
 
 from . import state
-from .common import DATA_CLASSES_DEFAULT, log, parse_tool_args, read_env_value
+from .common import DATA_CLASSES_DEFAULT, REASONING_OFF, log, parse_tool_args, read_env_value
 from .nodes import Breaker
 
 DEFAULT_HOSTS = {"api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com"}
@@ -342,11 +342,23 @@ def _oa_body(body, path, model_id, stream):
     if stream:
         oa["stream_options"] = {"include_usage": True}
     # Ollama `think` -> OpenAI reasoning_effort, only for models marked as reasoning in catalog (gpt-5, o-series):
-    # think: false = minimal (HA-AI-Tasks; otherwise gpt-5-mini thinks 130 tokens for an "OK"), think: true = provider default.
+    # think: false = the entry's reasoning_off (ADR-0098), by default minimal (HA-AI-Tasks; otherwise gpt-5-mini thinks
+    # 130 tokens for an "OK"); a vLLM-served model ignores minimal and needs none. think: true or absent = provider default.
     e = state.CFG.models.get(oa_model_key(model_id)) or {}
     if body.get("think") is False and e.get("reasoning"):
-        oa["reasoning_effort"] = "minimal"
+        oa["reasoning_effort"] = e.get("reasoning_off") or REASONING_OFF[0]
     return oa
+
+
+def _thought(part):
+    """The server's thinking in an answer message or stream delta: `reasoning_content` (llama.cpp-style servers), else
+    `reasoning` (vLLM-style servers). One field, never both: a server that sends the same text under both names would
+    otherwise double it (ADR-0098)."""
+    for key in ("reasoning_content", "reasoning"):
+        value = part.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def oa_model_key(model_id):
@@ -601,7 +613,8 @@ async def openai_exchange(post, path, body, model, model_id, stream, local_serve
     the answer back in Ollama form. Shared by cloud providers (run) and OpenAI-compatible nodes (openai_node.run).
     `post(req)` sends the JSON request and returns an async context manager with the response - aiohttp's for a
     provider, the tunnel's (nodes.nreq) for a node. Returns (info, chunks) like run(); HTTP errors raise CloudError.
-    The server's thinking (`reasoning_content`, as llama.cpp-style servers send it) comes back as Ollama's `thinking`.
+    The server's thinking (`reasoning_content` as llama.cpp-style servers send it, or `reasoning` as vLLM does) comes back
+    as Ollama's `thinking`, except for a client that sent `think: false` (ADR-0098: it asked for none, as on Ollama).
     local_server (an OpenAI-compatible node): also send the older `max_tokens`, which local servers often know instead
     of max_completion_tokens, and turn Ollama's `think: false` into `reasoning_effort: "none"` (measured with Strata
     2026-10-23: without it a thinking model spent a 200-token budget on thinking and answered nothing)."""
@@ -620,6 +633,7 @@ async def openai_exchange(post, path, body, model, model_id, stream, local_serve
             value = opts.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 req[name] = value
+    show_thought = body.get("think") is not False
     info = {"p_tok": 0, "c_tok": 0, "finish": "stop"}
     if not stream:
         async with post(req) as r:
@@ -630,7 +644,7 @@ async def openai_exchange(post, path, body, model, model_id, stream, local_serve
         ch = (j.get("choices") or [{}])[0]
         msg = ch.get("message") or {}
         content, tcs = msg.get("content") or "", _oa_tool_calls_to_native(msg.get("tool_calls"))
-        thinking = msg.get("reasoning_content") if isinstance(msg.get("reasoning_content"), str) else ""
+        thinking = _thought(msg) if show_thought else ""
         u = j.get("usage") or {}
         info.update(p_tok=int(u.get("prompt_tokens") or 0), c_tok=int(u.get("completion_tokens") or 0), finish=ch.get("finish_reason") or "stop")
         return info, _native_done(model, path, content, tcs, info["finish"], info["p_tok"], info["c_tok"], t0, thinking)
@@ -646,7 +660,7 @@ async def openai_exchange(post, path, body, model, model_id, stream, local_serve
                     info["p_tok"], info["c_tok"] = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
                 for ch in ev.get("choices") or []:
                     d = ch.get("delta") or {}
-                    thought = d.get("reasoning_content") if isinstance(d.get("reasoning_content"), str) else ""
+                    thought = _thought(d) if show_thought else ""
                     if d.get("content") or thought:
                         yield _native_piece(model, path, d.get("content") or "", thought)
                     for tc in d.get("tool_calls") or []:

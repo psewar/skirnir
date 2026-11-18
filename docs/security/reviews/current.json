@@ -2,51 +2,76 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "740b21131220ea269c8b49a2f0ed59d7213a1c67",
- "change_digest": "e78024d0da9f8b29ddb97913427a35234db64be0c15d3f40bfdb4be919c0b440",
+ "base_sha": "90f769736294bdee30e33d34877b8abb357790ae",
+ "change_digest": "22030686db27758f1639946a1d80182f0d40740f18e8ef8fa8a5a24652da4f81",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
+  "docs/adr/0098-a-cloud-model-names-the-value-that-turns-its-reasoning-off.md",
+  "docs/adr/README.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
+  "router/config.example.yaml",
+  "router/skirnir_router/admin.py",
+  "router/skirnir_router/cloud.py",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/poll.py",
-  "test/selftest_poll_yields_to_push.py",
-  "router/skirnir_router/nodes.py",
+  "router/skirnir_router/config.py",
+  "router/ui.html",
+  "test/selftest_cloud_reasoning.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
+  "TM-03",
+  "TM-05",
   "TM-07"
  ],
  "boundaries": [
-  "B3"
+  "B1",
+  "B2",
+  "B3",
+  "B6"
  ],
- "summary": "Router 0.32.4 (fixes #162): while a node's agent reports are fresh (Node.ollama_push_active), poll_node keeps the model list of the agent's last report and applies only the polled loaded models. Before, an on-demand poll (end of a prewarm, after a cold load, a measurement, a wake-up) replaced the reported list with the standby Ollama's models and hid a held server's model for up to 30 s.",
+ "summary": "Router 0.33.0 (ADR-0098): new optional catalog key models.<m>.reasoning_off (minimal | none) names the reasoning_effort the openai adapter sends for a client's think: false on a cloud model with reasoning: true; default minimal as before. The configuration check refuses other values, the key without reasoning: true and on a local model; the admin cloud-model entry and the web UI keep the key. The adapter now reads the provider's thought from reasoning_content, else reasoning, returns it as Ollama thinking, and drops it for a client that sent think: false. The adapter is shared by cloud providers and OpenAI-compatible nodes.",
  "findings": [
   {
+   "id": "TM-05",
+   "evidence": "B6: the request to a cloud provider gains at most one field value, reasoning_effort, taken from the operator's catalog and restricted to the fixed set (minimal, none) by Config._parse_models; no client-supplied value reaches it, and no message content, tool result or memory text changes. The final payload checks (request_block_reason, credential scan, privacy check) run on the same body as before, unchanged (proxy._prepare/_cloud_ordered not touched). Egress hosts, transport and redirect handling (TM-06) are untouched. The thought returned from a provider is model output delivered to the client that made the request, with the same trust as its content; _oa_messages and _an_body never forward a thinking field back to a provider, so it does not widen what is sent to the cloud. For think: false the thought is now dropped (less disclosure than before for reasoning_content).",
+   "resolution": "No new exposure on the cloud boundary; classification limits of TM-05 remain as before. Covered by test/selftest_cloud_reasoning.py (values sent, model without reasoning: true sends none, thought dropped for think: false).",
+   "disposition": "baseline"
+  },
+  {
+   "id": "TM-03",
+   "evidence": "B2: PUT /admin/config (control auth unchanged) passes reasoning_off from the request into the override entry (admin._cloud_model_entry); config.write_overrides validates the merged configuration with the probe parse before writing, so an invalid value, the key without reasoning: true or on a local model is a 400 and nothing is written. ui.html only carries the existing value inside the JS object it sends back (JSON.stringify), never into HTML, so no new markup sink. No new route, CSRF or CORS change.",
+   "resolution": "Rejected case tested: write_overrides with reasoning_off: low returns 400 and writes no roles.yaml (test/selftest_cloud_reasoning.py on a temporary copy of the example configuration).",
+   "disposition": "baseline"
+  },
+  {
    "id": "TM-07",
-   "evidence": "The model list of a node with fresh reports now comes only from its agent's OLLAMA reports, not from a router poll in between. Both the report and the poll travel through the same authenticated agent tunnel and are assertions of that host (B3), so an approved agent already controlled both; the change does not widen what a node can claim. A stale or invalid report (ollama_push_ts reset to 0, or older than PUSH_STALE_S) falls back to the full poll answer as before; a tunnel loss resets the timestamp. No route, authentication, payload or configuration change.",
-   "resolution": "Same trust as the existing push path (poll_loop already skipped nodes with fresh reports); covered by the self-test for fresh and stale reports.",
+   "evidence": "B3/B1: an OpenAI-compatible node shares openai_exchange; its reasoning field is now returned as thinking like reasoning_content already was. Both are assertions of an approved agent's upstream, delivered only to the requesting client (B1 role/model rights unchanged). Managed sessions persist thinking within the existing persistence limit, as for Ollama nodes. No change to enrollment, tunnel targets or bounds.",
+   "resolution": "Same trust as the existing reasoning_content path; covered by the node check in the self-test and selftest_openai_node.py.",
    "disposition": "baseline"
   }
  ],
  "tests": [
   {
-   "command": "python test/selftest_poll_yields_to_push.py",
+   "command": "python test/selftest_cloud_reasoning.py",
    "result": "passed",
-   "evidence": "all PASS (12 checks); the two new checks fail without the fix (models lose the held server's model, as observed in production)."
-  },
-  {
-   "command": "all test/selftest_*.py (180 s timeout each)",
-   "result": "passed",
-   "evidence": "0 failed, 0 timed out."
+   "evidence": "ALL OK (40 checks, including 8 refused configurations and the refused PUT /admin/config write). Against the previous cloud.py the test fails 10 checks (values sent, reasoning field, thought on think: false)."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "exit code 0, 332 PASS lines, no FAIL."
+   "evidence": "exit code 0, 332 PASS lines, 0 failures."
   },
   {
-   "command": "ruff check .; python test/selftest_control_flow.py; python test/check_control_flow.py; python test/selftest_english_names.py",
+   "command": "python test/selftest_openai_node.py; selftest_cloud_errors/transport/final_payload/wait_for_load; selftest_role_options; selftest_catalog_merge; selftest_config_load; selftest_control_flow_admin; selftest_anthropic_messages; selftest_english_names; selftest_browser",
    "result": "passed",
-   "evidence": "All checks passed; control flow ok: 0 legacy findings."
+   "evidence": "all exit 0."
+  },
+  {
+   "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python test/selftest_control_flow.py; python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "All checks passed; configuration ok; ADR index ok: 98 ADRs; 0 pinned-reference findings; control flow ok: 0 findings."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -56,10 +81,12 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
+   "evidence": "Public-change scan: 0 finding(s); manual review of the diff found no organisation, host or address (examples use llm.example.org and synthetic model names)."
   }
  ],
  "limitations": [
-  "Reproduced and diagnosed in a live deployment through the 0.32.3 journal line; the fix is verified by self-test and will be confirmed by a router restart followed by an immediate request for the held server's model."
+  "The provider is a fake in the test process; no live request against a vLLM-served model was made in this change. The ADR's Confirmation describes the check in operation.",
+  "The full selftest_*.py set was not run; only the self-tests touching the cloud adapter, configuration, admin path and UI, plus the end-to-end suite.",
+  "Pre-existing: oa_model_key picks the first cloud catalog entry whose provider model id matches, so two providers serving the same provider model id share one entry's reasoning settings; not changed here."
  ]
 }
