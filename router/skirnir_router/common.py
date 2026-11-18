@@ -9,7 +9,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.33.0"
+VERSION = "0.34.0"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -19,6 +19,7 @@ DATA_CLASSES_DEFAULT = ["public", "internal", "personal", "secret"]   # Stage 5:
 # ADR-0098: reasoning_effort values that turn a cloud model's reasoning off for `think: false` (catalog key reasoning_off);
 # the first is the default (OpenAI's gpt-5 models), `none` is for servers that ignore `minimal` (a vLLM-served model).
 REASONING_OFF = ("minimal", "none")
+TRUST_LEVELS = ("cloud", "institutional")   # ADR-0099: router.cloud.providers.<p>.trust, default cloud
 
 
 def read_env_value(path, key, strip_quotes=False):

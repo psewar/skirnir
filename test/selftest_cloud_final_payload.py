@@ -100,10 +100,10 @@ class FinalPayloadTests(unittest.TestCase):
             cfg.cloud = {**cfg.cloud, "privacy_check": CFG}
             state.CFG = cfg
             relay = object.__new__(proxy._Relay)
-            relay.req = type("Q", (), {"cloud_privacy": True, "request_id": "t1", "explicit": False})()
+            relay.req = type("Q", (), {"cloud_privacy": True, "data_class_effective": "personal", "request_id": "t1", "explicit": False})()
             relay.path, relay.out, relay.stream = "/api/chat", augmented("Der Wochenmarkt öffnet um acht Uhr."), False
             relay.model, relay.exposed = "openai:example-model", "assist:latest"
-            relay.node = type("N", (), {"name": "cloud:openai", "is_cloud": True})()
+            relay.node = type("N", (), {"name": "cloud:openai", "is_cloud": True, "spec": {"kind": "openai", "trust": "cloud"}})()
             relay.shape, relay.headers, relay.memory_capture, relay.info = None, {}, None, None
             response = asyncio.run(proxy._Relay._via_cloud(relay))
             self.assertEqual(response.status, 200)

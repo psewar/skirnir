@@ -45,8 +45,8 @@ _e(P + "budget_month_chf", "float", "Budget je Monat", "0 = kein Budget; erschoe
    label_en="Budget per month", help_en="0 = no budget; exhausted = provider drops out as a tier")
 _e(P + "warn_at_percent", "int", "Warnung ab %", "HA-Problem 'Cloud <anbieter>: x % des Monatsbudgets'", "Cloud-Anbieter", 80, min=1, max=100,
    label_en="Warn from %", help_en="HA problem 'Cloud <provider>: x % of the monthly budget'")
-_e(P + "max_data_class", "choice", "Datenklasse max.", "eigene Obergrenze dieses Anbieters (leer = globale Grenze)", "Cloud-Anbieter", None, choices="data_classes", nullable=True,
-   label_en="Data class max.", help_en="this provider's own ceiling (empty = global limit)")
+_e(P + "max_data_class", "choice", "Datenklasse max.", "eigene Obergrenze dieses Anbieters (leer = globale Grenze); hoeher als die globale Grenze nur mit trust: institutional in config.yaml", "Cloud-Anbieter", None, choices="data_classes", nullable=True,
+   label_en="Data class max.", help_en="this provider's own ceiling (empty = global limit); above the global limit only with trust: institutional in config.yaml")
 _e(P + "timeout_s", "float", "Timeout s", "leer = request_timeout_s", "Cloud-Anbieter", None, min=5, max=3600, nullable=True,
    label_en="Timeout s", help_en="empty = request_timeout_s")
 _e(P + "max_inflight", "int", "gleichzeitig", "Admission-Grenze fuer den Anbieter", "Cloud-Anbieter", 8, min=1, max=64,

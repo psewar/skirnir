@@ -147,7 +147,8 @@ Tab *Clients*). Weitere Clients: [docs/clients.de.md](docs/clients.de.md).
 - **Busy-Erkennung und Spielmodus.** Ein Spiel oder andere fremde GPU-Last macht einen Knoten `busy`: Dort laufen nur
   `busy_ok`-Stufen, große Modelle werden entladen und danach wieder vorgewärmt. [Konfiguration](docs/configuration.de.md#rollen-und-stufen).
 - **Cloud als Stufe.** Ein Cloud-Modell ist nur eine weitere Stufe einer Rolle, geschützt durch Datenklassen, Credential-Scan,
-  Budget und Egress-Allowlist; standardmäßig aus. [Konfiguration](docs/configuration.de.md#cloud-als-stufe-in-rollen).
+  Budget und Egress-Allowlist; standardmäßig aus. Einen Modellserver der eigenen Organisation kann man mit
+  `trust: institutional` markieren, damit er Daten bis zu seiner eigenen Klasse erhält. [Konfiguration](docs/configuration.de.md#cloud-als-stufe-in-rollen).
 - **Auto-Rolle.** `auto:latest` lässt eine Kette lokaler Engines die Rolle wählen. [Konfiguration](docs/configuration.de.md#auto-rolle-die-decision-engine).
 - **Gedächtnis und Sitzungen (optional).** Session-Speicher, Hindsight Memory, verwalteter Kontext und gemeinsames Gedächtnis
   sind standardmäßig aus. [Referenz](docs/reference.de.md#optionaler-persistenter-session-speicher).

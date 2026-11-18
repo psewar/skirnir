@@ -122,7 +122,7 @@ router:
       # redact_domains / redact_device_classes / redact_names / redact_tools / threshold / refusal: Vorgaben in privacy.py
     # Use final HTTPS endpoints. HTTP requires an explicitly allowed literal loopback address.
     # Weitere Hosts fuer OpenAI-kompatible Anbieter (Vorgabe: api.openai.com, api.anthropic.com, generativelanguage.googleapis.com)
-    egress_allow: [api.eu.mistral.ai]
+    egress_allow: [api.eu.mistral.ai, llm.example.org]
     providers:
       openai:                    # Schluessel als OPENAI_API_KEY in secrets.env
         kind: openai
@@ -151,7 +151,17 @@ router:
         budget_month_chf: 10
         warn_at_percent: 80
         region: eu
-  control_auth:                  # Basic Auth fuer UI + /admin/*; Klartext im Secret-Store
+      institution:               # ADR-0099: a model server run by the operator's own organisation (university or company
+        kind: openai             #   cluster) under its data protection rules. trust: institutional lets its own
+        enabled: false           #   max_data_class replace max_cloud_data_class (at most the class below the highest, so
+        trust: institutional     #   'secret' never leaves). Opt-outs (routing.execution: local, clients.<c>.cloud: false,
+        max_data_class: personal #   memory allow_cloud: false), credential scan, HTTPS and egress_allow apply as for every
+        base_url: https://llm.example.org/v1   # provider. trust is set only here, not in the web UI. Put it in its own role
+        api_key_env: INSTITUTION_API_KEY        #   granted to the clients whose data the organisation may process. Catalog e.g.
+        secrets_file: /etc/skirnir-router/secrets.env   # "institution:example-model": {cloud: institution,
+        budget_month_chf: 0      # 0 = no budget  #   provider_model: example-org/example-model, price_chf_per_m: {input: 0, output: 0}}
+        region: eu
+  control_auth:                 # Basic Auth fuer UI + /admin/*; Klartext im Secret-Store
     # allow_unauthenticated_loopback: true   # NUR Entwicklung ohne users: Loopback ohne Anmeldung (ADR-0053); sonst 503
     users:
       admin: "pbkdf2:200000:54e400a7b83f03e36564355c2953bd2a:dec3e7feefd0cf085a3aebfa2f8f3b7e9482a950e8ebc6806d8430df64f5d8d9"   # Disabled example hash (no known password). Replace with: python3 router.py --hash '<passwort>'

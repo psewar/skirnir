@@ -17,7 +17,7 @@ from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig
 from .rerank_config import RerankConfig, parse_rerank_config
 from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
 from . import settings as settings_mod
-from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, REASONING_OFF, THINK_MODES, log, open_private, tls_fingerprint
+from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, REASONING_OFF, THINK_MODES, TRUST_LEVELS, log, open_private, tls_fingerprint
 from .outcome import Problem, failed, invalid
 
 
@@ -84,7 +84,8 @@ SCHEMA = {
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None, "privacy_check": dict.fromkeys(PRIVACY_FIELDS),
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
-                                      "warn_at_percent": None, "region": None, "timeout_s": None, "max_inflight": None, "max_data_class": None}}},
+                                      "warn_at_percent": None, "region": None, "timeout_s": None, "max_inflight": None, "max_data_class": None,
+                                      "trust": None}}},
         "openai": {"enabled": None, "default_think": None},
         "anthropic": {"enabled": None, "keepalive_s": None, "think": None},
         "wol": {"wait_up_s": None, "retry_interval_s": None, "cooldown_s": None, "broadcast_addresses": None},
@@ -481,6 +482,14 @@ class Config:
                 return invalid(f"router.cloud.providers.{pname}.api_key_env missing")
             if spec.get("max_data_class") is not None and spec["max_data_class"] not in classes:
                 return invalid(f"router.cloud.providers.{pname}.max_data_class must be one of the data classes {classes}")
+            # ADR-0099: only the configuration file sets trust (not in settings.EDITABLE, ADR-0016). An institutional
+            # provider may receive data above max_cloud_data_class, but the highest class never leaves the house.
+            spec["trust"] = spec.get("trust", "cloud")
+            if spec["trust"] not in TRUST_LEVELS:
+                return invalid(f"router.cloud.providers.{pname}.trust must be one of {list(TRUST_LEVELS)}")
+            if spec["trust"] == "institutional" and spec.get("max_data_class") == classes[-1]:
+                return invalid(f"router.cloud.providers.{pname}.max_data_class: the highest data class ({classes[-1]}) "
+                               "never leaves the house, not even to an institutional provider")
             spec["enabled"] = bool(spec.get("enabled", True))
             providers[str(pname)] = spec
         privacy = parse_privacy_config(cl.get("privacy_check"))

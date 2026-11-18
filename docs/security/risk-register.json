@@ -86,11 +86,12 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Incorrect declaration or classifier false negative forwards sensitive data.",
-      "controls": "Client class floor, cloud opt-out, secret scan. The cloud checks run on the final payload after memory insertion; the credential scan, the privacy rules and the classifier read inserted facts as text (router 0.21.1).",
+      "controls": "Client class floor, cloud opt-out, secret scan. The cloud checks run on the final payload after memory insertion; the credential scan, the privacy rules and the classifier read inserted facts as text (router 0.21.1). A provider marked trust: institutional in config.yaml takes its own class limit below the highest class; opt-outs and the credential scan still apply (router 0.34.0, ADR-0099).",
       "next_action": "Measure classifier quality on realistic personal and neutral texts; include tool results in the final-payload test.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_cloud_final_payload.py",
+        "test/selftest_institutional_provider.py",
         "test/selftest_privacy_check.py",
         "test/selftest_security.py"
       ],

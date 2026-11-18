@@ -363,6 +363,8 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "kein Schlüssel": "no key",
   "aktiv": "active",
   "Cloud global aus": "cloud globally off",
+  "institutionell": "institutional",
+  "institutionell (ADR-0099): eigene Datenklassen-Grenze statt der globalen": "institutional (ADR-0099): own data class limit instead of the global one",
   "kein Budget": "no budget",
   "kein Benchmark": "no benchmark",
   "Fehler": "errors",
@@ -694,7 +696,7 @@ function renderCloud() {
       <td>${(c.models || []).map(m => `<span class="badge cloud">${esc(m)}</span>`).join('') || '<span class="muted">–</span>'}</td>
       <td><b class="${cls}">${fmtCost(c.spend_month_chf)}</b> <span class="muted">/ ${c.budget_month_chf ? fmtCost(c.budget_month_chf) : t('kein Budget')}${c.budget_percent != null ? ' (' + c.budget_percent + ' %)' : ''}</span>${bar}</td>
       <td>${c.breaker === 'closed' ? '<span class="ok">closed</span>' : `<span class="badge ${esc(c.breaker)}">${esc(c.breaker)}</span>`}${c.inflight ? ` · ${c.inflight} ${t('aktiv')}` : ''}</td>
-      <td class="muted">${esc(c.region || '–')} · ${esc(c.max_data_class || cc.max_cloud_data_class || '–')}</td></tr>`);
+      <td class="muted">${esc(c.region || '–')} · ${esc(c.ceiling || c.max_data_class || cc.max_cloud_data_class || '–')}${c.trust === 'institutional' ? ` · <span title="${t('institutionell (ADR-0099): eigene Datenklassen-Grenze statt der globalen')}">${t('institutionell')}</span>` : ''}</td></tr>`);
   }
 }
 

@@ -2,76 +2,95 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "90f769736294bdee30e33d34877b8abb357790ae",
- "change_digest": "22030686db27758f1639946a1d80182f0d40740f18e8ef8fa8a5a24652da4f81",
+ "base_sha": "627268b43e7d3c2117f9f6f6ca9045bf90a8ed54",
+ "change_digest": "492689be0e917a6a62cc48df6e133a4651b745cc7d01fc11b905a882f1913c8d",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0098-a-cloud-model-names-the-value-that-turns-its-reasoning-off.md",
+  "README.de.md",
+  "README.md",
+  "docs/adr/0099-institutional-providers-take-their-own-data-class-limit.md",
   "docs/adr/README.md",
   "docs/configuration.de.md",
   "docs/configuration.md",
+  "docs/security/risk-register.json",
+  "docs/security/threat-model.de.md",
+  "docs/security/threat-model.md",
   "router/config.example.yaml",
-  "router/skirnir_router/admin.py",
   "router/skirnir_router/cloud.py",
   "router/skirnir_router/common.py",
   "router/skirnir_router/config.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/settings.py",
   "router/ui.html",
-  "test/selftest_cloud_reasoning.py",
+  "test/selftest_cloud_final_payload.py",
+  "test/selftest_institutional_provider.py",
+  "test/selftest_privacy_check.py",
+  "router/skirnir_router/request.py",
+  "router/skirnir_router/scheduler.py",
+  "router/skirnir_router/fallback_observation.py",
+  "router/skirnir_router/memory.py",
+  "router/skirnir_router/managed.py",
+  "router/skirnir_router/admin.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-03",
   "TM-05",
-  "TM-07"
+  "TM-03",
+  "TM-06"
  ],
  "boundaries": [
-  "B1",
   "B2",
-  "B3",
-  "B6"
+  "B6",
+  "B7",
+  "B9"
  ],
- "summary": "Router 0.33.0 (ADR-0098): new optional catalog key models.<m>.reasoning_off (minimal | none) names the reasoning_effort the openai adapter sends for a client's think: false on a cloud model with reasoning: true; default minimal as before. The configuration check refuses other values, the key without reasoning: true and on a local model; the admin cloud-model entry and the web UI keep the key. The adapter now reads the provider's thought from reasoning_content, else reasoning, returns it as Ollama thinking, and drops it for a client that sent think: false. The adapter is shared by cloud providers and OpenAI-compatible nodes.",
+ "summary": "Router 0.34.0 (ADR-0099 proposed): a cloud provider may carry trust: institutional (config.yaml only). It then receives data up to its own max_data_class instead of max_cloud_data_class, at most the class below the highest. Every other provider keeps the old rule (its own class only narrows). request_block_reason now cuts off at the widest limit of an enabled provider; provider_block_reason closes each provider not cleared for the class (traced: every cloud selection runs through Routing.tier_blocked in scheduler.select and fallback_observation). The content check runs only for a provider whose limit is below the request's class. Opt-outs (execution local, cloud: false, memory allow_cloud: false, managed sessions), the credential scan, HTTPS-only destinations, egress allowlist and budget apply unchanged. /admin/state and the UI report trust and the effective ceiling. Re-reviewed after re-applying the change onto main 627268b (PR #166, ADR-0098 reasoning_off, router 0.33.0): renumbered to ADR-0099 and router 0.34.0; the conflicts in common.py, config.py, the configuration docs, the changelog and the ADR index were resolved by keeping both sides. The two changes touch independent parts of the cloud path (reasoning_effort value and returned thought vs. which provider may receive a data class), so the combined code adds no new crossing.",
  "findings": [
   {
    "id": "TM-05",
-   "evidence": "B6: the request to a cloud provider gains at most one field value, reasoning_effort, taken from the operator's catalog and restricted to the fixed set (minimal, none) by Config._parse_models; no client-supplied value reaches it, and no message content, tool result or memory text changes. The final payload checks (request_block_reason, credential scan, privacy check) run on the same body as before, unchanged (proxy._prepare/_cloud_ordered not touched). Egress hosts, transport and redirect handling (TM-06) are untouched. The thought returned from a provider is model output delivered to the client that made the request, with the same trust as its content; _oa_messages and _an_body never forward a thinking field back to a provider, so it does not widen what is sent to the cloud. For think: false the thought is now dropped (less disclosure than before for reasoning_content).",
-   "resolution": "No new exposure on the cloud boundary; classification limits of TM-05 remain as before. Covered by test/selftest_cloud_reasoning.py (values sent, model without reasoning: true sends none, thought dropped for think: false).",
+   "evidence": "Intended widening: with an enabled institutional provider whose max_data_class is personal, personal requests (also undeclared ones, which default to personal) reach that provider's tiers, and the content check and its redaction of house context are skipped for it. The router cannot verify the organisation's data protection or no-storage promise; a data class says how sensitive data is, not whose it is, so a role that falls back to an institutional tier would send household data to the organisation. Not reachable without the operator writing trust: institutional into config.yaml; the highest class is refused (also from the web UI and for custom class lists); a disabled provider widens nothing.",
+   "resolution": "ADR-0099 records the operator's decision and its consequences; configuration docs (EN/DE) advise a dedicated role granted only to the clients whose data the organisation may process; TM-05 controls updated; selftest_institutional_provider covers accepted and rejected cases. The maintainer must accept ADR-0099 for the residual risk.",
    "disposition": "baseline"
   },
   {
    "id": "TM-03",
-   "evidence": "B2: PUT /admin/config (control auth unchanged) passes reasoning_off from the request into the override entry (admin._cloud_model_entry); config.write_overrides validates the merged configuration with the probe parse before writing, so an invalid value, the key without reasoning: true or on a local model is a 400 and nothing is written. ui.html only carries the existing value inside the JS object it sends back (JSON.stringify), never into HTML, so no new markup sink. No new route, CSRF or CORS change.",
-   "resolution": "Rejected case tested: write_overrides with reasoning_off: low returns 400 and writes no roles.yaml (test/selftest_cloud_reasoning.py on a temporary copy of the example configuration).",
+   "evidence": "Pre-existing, not widened: a web UI session (or stolen admin credentials) can already raise the global router.cloud.max_cloud_data_class to any class, which opens every provider. The new trust key is not in settings.EDITABLE (settings.coerce refuses it, tested), and the UI-editable max_data_class of an institutional provider passes the same _parse_cloud check that refuses the highest class (tested via Config.reload with a settings override).",
+   "resolution": "No new UI path to personal data; the pre-existing global setting stays as decided in ADR-0016's allowlist. Noted for the maintainer as a possible follow-up (make max_cloud_data_class config-only).",
    "disposition": "baseline"
   },
   {
-   "id": "TM-07",
-   "evidence": "B3/B1: an OpenAI-compatible node shares openai_exchange; its reasoning field is now returned as thinking like reasoning_content already was. Both are assertions of an approved agent's upstream, delivered only to the requesting client (B1 role/model rights unchanged). Managed sessions persist thinking within the existing persistence limit, as for Ollama nodes. No change to enrollment, tunnel targets or bounds.",
-   "resolution": "Same trust as the existing reasoning_content path; covered by the node check in the self-test and selftest_openai_node.py.",
+   "id": "TM-06",
+   "evidence": "An institutional provider is an ordinary cloud provider for transport: _parse_cloud still requires an allowlisted HTTPS final URL without credentials, query or fragment, HTTP only on literal loopback, and cloud.run refuses 3xx. A plain-HTTP address inside an organisation's network is refused like any other. Keys come from api_key_env/secrets_file and are never logged; the new log lines name provider, trust and class only.",
+   "resolution": "Unchanged controls apply; no new destination type.",
    "disposition": "baseline"
   }
  ],
  "tests": [
   {
-   "command": "python test/selftest_cloud_reasoning.py",
+   "command": "python test/selftest_institutional_provider.py",
    "result": "passed",
-   "evidence": "ALL OK (40 checks, including 8 refused configurations and the refused PUT /admin/config write). Against the previous cloud.py the test fails 10 checks (values sent, reasoning field, thought on think: false)."
+   "evidence": "28 PASS, ALLE OK. Fault injection (institution gate always open, trust ignored, request gate fixed at the global limit) makes 5, 1 and 4 checks fail respectively."
   },
   {
-   "command": "python test/run_tests.py",
+   "command": "every python test/selftest_*.py listed in .github/workflows (68 files, 240 s timeout each), on the re-applied tree",
+   "result": "passed",
+   "evidence": "68 files, 0 failed, 0 timed out (includes selftest_institutional_provider and selftest_cloud_reasoning); selftest_privacy_check and selftest_cloud_final_payload only gained the new fields on their fake request and target."
+  },
+  {
+   "command": "python test/run_tests.py (on the re-applied tree)",
    "result": "passed",
    "evidence": "exit code 0, 332 PASS lines, 0 failures."
   },
   {
-   "command": "python test/selftest_openai_node.py; selftest_cloud_errors/transport/final_payload/wait_for_load; selftest_role_options; selftest_catalog_merge; selftest_config_load; selftest_control_flow_admin; selftest_anthropic_messages; selftest_english_names; selftest_browser",
-   "result": "passed",
-   "evidence": "all exit 0."
-  },
-  {
    "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/check_pinned_references.py; python test/selftest_control_flow.py; python test/check_control_flow.py",
    "result": "passed",
-   "evidence": "All checks passed; configuration ok; ADR index ok: 98 ADRs; 0 pinned-reference findings; control flow ok: 0 findings."
+   "evidence": "All checks passed; configuration ok; ADR index ok (99); 0 pinned-reference findings; control flow ok, 0 findings."
+  },
+  {
+   "command": "manual live run (by the session that built the change, on the same logic before the renumbering, base 90f7697): local router (loopback, synthetic clients and prompts) with an ordinary provider on an unreachable loopback port and an institutional OpenAI-compatible endpoint",
+   "result": "passed",
+   "evidence": "personal and undeclared requests answered by the institutional tier with the ordinary tier skipped (data class personal > internal for provider ordinary (trust cloud)); declared internal failed over from the unreachable ordinary provider; secret, execution local, cloud: false and a credential in the prompt answered 400 with the reason per tier; streaming answered; the endpoint does not redirect; the key appears in no log, journal or state file; UI cloud table shows ceiling and trust."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -81,12 +100,12 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s); manual review of the diff found no organisation, host or address (examples use llm.example.org and synthetic model names)."
+   "evidence": "Public-change scan: 0 finding(s); added lines also searched by hand for the organisation's name, hosts and addresses."
   }
  ],
  "limitations": [
-  "The provider is a fake in the test process; no live request against a vLLM-served model was made in this change. The ADR's Confirmation describes the check in operation.",
-  "The full selftest_*.py set was not run; only the self-tests touching the cloud adapter, configuration, admin path and UI, plus the end-to-end suite.",
-  "Pre-existing: oa_model_key picks the first cloud catalog entry whose provider model id matches, so two providers serving the same provider model id share one entry's reasoning settings; not changed here."
+  "The organisation's promise not to store data is outside the router's control; the operator vouches for it by setting trust: institutional.",
+  "The live run used one organisation's endpoint and synthetic prompts only, before the re-application onto main; it was not repeated on the renumbered tree. Thinking control for such a server is configured per catalog entry with reasoning_off (ADR-0098, already on main), not by this change.",
+  "The end-to-end suite has no institutional provider; the new behaviour is covered by the self-test and the manual live run."
  ]
 }

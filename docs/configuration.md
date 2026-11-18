@@ -237,7 +237,7 @@ Limits (`router.cloud`):
 
 - **Data classes as a declaration**, not a content classifier: `routing.data_class`, else `clients.<c>.data_class`, else
   `default_data_class` (**personal**). Cloud only up to `max_cloud_data_class` (**internal**). Consequence: whoever declares nothing
-  never goes to the cloud.
+  never goes to the cloud. Exception: an [institutional provider](#institutional-providers) takes its own limit.
 - **Content check instead of a blanket block** (router 0.13.0, opt-in per client: `clients.<c>.privacy_check: true` and
   `router.cloud.privacy_check.enabled: true`): for a client whose class is `personal` by default (not declared), the cloud tier
   stays a candidate, and when it is actually chosen the request is checked: rules on what the user wrote (operator `terms`
@@ -290,3 +290,41 @@ ends with `done_reason: length` and empty content, or `eval_count` is far above 
 thinks and needs `none`. The provider's thought (`reasoning_content`, or `reasoning` as vLLM sends it) arrives as
 Ollama's `thinking` (`reasoning` in the OpenAI shape, a thinking block in the Anthropic shape), except for a client that
 sent `think: false`.
+
+### Institutional providers
+
+Router 0.34.0, [ADR-0099](adr/0099-institutional-providers-take-their-own-data-class-limit.md):
+a model server run by your own organisation (a university or company cluster), cleared under its data protection rules
+for personal data. Configure it like any OpenAI-compatible provider and add `trust: institutional` with its own
+`max_data_class`:
+
+```yaml
+router:
+  cloud:
+    egress_allow: [llm.example.org]
+    providers:
+      institution:
+        kind: openai
+        trust: institutional          # config.yaml only, not editable in the web UI
+        max_data_class: personal      # replaces max_cloud_data_class for this provider
+        base_url: https://llm.example.org/v1
+        api_key_env: INSTITUTION_API_KEY
+        secrets_file: /etc/skirnir-router/secrets.env
+        budget_month_chf: 0
+```
+
+- Its own `max_data_class` **replaces** `max_cloud_data_class` for this provider. It may be any class below the highest,
+  so `secret` never leaves the house. With `trust: cloud` (the default) a provider's own class only narrows the global
+  limit. A higher value has no effect, and the router logs a warning at start.
+- Without its own `max_data_class` an institutional provider gets the global limit like any other.
+- Everything else stays: `routing.execution: local`, `clients.<c>.cloud: false`, memory projects with `allow_cloud: false`
+  and managed sessions keep requests away from it. The credential scan, HTTPS, the egress allowlist, budget and circuit
+  breaker apply.
+- The content check (`privacy_check`) runs only for providers whose limit is below the request's class. An
+  institutional provider cleared for `personal` gets the request without the check and without redaction.
+- A data class says how sensitive data is, not whose it is. Put the institutional model in its **own role**, granted
+  only to the clients whose data the organisation may process (`clients.<c>.roles`). Do not add it as a fallback tier to
+  roles that household or private clients use.
+- `/admin/state` and the cloud table of the web UI show each provider's `trust` and its effective limit (`ceiling`).
+- Use the organisation's HTTPS endpoint. A plain-HTTP address inside its network is refused like any other HTTP
+  provider.
