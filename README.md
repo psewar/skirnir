@@ -146,7 +146,8 @@ clients: [docs/clients.md](docs/clients.md).
 - **Busy detection and game mode.** A game or other foreign GPU load makes a node `busy`: only `busy_ok` tiers run there,
   large models are unloaded and prewarmed again afterwards. [Configuration](docs/configuration.md#roles-and-tiers).
 - **Cloud as a tier.** A cloud model is just another tier of a role, guarded by data classes, a credential scan, a budget and
-  an egress allowlist; off by default. [Configuration](docs/configuration.md#cloud-as-a-tier-in-roles).
+  an egress allowlist; off by default. A model server run by your own organisation can be marked `trust: institutional` to
+  receive data up to its own class. [Configuration](docs/configuration.md#cloud-as-a-tier-in-roles).
 - **Auto role.** `auto:latest` lets a chain of local engines pick the role. [Configuration](docs/configuration.md#auto-role-the-decision-engine).
 - **Memory and sessions (optional).** Session store, Hindsight memory, managed context and shared memory are off by default.
   [Reference](docs/reference.md#optional-persistent-session-api).

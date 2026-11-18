@@ -131,9 +131,9 @@ async def main():
 
     def relay(question, tools=()):
         x = object.__new__(proxy._Relay)
-        x.req = type("Q", (), {"cloud_privacy": True, "request_id": "t1", "explicit": False})()
+        x.req = type("Q", (), {"cloud_privacy": True, "data_class_effective": "personal", "request_id": "t1", "explicit": False})()
         x.path, x.out, x.stream, x.model, x.exposed = "/api/chat", body(question, tools), False, "openai:gpt-5-mini", "assist:latest"
-        x.node = type("N", (), {"name": "cloud:openai", "is_cloud": True})()
+        x.node = type("N", (), {"name": "cloud:openai", "is_cloud": True, "spec": {"kind": "openai", "trust": "cloud"}})()
         x.shape, x.headers, x.memory_capture, x.info = None, {}, None, None
         return x
 

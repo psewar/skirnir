@@ -240,7 +240,7 @@ Schranken (`router.cloud`):
 
 - **Datenklassen als Deklaration**, kein Inhaltsklassifikator: `routing.data_class`, sonst `clients.<c>.data_class`, sonst
   `default_data_class` (**personal**). Cloud nur bis `max_cloud_data_class` (**internal**). Folge: wer nichts deklariert, geht nie
-  in die Cloud.
+  in die Cloud. Ausnahme: Ein [institutioneller Anbieter](#institutionelle-anbieter) hat seine eigene Grenze.
 - **Inhaltsprüfung statt Pauschalsperre** (Router 0.13.0, Opt-in je Client: `clients.<c>.privacy_check: true` und
   `router.cloud.privacy_check.enabled: true`): Für einen Client, dessen Klasse ohne Deklaration `personal` ist, bleibt die
   Cloud-Stufe Kandidat, und wenn sie wirklich gewählt wird, wird die Anfrage geprüft: Regeln auf dem, was der Nutzer
@@ -294,3 +294,41 @@ Antwort mit `done_reason: length` und leerem Inhalt, oder liegt `eval_count` wei
 Modell noch und braucht `none`. Der Gedanke des Anbieters (`reasoning_content`, oder `reasoning`, wie vLLM ihn schickt)
 kommt als Ollamas `thinking` an (`reasoning` in der OpenAI-Form, ein Thinking-Block in der Anthropic-Form), außer für
 einen Client, der `think: false` gesendet hat.
+
+### Institutionelle Anbieter
+
+Router 0.34.0, [ADR-0099](adr/0099-institutional-providers-take-their-own-data-class-limit.md):
+ein Modellserver, den die eigene Organisation betreibt (Hochschul- oder Firmencluster), nach ihren Datenschutzregeln für
+personenbezogene Daten freigegeben. Er wird wie jeder OpenAI-kompatible Anbieter eingetragen, dazu `trust: institutional`
+mit eigener `max_data_class`:
+
+```yaml
+router:
+  cloud:
+    egress_allow: [llm.example.org]
+    providers:
+      institution:
+        kind: openai
+        trust: institutional          # nur in config.yaml, nicht in der Web-UI änderbar
+        max_data_class: personal      # ersetzt max_cloud_data_class für diesen Anbieter
+        base_url: https://llm.example.org/v1
+        api_key_env: INSTITUTION_API_KEY
+        secrets_file: /etc/skirnir-router/secrets.env
+        budget_month_chf: 0
+```
+
+- Die eigene `max_data_class` **ersetzt** `max_cloud_data_class` für diesen Anbieter. Erlaubt ist jede Klasse unter der
+  höchsten, `secret` verlässt das Haus also nie. Mit `trust: cloud` (Vorgabe) schränkt die eigene Klasse eines Anbieters
+  die globale Grenze nur ein. Ein höherer Wert wirkt nicht, und der Router warnt beim Start.
+- Ohne eigene `max_data_class` gilt für einen institutionellen Anbieter die globale Grenze wie für jeden anderen.
+- Alles andere bleibt: `routing.execution: local`, `clients.<c>.cloud: false`, Memory-Projekte mit `allow_cloud: false`
+  und verwaltete Sitzungen halten Anfragen von ihm fern. Credential-Scan, HTTPS, Egress-Allowlist, Budget und Circuit
+  Breaker gelten.
+- Die Inhaltsprüfung (`privacy_check`) läuft nur für Anbieter, deren Grenze unter der Klasse der Anfrage liegt. Ein für
+  `personal` freigegebener institutioneller Anbieter bekommt die Anfrage ohne Prüfung und ohne Schwärzung.
+- Eine Datenklasse sagt, wie sensibel Daten sind, nicht wem sie gehören. Das institutionelle Modell gehört in eine
+  **eigene Rolle**, freigegeben nur für die Clients, deren Daten die Organisation verarbeiten darf (`clients.<c>.roles`).
+  Nicht als Ausweichstufe in Rollen hängen, die Haushalts- oder private Clients nutzen.
+- `/admin/state` und die Cloud-Tabelle der Web-UI zeigen für jeden Anbieter `trust` und die wirksame Grenze (`ceiling`).
+- Den HTTPS-Endpunkt der Organisation verwenden. Eine HTTP-Adresse in ihrem Netz wird abgelehnt wie bei jedem
+  Anbieter.

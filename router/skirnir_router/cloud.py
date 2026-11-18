@@ -9,6 +9,10 @@ The client can protect itself: `routing.execution: local` or `client_auth.client
 Constraints, all configurable (`router.cloud`):
 - Data classes as DECLARATION (no content classifier): `routing.data_class`, else client default, else
   `default_data_class` (personal). Cloud only if class is at most `max_cloud_data_class` (internal).
+- Trust per provider (ADR-0099): `trust: cloud` (default) can only narrow that limit with its own `max_data_class`. A
+  provider with `trust: institutional` (run by the operator's own organisation under its data protection rules) takes its
+  own `max_data_class` instead of the global limit, up to the class below the highest; everything else (opt-outs,
+  credential scan, HTTPS, egress, budget) applies to it as to any provider.
 - Credential scan: prompts with recognizable keys/passwords do not go to cloud (`credential_scan: block`).
 - Budget per provider and month in the currency of the catalog prices (no conversion); exhausted = provider is no longer a tier; warning
   at `warn_at_percent` as HA Problem.
@@ -106,7 +110,8 @@ class CloudTarget(Breaker):
                 "key": bool(self.api_key), "key_source": self.key_source, "base_url": self.spec["base_url"], "region": self.spec.get("region"),
                 "models": sorted(self.models), "inflight": self.inflight, "breaker": self.breaker,
                 "spend_month_chf": round(spend, 4), "budget_month_chf": budget,
-                "budget_percent": round(100 * spend / budget, 1) if budget else None, "max_data_class": self.spec.get("max_data_class")}
+                "budget_percent": round(100 * spend / budget, 1) if budget else None, "max_data_class": self.spec.get("max_data_class"),
+                "trust": self.spec.get("trust", "cloud"), "ceiling": ceiling(self)}
 
 
 # ---------------- Setup from configuration ----------------
@@ -121,9 +126,13 @@ def setup():
         t.models = {m for m, e in state.CFG.models.items() if (e or {}).get("cloud") == name}
         t.api_key, t.key_source = _load_key(spec)
         new[name] = t
-        log.info("cloud provider %s (%s): %s, key %s, %d models, budget %s/month", name, spec["kind"],
-                 "active" if spec.get("enabled", True) else "disabled", f"from {t.key_source}" if t.api_key else "MISSING",
-                 len(t.models), spec.get("budget_month_chf"))
+        log.info("cloud provider %s (%s, trust %s): %s, key %s, %d models, budget %s/month, data up to %s", name, spec["kind"],
+                 spec.get("trust", "cloud"), "active" if spec.get("enabled", True) else "disabled",
+                 f"from {t.key_source}" if t.api_key else "MISSING", len(t.models), spec.get("budget_month_chf"), ceiling(t))
+        own = spec.get("max_data_class")
+        if own and own != ceiling(t):
+            log.warning("cloud provider %s: max_data_class %s is above max_cloud_data_class and has no effect without "
+                        "trust: institutional (ADR-0099); it receives data up to %s", name, own, ceiling(t))
     state.CLOUD = new
 
 
@@ -154,6 +163,44 @@ def class_index(name):
     return classes.index(name) if name in classes else len(classes)
 
 
+def _institution_clears(spec, dc):
+    """ADR-0099: a provider with trust: institutional and its own max_data_class takes data up to that class, which may be
+    above router.cloud.max_cloud_data_class. Configuration keeps that class below the highest one (config._parse_cloud)."""
+    own = spec.get("max_data_class")
+    return spec.get("trust") == "institutional" and bool(own) and class_index(dc) <= class_index(own)
+
+
+def ceiling(target):
+    """Highest data class this provider receives, as a fact for the journal, /admin/state and the UI: an institutional
+    provider's own max_data_class, otherwise the lower of its own and the global max_cloud_data_class."""
+    glob = state.CFG.cloud.get("max_cloud_data_class", "internal")
+    own = target.spec.get("max_data_class")
+    if not own:
+        return glob
+    if target.spec.get("trust") == "institutional":
+        return own
+    return min((glob, own), key=class_index)
+
+
+def widest_ceiling():
+    """The highest class any enabled provider may receive: max_cloud_data_class or an enabled institutional provider's own
+    ceiling. A request above it reaches no cloud tier at all; below it, provider_block_reason decides per provider."""
+    cfg = state.CFG.cloud
+    tops = [cfg.get("max_cloud_data_class", "internal")]
+    tops += [s["max_data_class"] for s in (cfg.get("providers") or {}).values()
+             if (s or {}).get("trust") == "institutional" and s.get("enabled", True) and s.get("max_data_class")]
+    return max(tops, key=class_index)
+
+
+def needs_privacy_check(target, req):
+    """The request reaches this provider only through the content check (privacy.py): its client opted in, and its class
+    is above what the provider is cleared for. An institutional provider cleared for the class needs no check."""
+    if not req.cloud_privacy:
+        return False
+    dc = req.data_class_effective or state.CFG.cloud.get("default_data_class", "personal")
+    return not _institution_clears(target.spec, dc)
+
+
 # ---------------- Schranken ----------------
 
 def request_block_reason(req, body, client_name):
@@ -173,13 +220,16 @@ def request_block_reason(req, body, client_name):
     declared = req.data_class or floor or cfg.get("default_data_class", "personal")
     dc = max((floor, declared), key=class_index) if floor else declared
     req.data_class_effective = dc
-    if class_index(dc) > class_index(cfg.get("max_cloud_data_class", "internal")):
-        if dc == "personal" and not req.data_class and cc.get("privacy_check") is True:
-            # The client opted into the content check (privacy.py): the cloud tier stays a candidate, and the check
-            # decides when it is actually chosen. Never for a declared class or one above personal.
-            req.cloud_privacy = True
-        else:
-            return f"data class {dc} > {cfg.get('max_cloud_data_class', 'internal')} (not cleared for the cloud)"
+    if class_index(dc) > class_index(cfg.get("max_cloud_data_class", "internal")) and dc == "personal" \
+            and not req.data_class and cc.get("privacy_check") is True:
+        # The client opted into the content check (privacy.py): the cloud tier stays a candidate, and the check
+        # decides when it is actually chosen. Never for a declared class or one above personal.
+        req.cloud_privacy = True
+    # Without institutional providers (ADR-0099) the widest ceiling is max_cloud_data_class, as before; with one, a class
+    # up to its ceiling stays a candidate here and provider_block_reason closes the other providers.
+    widest = widest_ceiling()
+    if class_index(dc) > class_index(widest) and not req.cloud_privacy:
+        return f"data class {dc} > {widest} (not cleared for the cloud)"
     if cfg.get("credential_scan", "block") == "block":
         hit = scan_secrets(body)
         if hit:
@@ -195,13 +245,29 @@ def provider_block_reason(tier, req=None):
         return f"cloud provider {t.provider} disabled"
     if not t.api_key:
         return f"cloud provider {t.provider}: no API key"
-    if req is not None and t.spec.get("max_data_class"):
-        dc = getattr(req, "data_class_effective", None) or state.CFG.cloud.get("default_data_class", "personal")
-        if class_index(dc) > class_index(t.spec["max_data_class"]):
-            return f"data class {dc} > {t.spec['max_data_class']} for provider {t.provider}"
+    if req is not None:
+        why = _class_block_reason(t, req)
+        if why:
+            return why
     budget = float(t.spec.get("budget_month_chf") or 0)
     if budget and spend_month(t.provider) >= budget:
         return f"cloud provider {t.provider}: monthly budget {budget:.2f} exhausted"
+    return None
+
+
+def _class_block_reason(t, req):
+    """Why the request's data class keeps it from this provider - or None. A provider's own max_data_class always narrows;
+    only an institutional provider's own class replaces max_cloud_data_class (ADR-0099). For every other provider a class
+    above max_cloud_data_class passes only with the client's content check pending (request_block_reason, privacy.py)."""
+    dc = getattr(req, "data_class_effective", None) or state.CFG.cloud.get("default_data_class", "personal")
+    own = t.spec.get("max_data_class")
+    if own and class_index(dc) > class_index(own):
+        return f"data class {dc} > {own} for provider {t.provider}"
+    if _institution_clears(t.spec, dc):
+        return None
+    glob = state.CFG.cloud.get("max_cloud_data_class", "internal")
+    if class_index(dc) > class_index(glob) and not req.cloud_privacy:
+        return f"data class {dc} > {glob} for provider {t.provider} (trust {t.spec.get('trust', 'cloud')})"
     return None
 
 

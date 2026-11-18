@@ -791,7 +791,9 @@ class _Relay:
         """Request to a cloud provider (cloud.run), response in Ollama format to the client. None = next candidate
         (provider error before first byte, Breaker counts it)."""
         out = self.out
-        if self.req.cloud_privacy:   # personal data, the client opted into the content check (privacy.py)
+        # personal data, the client opted into the content check (privacy.py); not for an institutional provider cleared
+        # for the class (ADR-0099)
+        if cloud.needs_privacy_check(self.node, self.req):
             if self.path in cloud.EMBED_PATHS:
                 return None   # embeddings have no user turn to judge and no answer to refuse with: stay local
             verdict = await privacy.check(self.out, state.CFG.cloud["privacy_check"])
