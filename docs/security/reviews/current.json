@@ -2,28 +2,21 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "bd05beaf444cd7d37544fc8cdd37013d1aae3200",
- "change_digest": "1297e89b636c92f12d2f2e156b04c410aa295aaa109513ba2a3c670a750e6e9d",
+ "base_sha": "3040f66fa92b5e321c113429f7acb8b53fc0790e",
+ "change_digest": "773300e9570531933add22d5079819ded81cc72803b12b60e6a4b4f248924d35",
  "reviewed_paths": [
   "CHANGELOG.md",
-  "docs/adr/0098-a-cloud-model-names-the-value-that-turns-its-reasoning-off.md",
-  "docs/adr/README.md",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-05"
+  "TM-16"
  ],
  "boundaries": [
-  "B6"
+  "B8"
  ],
- "summary": "Documentation only: ADR-0098 status proposed -> accepted on the operator's decision of 2026-11-18 (after the merge of router 0.33.0, before its rollout), the ADR index regenerated, and the unreleased CHANGELOG row v0.38.0 naming ADR-0098 accepted. No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
+ "summary": "Documentation only: the CHANGELOG rows v0.37.4, v0.38.0 and v0.39.0 change from (unreleased) to links to their published GitHub releases. The releases carry the unchanged agent 0.35.2 binaries (byte-identical to v0.36.0, attestation verified before upload); the Release provenance workflow rebuilt them from each tag and compared them. No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
  "findings": [],
  "tests": [
-  {
-   "command": "python test/check_adr_index.py",
-   "result": "passed",
-   "evidence": "ADR index ok: 99 ADRs (0098 accepted)."
-  },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
    "result": "passed",
@@ -33,10 +26,20 @@
    "command": "python test/check_public_changes.py",
    "result": "passed",
    "evidence": "Public-change scan: 0 finding(s)."
+  },
+  {
+   "command": "gh attestation verify skirnir-agent-0.35.2-{linux-amd64,windows-amd64.exe} --repo psewar/skirnir",
+   "result": "passed",
+   "evidence": "Both binaries taken from v0.37.4 verify (exit 0); SHA-256 equal to the v0.36.0 assets."
+  },
+  {
+   "command": "Release provenance workflow for v0.38.0 and v0.39.0",
+   "result": "passed",
+   "evidence": "Runs 44346479982 and 44346496200 succeeded: both agent binaries rebuilt identical (linux c94cf1d2..., windows 3c615b5e...), attested, SBOMs attached (router 0.33.0 and 0.34.0)."
   }
  ],
  "limitations": [
-  "Documentation only; the behaviour it records was reviewed in the record of PR 166 (router 0.33.0).",
-  "Router 0.33.0 is not yet rolled out; the ADR's confirmation in operation (a think: false request against the vLLM-served model with reasoning_off: none) is still to be done."
+  "Documentation only; the released behaviour was reviewed in the records of PR 166 (router 0.33.0) and PR 167 (router 0.34.0).",
+  "Neither release is rolled out yet."
  ]
 }
