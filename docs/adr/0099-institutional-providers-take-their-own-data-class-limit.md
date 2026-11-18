@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-18
 decision-makers: operator
 ---
@@ -43,8 +43,10 @@ But then it gets only `internal` data, which is exactly the data the team does n
 
 ## Decision Outcome
 
-Chosen option: **1**, because it changes only the data class limit, and only for a provider the operator marked in the
-configuration file. It reuses everything the cloud path already enforces.
+Chosen option (accepted by the operator 2026-11-18, after the merge of router 0.34.0 and before its rollout): **1**,
+because it changes only the data class limit, and only for a provider the operator marked in the configuration file. It
+reuses everything the cloud path already enforces. With the acceptance the operator also takes on the residual risk
+named under Consequences: the organisation's promise not to store data is the operator's to vouch for.
 
 * `router.cloud.providers.<p>.trust` is `cloud` (default) or `institutional`. Anything else, and an institutional
   provider with the highest data class as `max_data_class`, stops the configuration from loading. `trust` is not in
