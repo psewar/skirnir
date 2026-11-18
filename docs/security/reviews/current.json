@@ -2,11 +2,11 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "ce8beda10185eae2633f38fc8b98c96f5165662a",
- "change_digest": "76ae012ca34193eb8cacace044f83ba5cb6dac95401edcce9f131082d08a6d0d",
+ "base_sha": "bd05beaf444cd7d37544fc8cdd37013d1aae3200",
+ "change_digest": "1297e89b636c92f12d2f2e156b04c410aa295aaa109513ba2a3c670a750e6e9d",
  "reviewed_paths": [
   "CHANGELOG.md",
-  "docs/adr/0099-institutional-providers-take-their-own-data-class-limit.md",
+  "docs/adr/0098-a-cloud-model-names-the-value-that-turns-its-reasoning-off.md",
   "docs/adr/README.md",
   "docs/security/reviews/current.json"
  ],
@@ -16,13 +16,13 @@
  "boundaries": [
   "B6"
  ],
- "summary": "Documentation only: ADR-0099 status proposed -> accepted on the operator's decision of 2026-11-18 (after the merge of router 0.34.0, before its rollout), with a sentence that the operator takes on the residual risk the ADR names (the organisation's no-storage promise); the ADR index regenerated, and the unreleased CHANGELOG row v0.39.0 naming ADR-0099 accepted. No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
+ "summary": "Documentation only: ADR-0098 status proposed -> accepted on the operator's decision of 2026-11-18 (after the merge of router 0.33.0, before its rollout), the ADR index regenerated, and the unreleased CHANGELOG row v0.38.0 naming ADR-0098 accepted. No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
  "findings": [],
  "tests": [
   {
    "command": "python test/check_adr_index.py",
    "result": "passed",
-   "evidence": "ADR index ok: 99 ADRs (0099 accepted)."
+   "evidence": "ADR index ok: 99 ADRs (0098 accepted)."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -36,8 +36,7 @@
   }
  ],
  "limitations": [
-  "Documentation only; the behaviour it records was reviewed in the record of PR 167 (router 0.34.0).",
-  "Accepting the ADR is not a time-limited risk acceptance in docs/security/risk-register.json; TM-05 stays open with the controls ADR-0099 describes.",
-  "Router 0.34.0 is not yet rolled out; the ADR records no check in operation."
+  "Documentation only; the behaviour it records was reviewed in the record of PR 166 (router 0.33.0).",
+  "Router 0.33.0 is not yet rolled out; the ADR's confirmation in operation (a think: false request against the vLLM-served model with reasoning_off: none) is still to be done."
  ]
 }
