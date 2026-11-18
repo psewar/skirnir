@@ -301,6 +301,8 @@ def _cloud_model_entry(m, v):
             return e["context_tokens"]
     if v.get("reasoning") is not None:
         e["reasoning"] = bool(v["reasoning"])
+    if v.get("reasoning_off") is not None:   # kept as given: the configuration check judges it with the entry (ADR-0098)
+        e["reasoning_off"] = v["reasoning_off"]
     if v.get("capabilities") is not None:
         e["capabilities"] = {str(k): bool(x) for k, x in v["capabilities"].items()}
     if v.get("note"):

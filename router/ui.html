@@ -802,7 +802,7 @@ function renderRoles() {
 
 function modelField(m, k, v) {
   const c = CFG.models[m] || {};
-  const e = MODEL_CHANGES[m] || { cloud: c.cloud, provider_model: c.provider_model, price_chf_per_m: { ...(c.price_chf_per_m || {}) }, context_tokens: c.context_tokens, reasoning: c.reasoning, capabilities: c.capabilities };
+  const e = MODEL_CHANGES[m] || { cloud: c.cloud, provider_model: c.provider_model, price_chf_per_m: { ...(c.price_chf_per_m || {}) }, context_tokens: c.context_tokens, reasoning: c.reasoning, reasoning_off: c.reasoning_off, capabilities: c.capabilities };
   if (k === 'context_tokens') e.context_tokens = v ? +v : undefined; else e.price_chf_per_m[k] = +v;
   MODEL_CHANGES[m] = e; dirty = true; $('#kmsg').innerHTML = `<span class="warn">${t('ungespeicherte Änderungen')}</span>`; markDirty();
 }

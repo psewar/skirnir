@@ -9,13 +9,16 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.32.4"
+VERSION = "0.33.0"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
 PROXY_METHODS = ("POST",)
 PRIORITIES = ("interactive", "normal", "batch")              # Stage 3: Priority classes; order defines rank (admission)
 DATA_CLASSES_DEFAULT = ["public", "internal", "personal", "secret"]   # Stage 5: Data classes, if router.cloud.data_classes is missing
+# ADR-0098: reasoning_effort values that turn a cloud model's reasoning off for `think: false` (catalog key reasoning_off);
+# the first is the default (OpenAI's gpt-5 models), `none` is for servers that ignore `minimal` (a vLLM-served model).
+REASONING_OFF = ("minimal", "none")
 
 
 def read_env_value(path, key, strip_quotes=False):

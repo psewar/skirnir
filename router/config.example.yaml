@@ -359,6 +359,16 @@ models:
     reasoning: true          # think: false -> reasoning_effort minimal (sonst ~130 Denk-Token fuer ein 'OK')
     price_chf_per_m: { input: 1.25, output: 10.0 }
     context_tokens: 400000
+  # Denkendes Modell hinter einem OpenAI-kompatiblen Server (z. B. vLLM; Anbieter wie mistral oben, kind: openai,
+  # base_url https://llm.example.org/v1): es ignoriert reasoning_effort minimal und denkt weiter, none schaltet es ab.
+  # reasoning_off nennt den Wert fuer think: false (minimal = Standard, none), nur mit reasoning: true (ADR-0098).
+  # "example-llm:reasoner-small":
+  #   cloud: example-llm
+  #   provider_model: example-org/reasoner-small
+  #   capabilities: { tools: true, vision: false, structured: true, thinking: true }
+  #   reasoning: true
+  #   reasoning_off: none
+  #   price_chf_per_m: { input: 0, output: 0 }
   "anthropic:claude-sonnet-4-5":
     cloud: anthropic
     provider_model: claude-sonnet-4-5

@@ -272,3 +272,25 @@ und Katalogeinträge `<anbieter>:<modell>` mit `cloud: <anbieter>` und Preisen. 
 Anbieter zuerst gefragt wird. Mit `render-env.sh` den Schlüssel in `render-env.conf` als `EXTRA_SECRET_KEYS="EXAMPLE_API_KEY"`
 nennen, damit er in `secrets.env` landet (ADR-0080); Namen müssen auf `_KEY` oder `_TOKEN` enden, weil `secrets.env` die Umgebung des Router-Dienstes ist. Siehe den deaktivierten Anbieter `mistral` in
 [config.example.yaml](../router/config.example.yaml).
+
+**Denken eines Cloud-Modells abschalten** (Router 0.33.0, [ADR-0098](adr/0098-a-cloud-model-names-the-value-that-turns-its-reasoning-off.md)):
+Für einen Katalogeintrag mit `reasoning: true` wird `think: false` eines Clients zu `reasoning_effort` in der Anfrage an
+einen `openai`-Anbieter; `think: true` oder kein `think` sendet nichts und lässt die Vorgabe des Anbieters. `reasoning_off`
+nennt den Wert: `minimal` (Standard, OpenAIs gpt-5-Modelle) oder `none` (Server, die `minimal` übergehen, zum Beispiel ein
+denkendes Modell hinter vLLM). Die Konfigurationsprüfung lehnt andere Werte ab, ebenso den Schlüssel ohne
+`reasoning: true` oder an einem lokalen Modell.
+
+```yaml
+models:
+  "example-llm:reasoner-small":
+    cloud: example-llm
+    provider_model: example-org/reasoner-small
+    reasoning: true
+    reasoning_off: none
+```
+
+Welchen Wert ein Modell braucht: eine Anfrage mit `think: false` und kleinem `num_predict` (64) schicken. Endet die
+Antwort mit `done_reason: length` und leerem Inhalt, oder liegt `eval_count` weit über der Länge der Antwort, denkt das
+Modell noch und braucht `none`. Der Gedanke des Anbieters (`reasoning_content`, oder `reasoning`, wie vLLM ihn schickt)
+kommt als Ollamas `thinking` an (`reasoning` in der OpenAI-Form, ein Thinking-Block in der Anthropic-Form), außer für
+einen Client, der `think: false` gesendet hat.
