@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-18
 decision-makers: operator
 ---
@@ -51,7 +51,8 @@ thought of such a model even when the client asked for it.
 
 ## Decision Outcome
 
-Chosen option: **a per-model catalog key `reasoning_off`**.
+Chosen option (accepted by the operator 2026-11-18, after the merge of router 0.33.0 and before its rollout): **a
+per-model catalog key `reasoning_off`**.
 
 - `models.<m>.reasoning_off` is the `reasoning_effort` value the router sends when the client asks `think: false`:
   `minimal` (the default when the key is absent, today's behaviour) or `none`. `think: true` or no `think` still sends
