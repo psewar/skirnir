@@ -80,7 +80,10 @@ system RAM (`/api/ps`: `size` larger than `size_vram`; those layers run on the C
 models and GiB as attributes; from `router.ram_spill_problem_gib` (0.5 GiB, 0 = off) it is also a **Problem**.
 `sensor.skirnir_node_<node>_gen_tps` and `_prompt_tps` carry the generation and prompt rate (tok/s) of the last warm request on
 the node, with the model as attribute; a reply under 20 tokens or a prompt under 200 new tokens does not count, nor do
-benchmarks. Their raw values are meant for a baseline in Home Assistant (e.g. a statistics helper with the median of a week).
+benchmarks. New tokens are those Ollama did not serve from its prompt cache (`prompt_eval_cached_count`, router 0.34.1,
+[ADR-0100](adr/0100-the-prompt-rate-counts-only-the-tokens-ollama-processed.md)); the prompt rate is computed over them, and a
+node whose Ollama does not report the cached part sends no prompt rate. Their raw values are meant for a baseline in Home
+Assistant (e.g. a statistics helper with the median of a week).
 
 ## Agent updates and rollout
 

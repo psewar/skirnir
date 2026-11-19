@@ -2,21 +2,50 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "3040f66fa92b5e321c113429f7acb8b53fc0790e",
- "change_digest": "773300e9570531933add22d5079819ded81cc72803b12b60e6a4b4f248924d35",
+ "base_sha": "239b2bc8b9e1cf359220881cf44775b1820e166a",
+ "change_digest": "fe96ce295f5f277339c8b6456fa3860fbacd92f44d709cfe431cf402d8789c41",
  "reviewed_paths": [
   "CHANGELOG.md",
+  "docs/adr/0100-the-prompt-rate-counts-only-the-tokens-ollama-processed.md",
+  "docs/adr/README.md",
+  "docs/operations.de.md",
+  "docs/operations.md",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/nodes.py",
+  "router/skirnir_router/perf.py",
+  "test/selftest_slowness_signals.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-16"
+  "TM-15"
  ],
  "boundaries": [
-  "B8"
+  "B3",
+  "B9"
  ],
- "summary": "Documentation only: the CHANGELOG rows v0.37.4, v0.38.0 and v0.39.0 change from (unreleased) to links to their published GitHub releases. The releases carry the unchanged agent 0.35.2 binaries (byte-identical to v0.36.0, attestation verified before upload); the Release provenance workflow rebuilt them from each tag and compared them. No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
+ "summary": "Router 0.34.1 changes how the prompt rate is computed from the Ollama response statistics of a finished request: perf_stats reads the optional prompt_eval_cached_count and rates the processed tokens; Node.note_perf passes a prompt rate to the Home Assistant MQTT sensors only when that count is known and at least 200. Traced callers: perf_record (proxy.py end of request, ops.py shadow runs, bench) and admin.py try-it display; consumers of the result: the passive averages and samples in perf.json, Node.last_prompt -> ha.py snapshot -> MQTT sensor node_<n>_prompt_tps. The routing score (EWMA) uses gen_tps and ttft only, so routing, placement, authentication, the tunnel protocol, the cloud payload and the request/response bodies passed to clients are unchanged. The new input comes from the node's Ollama through the agent tunnel (B3), which could already report any rate; the value is type-checked (numbers only, booleans excluded), clamped to 0..prompt_eval_count like Ollama, and only changes a telemetry number. No new route, key, dependency, workflow or permission.",
  "findings": [],
  "tests": [
+  {
+   "command": "python test/selftest_slowness_signals.py",
+   "result": "passed",
+   "evidence": "ALLE OK, including cache hit, uncached, partly cached, missing, negative, oversized, string and boolean cached counts; the same test fails on the old code (KeyError prompt_new)."
+  },
+  {
+   "command": "python test/run_tests.py",
+   "result": "passed",
+   "evidence": "0 failures; passive performance data and benchmark checks pass with responses that carry no cached count."
+  },
+  {
+   "command": "python test/selftest_control_flow_admin.py; python test/selftest_control_flow.py; python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "ALLE OK; control flow ok, 0 findings (no new except/raise)."
+  },
+  {
+   "command": "ruff check .; python test/check_adr_index.py; python router/router.py --check router/config.example.yaml --pure",
+   "result": "passed",
+   "evidence": "All checks passed; ADR index ok: 100 ADRs; configuration ok."
+  },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
    "result": "passed",
@@ -25,21 +54,12 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
-  },
-  {
-   "command": "gh attestation verify skirnir-agent-0.35.2-{linux-amd64,windows-amd64.exe} --repo psewar/skirnir",
-   "result": "passed",
-   "evidence": "Both binaries taken from v0.37.4 verify (exit 0); SHA-256 equal to the v0.36.0 assets."
-  },
-  {
-   "command": "Release provenance workflow for v0.38.0 and v0.39.0",
-   "result": "passed",
-   "evidence": "Runs 44346479982 and 44346496200 succeeded: both agent binaries rebuilt identical (linux c94cf1d2..., windows 3c615b5e...), attested, SBOMs attached (router 0.33.0 and 0.34.0)."
+   "evidence": "Public-change scan: 0 finding(s); added text uses synthetic numbers and names no host, address or person."
   }
  ],
  "limitations": [
-  "Documentation only; the released behaviour was reviewed in the records of PR 166 (router 0.33.0) and PR 167 (router 0.34.0).",
-  "Neither release is rolled out yet."
+  "Pre-existing, not changed here: perf_stats does not reject NaN or negative durations from a node; a node can report arbitrary rates, which only affect telemetry. With this change a NaN cached count is clamped and a NaN processed count never reaches Home Assistant.",
+  "Not tested against a live Ollama; the field semantics follow Ollama's PR 17943 (prompt_eval_count = whole prompt, prompt_eval_cached_count = cached part, duration = processed part).",
+  "Not rolled out."
  ]
 }

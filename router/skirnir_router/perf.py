@@ -31,18 +31,34 @@ def _num(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+def prompt_new_tokens(stats):
+    """Prompt tokens Ollama actually processed in this request, or None if it does not say (ADR-0100).
+
+    prompt_eval_count is the whole prompt, prompt_eval_duration only covers the part not served from the KV cache.
+    Ollama reports the cached part as prompt_eval_cached_count (absent = unknown, 0 = nothing cached) and clamps it to
+    the prompt like this."""
+    pc, cached = stats.get("prompt_eval_count") or 0, stats.get("prompt_eval_cached_count")
+    if not _num(pc) or not _num(cached):
+        return None
+    return pc - min(max(0, cached), pc)
+
+
 def perf_stats(stats, ttft_s):
-    """Ollama response fields (nanoseconds) -> tok/s and milliseconds. None if unusable."""
+    """Ollama response fields (nanoseconds) -> tok/s and milliseconds. None if unusable.
+    prompt_tps counts the processed prompt tokens where Ollama reports the cached part, else the whole prompt (older
+    Ollama: inflated by cache hits); prompt_new says which (None = unknown)."""
     if not isinstance(stats, dict):
         return None
     ec, ed, pc, pd, ld = (stats.get(k) or 0 for k in ("eval_count", "eval_duration", "prompt_eval_count", "prompt_eval_duration", "load_duration"))
     if not all(_num(x) for x in (ec, ed, pc, pd, ld)) or ec < 2 or ed <= 0:
         return None
+    new = prompt_new_tokens(stats)
+    rated = pc if new is None else new
     return {"gen_tps": round(ec / (ed / 1e9), 1),
-            "prompt_tps": round(pc / (pd / 1e9), 1) if pc and pd else None,
+            "prompt_tps": round(rated / (pd / 1e9), 1) if rated and pd else None,
             "ttft_ms": round(ttft_s * 1000) if ttft_s is not None else None,
             "load_ms": round(ld / 1e6),
-            "tokens": ec, "prompt_tokens": pc}
+            "tokens": ec, "prompt_tokens": pc, "prompt_new": new}
 
 
 async def _ollama(node, method, path, body=None, timeout=60, answer=True):

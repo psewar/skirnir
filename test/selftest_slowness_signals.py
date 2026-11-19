@@ -66,20 +66,20 @@ check("offline: RAM fact cleared with the loaded models", n.ram_spill == {} and 
 
 # --- 2. Rates of real requests
 state.MQTT_DIRTY.clear()
-n.note_perf("synth-model:27b", {"gen_tps": 101.1, "prompt_tps": 119.0, "tokens": 88, "prompt_tokens": 39}, now)
+n.note_perf("synth-model:27b", {"gen_tps": 101.1, "prompt_tps": 119.0, "tokens": 88, "prompt_tokens": 39, "prompt_new": 39}, now)
 check("long reply, short prompt: generation rate taken, prompt rate not",
       n.last_gen == {"model": "synth-model:27b", "tps": 101.1, "ts": now} and n.last_prompt is None, f"{n.last_gen} {n.last_prompt}")
 check("new rate reaches HA at once (MQTT dirty)", bool(state.MQTT_DIRTY))
 state.MQTT_DIRTY.clear()
-n.note_perf("synth-model:27b", {"gen_tps": 7.4, "prompt_tps": 276.8, "tokens": 2, "prompt_tokens": 562}, now + 1)
+n.note_perf("synth-model:27b", {"gen_tps": 7.4, "prompt_tps": 276.8, "tokens": 2, "prompt_tokens": 562, "prompt_new": 562}, now + 1)
 check("2-token reply: generation rate unchanged, long prompt counts",
       n.last_gen["tps"] == 101.1 and n.last_prompt == {"model": "synth-model:27b", "tps": 276.8, "ts": now + 1}, f"{n.last_gen} {n.last_prompt}")
-n.note_perf("synth-model:27b", {"gen_tps": 9.0, "prompt_tps": None, "tokens": 5, "prompt_tokens": 10}, now + 2)
+n.note_perf("synth-model:27b", {"gen_tps": 9.0, "prompt_tps": None, "tokens": 5, "prompt_tokens": 10, "prompt_new": 10}, now + 2)
 check("too small for both: nothing changes, no MQTT update", n.last_gen["tps"] == 101.1 and n.last_prompt["tps"] == 276.8
       and len(state.MQTT_DIRTY) == 1, str(state.MQTT_DIRTY))
 
-STATS = {"eval_count": 160, "eval_duration": int(19.3e9), "prompt_eval_count": 1277, "prompt_eval_duration": int(13.7e9),
-         "load_duration": int(8e6)}
+STATS = {"eval_count": 160, "eval_duration": int(19.3e9), "prompt_eval_count": 1277, "prompt_eval_cached_count": 0,
+         "prompt_eval_duration": int(13.7e9), "load_duration": int(8e6)}
 state.PERF_DIRTY = [0]
 perf.perf_record("synth-model:27b", "gpu-desktop", STATS, 17.6, kind="bench")
 check("benchmark run does not reach the HA rate", n.last_gen["tps"] == 101.1, str(n.last_gen))
@@ -129,6 +129,31 @@ label, extra = ents[("sensor", "node_gpu_desktop_gen_tps")]
 check("rate sensor: tok/s, measurement, unavailable without a value", extra["unit_of_measurement"] == "tok/s"
       and extra["state_class"] == "measurement" and extra["availability_mode"] == "all")
 state.CFG = cfg_backup
+
+# --- 3. Prompt cache (ADR-0100): prompt_eval_count is the whole prompt, the duration only covers the processed part
+LONG = {"eval_count": 104, "eval_duration": int(1.6e9), "prompt_eval_count": 91684, "prompt_eval_duration": int(0.253e9),
+        "load_duration": int(8e6)}
+hit = perf.perf_stats({**LONG, "prompt_eval_cached_count": 91500}, None)
+check("cache hit: rate over the 184 processed tokens, not the 91684 of the prompt",
+      hit["prompt_new"] == 184 and hit["prompt_tps"] == 727.3 and hit["prompt_tokens"] == 91684, str(hit))
+perf.perf_record("synth-model:27b", "gpu-desktop", {**LONG, "prompt_eval_cached_count": 91500}, 0.5)
+check("cache hit under 200 processed tokens does not reach HA (was 362k tok/s)", n.last_prompt["tps"] == 93.2, str(n.last_prompt))
+perf.perf_record("synth-model:27b", "gpu-desktop", {**LONG, "prompt_eval_cached_count": 0, "prompt_eval_duration": int(44.7e9)}, 45)
+check("uncached long prompt reaches HA with the real prefill rate", n.last_prompt["tps"] == 2051.1, str(n.last_prompt))
+part = perf.perf_stats({**LONG, "prompt_eval_cached_count": 89374, "prompt_eval_duration": int(0.95e9)}, None)
+check("partly cached: 2310 processed tokens in 0.95 s", part["prompt_new"] == 2310 and part["prompt_tps"] == 2431.6, str(part))
+unknown = perf.perf_stats(LONG, None)
+check("cache not reported: prompt_new unknown, catalog rate over the whole prompt as before",
+      unknown["prompt_new"] is None and unknown["prompt_tps"] == 362387.4, str(unknown))
+perf.perf_record("synth-model:27b", "gpu-desktop", LONG, 0.5)
+check("cache not reported: no prompt rate for HA", n.last_prompt["tps"] == 2051.1, str(n.last_prompt))
+check("cached count above the prompt is clamped: nothing processed, no rate",
+      perf.prompt_new_tokens({"prompt_eval_count": 300, "prompt_eval_cached_count": 500}) == 0
+      and perf.perf_stats({**LONG, "prompt_eval_count": 300, "prompt_eval_cached_count": 500}, None)["prompt_tps"] is None)
+check("negative or non-numeric cached count: clamped to 0 or unknown",
+      perf.prompt_new_tokens({"prompt_eval_count": 300, "prompt_eval_cached_count": -5}) == 300
+      and perf.prompt_new_tokens({"prompt_eval_count": 300, "prompt_eval_cached_count": "12"}) is None
+      and perf.prompt_new_tokens({"prompt_eval_count": 300, "prompt_eval_cached_count": True}) is None)
 
 print(f"\n{'ALLE OK' if not FAILS else str(len(FAILS)) + ' FEHLER: ' + ', '.join(FAILS)}")
 sys.exit(1 if FAILS else 0)
