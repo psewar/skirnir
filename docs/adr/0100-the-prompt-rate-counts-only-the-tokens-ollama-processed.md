@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-19
 decision-makers: operator
 ---
@@ -42,7 +42,8 @@ cached; Ollama's own CLI computes its prompt rate from the processed tokens the 
 
 ## Decision Outcome
 
-Chosen option: rate over the processed tokens.
+Chosen option (accepted by the operator 2026-11-19, after the merge and rollout of router 0.34.1): rate over the
+processed tokens.
 
 * `perf_stats` computes `prompt_new = prompt_eval_count - prompt_eval_cached_count` (the cached count clamped to
   0..prompt, like Ollama) and the prompt rate over `prompt_new`. Without a cached count, `prompt_new` is `None` and the
