@@ -83,8 +83,11 @@ eines geladenen Modells in den Arbeitsspeicher legen musste (`/api/ps`: `size` g
 auf der CPU, jede Anfrage ist vielfach langsamer), mit Modellen und GiB als Attribut; ab `router.ram_spill_problem_gib`
 (0,5 GiB, 0 = aus) ist es auch ein **Problem**. `sensor.skirnir_node_<knoten>_gen_tps` und `_prompt_tps` tragen die Erzeugungs-
 und Prompt-Rate (tok/s) der letzten warmen Anfrage auf dem Knoten, mit dem Modell als Attribut; eine Antwort unter 20 Token, ein
-Prompt unter 200 neuen Token und Benchmarks zählen nicht. Die Rohwerte sind für eine Grundlinie in Home Assistant gedacht (etwa
-ein Statistik-Helfer mit dem Median einer Woche).
+Prompt unter 200 neuen Token und Benchmarks zählen nicht. Neu sind die Token, die Ollama nicht aus seinem Prompt-Cache bedient
+hat (`prompt_eval_cached_count`, Router 0.34.1,
+[ADR-0100](adr/0100-the-prompt-rate-counts-only-the-tokens-ollama-processed.md)); über sie wird die Prompt-Rate berechnet, und
+ein Knoten, dessen Ollama den Cache-Anteil nicht meldet, sendet keine Prompt-Rate. Die Rohwerte sind für eine Grundlinie in Home
+Assistant gedacht (etwa ein Statistik-Helfer mit dem Median einer Woche).
 
 ## Agent-Updates und Rollout
 

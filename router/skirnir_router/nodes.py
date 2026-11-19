@@ -13,7 +13,7 @@ PUSH_STALE_S = 45   # Agent >= 0.14.0 reports Ollama status on every change and 
 # Slowness watch (router 0.9.2): minimum sizes for a request's rate to reach HA. Below that the rate is mostly noise
 # (a 2-token reply measured 7 tok/s on a model that generates 100; a cached prompt has only a few new tokens).
 PERF_MIN_GEN_TOKENS = 20
-PERF_MIN_PROMPT_TOKENS = 200
+PERF_MIN_PROMPT_TOKENS = 200   # processed (not cached) tokens; unknown when Ollama does not report the cache (ADR-0100)
 RAM_SPILL_MIN_GIB = 0.05   # below this, size - size_vram is rounding, not layers in system RAM
 
 # GPU guard: Agents before 0.20.0 report states, reasons, and field names in German (design/english-names.md). guard_english
@@ -473,11 +473,13 @@ class Node(Breaker):
 
     def note_perf(self, model, s, now):
         """Rates of a warm request for the HA sensors (slowness watch). Each rate needs its own minimum size: a reply of a
-        few tokens or a prompt mostly served from the cache gives a noisy rate. Only a changed value counts as news."""
+        few tokens or a prompt mostly served from the cache gives a noisy rate. The prompt rate needs Ollama's count of the
+        processed tokens (prompt_new): with the whole prompt as count, a cache hit read as 100x the real prefill rate
+        (ADR-0100). Only a changed value counts as news."""
         changed = False
         if s.get("tokens", 0) >= PERF_MIN_GEN_TOKENS:
             self.last_gen, changed = {"model": model, "tps": s["gen_tps"], "ts": now}, True
-        if s.get("prompt_tps") is not None and (s.get("prompt_tokens") or 0) >= PERF_MIN_PROMPT_TOKENS:
+        if s.get("prompt_tps") is not None and s.get("prompt_new") is not None and s["prompt_new"] >= PERF_MIN_PROMPT_TOKENS:
             self.last_prompt, changed = {"model": model, "tps": s["prompt_tps"], "ts": now}, True
         if changed:
             state.MQTT_DIRTY.append(True)
