@@ -190,6 +190,7 @@ Vulnerability reports: [SECURITY.md](SECURITY.md).
 | [docs/operations.md](docs/operations.md) | Web UI, metrics, Home Assistant entities, agent and Ollama updates, key rotation, names, measurements |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Status codes, pending agents, TLS errors, logs, memory states |
 | [docs/reference.md](docs/reference.md) | Interfaces, GPU guard, optional memory and session features, rerank, OpenAI-compatible nodes, limits, repo layout |
+| [docs/protocol.md](docs/protocol.md) | Router–agent protocol: login, frames, messages, JSON Schemas, conformance tests (for writing an agent of your own) |
 | [docs/adr/](docs/adr/README.md) | Architecture Decision Records: why Skirnir is built this way |
 | [agent/README.md](agent/README.md) | Agent internals (German) |
 

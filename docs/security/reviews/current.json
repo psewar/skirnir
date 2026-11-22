@@ -2,27 +2,101 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "875082c54dffdaeab321f6d0240ed9bf8effde94",
- "change_digest": "9a215ddb35514964393362b53ebe5eaae28ed71cf3a2a59d8670a7779282a0dd",
+ "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
+ "change_digest": "c7c17199caf1b8a9263ee983e72db897ec8163fbed5d3e7b8f6e7161fd5e6752",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
+  "AGENTS.md",
   "CHANGELOG.md",
-  "docs/adr/0100-the-prompt-rate-counts-only-the-tokens-ollama-processed.md",
+  "README.de.md",
+  "README.md",
+  "agent/README.md",
+  "agent/protocol_conformance_test.go",
+  "docs/adr/0107-versioned-router-agent-protocol-with-a-written-specification.md",
   "docs/adr/README.md",
-  "docs/security/reviews/current.json"
+  "docs/protocol.de.md",
+  "docs/protocol.md",
+  "docs/protocol/challenge.schema.json",
+  "docs/protocol/config-bundle.schema.json",
+  "docs/protocol/control-ollama-swap.schema.json",
+  "docs/protocol/control-ollama-update.schema.json",
+  "docs/protocol/control-update.schema.json",
+  "docs/protocol/control-upstream.schema.json",
+  "docs/protocol/facts.schema.json",
+  "docs/protocol/heartbeat-ack.schema.json",
+  "docs/protocol/heartbeat.schema.json",
+  "docs/protocol/hello.schema.json",
+  "docs/protocol/index.json",
+  "docs/protocol/node-refusal.schema.json",
+  "docs/protocol/ollama-state.schema.json",
+  "docs/protocol/power.schema.json",
+  "docs/protocol/request-head.schema.json",
+  "docs/protocol/response-head.schema.json",
+  "docs/protocol/status.schema.json",
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "docs/security/reviews/current.json",
+  "test/protocol_schema.py",
+  "test/selftest_protocol.py"
  ],
  "risk_ids": [
-  "TM-15"
+  "TM-07",
+  "TM-13",
+  "TM-14",
+  "TM-16"
  ],
  "boundaries": [
+  "B3",
+  "B8",
   "B9"
  ],
- "summary": "Documentation only: ADR-0100 status proposed -> accepted on the operator's decision of 2026-11-19 (after the merge and rollout of router 0.34.1), with that note in the decision outcome; the ADR index regenerated, and the released CHANGELOG row v0.39.1 extended to 'ADR-0100 proposed, accepted 2026-11-19' (the release notes keep 'proposed', which was true at release time). No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
+ "summary": "Documentation, schemas and tests only: docs/protocol.md (+ German twin) and docs/protocol/*.json specify the existing router-agent tunnel protocol as version 1 (ADR-0107, proposed); test/protocol_schema.py (dependency-free validator), test/selftest_protocol.py (added to ci.yml) and agent/protocol_conformance_test.go bind the specification to the router, the Go agent and test/fake_agent.py. No router or agent code, configuration, version, dependency or wire change. Traced B3: login (challenge, Ed25519 signature over nonce|node|pubkey, 32-KiB hello, enrollment limits, revocation), frame dispatch, request streams and the agent passthrough allowlist were read in registry.py, tunnel.py, poll.py, agent/tunnel.go, passthrough.go, heartbeat.go, facts.go; the documentation matches the code and the new tests now cross-check the allowlist (TM-14), the hello and its refusal cases (TM-07) and the update order fields (TM-13) in CI. B8: update and Ollama update orders are only described, their verification is unchanged. B9: one added CI step with no new action, permission or dependency; AGENTS.md gains a documentation rule and weakens no review policy. Tests bind only loopback (aiohttp TestServer, httptest) and start the fake agent as a subprocess without credentials. The published details (limits, message fields) were already public in the open code; the docs add that the configuration bundle (MQTT password) and the update token are secrets agents must not log. Examples use reserved domains/ranges only.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/check_adr_index.py",
+   "command": "python test/selftest_protocol.py",
    "result": "passed",
-   "evidence": "ADR index ok: 100 ADRs (0100 accepted)."
+   "evidence": "Ran 20 tests OK on Windows (Python 3.12) and under WSL Ubuntu Python 3.11 in the local CI run; includes rejected cases (hello without pubkey/sig/t, 65-character node name, facts not an object -> 401; OLLAMA without up or with non-list tags dropped; POWER with unknown state dropped)."
+  },
+  {
+   "command": "cd agent && go test ./...",
+   "result": "passed",
+   "evidence": "ok on Windows; TestProtocol* include a refused nonce shorter than 16 bytes and signature verification of the real hello."
+  },
+  {
+   "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./...",
+   "result": "passed",
+   "evidence": "gofmt empty, vet clean for host, windows and linux."
+  },
+  {
+   "command": "mutation checks of the conformance tests",
+   "result": "passed",
+   "evidence": "Undocumented fake-agent heartbeat field, router read/sent undocumented fields, undocumented Facts field, renamed/retyped heartbeat property, extra control-message property, changed allowlist and extra required hello field each made the tests fail; all reverted."
+  },
+  {
+   "command": "ruff check .",
+   "result": "passed",
+   "evidence": "All checks passed."
+  },
+  {
+   "command": "python router/router.py --check router/config.example.yaml --pure",
+   "result": "passed",
+   "evidence": "configuration ok."
+  },
+  {
+   "command": "python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "control flow ok, 0 findings."
+  },
+  {
+   "command": "python test/selftest_agent_revocation.py; python test/selftest_power.py; python test/selftest_english_names.py; python test/check_pinned_references.py",
+   "result": "passed",
+   "evidence": "OK / 0 failures / ALLE OK / 0 findings."
+  },
+  {
+   "command": "python test/check_adr_index.py --write",
+   "result": "passed",
+   "evidence": "index regenerated with ADR-0107; see limitations for the numbering gap."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -30,12 +104,20 @@
    "evidence": "run after staging this record."
   },
   {
-   "command": "python test/check_public_changes.py",
+   "command": "python test/check_public_changes.py --base $(git merge-base origin/main HEAD)",
    "result": "passed",
    "evidence": "Public-change scan: 0 finding(s)."
+  },
+  {
+   "command": "go test ./... on Linux",
+   "result": "not_run",
+   "evidence": "No Go toolchain in the local WSL; GOOS=linux go vet passed, CI runs go test on Linux and Windows."
   }
  ],
  "limitations": [
-  "Documentation only; the behaviour it records was reviewed in the record of PR 171 (router 0.34.1)."
+  "python test/check_adr_index.py reports a numbering gap (0101-0106 are assigned to parallel pull requests not yet on main); it turns green once those merge, as planned by the maintainer's merge order.",
+  "The local WSL CI run showed failures unrelated to this change and its files: git ls-files in a Windows worktree (pinned references), missing python packaging and pwsh, and the PostgreSQL integrations; this PR touches no session, memory or storage code.",
+  "Pre-existing, not changed here: a heartbeat the router cannot apply is answered with the exception text in HBACK error to the approved agent; the router fails an open stream on an unknown frame type.",
+  "The specification describes what the code does today; it does not prove the absence of protocol flaws. Values and patterns are checked by the Python validator; the Go side checks structure, types and required fields."
  ]
 }

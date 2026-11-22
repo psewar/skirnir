@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Heartbeat answer (router to agent, binary frame HBACK, stream 0)",
+  "description": "The router's verdict after each HB. The agent shows it in its status (/healthz is healthy while an answer arrived within three intervals, at least 30 s). An unapproved identity gets state pending. A heartbeat the router could not apply gets state empty and error.",
+  "type": "object",
+  "properties": {
+    "state": {"type": "string", "description": "The router's node state: free, busy or offline; pending before approval; empty when the heartbeat could not be applied.", "x-since-router": "baseline"},
+    "busy_reason": {"type": "string", "description": "Why the router counts the node as busy, for display only.", "x-since-router": "baseline"},
+    "gpu_guard_ack": {"type": "boolean", "description": "true: the router respects this node's GPU guard (global setting and node policy). Absent before approval.", "x-since-router": "baseline"},
+    "error": {"type": "string", "description": "Why the heartbeat could not be applied, for logs only.", "x-since-router": "baseline", "x-ignored-by-receiver": true}
+  },
+  "required": ["state"],
+  "additionalProperties": true,
+  "examples": [
+    {"state": "free", "busy_reason": "", "gpu_guard_ack": true},
+    {"state": "busy", "busy_reason": "foreign VRAM 6.1 GiB", "gpu_guard_ack": false},
+    {"state": "pending", "busy_reason": ""},
+    {"state": "", "error": "unsupported operand type(s)"}
+  ]
+}

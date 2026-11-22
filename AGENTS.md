@@ -44,6 +44,9 @@ A pull request is complete when it contains, as far as they apply:
   (same sections and facts, English and German); the README keeps the quick start, details live in `docs/`; the
   matching `design/` document describes the new behaviour.
 - **ADR** for every decision (next section).
+- **Protocol.** A change to what router and agent send each other (frames, messages, fields) updates the schemas in
+  `docs/protocol/` and `docs/protocol.md` with its German twin; `test/selftest_protocol.py` and
+  `agent/protocol_conformance_test.go` fail until code, schemas and the test fake agent agree (ADR-0107).
 - **Configuration.** A new key goes into the schema (`SCHEMA` in `router/skirnir_router/config.py`), the example
   configuration (`router/config.example.yaml`, `agent/config.example.yaml`) and, if the web UI may change it at runtime,
   `EDITABLE` in `router/skirnir_router/settings.py`. New options default to off or to the previous behaviour; an

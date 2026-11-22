@@ -1,5 +1,16 @@
 # Changelog
 
+## Router–agent protocol specification (unreleased; router and agent unchanged)
+
+- The protocol between router and node agent is specified as version 1 (ADR-0107, proposed): `docs/protocol.md` and
+  `docs/protocol.de.md` describe login, frames, request streams, heartbeat, upstream and power reports and control
+  messages; `docs/protocol/` holds one JSON Schema per message (required fields, meaning when absent, the agent version
+  each field appeared in) and an index of frame codes, the passthrough allowlist and limits. Nothing changes on the wire.
+- Conformance tests keep the specification, the router, the Go agent and the test fake agent in step:
+  `test/selftest_protocol.py` (new in CI; includes the real router talking to `test/fake_agent.py` through a validating
+  relay) and `agent/protocol_conformance_test.go`. `test/protocol_schema.py` validates captured messages for authors of
+  other agents, without third-party packages.
+
 ## Node tools (included in v0.31.0)
 
 - `agent/Set-OllamaLoopback.cmd` binds Ollama on a Windows node to loopback in one step (TM-11, ADR-0072): double-click, it asks for administrator rights itself and starts despite the default execution policy. It detects whether Ollama is the agent's child or a user's desktop app, sets `OLLAMA_HOST=127.0.0.1:11434` there, restarts Ollama, verifies that every listener is a loopback address (else restores the previous state) and disables firewall rules that only opened Ollama. It refuses while other machines are connected to Ollama (`-Force "<reason>"`); `-Check` only reports. Router and agent versions are unchanged.

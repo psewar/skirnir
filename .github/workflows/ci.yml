@@ -79,6 +79,8 @@ jobs:
       - run: python test/selftest_control_flow_admin.py
       - run: python test/selftest_control_flow_rest.py
       - run: python test/selftest_tunnel_cancel.py
+      - name: Router-agent protocol matches its specification (ADR-0107)
+        run: python test/selftest_protocol.py
       - run: python test/selftest_anthropic_messages.py
       - run: python test/selftest_keepalive.py
       - run: python test/selftest_max_parallel.py

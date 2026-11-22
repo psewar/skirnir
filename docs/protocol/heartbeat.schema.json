@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Heartbeat (agent to router, binary frame HB, stream 0)",
+  "description": "GPU and node facts, sent every heartbeat_interval_s (3 s until the configuration bundle says otherwise). The router answers every HB with HBACK. It stores the values as the node's current state, runs its busy/free state machine and learns the desktop VRAM baseline from them. No field is required: a missing block means the agent does not report it, and the router keeps its previous behaviour for that fact (for example no game detection). The current Go agent always sends the four GPU fields and ts. Receivers ignore unknown fields.",
+  "type": "object",
+  "properties": {
+    "gpu_util_pct": {"type": "integer", "minimum": 0, "maximum": 100, "description": "GPU utilisation in percent.", "x-since-agent": "baseline"},
+    "vram_total_mib": {"type": "integer", "minimum": 0, "description": "Total VRAM in MiB.", "x-since-agent": "baseline"},
+    "vram_used_mib": {"type": "integer", "minimum": 0, "description": "Used VRAM in MiB, all processes (Windows reports no per-process VRAM; the router subtracts Ollama's models and the agent's children).", "x-since-agent": "baseline"},
+    "vram_free_mib": {"type": "integer", "minimum": 0, "description": "Free VRAM in MiB.", "x-since-agent": "baseline"},
+    "ts": {"type": "integer", "description": "Unix time in seconds when the agent built the heartbeat. Informational; the router uses its own receive time.", "x-since-agent": "baseline", "x-ignored-by-receiver": true},
+    "ollama_tls_sha256": {"type": "string", "description": "SHA-256 fingerprint of the agent's local TLS proxy certificate for a directly reachable node (tls_mode auto). Absent without such a proxy.", "x-since-agent": "baseline"},
+    "ollama_proc_mib": {"type": "integer", "minimum": 0, "description": "VRAM of the Ollama process in MiB. Read by the router; the current Go agent does not send it.", "x-since-agent": "baseline", "x-legacy": true},
+    "sensors": {"$ref": "#/$defs/sensors", "x-since-agent": "0.6.0"},
+    "gpu_guard": {"$ref": "#/$defs/gpu_guard", "x-since-agent": "0.7.0"},
+    "update": {"$ref": "#/$defs/update_report", "description": "Progress of the latest agent update order. Absent when the agent has had no order since it started.", "x-since-agent": "0.8.0"},
+    "ollama_update": {"$ref": "#/$defs/update_report", "description": "Progress of the latest Ollama update order. Absent when there was none.", "x-since-agent": "0.12.0"},
+    "ollama_version": {"type": "string", "description": "Version of the local Ollama (/api/version, refreshed at most every 60 s). Absent when it did not answer.", "x-since-agent": "0.12.0"},
+    "children_vram_mib": {
+      "type": "object",
+      "description": "VRAM in MiB per child kind of the agent, without Ollama, so the router does not count it as foreign load. Absent when no child holds VRAM.",
+      "additionalProperties": {"type": "integer", "minimum": 0},
+      "x-since-agent": "0.13.0"
+    },
+    "game": {"$ref": "#/$defs/game", "x-since-agent": "0.17.0"},
+    "memory": {"$ref": "#/$defs/memory", "x-since-agent": "0.17.0"},
+    "routes": {
+      "type": "object",
+      "description": "Health of the services behind configured tunnel routes (agent setting tunnel.routes), by route name. The router only sends a routed request (for example rerank) to a node whose route is up. Absent without routes.",
+      "additionalProperties": {"$ref": "#/$defs/route_health"},
+      "x-since-agent": "0.18.0"
+    },
+    "standby_models": {
+      "type": "array",
+      "description": "Models of the standby Ollama (tunnel.upstream_fallback); the router may switch to it for one of these. Absent without a standby Ollama.",
+      "items": {"type": "string"},
+      "x-since-agent": "0.25.0"
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "sensors": {
+      "type": "object",
+      "description": "Temperature, power, throttling and GPU-Z values. The router stores the block unchanged for the UI and Home Assistant. Each field is absent when the source cannot provide it.",
+      "properties": {
+        "temp_c": {"type": "integer", "description": "GPU temperature in degrees Celsius."},
+        "power_w": {"type": "number", "description": "Board power draw in W."},
+        "power_limit_w": {"type": "number", "description": "Current power limit in W."},
+        "power_limit_default_w": {"type": "number", "description": "Default power limit in W."},
+        "fan_pct": {"type": "integer", "description": "Fan speed in percent."},
+        "mem_util_pct": {"type": "integer", "description": "Memory controller utilisation in percent."},
+        "throttle_mask": {"type": "integer", "minimum": 0, "description": "NVML clock throttle reason bit mask."},
+        "throttle_reasons": {"type": "array", "items": {"type": "string"}, "description": "Active throttle reasons as names."},
+        "mem_temp_c": {"type": "number", "description": "Memory temperature (GPU-Z)."},
+        "hotspot_c": {"type": "number", "description": "Hot spot temperature (GPU-Z)."},
+        "gpu_voltage_v": {"type": "number", "description": "GPU voltage (GPU-Z)."},
+        "pin16_power_w": {"type": "number", "description": "Power through the 16-pin connector (GPU-Z)."},
+        "pin16_voltage_v": {"type": "number", "description": "Voltage at the 16-pin connector (GPU-Z)."},
+        "board_power_w": {"type": "number", "description": "Board power (GPU-Z)."},
+        "perfcap_mask": {"type": "integer", "description": "Performance cap reason bit mask (GPU-Z)."},
+        "perfcap_reasons": {"type": "array", "items": {"type": "string"}, "description": "Performance cap reasons as names (GPU-Z)."},
+        "cpu_temp_c": {"type": "number", "description": "CPU temperature (GPU-Z)."},
+        "gpuz": {"type": "boolean", "description": "true: this sample has fresh GPU-Z values."}
+      },
+      "additionalProperties": true
+    },
+    "gpu_guard": {
+      "type": "object",
+      "description": "State of the agent's GPU guard (power limit, high-load tier, warnings; ADR-0019). The router flags a problem next to the node state and acknowledges its policy in HBACK gpu_guard_ack.",
+      "properties": {
+        "state": {"type": "string", "description": "off, unavailable, normal, high_load, throttled or recovery (agents before 0.20.0 sent German values, which the router translates)."},
+        "source": {"type": "string", "description": "Where the readings come from."},
+        "power_w": {"type": "number", "description": "Current power draw in W."},
+        "pin16_w": {"type": "number", "description": "Power through the 16-pin connector in W."},
+        "pin16_v": {"type": "number", "description": "Voltage at the 16-pin connector in V."},
+        "pin16_ref_v": {"type": "number", "description": "Reference voltage for the connector check in V."},
+        "limit_w": {"type": "number", "description": "Power limit the guard set, in W."},
+        "default_limit_w": {"type": "number", "description": "Default power limit of the card in W."},
+        "target_w": {"type": "number", "description": "Power limit the guard aims for, in W."},
+        "throttle": {"type": "array", "items": {"type": "string"}, "description": "Active throttle reasons."},
+        "high_load_s": {"type": "integer", "minimum": 0, "description": "Seconds in the high-load tier."},
+        "problem": {"type": "boolean", "description": "true: the guard sees a problem the operator should look at."},
+        "reason": {"type": "string", "description": "Fixed reason code for state or problem."},
+        "warnings": {"type": "array", "items": {"type": "string"}, "description": "Active warnings."}
+      },
+      "additionalProperties": true
+    },
+    "update_report": {
+      "type": "object",
+      "description": "Progress of an update order. The router ignores a report without state.",
+      "properties": {
+        "version": {"type": "string", "description": "Version of the order."},
+        "state": {"type": "string", "description": "Agent update: downloading, applied, failed. Ollama update: checking, downloading, extracting, ready (waits for ollama-swap), swapping, applied, failed."},
+        "message": {"type": "string", "description": "Human-readable detail, for display only. Not a control signal."},
+        "kind": {"type": "string", "description": "Fixed failure type of an agent update, empty for none: app_control (an application control policy blocked the new binary; the router retries later) or downgrade (the agent refused an older version). Always sent by agents since 0.19.1; absent in Ollama update reports.", "x-since-agent": "0.19.1"},
+        "ts": {"type": "string", "description": "RFC 3339 time of the report."}
+      },
+      "required": ["state"],
+      "additionalProperties": true
+    },
+    "game": {
+      "type": "object",
+      "description": "A running game as a fact. With supported false (no game detection on this platform) the router ignores the block; an absent block clears the node's game state.",
+      "properties": {
+        "supported": {"type": "boolean", "description": "false: this platform does not detect games. Absent counts as true."},
+        "running": {"type": "boolean", "description": "A game is running."},
+        "name": {"type": "string", "description": "Program name of the game."},
+        "via": {"type": "string", "description": "How it was detected: pfad (by its folder; a German value kept on the wire for now) or name."},
+        "since": {"type": "integer", "description": "Unix seconds since the agent first saw it."},
+        "folders": {"type": "integer", "minimum": 0, "description": "Game folders in the agent's index (0: nothing installed, nothing detected)."},
+        "procs": {"type": "integer", "minimum": 0, "description": "Processes that count as the game.", "x-since-agent": "0.19.0"},
+        "gpu_dedicated_mib": {"type": "integer", "minimum": 0, "description": "Dedicated GPU memory of the game in MiB.", "x-since-agent": "0.19.0"},
+        "gpu_shared_mib": {"type": "integer", "minimum": 0, "description": "Shared (system) memory the GPU uses for the game in MiB.", "x-since-agent": "0.19.0"},
+        "gpu_pct": {"type": "number", "minimum": 0, "description": "Highest GPU engine utilisation by the game in percent; absent on the first pass.", "x-since-agent": "0.19.0"}
+      },
+      "additionalProperties": true
+    },
+    "memory": {
+      "type": "object",
+      "description": "Main memory as a fact; the router avoids cold loads under memory pressure. A value the platform does not have (commit on Linux) is absent.",
+      "properties": {
+        "ram_available_gib": {"type": "number", "minimum": 0, "description": "Available RAM in GiB."},
+        "ram_total_gib": {"type": "number", "minimum": 0, "description": "Total RAM in GiB."},
+        "commit_free_gib": {"type": "number", "description": "Free commit charge in GiB (Windows)."},
+        "commit_limit_gib": {"type": "number", "minimum": 0, "description": "Commit limit in GiB (Windows)."}
+      },
+      "additionalProperties": true
+    },
+    "route_health": {
+      "type": "object",
+      "description": "Health of one routed service. Only up true counts as up; an unknown reason counts as unhealthy.",
+      "properties": {
+        "up": {"type": "boolean", "description": "The service answered its health check."},
+        "reason": {"type": "string", "enum": ["", "unreachable", "unhealthy", "starting", "selftest_failed"], "description": "Why it is not up; empty when up."}
+      },
+      "additionalProperties": true
+    }
+  },
+  "examples": [
+    {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363, "ts": 1790000000},
+    {
+      "gpu_util_pct": 4, "vram_total_mib": 24564, "vram_used_mib": 9100, "vram_free_mib": 15464, "ts": 1790000003,
+      "sensors": {"temp_c": 51, "power_w": 61.5, "mem_util_pct": 3},
+      "gpu_guard": {"state": "normal", "source": "nvml", "limit_w": 450.0, "high_load_s": 0, "problem": false},
+      "update": {"version": "0.35.3", "state": "downloading", "kind": "", "ts": "2026-11-23T02:00:00Z"},
+      "ollama_update": {"version": "0.13.1", "state": "ready", "message": "waiting for the router's release", "ts": "2026-11-23T02:00:00Z"},
+      "ollama_version": "0.13.0",
+      "children_vram_mib": {"stt": 1800},
+      "game": {"supported": true, "running": false, "folders": 3},
+      "memory": {"ram_available_gib": 41.2, "ram_total_gib": 63.7, "commit_free_gib": 50.1, "commit_limit_gib": 80.0},
+      "routes": {"rerank": {"up": true, "reason": ""}},
+      "standby_models": ["example-model:8b"]
+    }
+  ]
+}
