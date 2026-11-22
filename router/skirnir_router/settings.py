@@ -16,6 +16,7 @@ import re
 from . import values
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES, THINK_MODES  # noqa: E402
 from .outcome import failed, invalid  # noqa: E402
+from .problems import LANGUAGES as PROBLEM_LANGUAGES  # noqa: E402
 SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open", "switch")
 
 # typ: int | float | bool | str | choice | list | iplist | keep_alive | tristate
@@ -239,6 +240,10 @@ _e("router.ram_spill_problem_gib", "float", "HA-Problem ab Modell im RAM GiB",
    "ein geladenes Modell, das Ollama teilweise in den Arbeitsspeicher legen musste, rechnet dort auf der CPU (vielfach langsamer); 0 = aus",
    G, 0.5, min=0, max=256, label_en="HA problem from model in RAM GiB",
    help_en="a loaded model that Ollama had to place partly in system RAM runs there on the CPU (many times slower); 0 = off")
+_e("router.problem_language", "choice", "Sprache der Problemtexte",
+   "Texte im HA-Attribut problems und in /admin/problems; de = die Saetze, auf die bestehende HA-Automationen pruefen. Codes und /metrics bleiben gleich (ADR-0101)",
+   G, "de", choices=list(PROBLEM_LANGUAGES), label_en="Language of problem texts",
+   help_en="texts in the HA attribute problems and in /admin/problems; de = the sentences existing HA automations match. Codes and /metrics stay the same (ADR-0101)")
 
 G = "Wake-on-LAN"
 _e("router.wol.wait_up_s", "float", "warten bis wach s", "", G, 90, min=5, max=900, label_en="wait until awake s")

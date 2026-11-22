@@ -2,48 +2,104 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
- "change_digest": "9f931b5e80f186072f410473bb3b21f02614fe5f122411b9ad6e6777e0c4b7fa",
+ "base_sha": "173006bc8df89af2ffe916d5ef9ae75d3ec136f4",
+ "change_digest": "76c8ff1cf042bee225fc5c978e9f406056c209e60f7cb947b729e7b2269305d7",
  "reviewed_paths": [
-  "README.md",
+  ".github/workflows/ci.yml",
+  "CHANGELOG.md",
   "README.de.md",
-  "docs/operations.md",
+  "README.md",
+  "design/english-names.md",
+  "docs/adr/0101-problems-are-structured-records-exported-as-metrics.md",
+  "docs/adr/README.md",
   "docs/operations.de.md",
+  "docs/operations.md",
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "docs/troubleshooting.de.md",
+  "docs/troubleshooting.md",
+  "router/config.example.yaml",
+  "router/skirnir_router/admin.py",
+  "router/skirnir_router/agentupdate.py",
+  "router/skirnir_router/app.py",
+  "router/skirnir_router/cloud.py",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/ha.py",
+  "router/skirnir_router/metrics.py",
+  "router/skirnir_router/ollamaupdate.py",
+  "router/skirnir_router/problems.py",
+  "router/skirnir_router/settings.py",
+  "router/ui.html",
+  "test/selftest_problems.py",
+  "router/skirnir_router/auth.py (unchanged, basic_auth_middleware traced)",
+  "router/skirnir_router/browser_headers.py (unchanged, CSP applies to the new UI section)",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
+  "TM-03",
   "TM-07",
-  "TM-12",
-  "TM-13",
+  "TM-08",
   "TM-15"
  ],
  "boundaries": [
+  "B2",
   "B3",
-  "B8",
   "B9"
  ],
- "summary": "Documentation only. (1) The README status line (EN/DE) no longer names router and agent versions, which had gone stale (0.23.0/0.30.0); it points to the releases and the top CHANGELOG row instead, so it cannot go stale again. (2) docs/operations.md and its German twin gain a 'What to back up' section before 'Restoring a backup', derived from the code: config folder (/etc/skirnir-router: config.yaml, certs/ or tls/, agent/ release folder; agentupdate.agent_dir, ops.manifest_path, router-layout.sh), the secret source rather than the rendered secrets.env (render-env.sh, install-router docs), the state folder files written via common.state_dir / Config._locate (nodes.json from app.py, roles.yaml, deletions.jsonl, usage.json incl. monthly cloud spend, metrics.json, perf.json, events.jsonl, requests.jsonl, ollama-latest.json; same list as router-layout.sh STATE_FILES), the optional PostgreSQL session database and outbox, the external memory backend, the audit log, the agent configuration and identity.dir (agent-identity.key and provisioned.json, DPAPI LOCAL_MACHINE on Windows per platform_windows.go) and the operator's update signing key folder (deploy/agent_keys.py). The 'Restoring a backup' intro now says deletions.jsonl lives in router.state_dir (since ADR-0086), not next to config.yaml. Security-relevant content of the text: it tells operators to back up the secret source rather than secrets.env, to protect the backup of the secret-store access file like the file itself, and to keep the signing-key backup offline and encrypted; it keeps the existing advice that deletions.jsonl must not be restored older than the database (TM-12). It discloses no secret, endpoint, host or credential, and names only default paths that the install scripts and existing docs already publish. No code, configuration, version, workflow or review-policy change.",
+ "summary": "Router 0.35.0, ADR-0101: problems computed in a new module problems.py as records (fixed code, severity, node, subject, params, message) instead of German sentences built in ha.py. New: GET /admin/problems on the control port, gauges skirnir_problem{code,severity,node,subject} and skirnir_problems_active in /metrics, a problems list in the web UI overview, config key router.problem_language (de default, en; schema, example, EDITABLE choice). B2: the new route is registered on the control app only; basic_auth_middleware runs before it like for every /admin GET (traced; it is not under /v1/, so no token bypass); it is read-only, so the CSRF header does not apply; an unknown lang is a 400 value, not an exception. Tested rejected cases: no credentials 401, wrong password 401, bad lang 400. B3/TM-07: node names and model names reported by an approved agent and an agent's update message reach the records. Templates are filled once with str.format (a reported name with braces is not expanded again; tested). Free text (update message, version check error, GPU guard reason) stays in params and the message, never in a metric label (tested). Labels carry fixed codes, fixed severities, node names (registry/config), role and provider names (config) and model names the node reports (already labels of skirnir_model_loaded_gib, same bound). The Prometheus label escaping now also escapes a line feed, so a reported model name cannot start a new sample line (tested); this also hardens the existing model labels. TM-03: the UI builds the list with createElement/textContent only, no innerHTML or inline handler; checked in a browser with a node named '<b>evil</b>' shown as text, no console errors; CSP unchanged. TM-15/B9: /metrics and /admin/problems expose no data that was not already visible to the same authenticated reader (/admin/ha has the same texts); no new log lines, no secrets. TM-08: compute() is the same pure view HA computes every interval (one scheduler pass over the roles with mutate=False, no breaker switching), now also per /metrics scrape and per /admin/problems GET, behind Basic Auth. The HA attribute keeps its exact German texts by default (tested byte for byte against the 0.34 sentences; end-to-end HA checks unchanged). The CI change only adds the new self-test to the explicit list. No dependency, workflow permission, review-policy or agent change. Public data: the added lines use synthetic names only (synth-*, gpu-desktop, loopback). Refreshed after merging main (PR 176 docs, PR 174 setup-go bump): the only conflict was this record; the merged README and operations texts keep both sides, and the diff against the new merge-base is the same 27 paths with the same content as reviewed before, so the merge adds nothing new to this change.",
  "findings": [],
  "tests": [
   {
-   "command": "python tools/security/review.py snapshot --base origin/main --head INDEX",
+   "command": "python test/selftest_problems.py",
    "result": "passed",
-   "evidence": "security_relevant false; changed paths README.md, README.de.md, docs/operations.md, docs/operations.de.md."
+   "evidence": "all passed: catalogue, every code from its condition with the 0.34 German text, English texts, no placeholder re-expansion, HA view de/en, gauge lines, label line-feed escaping, summing of equal label sets, GET /admin/problems 401 anonymous, 401 wrong password, 400 lang=xx, 200 records, config refuses fr."
   },
   {
-   "command": "python test/check_public_changes.py --base <merge-base>",
+   "command": "all self-tests listed in .github/workflows/ci.yml (Windows, Python 3.12)",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
+   "evidence": "no failures, including selftest_slowness_signals, selftest_browser, selftest_quiet, selftest_client_limits."
+  },
+  {
+   "command": "python test/run_tests.py (end-to-end suite, run through a local lock wrapper for the fixed ports)",
+   "result": "passed",
+   "evidence": "0 failures, STATE passed, run before merging main; the merge changed no router code, so it was not repeated (includes the existing HA problem-text checks)"
+  },
+  {
+   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure",
+   "result": "passed",
+   "evidence": "All checks passed; configuration ok: 5 roles, 7 models."
+  },
+  {
+   "command": "python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "control flow ok: 0 legacy findings."
+  },
+  {
+   "command": "python test/check_adr_index.py",
+   "result": "passed",
+   "evidence": "ADR index ok: 101 ADRs."
+  },
+  {
+   "command": "browser check of the UI overview against a local control app with synthetic state",
+   "result": "passed",
+   "evidence": "problems listed in English and German, a node named <b>evil</b> rendered as text, no console errors."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
    "result": "passed",
    "evidence": "run after staging this record."
+  },
+  {
+   "command": "python test/check_public_changes.py --base <merge-base>",
+   "result": "passed",
+   "evidence": "Public-change scan: 0 finding(s)."
   }
  ],
  "limitations": [
-  "Documentation only; no behaviour changed, so no negative test applies.",
-  "The backup list was derived from origin/main at fb19cb6; parallel open PRs (secrets renderer, status sinks) may change the secret source or add state files, and would then update this section.",
-  "TM-15's next action 'backup controls for these files' is only partly addressed: the list names the files and how to protect sensitive backups, but Skirnir still has no backup tooling, retention or integrity check of its own; the risk register is unchanged."
+  "The CI python job on Linux and the PostgreSQL integrations were not run locally; the change touches no session, memory or storage code.",
+  "Texts an agent sends (GPU guard reason, update messages) remain in the agent's language and are passed through as before.",
+  "Model names reported by a compromised approved agent can still create label series (bounded by what the node reports, as for skirnir_model_loaded_gib); no new cap was added.",
+  "No Prometheus server or Alertmanager was run against the new gauge; the exposition lines were checked as text."
  ]
 }

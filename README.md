@@ -46,8 +46,8 @@ optional model reviews are advisory and require an explicitly configured endpoin
   first) tier of a role, with data classes, credential scan, monthly budget and an egress allowlist. By default nothing goes to
   the cloud.
 - **Client identities** on the inference port (Bearer, Basic, source IP), role and model locks, rate limit, audit log.
-- **Observable:** Prometheus endpoint, usage per day and client, decision log, Home Assistant device via MQTT discovery, web UI
-  with live charts, catalogue, role editor, playground and load test.
+- **Observable:** Prometheus endpoint with problems as alertable metrics, usage per day and client, decision log, Home
+  Assistant device via MQTT discovery, web UI with live charts, catalogue, role editor, playground and load test.
 - **Operations-ready:** config schema with suggestions on typos, idempotency key, canary and shadow tiers per role, deploy manifest
   with SHA-256, Ollama versions and model digests per node.
 - **TLS on every link** once configured (see [security essentials](#security-essentials)), one process, one event loop, no

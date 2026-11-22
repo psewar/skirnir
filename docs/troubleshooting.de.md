@@ -13,6 +13,9 @@ python3 /opt/skirnir-router/router.py --posture /etc/skirnir-router/config.yaml
 Jede Antwort trägt `X-Skirnir-Request-Id`; dieselbe ID steht im Entscheidungsprotokoll (`/admin/state`, Web-UI *Übersicht*)
 und bei Abweisungen im Audit-Log (`client_auth.audit_log`, z. B. `/var/log/skirnir-router/audit.jsonl`).
 
+Was der Router selbst für falsch hält, steht in der Web-UI *Übersicht* unter *Probleme*, in `GET /admin/problems` und als
+`skirnir_problem` in `/metrics`, mit einem festen Code je Fall ([operations.de.md](operations.de.md#probleme)).
+
 ## Steuer-Port (11435)
 
 | Symptom | Ursache und Abhilfe |
@@ -51,7 +54,7 @@ sein Token hat.
 | Update abgelehnt, „ungültige Manifest-Signatur“ | Der Knoten vertraut dem Signierschlüssel nicht; mit `Set-UpdateKey.cmd` oder `update.public_keys` ergänzen ([operations.de.md](operations.de.md#schlüsselwechsel)). Art `downgrade`: Das Release ist älter als der laufende Agent. |
 | Knoten zeigt keine Modelle / Rolle nicht bedienbar | Ollama auf `127.0.0.1:11434` nicht erreichbar, oder die Modelle der Rolle sind auf diesem Knoten nicht geladen. |
 | Knoten bleibt `busy` | Ein Spiel oder fremde GPU-Last; `skirnir-agent game` zeigt die Spielerkennung, `skirnir-agent gpu` die Sensoren, `/admin/state` `game_heavy` und seinen Grund. |
-| Modell langsam | Ein Teil liegt im Arbeitsspeicher: Home Assistant `binary_sensor.skirnir_node_<knoten>_ram_spill` ([operations.de.md](operations.de.md#home-assistant-entitäten)). |
+| Modell langsam | Ein Teil liegt im Arbeitsspeicher: Problem `ram_spill`, Home Assistant `binary_sensor.skirnir_node_<knoten>_ram_spill` ([operations.de.md](operations.de.md#home-assistant-entitäten)). |
 
 Agent-Befehle zur Diagnose: `skirnir-agent check-config` (Konfiguration), `status` (Dienst und `/health`), `gpu` (Messquelle und
 Sensoren), `identity` (Fingerprint), `game` (Spielerkennung und Speicher).

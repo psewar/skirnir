@@ -11,7 +11,8 @@
 `https://<name>:11435/`, login with a user from `control_auth.users`. One page ([router/ui.html](../router/ui.html)), no
 external libraries, six tabs:
 
-- **Overview:** nodes with state, breaker, GPU, VRAM, load and loaded models; cloud providers with budget bars; operations tiles; recent decisions; **live charts** (canvas from `/metrics`): requests/min,
+- **Overview:** the active **problems** (severity, code and text in the UI language, [below](#problems));
+  nodes with state, breaker, GPU, VRAM, load and loaded models; cloud providers with budget bars; operations tiles; recent decisions; **live charts** (canvas from `/metrics`): requests/min,
   tokens/s, GPU and VRAM per node, daily history, latency histogram, shares by node/role/client, effectively used models.
 - **Agents:** registered agents with facts, approval, per-node policy (WOL, weight, busy thresholds, GPU guard, MQTT,
   auto-update), the staged agent version and the update state; a dot on the tab while an agent waits for approval.
@@ -36,7 +37,8 @@ ended early with `DELETE` ([ADR-0061](adr/0061-quiet-a-single-node-for-a-measure
 `requests_total{role,node,model,client,via,outcome}`, `tokens_total{kind,…}`, histograms `request_duration_seconds`,
 `ttft_seconds`, `queue_wait_seconds`, `events_total{event,node}`, per node `node_up`, `node_state`, `node_inflight`,
 `node_gpu_util_percent`, `node_vram_*_gib`, `node_breaker`, per model `model_loaded_gib`, `perf_gen_tps`, `perf_error_rate`,
-plus `decision_*`, `cloud_*`, `usage_today_*`, `info`.
+plus `decision_*`, `cloud_*`, `usage_today_*`, `info`, and the active problems as `problem{code,severity,node,subject}` and
+`problems_active` ([below](#problems)).
 
 ```yaml
 scrape_configs:
@@ -59,6 +61,43 @@ restarts; `?decisions=N` selects how many are returned, default 50) holds the mo
 breaker, queue, shadow, decision). `/admin/state` also shows `build` (deploy manifest) and `supply_chain` (Ollama version and
 model digests per node). Refused and limited requests are in the audit log (`client_auth.audit_log`).
 
+### Problems
+
+Conditions the operator should act on while the router keeps serving (router 0.35.0,
+[ADR-0101](adr/0101-problems-are-structured-records-exported-as-metrics.md)). They are computed without MQTT and reach
+every channel from the same list: `GET /admin/problems[?lang=de|en]` (control port, Basic Auth; records with `code`,
+`severity`, `node`, `subject`, `params`, `message`), the web UI overview, `/metrics` and the Home Assistant attribute
+`problems`.
+
+| Code | Severity | When |
+|---|---|---|
+| `no_node_online` | critical | No node is online. |
+| `role_not_servable` | critical | No online node could serve the role (`subject`), not even when free; a role that waits only for a busy node is not a problem. |
+| `agent_heartbeat_missing` | warning | The node's agent reported before and has been silent longer than `router.agent_missing_problem_s`. |
+| `ram_spill` | warning | A loaded model (`subject`) has at least `router.ram_spill_problem_gib` in system RAM. |
+| `gpu_guard` | warning | The agent reports a GPU guard problem (unavailable, deselected, hardware warning) and the router considers the guard. |
+| `agent_update_failed`, `agent_update_stalled` | warning | An agent update failed or has not reported for too long. |
+| `ollama_update_failed`, `ollama_update_stalled` | warning | The same for an Ollama update. |
+| `ollama_version_check_failing` | warning | The Ollama version check has failed for three days (or never succeeded). |
+| `cloud_budget_warning` | warning | A provider (`subject`) is above `warn_at_percent` of its monthly budget. |
+| `cloud_budget_exhausted` | critical | A provider's monthly budget is used up; it drops out as a tier. |
+
+`critical` means requests fail or a configured tier drops out now; `warning` means the router still serves, but slower,
+without a safety function or without fresh facts. In `/metrics`, `skirnir_problem` has one series per active problem
+(value 1, or the number of problems with the same labels) and none while there is nothing; an empty `node` or `subject`
+means none. Labels never carry free text; the values behind the message (minutes, GiB, an agent's error) are in
+`/admin/problems`. An alert rule without Home Assistant:
+
+```yaml
+groups:
+  - name: skirnir
+    rules:
+      - alert: SkirnirProblem
+        expr: skirnir_problem > 0
+        for: 5m
+        annotations: { summary: "{{ $labels.code }} {{ $labels.node }} {{ $labels.subject }}" }
+```
+
 ## Home Assistant entities
 
 Home Assistant is optional. Without an `mqtt:` section, or without `paho-mqtt` installed, the router publishes nothing. Routing,
@@ -68,8 +107,9 @@ password comes from `secrets.env`.
 
 The router registers via MQTT discovery as the device **Skirnir**: sensors for nodes online/busy, available models, ready roles
 (attribute: which node and model would be chosen right now), requests and tokens today, cloud costs this month, last assignment,
-per node state / GPU utilisation / free VRAM, a `binary_sensor` **Problem** with attribute `problems` (no node online, role not
-servable, agent silent, budget warning) and a sensor **Node awaiting approval** for new agents. Last will
+per node state / GPU utilisation / free VRAM, a `binary_sensor` **Problem** with attribute `problems` (the texts of the
+[problems](#problems) in `router.problem_language`: `de` by default, the sentences automations have matched since router
+0.1, or `en`) and a sensor **Node awaiting approval** for new agents. Last will
 `ollama-router/status=offline` (the MQTT topic and entity ids keep the old name on purpose); missing readings are `unavailable`,
 not `unknown`. Node entities are kept in sync: blocked or deleted nodes disappear from Home Assistant, even if they vanished
 during a router restart. Connecting Home Assistant as a client: [clients.md](clients.md#home-assistant).
