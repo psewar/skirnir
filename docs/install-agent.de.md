@@ -9,7 +9,7 @@ am Knoten, kein Zertifikat, kein Token und keine feste IP. Interna des Agenten: 
 
 | Was | Einzelheiten |
 |---|---|
-| GPU | NVIDIA mit funktionierendem Treiber (`nvidia-smi`) |
+| GPU | NVIDIA mit funktionierendem Treiber (`nvidia-smi`); ohne läuft der Knoten als CPU-Knoten ([unten](#knoten-ohne-nvidia-gpu)) |
 | Ollama | Installiert, an Loopback gebunden (`OLLAMA_HOST=127.0.0.1`), mit den Modellen der Rollen geladen |
 | Agent | Release-Datei `skirnir-agent-<version>-windows-amd64.exe` oder `skirnir-agent-<version>-linux-amd64` aus den [Releases](https://github.com/psewar/skirnir/releases) |
 | Netz | Ausgehend HTTPS zu `https://<name>:11435`; dem Zertifikat des Routers muss der Knoten vertrauen (öffentlich oder eine private CA in `router.ca_file`) |
@@ -217,6 +217,28 @@ braucht keine eigenen Secrets. Kein Token, keine Firewall-Regel, keine IP von Ha
 - Stellt optional einen TLS-Proxy vor Ollama (`ollama_proxy`, Port 11443, Zertifikat per Fingerprint gepinnt) für Router, die
   ohne Tunnel direkt zugreifen sollen.
 - **Schützt die GPU** mit einem Power-Limit, standardmäßig an ([reference.de.md](reference.de.md#gpu-schutz)).
+
+## Knoten ohne NVIDIA-GPU
+
+Seit Agent und Router 0.36.0 (ADR-0102) kann auch ein Rechner ohne NVIDIA-GPU Knoten sein: ein CPU-Rechner für Inferenz oder
+einer mit AMD-, Intel- oder Apple-GPU (sie laufen als CPU-Knoten, bis der Agent sie messen kann). Das entscheidet `gpu.probe`
+in der Agent-Konfiguration:
+
+| `gpu.probe` | Verhalten |
+|---|---|
+| `auto` (Standard) | Sucht wie bisher eine NVIDIA-GPU (NVML, dann `nvidia-smi`). Nur wo der Agent früher den Start verweigerte (beides fehlt), läuft er ohne GPU |
+| `nvidia` | Startet ohne NVIDIA-GPU nicht, wie bis Agent 0.35 |
+| `none` | Sucht nicht; der Knoten ist ein CPU-Knoten |
+
+Ohne GPU meldet der Agent bei der Anmeldung und in jedem Heartbeat `gpu_present: false`, schickt keine GPU-Werte, und der
+GPU-Schutz meldet `not_applicable` (kein Problem). Der Router bemisst Modelle dann nach dem Hauptspeicher des Knotens:
+verfügbarer RAM plus was Ollama hält, abzüglich der Reserve (mindestens `modes.memory_pressure.min_free_gib`), und ein Modell
+größer als der gesamte RAM ist `model_too_large`. Eine GPU-busy-Erkennung gibt es für so einen Knoten nicht.
+`skirnir-agent status` zeigt `GPU: none (gpu.probe ...)`.
+
+Die Spielerkennung (Windows) lässt sich auf einem Rechner, auf dem nie gespielt wird, mit `game.enabled: false` abschalten
+(ADR-0103); unter Linux ist sie ohnehin aus. Die Namen der Home-Assistant-Entitäten des Knotens sind standardmäßig deutsch;
+`mqtt.entity_language: en` macht sie englisch, ohne die Entitäts-IDs zu ändern.
 
 ## Updates und der Update-Schlüssel
 

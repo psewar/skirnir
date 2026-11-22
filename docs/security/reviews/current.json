@@ -1,105 +1,125 @@
 {
- "schema_version": 1,
- "status": "completed",
- "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "173006bc8df89af2ffe916d5ef9ae75d3ec136f4",
- "change_digest": "76c8ff1cf042bee225fc5c978e9f406056c209e60f7cb947b729e7b2269305d7",
- "reviewed_paths": [
-  ".github/workflows/ci.yml",
-  "CHANGELOG.md",
-  "README.de.md",
-  "README.md",
-  "design/english-names.md",
-  "docs/adr/0101-problems-are-structured-records-exported-as-metrics.md",
-  "docs/adr/README.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
-  "docs/reference.de.md",
-  "docs/reference.md",
-  "docs/troubleshooting.de.md",
-  "docs/troubleshooting.md",
-  "router/config.example.yaml",
-  "router/skirnir_router/admin.py",
-  "router/skirnir_router/agentupdate.py",
-  "router/skirnir_router/app.py",
-  "router/skirnir_router/cloud.py",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/ha.py",
-  "router/skirnir_router/metrics.py",
-  "router/skirnir_router/ollamaupdate.py",
-  "router/skirnir_router/problems.py",
-  "router/skirnir_router/settings.py",
-  "router/ui.html",
-  "test/selftest_problems.py",
-  "router/skirnir_router/auth.py (unchanged, basic_auth_middleware traced)",
-  "router/skirnir_router/browser_headers.py (unchanged, CSP applies to the new UI section)",
-  "docs/security/reviews/current.json"
- ],
- "risk_ids": [
-  "TM-03",
-  "TM-07",
-  "TM-08",
-  "TM-15"
- ],
- "boundaries": [
-  "B2",
-  "B3",
-  "B9"
- ],
- "summary": "Router 0.35.0, ADR-0101: problems computed in a new module problems.py as records (fixed code, severity, node, subject, params, message) instead of German sentences built in ha.py. New: GET /admin/problems on the control port, gauges skirnir_problem{code,severity,node,subject} and skirnir_problems_active in /metrics, a problems list in the web UI overview, config key router.problem_language (de default, en; schema, example, EDITABLE choice). B2: the new route is registered on the control app only; basic_auth_middleware runs before it like for every /admin GET (traced; it is not under /v1/, so no token bypass); it is read-only, so the CSRF header does not apply; an unknown lang is a 400 value, not an exception. Tested rejected cases: no credentials 401, wrong password 401, bad lang 400. B3/TM-07: node names and model names reported by an approved agent and an agent's update message reach the records. Templates are filled once with str.format (a reported name with braces is not expanded again; tested). Free text (update message, version check error, GPU guard reason) stays in params and the message, never in a metric label (tested). Labels carry fixed codes, fixed severities, node names (registry/config), role and provider names (config) and model names the node reports (already labels of skirnir_model_loaded_gib, same bound). The Prometheus label escaping now also escapes a line feed, so a reported model name cannot start a new sample line (tested); this also hardens the existing model labels. TM-03: the UI builds the list with createElement/textContent only, no innerHTML or inline handler; checked in a browser with a node named '<b>evil</b>' shown as text, no console errors; CSP unchanged. TM-15/B9: /metrics and /admin/problems expose no data that was not already visible to the same authenticated reader (/admin/ha has the same texts); no new log lines, no secrets. TM-08: compute() is the same pure view HA computes every interval (one scheduler pass over the roles with mutate=False, no breaker switching), now also per /metrics scrape and per /admin/problems GET, behind Basic Auth. The HA attribute keeps its exact German texts by default (tested byte for byte against the 0.34 sentences; end-to-end HA checks unchanged). The CI change only adds the new self-test to the explicit list. No dependency, workflow permission, review-policy or agent change. Public data: the added lines use synthetic names only (synth-*, gpu-desktop, loopback). Refreshed after merging main (PR 176 docs, PR 174 setup-go bump): the only conflict was this record; the merged README and operations texts keep both sides, and the diff against the new merge-base is the same 27 paths with the same content as reviewed before, so the merge adds nothing new to this change.",
- "findings": [],
- "tests": [
-  {
-   "command": "python test/selftest_problems.py",
-   "result": "passed",
-   "evidence": "all passed: catalogue, every code from its condition with the 0.34 German text, English texts, no placeholder re-expansion, HA view de/en, gauge lines, label line-feed escaping, summing of equal label sets, GET /admin/problems 401 anonymous, 401 wrong password, 400 lang=xx, 200 records, config refuses fr."
-  },
-  {
-   "command": "all self-tests listed in .github/workflows/ci.yml (Windows, Python 3.12)",
-   "result": "passed",
-   "evidence": "no failures, including selftest_slowness_signals, selftest_browser, selftest_quiet, selftest_client_limits."
-  },
-  {
-   "command": "python test/run_tests.py (end-to-end suite, run through a local lock wrapper for the fixed ports)",
-   "result": "passed",
-   "evidence": "0 failures, STATE passed, run before merging main; the merge changed no router code, so it was not repeated (includes the existing HA problem-text checks)"
-  },
-  {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure",
-   "result": "passed",
-   "evidence": "All checks passed; configuration ok: 5 roles, 7 models."
-  },
-  {
-   "command": "python test/selftest_control_flow.py && python test/check_control_flow.py",
-   "result": "passed",
-   "evidence": "control flow ok: 0 legacy findings."
-  },
-  {
-   "command": "python test/check_adr_index.py",
-   "result": "passed",
-   "evidence": "ADR index ok: 101 ADRs."
-  },
-  {
-   "command": "browser check of the UI overview against a local control app with synthetic state",
-   "result": "passed",
-   "evidence": "problems listed in English and German, a node named <b>evil</b> rendered as text, no console errors."
-  },
-  {
-   "command": "python tools/security/review.py check --base origin/main --head INDEX",
-   "result": "passed",
-   "evidence": "run after staging this record."
-  },
-  {
-   "command": "python test/check_public_changes.py --base <merge-base>",
-   "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
-  }
- ],
- "limitations": [
-  "The CI python job on Linux and the PostgreSQL integrations were not run locally; the change touches no session, memory or storage code.",
-  "Texts an agent sends (GPU guard reason, update messages) remain in the agent's language and are passed through as before.",
-  "Model names reported by a compromised approved agent can still create label series (bounded by what the node reports, as for skirnir_model_loaded_gib); no new cap was added.",
-  "No Prometheus server or Alertmanager was run against the new gauge; the exposition lines were checked as text."
- ]
+  "schema_version": 1,
+  "status": "completed",
+  "reviewer": "Claude Code (Opus 5.5) repository security review",
+  "base_sha": "4a614341aecd17f58aa55ca5e88476373442af61",
+  "change_digest": "481a506bac6351fe5d07039f58aebaff3a8b4d9656ff9de647002f761ef9b8aa",
+  "reviewed_paths": [
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "README.de.md",
+    "README.md",
+    "agent/README.md",
+    "agent/app.go",
+    "agent/config.example.yaml",
+    "agent/config.go",
+    "agent/facts.go",
+    "agent/game.go",
+    "agent/game_test.go",
+    "agent/gpu.go",
+    "agent/guard.go",
+    "agent/health.go",
+    "agent/heartbeat.go",
+    "agent/install_windows.go",
+    "agent/install_windows_test.go",
+    "agent/main.go",
+    "agent/mqtt.go",
+    "agent/nogpu_test.go",
+    "design/english-names.md",
+    "design/gpu-guard.md",
+    "design/routing-algorithm.md",
+    "docs/adr/0102-the-agent-starts-without-a-gpu.md",
+    "docs/adr/0103-game-detection-is-a-module-that-can-be-switched-off.md",
+    "docs/adr/README.md",
+    "docs/configuration.de.md",
+    "docs/configuration.md",
+    "docs/install-agent.de.md",
+    "docs/install-agent.md",
+    "docs/operations.de.md",
+    "docs/operations.md",
+    "docs/reference.de.md",
+    "docs/reference.md",
+    "docs/security/reviews/current.json",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/nodes.py",
+    "router/skirnir_router/poll.py",
+    "router/skirnir_router/problems.py",
+    "router/skirnir_router/registry.py",
+    "router/skirnir_router/scheduler.py",
+    "test/fake_agent.py",
+    "test/run_tests.py",
+    "test/selftest_availability.py",
+    "test/selftest_cpu_node.py"
+  ],
+  "risk_ids": [
+    "TM-07",
+    "TM-14",
+    "TM-15"
+  ],
+  "boundaries": [
+    "B3",
+    "B8",
+    "B9"
+  ],
+  "summary": "Agent 0.36.0 / router 0.36.0: the agent runs without an NVIDIA GPU (gpu.probe auto|nvidia|none, default auto, ADR-0102), game detection can be switched off (game.enabled, ADR-0103), the game fact's via is 'path' (router maps the old 'pfad'), Home Assistant display names can be English (mqtt.entity_language, unique_id and entity ID unchanged), and the Windows install checks the event-log source in the registry instead of matching error text. B3 (router <-> agent): new fact/heartbeat field gpu_present and the guard state not_applicable from an approved agent. The router takes gpu_present only as a real boolean (heartbeat) or literal false (facts), and memory values only as non-boolean numbers; otherwise the node stays a GPU node or nothing fits. A compromised approved agent could already misreport VRAM, utilisation and guard state (TM-07: telemetry is an assertion of that host); claiming no GPU or not_applicable gives it no capability beyond that: it can attract or repel models for its own node and avoid the require_fresh_status cap, as reporting 'normal' already did. No new route, frame, authentication path or egress. B8 (agent host): install_windows reads HKLM SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\<service> read-only in the existing admin install step; service account, ACLs, update and signing paths are unchanged. With gpu.probe auto and no NVIDIA driver at all the GPU guard does not run; without a driver no workload can use the card, so the power-limit protection loses nothing; gpu.probe nvidia keeps the refusal. POST /gpuz stays loopback-only and now answers 409 without a GPU. B9: /health (loopback) gains gpu_probe and gpu_present, MQTT discovery gains constant English names; no secret, host or user data. The fake agent and E2E use loopback and synthetic values only. Re-reviewed after merging origin/main (PR 178 structured problems / router 0.35.0 / ADR-0101, PR 176 docs) into the branch: conflicts only in CHANGELOG (both rows kept, v0.41.0 above v0.40.0), VERSION (0.36.0 kept), ADR index (regenerated, 0101-0103) and this record. Semantic overlap with router/skirnir_router/problems.py: ram_spill is already empty for a node without a GPU; the gpu_guard problem now also requires gpu_present, so a node without a GPU never raises it even if its agent claims a guard problem (an approved agent cannot plant a GPU-guard alarm for a node that has no GPU); docs/operations(.de).md say so. No other change to #178's codes, metrics or config.",
+  "findings": [],
+  "tests": [
+    {
+      "command": "python test/selftest_cpu_node.py",
+      "result": "passed",
+      "evidence": "router: facts/heartbeat without GPU values, full-size holdings, no ram_spill, RAM budget and capacity, model_too_large/vram_full, guard not_applicable not capping, older agents unchanged, pfad->path, enabled false; rejected cases: non-numeric memory, non-boolean gpu_present, facts other than false; after the merge also: no gpu_guard/ram_spill problem for nodes without a GPU (including one whose agent claims a guard problem; this check fails without the problems.py change), a GPU node still raises it."
+    },
+    {
+      "command": "python test/selftest_problems.py",
+      "result": "passed",
+      "evidence": "all passed (after the merge)."
+    },
+    {
+      "command": "python test/check_adr_index.py",
+      "result": "passed",
+      "evidence": "ADR index ok: 103 ADRs (after the merge)."
+    },
+    {
+      "command": "python test/run_tests.py (through a local lock wrapper that serialises the fixed loopback ports)",
+      "result": "passed",
+      "evidence": "0 failures, STATE passed; includes the new fake agent with FAKE_GPU=0 (online, gpu_present false, guard not_applicable, no HA problem)."
+    },
+    {
+      "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml (Windows, Python 3.12)",
+      "result": "passed",
+      "evidence": "74 self-tests after the merge; selftest_availability needed its fake node to gain capacity_gib/reserve_gib."
+    },
+    {
+      "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./...",
+      "result": "passed",
+      "evidence": "gofmt empty, vet clean on both GOOS, go test ok on Windows (incl. install_windows_test.go)."
+    },
+    {
+      "command": "GOOS=linux go test -c, test binary run under WSL Ubuntu",
+      "result": "passed",
+      "evidence": "PASS (nogpu_test.go, config, mqtt and the other Linux tests)."
+    },
+    {
+      "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_control_flow.py ; python test/selftest_control_flow.py ; python test/check_pinned_references.py ; python tools/security/lock_requirements.py check",
+      "result": "passed",
+      "evidence": "all clean."
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "result": "passed",
+      "evidence": "run after staging this record."
+    },
+    {
+      "command": "python test/check_public_changes.py",
+      "result": "passed",
+      "evidence": "Public-change scan: 0 finding(s)."
+    }
+  ],
+  "limitations": [
+    "The end-to-end suite uses a fake agent; the real agent without a GPU was exercised by Go unit tests (probe none), not on a physical CPU-only machine.",
+    "gpu.probe auto on a machine whose NVIDIA driver is missing entirely now starts as a CPU node instead of refusing (documented in ADR-0102).",
+    "The router's RAM budget trusts the agent's memory fact like the VRAM fact before (TM-07); on Linux MemAvailable can include page cache of a mapped model, so the budget is an estimate; Ollama's own memory check and memory pressure remain the guard.",
+    "The catalog's VRAM measurement (/admin/measure) still needs a GPU; not changed here.",
+    "PostgreSQL integrations were not run: no session, memory or storage code changed."
+  ]
 }

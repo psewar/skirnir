@@ -29,6 +29,8 @@ type Config struct {
 	Install      InstallCfg
 	OllamaProxy  ProxyCfg        `yaml:"ollama_proxy"`
 	Tunnel       TunnelCfg       `yaml:"tunnel"`
+	GPU          GPUCfg          `yaml:"gpu"`           // gpu.probe: auto | nvidia | none (gpu.go, agent 0.36.0, ADR-0102)
+	Game         GameCfg         `yaml:"game"`          // game.enabled: game detection (game.go, agent 0.36.0, ADR-0103)
 	GPUZ         GPUZCfg         `yaml:"gpuz"`          // GPU-Z-Sensoren als Zusatzquelle (Windows), Standard an
 	GPUGuard     GuardCfg        `yaml:"gpu_guard"`     // GPU guard: Power limit, high-load stage, warnings (guard.go), enabled by default
 	Update       UpdateCfg       `yaml:"update"`        // Self-update via the Router (updater.go): operator's public_key, enabled
@@ -87,6 +89,29 @@ type RouteCfg struct {
 
 // GPUZCfg: GPU-Z-Shared-Memory als Zusatzquelle (Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung). Standard an;
 // if GPU-Z is not running, nothing happens. `enabled: false` disables the reader entirely.
+// GPUCfg: which GPU the agent measures (ADR-0102). "auto" (default) looks for an NVIDIA GPU as before and, where none is
+// found (no NVML and no nvidia-smi), runs without one and reports gpu_present: false; "nvidia" requires it and refuses to
+// start without it (the behaviour before agent 0.36.0); "none" does not look at all.
+type GPUCfg struct {
+	Probe string `yaml:"probe"`
+}
+
+const (
+	gpuProbeAuto   = "auto"
+	gpuProbeNvidia = "nvidia"
+	gpuProbeNone   = "none"
+)
+
+// GameCfg: game detection (ADR-0103). Default on where the platform detects games (Windows) and off elsewhere, so an
+// existing configuration behaves as before; enabled: false switches it off on a Windows machine that never plays.
+type GameCfg struct {
+	Enabled *bool `yaml:"enabled"`
+}
+
+func (g *GameCfg) on() bool {
+	return g.Enabled == nil && gameScanSupported || g.Enabled != nil && *g.Enabled
+}
+
 type GPUZCfg struct {
 	Enabled *bool `yaml:"enabled"`
 }
@@ -130,7 +155,16 @@ type MQTTCfg struct {
 	AliasModel      string  `yaml:"alias_model" json:"alias_model"`
 	SttChild        string  `yaml:"stt_child" json:"stt_child"`
 	SttFallbackPort int     `yaml:"stt_fallback_port" json:"stt_fallback_port"`
+	// EntityLanguage: language of the Home Assistant entity names, "de" (default, the names before agent 0.36.0) or "en".
+	// Only the display names change; unique_id and entity ID stay, so history and automations keep working. Node-local:
+	// the router does not provision it.
+	EntityLanguage string `yaml:"entity_language" json:"entity_language,omitempty"`
 }
+
+const (
+	entityLanguageDE = "de"
+	entityLanguageEN = "en"
+)
 
 // SecretStoreCfg: access to a Secret-Store with Universal-Auth-API (Client-ID/-Secret -> Token -> Secret per key).
 type SecretStoreCfg struct {
@@ -352,6 +386,9 @@ func (c *Config) applyDefaults() {
 	if c.Tunnel.UpstreamAPI == "" {
 		c.Tunnel.UpstreamAPI = upstreamOllama
 	}
+	if c.GPU.Probe == "" {
+		c.GPU.Probe = gpuProbeAuto
+	}
 	if fb := c.Tunnel.UpstreamFallback; fb != nil {
 		if fb.Upstream == "" {
 			fb.Upstream = "http://127.0.0.1:11434"
@@ -439,6 +476,12 @@ func (c *Config) validate() error {
 	}
 	if c.Tunnel.UpstreamAPI != upstreamOllama && c.Tunnel.UpstreamAPI != upstreamOpenAI {
 		return fmt.Errorf("tunnel.upstream_api: %q is not ollama or openai", c.Tunnel.UpstreamAPI)
+	}
+	if c.GPU.Probe != gpuProbeAuto && c.GPU.Probe != gpuProbeNvidia && c.GPU.Probe != gpuProbeNone {
+		return fmt.Errorf("gpu.probe: %q is not auto, nvidia or none", c.GPU.Probe)
+	}
+	if l := c.MQTT.EntityLanguage; l != "" && l != entityLanguageDE && l != entityLanguageEN {
+		return fmt.Errorf("mqtt.entity_language: %q is not de or en", l)
 	}
 	seen := map[string]bool{}
 	for _, ch := range c.Children {

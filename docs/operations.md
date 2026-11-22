@@ -75,7 +75,7 @@ every channel from the same list: `GET /admin/problems[?lang=de|en]` (control po
 | `role_not_servable` | critical | No online node could serve the role (`subject`), not even when free; a role that waits only for a busy node is not a problem. |
 | `agent_heartbeat_missing` | warning | The node's agent reported before and has been silent longer than `router.agent_missing_problem_s`. |
 | `ram_spill` | warning | A loaded model (`subject`) has at least `router.ram_spill_problem_gib` in system RAM. |
-| `gpu_guard` | warning | The agent reports a GPU guard problem (unavailable, deselected, hardware warning) and the router considers the guard. |
+| `gpu_guard` | warning | The agent reports a GPU guard problem (unavailable, deselected, hardware warning) and the router considers the guard. Never for a node without a GPU (`gpu_present: false`, ADR-0102). |
 | `agent_update_failed`, `agent_update_stalled` | warning | An agent update failed or has not reported for too long. |
 | `ollama_update_failed`, `ollama_update_stalled` | warning | The same for an Ollama update. |
 | `ollama_version_check_failing` | warning | The Ollama version check has failed for three days (or never succeeded). |

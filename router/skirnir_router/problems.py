@@ -128,11 +128,12 @@ def compute(now=None, unservable=None, lang=None):
                 if g >= state.CFG.ram_spill_problem_gib:
                     out.append(make("ram_spill", node=n.name, subject=m, model=m, gib=g))
     # GPU guard (Agent >= 0.7.0): unavailable (limit not settable), deselected (operator decision: counts as a problem),
-    # voltage/temperature/hardware warning. Only if the router should consider this node's status.
+    # voltage/temperature/hardware warning. Only if the router should consider this node's status. A node without a GPU
+    # (gpu_present false, router 0.36.0, ADR-0102) has nothing to guard: no gpu_guard problem, whatever its agent reports.
     if state.CFG.gpu_guard["enabled"]:
         for n in online:
             g = n.guard or {}
-            if n.guard_policy and g.get("problem") and n.guard_state(now) is not None:
+            if n.gpu_present and n.guard_policy and g.get("problem") and n.guard_state(now) is not None:
                 reason = g.get("reason") or ", ".join(g.get("warnings") or []) or "?"
                 out.append(make("gpu_guard", node=n.name, guard_state=g.get("state"), reason=reason))
     from . import agentupdate, cloud, ollamaupdate   # late: these modules import this one

@@ -76,7 +76,7 @@ Kanal aus derselben Liste: `GET /admin/problems[?lang=de|en]` (Steuer-Port, Basi
 | `role_not_servable` | critical | Kein Knoten online könnte die Rolle (`subject`) bedienen, auch frei nicht; eine Rolle, die nur auf einen belegten Knoten wartet, ist kein Problem. |
 | `agent_heartbeat_missing` | warning | Der Agent des Knotens hat schon gemeldet und schweigt länger als `router.agent_missing_problem_s`. |
 | `ram_spill` | warning | Ein geladenes Modell (`subject`) liegt mit mindestens `router.ram_spill_problem_gib` im Arbeitsspeicher. |
-| `gpu_guard` | warning | Der Agent meldet ein Problem des GPU-Schutzes (nicht verfügbar, abgewählt, Hardware-Warnung), und der Router beachtet den Schutz. |
+| `gpu_guard` | warning | Der Agent meldet ein Problem des GPU-Schutzes (nicht verfügbar, abgewählt, Hardware-Warnung), und der Router beachtet den Schutz. Nie für einen Knoten ohne GPU (`gpu_present: false`, ADR-0102). |
 | `agent_update_failed`, `agent_update_stalled` | warning | Ein Agent-Update ist fehlgeschlagen oder meldet sich zu lange nicht. |
 | `ollama_update_failed`, `ollama_update_stalled` | warning | Dasselbe für ein Ollama-Update. |
 | `ollama_version_check_failing` | warning | Die Ollama-Versionsprüfung scheitert seit drei Tagen (oder hat nie geklappt). |
