@@ -264,7 +264,7 @@ def render():
     gauge("skirnir_sessions", "active session affinities", [({}, len(state.SESSIONS))])
     rows = []
     for _exposed, role in state.CFG.roles.items():
-        pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # View: /metrics does not toggle any breaker
+        pick = scheduler.choose(role, role["tiers"], None, now)   # View: no probe_breakers, /metrics does not toggle any breaker
         rows.append(({"role": role["name"]}, 1 if pick else 0))
     gauge("skirnir_role_ready", "1 = role could be served right now", rows)
     gauge("skirnir_perf_gen_tps", "EWMA generation speed tok/s per model@node",

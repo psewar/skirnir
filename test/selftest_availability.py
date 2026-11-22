@@ -30,7 +30,7 @@ class Cfg:
 
 
 class FakeNode:
-    """Only what _node_block reads. budget_gib like Node.budget_gib: free VRAM + Ollama's own - reserve."""
+    """Only what scheduler.assess reads. budget_gib like Node.budget_gib: free VRAM + Ollama's own - reserve."""
 
     def __init__(self, name, models, st="free", free=30.0, total=31.8, foreign=0.0, loaded=(), breaker="closed",
                  draining_until=0.0, busy_reason="", gpu_util=0, game=None, memory=None, mem_pressure=False):

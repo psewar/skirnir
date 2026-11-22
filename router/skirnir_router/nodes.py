@@ -57,6 +57,15 @@ def nreq(node, method, path, **kw):
     return state.SESSION.request(method, node.url + path, **kw)
 
 
+def card_gib(node, reserve_for):
+    """The empty card minus the VRAM reserve for state `reserve_for` (modes.vram_reserve_gib): the most a model set can take
+    on this node. The base of every budget that does not start from measured free VRAM: budget_gib without a fresh
+    heartbeat, card_budget_gib, the residency room (poll.residency_check) and the empty-card fit in scheduler.assess and
+    scheduler.role_possible_when_free (ADR-0108). A function rather than a method, so scheduler test doubles need only
+    vram_total_gib."""
+    return node.vram_total_gib - state.CFG.reserve.get(reserve_for, 1.0)
+
+
 class Breaker:
     """Circuit breaker per target (stage 3): closed -> open after `failures` errors in window -> after open_s half_open with exactly
     one probe. Shared for Node and CloudTarget (both carry name, inflight, breaker, breaker_fails, breaker_until)."""
@@ -69,12 +78,15 @@ class Breaker:
             return False
         return self.inflight == 0
 
-    def breaker_allows(self, now):
+    def breaker_probe(self, now):
+        """The breaker's only time-driven transition: once open_s is over, open -> half_open (one probe), with log and
+        journal entry. The selection itself is pure (scheduler.assess reads breaker_would_allow, which already lets an
+        expired open breaker through); the caller runs scheduler.probe_breakers before a selection, so the target is
+        ranked with its probe penalty as before (ADR-0108)."""
         if self.breaker == "open" and now >= self.breaker_until:
             self.breaker = "half_open"
             log.info("%s: breaker half_open - one probe", self.name)
             state.remember({"event": "breaker", "node": self.name, "state": "half_open"})
-        return self.breaker_would_allow(now)
 
     def breaker_fail(self, now, why):
         cfg = state.CFG.breaker
@@ -248,12 +260,20 @@ class Node(Breaker):
         that actually fit."""
         return self._loaded_real_gib()
 
-    def _loaded_real_gib(self):
+    def _real_gib(self, name, ps_gib):
+        """Measured occupancy of the loaded model `name`: the catalog's `real` figure at its loaded context, never less than
+        what /api/ps reports (`ps_gib`); /api/ps alone for a model the catalog has not measured."""
+        d = self.digest_of.get(name)
+        real = state.CFG.real_gib(name, self.loaded_ctx.get(d) if d is not None else None)
+        return max(ps_gib, real) if real is not None else ps_gib
+
+    def _loaded_real_gib(self, only=None):
+        """Measured occupancy summed over the loaded models, or over those for which `only(name)` holds. A plain loop on
+        purpose: sum() of floats rounds differently since Python 3.12, and budgets are compared at their edges."""
         total = 0.0
         for name, ps_gib in self.loaded.items():
-            d = self.digest_of.get(name)
-            real = state.CFG.real_gib(name, self.loaded_ctx.get(d) if d is not None else None)
-            total += max(ps_gib, real) if real is not None else ps_gib
+            if only is None or only(name):
+                total += self._real_gib(name, ps_gib)
         return total
 
     def ollama_vram_claimed_gib(self):
@@ -487,23 +507,15 @@ class Node(Breaker):
     def budget_gib(self, now, model):
         """What Ollama may occupy on this node: free VRAM + everything Ollama itself holds (will be
         evicted or reused via Runner-Sharing as needed) - reserve. Foreign VRAM (desktop, game) does not count."""
-        reserve = state.CFG.reserve.get(self.state, 1.0)
         if self.gpu_known(now) and self.vram_free_gib is not None:
-            return self.vram_free_gib + self.ollama_vram_gib() - reserve
-        return self.vram_total_gib - reserve
+            return self.vram_free_gib + self.ollama_vram_gib() - state.CFG.reserve.get(self.state, 1.0)
+        return card_gib(self, self.state)
 
     def answering_vram_gib(self):
         """VRAM of the loaded models that are answering a request right now (measured occupancy like ollama_vram_gib).
         budget_gib counts them as evictable; a load beside them that needs their memory makes Ollama evict them as soon
         as their request ends (0.32.1, ADR-0097)."""
-        total = 0.0
-        for name, ps_gib in self.loaded.items():
-            if not any(c > 0 and self.same_blob(m, name) for m, c in self.inflight_models.items()):
-                continue
-            d = self.digest_of.get(name)
-            real = state.CFG.real_gib(name, self.loaded_ctx.get(d) if d is not None else None)
-            total += max(ps_gib, real) if real is not None else ps_gib
-        return total
+        return self._loaded_real_gib(lambda name: any(c > 0 and self.same_blob(m, name) for m, c in self.inflight_models.items()))
 
     @property
     def speaks_openai(self):
@@ -547,10 +559,16 @@ class Node(Breaker):
         """The node can serve the model now or after switching to its standby Ollama."""
         return model in self.models or self.standby_switch(model)
 
+    def card_budget_gib(self, reserve_for):
+        """What Ollama may occupy with nothing of its own counted: the card minus the reserve for state `reserve_for`, the
+        desktop baseline and foreign memory. One formula for the standby switch (standby_budget_gib) and the prewarm plan
+        (poll.prewarm, with the reserve of a free node)."""
+        return card_gib(self, reserve_for) - self.baseline_gib() - self.foreign_vram_gib()
+
     def standby_budget_gib(self):
         """VRAM one side gets once the other has stopped (standby after a hold, server after a release): the card minus
         reserve, desktop baseline and foreign memory."""
-        return self.vram_total_gib - state.CFG.reserve.get(self.state, 1.0) - self.baseline_gib() - self.foreign_vram_gib()
+        return self.card_budget_gib(self.state)
 
     def quiet(self, now):
         """Is the node quiet for a measurement (ADR-0061)? Then the router unloads and prewarms nothing here."""

@@ -35,13 +35,13 @@ def start(body, path, role, tiers, req, node, model, reason, client):
 
 def alternative(tiers, blocked_model, req, client_ctx=None, now=None):
     """First free local tier of the role with a different model (warm before cold, other nodes before the blocked one) -
-    what a class-based fallback would take. None = none. Read-only view (mutate=False)."""
+    what a class-based fallback would take. None = none. Read-only view (no probe_breakers)."""
     now = now or time.time()
     found = []
     for i, t in enumerate(tiers):
         if t.get("cloud") or t["model"] == blocked_model or (req is not None and req.tier_blocked(t)):
             continue
-        _ctx, _need, cands = scheduler.candidates_for(t, client_ctx, now, mutate=False)
+        _ctx, cands = scheduler.candidates_for(t, client_ctx, now)
         for n in cands:
             if not admission.saturated(n, t["model"]):
                 found.append((not n.is_loaded(t["model"]), i, n.name, t["model"]))

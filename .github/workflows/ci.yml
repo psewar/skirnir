@@ -101,6 +101,7 @@ jobs:
       - run: python test/selftest_system_append.py
       - run: python test/selftest_cloud_wait_for_load.py
       - run: python test/selftest_fallback_keeps_busy_model.py
+      - run: python test/selftest_node_assessment.py
       - run: python test/selftest_poll_yields_to_push.py
       - run: python test/selftest_cloud_reasoning.py
       - run: python test/selftest_privacy_check.py
