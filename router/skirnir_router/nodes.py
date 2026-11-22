@@ -134,7 +134,8 @@ class Node(Breaker):
         # Missing = a GPU, as every agent before 0.36.0 had one.
         self.gpu_present = spec.get("gpu_present") is not False
         self.mac = spec.get("mac")
-        self.wol = bool(spec.get("wol", False))
+        self.wol = bool(spec.get("wol", False))   # may be woken on demand at all (name kept from the WOL-only days)
+        self.waker = spec.get("waker") or "wol"   # how: built-in wol or a name from router.wakers (ADR-0117)
         self.weight = int(spec.get("weight", 1))
         self.foreign_baseline_gib = float(spec.get("foreign_vram_baseline_gib", 0))
         self.fp = None      # Fingerprint of the agent key (registered nodes)
@@ -409,6 +410,7 @@ class Node(Breaker):
         if spec.get("mac"):
             self.mac = spec["mac"]
         self.wol = bool(spec.get("wol", self.wol))
+        self.waker = spec.get("waker", self.waker) or "wol"
         self.weight = int(spec.get("weight", self.weight))
         if spec.get("gpu"):
             self.gpu = spec["gpu"]
@@ -611,7 +613,7 @@ class Node(Breaker):
             "gpu_util": self.gpu_util, "vram_free_gib": self.vram_free_gib,
             "vram_used_gib": self.vram_used_gib, "vram_total_gib": self.vram_total_gib, "foreign_vram_gib": round(self.foreign_vram_gib(), 2), "children_vram_gib": round(self.children_vram_gib, 2),
             "heartbeat_age_s": round(now - self.hb_ts, 1) if self.hb_ts else None,
-            "wol": self.wol, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,
+            "wol": self.wol, "waker": self.waker, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,
             "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
             "breaker": self.breaker, "max_inflight": self.effective_max_inflight(), "draining": now < self.draining_until, "ollama_source": "push" if self.ollama_push_active(now) else "poll",
             "game": self.game, "memory": self.memory, "memory_pressure": self.mem_pressure,   # Agent >= 0.17.0

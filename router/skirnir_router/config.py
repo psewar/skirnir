@@ -15,11 +15,15 @@ from .shared_config import parse_scopes
 from .context_config import ContextConfig, parse_context_config
 from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
+from .waker_config import FIELDS as WAKER_FIELDS, check_choice as check_waker_choice, parse_wakers
+from .values import egress_url
 from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, REASONING_OFF, THINK_MODES, TRUST_LEVELS, log, open_private, tls_fingerprint
 from .outcome import Problem, failed, invalid
 from .problems import LANGUAGES as PROBLEM_LANGUAGES
+
+RELEASE_SOURCES = settings_mod.RELEASE_SOURCES
 
 
 def _d(path):
@@ -91,6 +95,8 @@ SCHEMA = {
         "openai": {"enabled": None, "default_think": None},
         "anthropic": {"enabled": None, "keepalive_s": None, "think": None},
         "wol": {"wait_up_s": None, "retry_interval_s": None, "cooldown_s": None, "broadcast_addresses": None},
+        # since 0.41.0 (ADR-0117): named wakers besides Wake-on-LAN, chosen per node with nodes.<name>.waker
+        "wakers": {"*": dict.fromkeys(WAKER_FIELDS)},
     },
     "mqtt": {"host": None, "port": None, "tls": None, "username": None, "password": None, "password_env": None, "password_file": None,
              "base_topic": None, "discovery_prefix": None, "interval_s": None},
@@ -107,7 +113,7 @@ SCHEMA = {
         "gpu_guard": {"enabled": None, "throttled_max_inflight": None, "score_penalty": None, "require_fresh_status": None},
         "agent_update": {"enabled": None, "canary": None, "canary_clean_h": None, "public_key": None},
         "ollama_update": {"enabled": None, "canary": None, "canary_clean_h": None, "window_start": None, "window_end": None,
-                          "timezone": None, "check_interval_h": None, "release_url": None},
+                          "timezone": None, "check_interval_h": None, "release_url": None, "release_source": None},
         "upstream_window": {"enabled": None, "window_start": None, "window_end": None, "timezone": None, "idle_hold_s": None},
     },
     "models": {"*": {"weights_gib": None, "kv_gib_per_1k": None, "capabilities": None, "source": None, "note": None, "measured_at": None,
@@ -120,7 +126,8 @@ SCHEMA = {
                      # since 0.6.5: max concurrent requests per node (qwen3.8: 1, Ollama cannot parallelize qwen35)
                      "max_parallel": None}},
     "nodes": {"*": {"ollama": None, "vram_total_gib": None, "wol": None, "weight": None, "mac": None, "foreign_vram_baseline_gib": None,
-                    "gpu": None, "ollama_tls_fingerprint": None, "ollama_tls_cert": None, "max_inflight": None}},
+                    "gpu": None, "ollama_tls_fingerprint": None, "ollama_tls_cert": None, "max_inflight": None,
+                    "waker": None}},
     "roles": {"*": {"exposed_as": None, "tiers": [_TIER], "latency_first": None, "priority": None, "canary": _CANARY, "shadow": _CANARY,
                     "options": dict.fromkeys(ROLE_OPTIONS), "system_append": None}},
     # Decision Engine (2026-09-16): Auto-role, whose role selects a chain of engines (decision/__init__.py)
@@ -325,12 +332,18 @@ class Config:
                                        f"memory_scopes.{grant['scope']}.writers lists it")
         self.mqtt = c.get("mqtt") or None   # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
         self._parse_wol(r.get("wol") or {})
+        self.wakers = parse_wakers(r.get("wakers"))
+        if failed(self.wakers):
+            return self.wakers
         for step in (lambda: self._parse_modes(c["modes"]), lambda: self._parse_models(c.get("models") or {})):
             if failed(problem := step()):
                 return problem
         bad_fp = [n for n, spec in c["nodes"].items() if spec.get("ollama_tls_fingerprint") and not tls_fingerprint(spec["ollama_tls_fingerprint"])]
         if bad_fp:
             return invalid(f"nodes.{bad_fp[0]}.ollama_tls_fingerprint: SHA-256 expected (64 hex digits, colons allowed)")
+        for name, spec in c["nodes"].items():
+            if failed(problem := check_waker_choice((spec or {}).get("waker"), self.wakers, f"nodes.{name}.waker")):
+                return problem
         self.nodes = c["nodes"]
         if failed(problem := self._parse_roles(c["roles"])):
             return problem
@@ -602,7 +615,15 @@ class Config:
                               "window_end": str(ou.get("window_end", _d("modes.ollama_update.window_end")) or ""),
                               "timezone": str(ou.get("timezone", _d("modes.ollama_update.timezone")) or ""),
                               "check_interval_h": float(ou.get("check_interval_h", _d("modes.ollama_update.check_interval_h"))),
-                              "release_url": str(ou.get("release_url", _d("modes.ollama_update.release_url")) or "")}
+                              "release_url": str(ou.get("release_url", _d("modes.ollama_update.release_url")) or ""),
+                              "release_source": ou.get("release_source", _d("modes.ollama_update.release_source"))}
+        # ADR-0117: github = the GitHub API's release description (default, as before); document = a neutral release
+        # document at release_url, fetched under the transport rules of ADR-0124 (final HTTPS URL, no redirect)
+        if self.ollama_update["release_source"] not in RELEASE_SOURCES:
+            return invalid(f"modes.ollama_update.release_source must be one of {list(RELEASE_SOURCES)}")
+        if self.ollama_update["release_source"] == "document":
+            if failed(url := egress_url(self.ollama_update["release_url"], "modes.ollama_update.release_url")):
+                return url
         if self.ollama_update["timezone"]:
             import zoneinfo
             # Only check where a timezone database exists: the local schema check in deploy.py runs on Windows Python

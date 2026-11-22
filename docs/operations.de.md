@@ -181,6 +181,33 @@ nie den Code, und seit Agent 0.31.0 keine ältere: Ein Auftrag unter dem install
 abgelehnt, ausser die Konfiguration des Knotens setzt `ollama_update.allow_downgrade: true` für ein bewusstes Zurückgehen
 (ADR-0073). Vorerst nur Windows-Knoten; die Linux-Archive sind tar.zst.
 
+**Release-Quelle** (Router 0.41.0, ADR-0117): `modes.ollama_update.release_source` wählt, woher der Router die neueste
+Version erfährt. `github` (Standard) liest wie bisher die GitHub-API unter `release_url`. `document` liest unter
+`release_url` ein neutrales Release-Dokument, etwa von einem Spiegel oder einem internen Verzeichnis ohne GitHub-Zugang:
+
+```json
+{"version": "0.35.1",
+ "files": {"windows/amd64": {"url": "https://mirror.example.net/ollama/v0.35.1/ollama-windows-amd64.zip",
+                             "sha256": "<64 Hex-Ziffern>", "size": 1900000000}}}
+```
+
+Die Regeln sind streng (ADR-0124): endgültige HTTPS-URL (einfaches HTTP nur an `127.0.0.1`/`::1`), keine Umleitung,
+höchstens 64 KiB, 20 s, `version` in der Versionsschreibweise des Agenten, `sha256` mit 64 Hex-Ziffern, `size` in Byte,
+und jede `url` endet auf den Archivnamen, den der Agent für diese Plattform erwartet. Plattformen ohne Agent-Archiv werden
+übersprungen; ein fehlerhafter Eintrag für eine bekannte Plattform verwirft das ganze Dokument, und der Router behält die
+zuletzt bekannte Version (ein Problem nach drei Tagen ohne erfolgreiche Prüfung). Das Dokument nennt nur die Version
+und die erwarteten Hashes. Der Agent lädt weiterhin von seiner eigenen Quelle `ollama_update.source` im Layout
+`<source>v<version>/<archiv>` und `<source>v<version>/sha256sum.txt` und lehnt einen Auftrag ab, dessen Hash nicht zur
+`sha256sum.txt` dieser Quelle passt. Für einen Spiegel zeigen also beide Seiten auf ihn: der Router auf das Dokument, jeder
+Agent mit `ollama_update.source` auf das Verzeichnis. Am Agenten ändert sich nichts.
+
+**Wecken im Protokoll:** Jeder Weckversuch erscheint im Entscheidungsprotokoll als Ereignis `wol` mit dem Feld `waker`
+(`wol` oder dem Namen aus `router.wakers`); das Journal schreibt `WOL <knoten> (<mac>)` oder `wake via <wecker> <knoten>
+(<host> HTTP <status>)`. Konnte ein Wecker nichts senden, steht dort `wake <knoten> via <wecker>: ... (<art>)` mit einer festen
+Art: `wake_no_mac`, `wake_send_failed`, `wake_unknown_waker`, `wake_secret_missing`, `wake_unreachable`, `wake_redirect`,
+`wake_refused`; dann wartet der Router nicht, sondern antwortet sofort mit 503. Konfiguration:
+[configuration.de.md](configuration.de.md#knoten-wecken).
+
 ## Schlüsselwechsel
 
 Der Signierschlüssel der Agenten lässt sich ohne Lücke wechseln

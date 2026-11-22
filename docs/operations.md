@@ -177,6 +177,31 @@ since agent 0.31.0 no older version: an order below the installed Ollama (or a p
 configuration sets `ollama_update.allow_downgrade: true` for a deliberate rollback (ADR-0073). Windows nodes only for now;
 Linux archives are tar.zst.
 
+**Release source** (router 0.41.0, ADR-0117): `modes.ollama_update.release_source` selects where the router learns the
+latest version. `github` (default) reads the GitHub API at `release_url` as before. `document` reads a neutral release
+document at `release_url`, for example from a mirror or an internal repository without GitHub access:
+
+```json
+{"version": "0.35.1",
+ "files": {"windows/amd64": {"url": "https://mirror.example.net/ollama/v0.35.1/ollama-windows-amd64.zip",
+                             "sha256": "<64 hex digits>", "size": 1900000000}}}
+```
+
+The rules are strict (ADR-0124): final HTTPS URL (plain HTTP only to `127.0.0.1`/`::1`), no redirect, at most 64 KiB,
+20 s, `version` in the agent's version grammar, `sha256` with 64 hex digits, `size` in bytes, and every `url` ends in the
+archive name the agent expects for that platform. Platforms without an agent archive are skipped; a malformed entry for a
+known platform discards the whole document and the router keeps the last known version (a problem is raised after three
+days without a successful check). The document names only the version and the expected hashes. The agent still downloads from
+its own source `ollama_update.source` in the layout `<source>v<version>/<archive>` and `<source>v<version>/sha256sum.txt`
+and refuses an order whose hash does not match that source's `sha256sum.txt`. For a mirror both sides therefore point at it:
+the router at the document, each agent with `ollama_update.source` at the directory. Nothing changes on the agent.
+
+**Waking in the log:** every wake attempt appears in the decision log as event `wol` with the field `waker` (`wol` or the
+name from `router.wakers`); the journal writes `WOL <node> (<mac>)` or `wake via <waker> <node> (<host> HTTP <status>)`. If a
+waker could not send anything, it writes `wake <node> via <waker>: ... (<kind>)` with a fixed kind: `wake_no_mac`,
+`wake_send_failed`, `wake_unknown_waker`, `wake_secret_missing`, `wake_unreachable`, `wake_redirect`, `wake_refused`; the
+router then does not wait but answers 503 at once. Configuration: [configuration.md](configuration.md#waking-nodes).
+
 ## Key rotation
 
 The agent signing key can be rotated without a gap ([ADR-0058](adr/0058-rotate-the-agent-signing-key-with-several-trusted-keys.md)):

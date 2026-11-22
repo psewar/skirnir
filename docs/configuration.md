@@ -179,6 +179,50 @@ roles:
   duration, waiting time, tokens, thinking, tool count, client, role, outcome - no prompt contents. A separate file, so the
   decision log keeps its window; it rotates at 20 MB. The response never waits for the classification.
 
+## Waking nodes
+
+When no candidate is left for a request, the router may wake one offline node that knew the model and then route the
+request again (router 0.41.0, ADR-0117). A node takes part when its policy or static entry says `wol: true` (the name stays
+from the Wake-on-LAN-only days); `waker` says how. The waiting is the same for every waker: the router polls the node every
+2 s for up to `router.wol.wait_up_s` (90 s), and tries the same node again only after `router.wol.cooldown_s` (300 s). A
+waker that reports *sent* only means the signal left the router; the poll decides whether the node came up.
+
+| Waker | What it does | Needs |
+|---|---|---|
+| `wol` (built in, default) | UDP magic packet to each of `router.wol.broadcast_addresses`, port 9, again every `retry_interval_s` while waiting | the node's MAC (from the agent or the policy), the router in the same broadcast domain |
+| `http_webhook` | one `POST` with the fixed JSON body `{"event": "wake", "node": "<name>", "mac": "<mac or null>"}` per attempt | a configured final URL; optional bearer token |
+
+```yaml
+router:
+  wakers:
+    plug:                                  # any name except wol
+      kind: http_webhook
+      url: https://automation.example.net/api/webhook/skirnir-wake
+      token_env: SKIRNIR_WAKE_TOKEN        # optional; the token comes from the environment (secrets.env)
+      timeout_s: 10                        # whole call, 1-60 s
+      repeat: false                        # true = send again every router.wol.retry_interval_s
+nodes:
+  pc-example: { wol: true, waker: plug }   # a registered node takes this as its base; the policy key waker overrides it
+```
+
+- **Where the webhook goes:** a Home Assistant webhook trigger (`/api/webhook/<id>`) that switches a smart plug or calls
+  `wake_on_lan.send_magic_packet` in another subnet, an ioBroker or openHAB rule behind an HTTP endpoint, or a controller
+  of your own. The body names the node, so one endpoint can serve several nodes.
+- **Transport rules** (ADR-0124, the same as for cloud providers in ADR-0048): HTTPS, plain HTTP only to literal
+  `127.0.0.1` or `::1`; no credentials, query or fragment in the URL; a redirect is refused, not followed (enter the final
+  URL); `timeout_s` bounds the whole call, and a slow receiver only delays the request that waits for this node. The token is
+  sent as `Authorization: Bearer ...`; if `token_env` is set but the variable is empty, nothing is sent. The log names only
+  the receiver's host, never the URL path (a Home Assistant webhook ID is a secret).
+- **`repeat`** stays off for anything that toggles: a second "press the power button" would switch the machine off again.
+  Turn it on for idempotent calls ("plug on") if the receiver may miss the first one.
+- **Choosing per node:** `nodes.<name>.waker` in the configuration file, or the policy key `waker` through the admin API
+  (`POST /admin/nodes/<fp>/policy {"waker": "plug"}`, `null` returns to `wol`). The policy accepts only `wol` or a name
+  from `router.wakers`; destinations and secret references live only in the configuration file. An unknown name in the
+  configuration is refused at load.
+- **No command waker:** the router runs unprivileged and executes nothing that the configuration names (ADR-0118). Power-on
+  through a BMC (IPMI, Redfish) or a cloud API goes through a webhook receiver that holds those credentials; a native `ipmi`
+  waker is not implemented yet.
+
 ## Auto role: the decision engine
 
 A client that does not know which role fits asks `auto:latest`. A chain of engines picks one of the configured roles; uncertain

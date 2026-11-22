@@ -998,6 +998,14 @@ def main():
         st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"mac": "AA-BB-CC-DD-EE-01", "busy_foreign_gib": None, "busy_gpu_util_pct": None})
         check("Policy: MAC is normalized", st == 200 and json.loads(raw)["policy"].get("mac") == "aa:bb:cc:dd:ee:01", raw.decode()[:80])
         http(C + f"/admin/nodes/{fpb}/policy", {"mac": None})
+        # ADR-0117/0124: the policy picks a waker configured in router.wakers by name, never a destination
+        st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"waker": "https://elsewhere.example.net/hook"})
+        check("Policy: waker that is not configured -> 400", st == 400 and "waker" in raw.decode(), raw.decode()[:80])
+        st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"waker": "e2e-hook"})
+        check("Policy: configured waker accepted and shown on the node", st == 200 and state()["nodes"]["big"].get("waker") == "e2e-hook",
+              raw.decode()[:80])
+        http(C + f"/admin/nodes/{fpb}/policy", {"waker": None})
+        check("Policy: waker removed -> Wake-on-LAN again", state()["nodes"]["big"].get("waker") == "wol")
         for _ in range(12):
             if state()["nodes"].get("big", {}).get("state") not in (None, "offline"):
                 break

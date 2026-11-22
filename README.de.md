@@ -33,7 +33,8 @@ und [Anleitung für PR-Review/CI](design/continuous-security-review.md). Jeder P
 - **Rollen statt Modellnamen.** Eine Rolle ist eine Rangliste von Stufen (`Modell @ num_ctx`, optional `busy_ok`). Der Router
   nimmt die beste Stufe, die ein Knoten jetzt bedienen kann; ein schon geladenes Modell gewinnt („warm zuerst“).
 - **Mehrere GPU-Knoten**, Windows oder Linux, angebunden über einen kleinen **Agenten** (Go), der einen ausgehenden Tunnel zum
-  Router hält. Kein offener Port am Knoten, kein Zertifikat, keine feste IP. Wake-on-LAN für schlafende Knoten. Ein Rechner
+  Router hält. Kein offener Port am Knoten, kein Zertifikat, keine feste IP. Wake-on-LAN oder ein Webhook (Smart-Plug,
+  Hausautomation) für schlafende Knoten. Ein Rechner
   ohne NVIDIA-GPU kommt als CPU-Knoten dazu, bemessen nach seinem Hauptspeicher
   ([docs/install-agent.de.md](docs/install-agent.de.md#knoten-ohne-nvidia-gpu)).
 - **Busy-Erkennung.** Belegt ein Spiel die GPU (fremdes VRAM, Auslastung), laufen dort nur noch `busy_ok`-Stufen; große Modelle
