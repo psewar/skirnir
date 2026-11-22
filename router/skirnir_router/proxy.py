@@ -17,10 +17,10 @@ from . import admission, auth, fallback_observation, cloud, decision, context_ch
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
 from .outcome import Problem, bad_gateway, failed
+from .shape import OllamaShape
 
 STREAM_PATHS = ("/api/chat", "/api/generate")   # only here does Ollama stream line-by-line NDJSON
 CONNECT_TIMEOUT_S = 5                            # Connection setup to the node; the response may take request_timeout_s
-NDJSON = "application/x-ndjson"
 UPSTREAM_ERRORS = (ClientError, asyncio.TimeoutError, OSError)
 CLIENT_FAULT_STATUSES = (400, 404, 413, 422)     # Cloud errors that another node cannot handle better -> to the client
 
@@ -55,7 +55,7 @@ async def handle_infer(request):
 
 async def route_request(request, path, body, shape=None, err=ollama_error):
     """Resolve model (role or specific), select node, relay request. `shape` formats the response
-    (None = Ollama format 1:1, otherwise e.g. OpenAI), `err` builds error responses in the client's format.
+    (None = Ollama format 1:1 via shape.OllamaShape, otherwise e.g. OpenAI), `err` builds error responses in the client's format.
     Stage 6: with Idempotency-Key (only without Stream) a repeat returns the cached response."""
     # Memory requests must recheck live credentials/project policy on every call.
     # Do not put scoped recall results into the legacy unscoped response cache.
@@ -433,7 +433,8 @@ class _Relay:
 
     def __init__(self, request, path, body, role, tier, ctx, node, tier_idx, shape, req):
         self.request, self.path, self.role, self.tier, self.node = request, path, role, tier, node
-        self.tier_idx, self.shape, self.req = tier_idx, shape, req
+        # ADR-0120: every request has a shape; the native format is one too, so the relay never asks `shape is None`
+        self.tier_idx, self.shape, self.req = tier_idx, shape if shape is not None else OllamaShape(), req
         self.model, self.exposed = tier["model"], role["exposed"]
         self.out, self.ctx = _backend_body(body, role, tier, ctx, node)
         if req.session:
@@ -468,7 +469,7 @@ class _Relay:
                 allowed = service is not None and service.current(self.req.memory_scope, read=self.req.memory["recall"], write=self.req.memory["retain"])
                 if not allowed:
                     self.outcome = "error"
-                    return self.shape.error(403, "memory policy changed") if self.shape else ollama_error(403, "memory policy changed")
+                    return self.shape.error(403, "memory policy changed")
             if self.is_cloud:   # Stage 5: Provider instead of node
                 return await self._via_cloud()
             if self.node.standby_switch(self.model):
@@ -483,7 +484,7 @@ class _Relay:
         except (*UPSTREAM_ERRORS, ConnectionResetError) as e:  # exception-ok: network to the node/client mid-answer
             # Error after the first byte: nothing left to save, connection ends
             log.warning("stream from %s aborted: %s", self.node.name, e)
-            if self.resp is not None and hasattr(self.shape, "stream_error"):
+            if self.resp is not None and self.shape.reports_abort_in_stream:
                 return await self._end_with_error(502, f"upstream {self.node.name} aborted")
             # exception-ok: aiohttp's way to end a handler with 502 when no error event fits the client's format
             raise web.HTTPBadGateway(text=json.dumps({"error": f"upstream {self.node.name} aborted"})) from e
@@ -503,11 +504,10 @@ class _Relay:
         node.last_used[model] = self.t0   # for the residency rule: is the evictee still needed?
         if not self.warm:
             node.announce_load(model, self.ctx or self.tier["num_ctx"])
-        via = self.shape.name if self.shape else "ollama"
+        via = self.shape.name
         self.info = self.req.info(self.role, self.tier_idx, self.tier, self.ctx, node, self.warm, via, self.request.get("client"))
         self.headers = request_mod.headers_for(self.info)
-        if hasattr(self.shape, "bind"):   # Anthropic: Message-ID = Request-ID, model = Name known to the client
-            self.shape.bind(self.req.request_id, self.exposed)
+        self.shape.bind(self.req.request_id, self.exposed)   # Anthropic: Message-ID = Request-ID, model = Name known to the client
         self.obs_task = None if self.context_sensitive else fallback_observation.begin(self.path, self.out)
         request_mod.remember_session(self.req.session_id, node.name, model)
         reason = "loaded" if self.warm else "cold"
@@ -550,7 +550,7 @@ class _Relay:
         fallback_observation.finish(self.obs_task, {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "request_id": self.req.request_id, "client": self.request.get("client"),
             "role": self.role["name"], "is_role": _is_role(self.role), "model": model, "node": node.name, "path": self.path,
-            "via": self.shape.name if self.shape else "ollama", "stream": self.stream, "priority": self.req.priority,
+            "via": self.shape.name, "stream": self.stream, "priority": self.req.priority,
             "think": self.out.get("think"), "tools": len(self.out.get("tools") or []), "messages": len(self.out.get("messages") or []),
             "num_ctx": self.ctx, "warm": self.warm, "queued_s": round(self.req.queued_ms / 1000.0, 2), "duration_s": round(elapsed, 2),
             "ttft_s": round(self.ttft_s, 2) if self.ttft_s else None, "prompt_tokens": self.ptoks, "output_tokens": self.ctoks,
@@ -595,7 +595,7 @@ class _Relay:
         stream start after `keepalive_s` without a response and then pings; from then on there is no fallback candidate.
         Fast errors (connection, 5xx) almost always come before and retain the fallback."""
         call = nodes.nreq(self.node, "post", self.path, json=self.out, timeout=timeout)
-        every = getattr(self.shape, "keepalive_s", 0) if self.stream else 0
+        every = self.shape.keepalive_s if self.stream else 0
         if not every:
             return await call
         task = asyncio.ensure_future(_awaited(call))
@@ -630,8 +630,7 @@ class _Relay:
         self.outcome = self.outcome or "error"
         transport = self.request.transport
         if transport is not None and not transport.is_closing():
-            data = self.shape.stream_error(status, msg) if self.shape else (json.dumps({"error": msg}) + "\n").encode()
-            await self.resp.write(data)
+            await self.resp.write(self.shape.stream_error(status, msg))
             await self.resp.write_eof()
         return self.resp
 
@@ -645,15 +644,7 @@ class _Relay:
 
     async def _pass_through_error(self, upstream):
         """4xx and 501 ("does not support embeddings": model cannot do that, another node cannot either) -> to the client."""
-        txt = await upstream.read()
-        if not self.shape:
-            return web.Response(status=upstream.status, body=txt, content_type="application/json", headers=self.headers)
-        try:
-            parsed = json.loads(txt)
-        except ValueError:  # exception-ok: upstream data; json.loads is the only full validity check
-            parsed = None
-        msg = (parsed.get("error") if isinstance(parsed, dict) else None) or txt.decode(errors="replace")
-        return self.shape.error(upstream.status, str(msg))
+        return self.shape.pass_through(upstream.status, await upstream.read(), self.headers)
 
     async def _answer_problem(self, problem):
         """Managed-turn problem: error event inside an already open stream, otherwise an error response."""
@@ -676,7 +667,7 @@ class _Relay:
         except ValueError:  # exception-ok: upstream data; json.loads is the only full validity check
             if self.managed_capture is not None:
                 return await self._answer_problem(bad_gateway("invalid managed upstream JSON"))
-            if self.shape:
+            if not self.shape.verbatim:   # an Ollama client gets the body as the node sent it
                 return self.shape.error(502, f"upstream {self.node.name}: invalid json")
         else:
             if isinstance(j, dict):
@@ -695,7 +686,7 @@ class _Relay:
             else:
                 if self.managed_capture is not None:
                     return await self._answer_problem(bad_gateway("invalid managed upstream response"))
-                data = self.shape.complete(j) if self.shape else json.dumps(j).encode()
+                data = self.shape.complete(j)
         self.outcome = "ok"
         return web.Response(status=200, body=data, content_type="application/json", headers=self.headers)
 
@@ -721,21 +712,11 @@ class _Relay:
                     terminal = chunk
                     continue  # Hold success until EOF and the database commit.
             if chunk is None:            # no JSON: forward raw in Ollama format, omit in foreign format
-                chunk = b"" if self.shape else line
+                chunk = self.shape.raw_line(line)
             if chunk:
                 await resp.write(chunk)
         self._note_stream_rescue(rescuer)
-        if self.managed_capture is not None:
-            problem = await self.managed_turn.commit(self.managed_capture)
-            if failed(problem):
-                return await self._answer_problem(problem)
-            if terminal:
-                await resp.write(terminal)
-        if self.shape:
-            await resp.write(self.shape.tail())
-        await resp.write_eof()
-        self.outcome = self.outcome or "ok"   # an error in the middle of the stream (_stream_error) remains an error
-        return resp
+        return await self._close_stream(resp, terminal)
 
     def _render_chunks(self, line, rescuer, first_at):
         """Bring an NDJSON chunk into the client format. None = no JSON. The rescuer can hold back a chunk
@@ -764,7 +745,7 @@ class _Relay:
                 self._record_stats(jj, ttft=first_at - self.t0 - (jj.get("load_duration") or 0) / 1e9)
                 if self.req.explicit:
                     jj["routing"] = self.info
-            out += (self.shape.chunk(jj) if self.shape else (json.dumps(jj) + "\n").encode()) or b""
+            out += self.shape.chunk(jj) or b""
         return out
 
     def _stream_error(self, line, msg):
@@ -779,11 +760,8 @@ class _Relay:
                     self.req.request_id, safe_message)
         state.remember({"event": "stream_error", "node": self.node.name, "model": self.model, "role": self.role["name"],
                         "client": self.request.get("client"), "request_id": self.req.request_id, "error": safe_message})
-        if not self.shape:   # Ollama clients get the line verbatim, as from Ollama itself
-            return line if line.endswith(b"\n") else line + b"\n"
-        if hasattr(self.shape, "stream_error"):
-            return self.shape.stream_error(502, f"upstream {self.node.name}: {msg}")
-        return b""
+        # Ollama clients get the line verbatim, as from Ollama itself; other formats their error event (or nothing)
+        return self.shape.upstream_error_line(line, 502, f"upstream {self.node.name}: {msg}")
 
     # -- Cloud (stage 5) --
 
@@ -900,7 +878,7 @@ class _Relay:
                 j["model"] = self.exposed
                 if j.get("done") and self.req.explicit:
                     j["routing"] = self.info
-                line = self.shape.chunk(j) if self.shape else (json.dumps(j) + "\n").encode()
+                line = self.shape.chunk(j)
                 if self.managed_capture is not None and self.managed_capture.done:
                     terminal = line   # hold success until the commit
                     continue
@@ -910,29 +888,35 @@ class _Relay:
             if resp is None:   # nothing sent yet -> next candidate
                 log.warning("%s: %s -> HTTP %s: %s", self.node.name, self.model, e.status, e)
                 return self._fail("error", f"HTTP {e.status}")
-            if hasattr(self.shape, "stream_error"):
+            if self.shape.reports_abort_in_stream:
                 return await self._end_with_error(502, f"{self.node.name} aborted: {e}")
             # exception-ok: aiohttp's way to end a handler with 502 when no error event fits the client's format
             raise web.HTTPBadGateway(text=json.dumps({"error": f"{self.node.name} aborted: {e}"})) from e
-        if resp is None:   # leerer Stream: trotzdem sauber abschließen
+        if resp is None:   # empty stream: still end cleanly
             resp = await self._open_stream()
+        return await self._close_stream(resp, terminal, cinfo)
+
+    async def _close_stream(self, resp, terminal, cinfo=None):
+        """End of a relayed stream (Ollama node, cloud, OpenAI-compatible node): a managed turn is committed before its
+        held final chunk goes out, then the format's tail. `cinfo` (translated backends) carries the usage, filled only
+        once the stream is through. An error in the middle of the stream (_stream_error) remains an error."""
         if self.managed_capture is not None:
             problem = await self.managed_turn.commit(self.managed_capture)
             if failed(problem):
                 return await self._answer_problem(problem)
             if terminal:
                 await resp.write(terminal)
-        if self.shape:
-            await resp.write(self.shape.tail())
+        tail = self.shape.tail()
+        if tail:
+            await resp.write(tail)
         await resp.write_eof()
-        self.ptoks, self.ctoks = cinfo["p_tok"], cinfo["c_tok"]
-        self.outcome = "ok"
+        if cinfo is not None:
+            self.ptoks, self.ctoks = cinfo["p_tok"], cinfo["c_tok"]
+        self.outcome = self.outcome or "ok"
         return resp
 
     def _client_error(self, status, msg):
-        if self.shape:
-            return self.shape.error(status, msg)
-        return web.Response(status=status, body=json.dumps({"error": msg}).encode(), content_type="application/json", headers=self.headers)
+        return self.shape.client_error(status, msg, self.headers)
 
     # -- Gemeinsames --
 
@@ -941,11 +925,12 @@ class _Relay:
         (Anthropic: message_start) send it immediately."""
         if self.resp is not None:
             return self.resp
-        resp = web.StreamResponse(status=200, headers={"Content-Type": self.shape.stream_content_type if self.shape else NDJSON, **self.headers})
+        resp = web.StreamResponse(status=200, headers={"Content-Type": self.shape.stream_content_type, **self.headers})
         await resp.prepare(self.request)
         self.resp = resp
-        if hasattr(self.shape, "head"):
-            await resp.write(self.shape.head())
+        head = self.shape.head()
+        if head:   # an empty write would flush the headers early, which a format without a head never did
+            await resp.write(head)
         return resp
 
     def _finalize_json(self, j, force_model=False):
@@ -954,7 +939,7 @@ class _Relay:
             j["model"] = self.exposed
         if self.req.explicit:
             j["routing"] = self.info
-        return self.shape.complete(j) if self.shape else json.dumps(j).encode()
+        return self.shape.complete(j)
 
     def _record_stats(self, j, ttft):
         """Adopt Ollama counters (eval_count ...) for speed stats and token metrics."""

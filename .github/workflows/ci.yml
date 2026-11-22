@@ -104,6 +104,7 @@ jobs:
       - run: python test/selftest_poll_yields_to_push.py
       - run: python test/selftest_cloud_reasoning.py
       - run: python test/selftest_privacy_check.py
+      - run: python test/selftest_shape.py
       - run: python test/integration_live_memory.py
       - run: python test/benchmark_context.py
       - name: Check added lines for common public-data leaks

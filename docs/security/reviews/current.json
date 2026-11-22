@@ -2,27 +2,72 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "875082c54dffdaeab321f6d0240ed9bf8effde94",
- "change_digest": "9a215ddb35514964393362b53ebe5eaae28ed71cf3a2a59d8670a7779282a0dd",
+ "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
+ "change_digest": "3dca31b29e4b12094de43796c7eeead0b93976cab724f575595a42f3e9aacc8b",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0100-the-prompt-rate-counts-only-the-tokens-ollama-processed.md",
+  "docs/adr/0120-response-shapes-share-a-base-class-with-default-methods.md",
   "docs/adr/README.md",
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "router/skirnir_router/anthropic_api.py",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/openai_api.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/shape.py",
+  "test/selftest_cloud_final_payload.py",
+  "test/selftest_institutional_provider.py",
+  "test/selftest_privacy_check.py",
+  "test/selftest_shape.py",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
-  "TM-15"
+  "TM-04",
+  "TM-05",
+  "TM-06",
+  "TM-09",
+  "TM-15",
+  "TM-16"
  ],
  "boundaries": [
+  "B1",
+  "B4",
+  "B6",
   "B9"
  ],
- "summary": "Documentation only: ADR-0100 status proposed -> accepted on the operator's decision of 2026-11-19 (after the merge and rollout of router 0.34.1), with that note in the decision outcome; the ADR index regenerated, and the released CHANGELOG row v0.39.1 extended to 'ADR-0100 proposed, accepted 2026-11-19' (the release notes keep 'proposed', which was true at release time). No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
+ "summary": "Refactoring of the response relay (router 0.37.2, ADR-0120 proposed), no intended behaviour change. A Shape base class (new module shape.py) with default methods and two stated facts (verbatim, reports_abort_in_stream) replaces hasattr/getattr/`shape is None` checks in proxy._Relay; the native Ollama format becomes OllamaShape; the OpenAI and Anthropic shapes inherit from it; the end of a relayed stream is one helper (_close_stream) for Ollama nodes, cloud providers and OpenAI-compatible nodes. Traced: client authentication, concrete-model rights and routing-block checks run in middleware and _prepare before route_request and are untouched (B1, TM-04). The live memory-policy recheck at the start of _Relay.run still refuses with 403 in every client format before any node or provider is contacted (B4, TM-09). Managed turns still commit before the held success chunk is written on all three streaming paths; the helper keeps the order commit -> terminal chunk -> tail -> EOF and returns the problem response on a failed commit, as both previous blocks did (TM-09). The unary paths keep their own managed handling; the cloud and OpenAI-node unary completions were deliberately not merged because a managed turn on a cloud node cannot be ruled out from the relay alone. The cloud content check, redaction and final payload in _via_cloud and cloud.run are unchanged; no new route, destination or data flow to a provider (B6, TM-05, TM-06). Error handling: a node's 4xx still reaches native clients raw and other clients as the extracted message in their format; Ollama's mid-stream error line, unparsable lines and unparsable unary bodies reach native clients verbatim and are dropped or converted for other formats exactly as before; context-sensitive log redaction and the journal entries are unchanged, and no log line was added (B9, TM-15). The workflow change only adds the new self-test step (TM-16). A normalised byte comparison of 40 path/answer combinations (native chat and generate, OpenAI chat and completions, Anthropic messages; stream, unary, unparsable, node 4xx) between the base and this change was identical; the new self-test's wire assertions also pass against the base code.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/check_adr_index.py",
+   "command": "python test/selftest_shape.py",
    "result": "passed",
-   "evidence": "ADR index ok: 100 ADRs (0100 accepted)."
+   "evidence": "13 tests OK: Shape defaults, facts per format, abstract methods enforced, native bytes for unary, stream, unparsable lines, Ollama error line, node 4xx; the 8 wire tests also pass against the origin/main router code."
+  },
+  {
+   "command": "python test/selftest_privacy_check.py && python test/selftest_institutional_provider.py && python test/selftest_cloud_final_payload.py",
+   "result": "passed",
+   "evidence": "cloud content check, institutional provider wiring and final cloud payload unchanged (hand-built relays now carry OllamaShape)."
+  },
+  {
+   "command": "python test/selftest_context.py && python test/selftest_memory.py && python test/selftest_interoperability.py && python test/selftest_anthropic_messages.py && python test/selftest_openai_node.py",
+   "result": "passed",
+   "evidence": "managed turns persist before success on native, OpenAI and Anthropic, unary and stream; memory policy and OpenAI-node paths unchanged."
+  },
+  {
+   "command": "wsl: all run steps of ci.yml jobs python + sessions-postgres (local PostgreSQL 16)",
+   "result": "passed",
+   "evidence": "77 steps ok including PostgreSQL integrations; the 5 environment-only failures in WSL (pinned references and sbom need git on the Windows worktree, packaging missing, no pwsh) pass on Windows: check_pinned_references 0 failures, selftest_pydeps + lock check 0 problems, selftest_sbom all passed, both .ps1 self-tests all passed. check_adr_index: see limitations."
+  },
+  {
+   "command": "python test/run_tests.py (end-to-end suite via the lock wrapper)",
+   "result": "passed",
+   "evidence": "0 failures, STATE: passed (native, OpenAI, Anthropic and cloud paths)."
+  },
+  {
+   "command": "ruff check . && python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "All checks passed; control flow ok, 0 findings."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -36,6 +81,9 @@
   }
  ],
  "limitations": [
-  "Documentation only; the behaviour it records was reviewed in the record of PR 171 (router 0.34.1)."
+  "Review by the authoring agent, not an independent reviewer.",
+  "python test/check_adr_index.py reports a numbering gap (0101-0119) because ADR-0120 was assigned ahead of ADRs in other open pull requests; it passes once those are merged and this branch is rebased. The index row itself is generated.",
+  "The byte comparison covers native, OpenAI and Anthropic client formats against a synthetic Ollama upstream; cloud-provider and OpenAI-compatible-node streams are covered by the existing self-tests and the end-to-end suite, not by a byte-for-byte comparison.",
+  "Pre-existing, unchanged and not security-relevant: a native client whose stream breaks off after the first byte gets the connection ended with HTTP 502 instead of an NDJSON error line; now stated as the fact reports_abort_in_stream = False."
  ]
 }
