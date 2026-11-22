@@ -18,7 +18,8 @@ RAM_SPILL_MIN_GIB = 0.05   # below this, size - size_vram is rounding, not layer
 
 # GPU guard: Agents before 0.20.0 report states, reasons, and field names in German (design/english-names.md). guard_english
 # translates on receipt so the router only sees English names; remove once all nodes are >= 0.20.0.
-GUARD_STATES = ("off", "unavailable", "normal", "high_load", "throttled", "recovery")
+# not_applicable (agent >= 0.36.0, ADR-0102): the node has no GPU, so there is nothing to guard - no problem.
+GUARD_STATES = ("off", "unavailable", "normal", "high_load", "throttled", "recovery", "not_applicable")
 GUARD_STATE_BEFORE_0_20 = {"aus": "off", "unverfuegbar": "unavailable", "hochlast": "high_load", "gedrosselt": "throttled",
                            "erholung": "recovery"}
 GUARD_FIELD_BEFORE_0_20 = {"quelle": "source", "grund": "reason", "warnungen": "warnings", "hochlast_s": "high_load_s", "zeit": "at"}
@@ -128,6 +129,10 @@ class Node(Breaker):
             if not self.set_fingerprint(fp):   # config.yaml validates format on load
                 log.error("node %s: invalid TLS fingerprint: %r - node stays unreachable", name, fp)
         self.vram_total_gib = float(spec.get("vram_total_gib", 0))
+        # Router 0.36.0 (ADR-0102): the agent reports gpu_present false when it runs without a GPU (gpu.probe). Such a node
+        # computes in main memory: models are sized by the RAM the agent reports, and there is no GPU busy detection.
+        # Missing = a GPU, as every agent before 0.36.0 had one.
+        self.gpu_present = spec.get("gpu_present") is not False
         self.mac = spec.get("mac")
         self.wol = bool(spec.get("wol", False))
         self.weight = int(spec.get("weight", 1))
@@ -400,6 +405,7 @@ class Node(Breaker):
         """Adopt facts/policy of a registered node (registration or policy change in the UI)."""
         if spec.get("vram_total_gib"):
             self.vram_total_gib = float(spec["vram_total_gib"])
+        self.gpu_present = spec.get("gpu_present") is not False
         if spec.get("mac"):
             self.mac = spec["mac"]
         self.wol = bool(spec.get("wol", self.wol))
@@ -484,10 +490,33 @@ class Node(Breaker):
         if changed:
             state.MQTT_DIRTY.append(True)
 
+    def reserve_gib(self, st=None):
+        """Memory kept free when sizing a model (modes.vram_reserve_gib per state). On a node without a GPU (ADR-0102) at
+        least modes.memory_pressure.min_free_gib as well: a load there must not push the node into memory pressure."""
+        reserve = state.CFG.reserve.get(st or self.state, 1.0)
+        if self.gpu_present:
+            return reserve
+        return max(reserve, state.CFG.memory_pressure["min_free_gib"])
+
+    def capacity_gib(self):
+        """Memory a model may occupy on the empty node: the card, or on a node without a GPU (ADR-0102) its main memory as
+        the agent reports it (memory.ram_total_gib). 0 = unknown."""
+        if self.gpu_present:
+            return self.vram_total_gib
+        total = (self.memory or {}).get("ram_total_gib")
+        return float(total) if isinstance(total, (int, float)) and not isinstance(total, bool) else 0.0
+
     def budget_gib(self, now, model):
         """What Ollama may occupy on this node: free VRAM + everything Ollama itself holds (will be
-        evicted or reused via Runner-Sharing as needed) - reserve. Foreign VRAM (desktop, game) does not count."""
-        reserve = state.CFG.reserve.get(self.state, 1.0)
+        evicted or reused via Runner-Sharing as needed) - reserve. Foreign VRAM (desktop, game) does not count.
+        Without a GPU (ADR-0102) the same in main memory: available RAM (agent fact memory.ram_available_gib) + what
+        Ollama holds (its loaded models' full size, apply_ollama_state) - reserve."""
+        reserve = self.reserve_gib()
+        if not self.gpu_present:
+            free = (self.memory or {}).get("ram_available_gib")
+            if self.gpu_known(now) and isinstance(free, (int, float)) and not isinstance(free, bool):
+                return free + self.ollama_vram_gib() - reserve
+            return self.capacity_gib() - reserve
         if self.gpu_known(now) and self.vram_free_gib is not None:
             return self.vram_free_gib + self.ollama_vram_gib() - reserve
         return self.vram_total_gib - reserve
@@ -578,6 +607,7 @@ class Node(Breaker):
                          if self.openai_upstream else None),
             "last_gen": self.last_gen, "last_prompt": self.last_prompt,
             "inflight": self.inflight, "gpu_known": bool(self.gpu_known(now)),
+            "gpu_present": self.gpu_present,   # 0.36.0 (ADR-0102): False = the node computes in main memory
             "gpu_util": self.gpu_util, "vram_free_gib": self.vram_free_gib,
             "vram_used_gib": self.vram_used_gib, "vram_total_gib": self.vram_total_gib, "foreign_vram_gib": round(self.foreign_vram_gib(), 2), "children_vram_gib": round(self.children_vram_gib, 2),
             "heartbeat_age_s": round(now - self.hb_ts, 1) if self.hb_ts else None,

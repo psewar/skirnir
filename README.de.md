@@ -19,9 +19,9 @@ Gebaut für ein Homelab: Home Assistant, Node-RED und lokale Agenten-Frameworks 
 die nicht rund um die Uhr laufen und nicht nur der KI gehören. Der Name: Skirnir ist in der nordischen Mythologie Freyrs Bote,
 der in fremde Reiche reitet, dort verhandelt und mit der Antwort zurückkehrt.
 
-**Stand:** Router 0.23.0, Agent 0.30.0 (siehe [Releases](https://github.com/psewar/skirnir/releases) und
-[CHANGELOG.md](CHANGELOG.md), das Tags auf Router- und Agent-Versionen abbildet), seit September 2026 in einem Homelab im
-Dauerbetrieb, ein Entwickler. Keine Stabilitätszusagen. Die Dokumentation gibt es auf Englisch und Deutsch, die Unter-READMEs
+**Stand:** seit September 2026 in einem Homelab im Dauerbetrieb, ein Entwickler. Die aktuellen Router- und
+Agent-Versionen stehen in den [Releases](https://github.com/psewar/skirnir/releases) und in der obersten Zeile von
+[CHANGELOG.md](CHANGELOG.md), das Tags auf Router- und Agent-Versionen abbildet. Keine Stabilitätszusagen. Die Dokumentation gibt es auf Englisch und Deutsch, die Unter-READMEs
 (Agent, Decision Engine) sind deutsch. Wer es nachbaut, sollte Python, systemd und Ollama kennen.
 
 Sichere Entwicklung: [Threat Model](docs/security/threat-model.de.md), [Risikoregister](docs/security/risk-register.json)
@@ -33,7 +33,9 @@ und [Anleitung für PR-Review/CI](design/continuous-security-review.md). Jeder P
 - **Rollen statt Modellnamen.** Eine Rolle ist eine Rangliste von Stufen (`Modell @ num_ctx`, optional `busy_ok`). Der Router
   nimmt die beste Stufe, die ein Knoten jetzt bedienen kann; ein schon geladenes Modell gewinnt („warm zuerst“).
 - **Mehrere GPU-Knoten**, Windows oder Linux, angebunden über einen kleinen **Agenten** (Go), der einen ausgehenden Tunnel zum
-  Router hält. Kein offener Port am Knoten, kein Zertifikat, keine feste IP. Wake-on-LAN für schlafende Knoten.
+  Router hält. Kein offener Port am Knoten, kein Zertifikat, keine feste IP. Wake-on-LAN für schlafende Knoten. Ein Rechner
+  ohne NVIDIA-GPU kommt als CPU-Knoten dazu, bemessen nach seinem Hauptspeicher
+  ([docs/install-agent.de.md](docs/install-agent.de.md#knoten-ohne-nvidia-gpu)).
 - **Busy-Erkennung.** Belegt ein Spiel die GPU (fremdes VRAM, Auslastung), laufen dort nur noch `busy_ok`-Stufen; große Modelle
   werden entladen und nach dem Spielen wieder vorgewärmt.
 - **Scheduler** mit Score (warm, Last, VRAM, Tempo, Fehlerrate), Circuit Breaker je Knoten und **Admission Control** mit
@@ -46,8 +48,9 @@ und [Anleitung für PR-Review/CI](design/continuous-security-review.md). Jeder P
   erste) Stufe in Rollen liegen, mit Datenklassen, Credential-Scan, Monatsbudget und Egress-Allowlist. Standardmäßig geht nichts
   in die Cloud.
 - **Client-Identitäten** auf dem Inferenz-Port (Bearer, Basic, Quell-IP), Rollen- und Modellsperren, Rate Limit, Audit-Log.
-- **Beobachtbar:** Prometheus-Endpunkt, Nutzung je Tag und Client, Entscheidungsprotokoll, Home-Assistant-Gerät per MQTT-Discovery,
-  Web-UI mit Live-Grafiken, Katalog, Rollen-Editor, Probierfeld und Lasttest.
+- **Beobachtbar:** Prometheus-Endpunkt mit Problemen als alarmierbaren Metriken, Nutzung je Tag und Client,
+  Entscheidungsprotokoll, Home-Assistant-Gerät per MQTT-Discovery, Web-UI mit Live-Grafiken, Katalog, Rollen-Editor,
+  Probierfeld und Lasttest.
 - **Betriebsfest:** Config-Schema mit Vorschlägen bei Tippfehlern, Idempotency-Key, Canary- und Shadow-Stufen je Rolle,
   Deploy-Manifest mit SHA-256, Ollama-Versionen und Modell-Digests je Knoten.
 - **TLS auf jeder Strecke**, sobald konfiguriert (siehe [Sicherheit](#sicherheit-das-wichtigste)), ein Prozess, ein Event-Loop,
@@ -188,7 +191,7 @@ Meldeweg für Sicherheitslücken: [SECURITY.md](SECURITY.md).
 | [docs/install-agent.de.md](docs/install-agent.de.md) | GPU-Knoten unter Windows und Linux, Ollama, Freigabe, Update-Schlüssel |
 | [docs/configuration.de.md](docs/configuration.de.md) | Client-Identitäten, Rollen und Stufen, Scheduler und Admission, Auto-Rolle, Cloud-Stufen |
 | [docs/clients.de.md](docs/clients.de.md) | Home Assistant, Node-RED, OpenAI- und Anthropic-Clients, Claude Code, der `routing`-Block |
-| [docs/operations.de.md](docs/operations.de.md) | Web-UI, Metriken, Home-Assistant-Entitäten, Agent- und Ollama-Updates, Schlüsselwechsel, Namen, Messwerte |
+| [docs/operations.de.md](docs/operations.de.md) | Web-UI, Metriken, Home-Assistant-Entitäten, Agent- und Ollama-Updates, Schlüsselwechsel, Sichern und Zurückspielen, Namen, Messwerte |
 | [docs/troubleshooting.de.md](docs/troubleshooting.de.md) | Statuscodes, wartende Agenten, TLS-Fehler, Logs, Gedächtnis-Zustände |
 | [docs/reference.de.md](docs/reference.de.md) | Schnittstellen, GPU-Schutz, optionale Gedächtnis- und Sitzungsfunktionen, Rerank, OpenAI-kompatible Knoten, Grenzen, Repo-Layout |
 | [docs/adr/](docs/adr/README.md) | Architecture Decision Records (englisch): warum Skirnir so gebaut ist |

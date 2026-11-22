@@ -65,6 +65,19 @@ nach dem Ende                          free -> einmal prewarm (Grund quiet_end);
 Der Zustand steht in `/admin/state` (`nodes.<name>.quiet`) und im Journal (`quiet`, `quiet_end`); er lebt nur im
 Speicher, ein Router-Neustart beendet ihn.
 
+Knoten ohne GPU (Router/Agent 0.36.0, [ADR-0102](../docs/adr/0102-the-agent-starts-without-a-gpu.md)): Der Agent meldet
+`gpu_present: false` in den Fakten und jedem Heartbeat (fehlt das Feld, gilt der Knoten als GPU-Knoten) und schickt keine
+GPU-Werte. Der Knoten rechnet im Hauptspeicher:
+```
+ollama_held   = sum(size über /api/ps)            # statt size_vram, das dort 0 ist; kein ram_spill
+reserve       = max(vram_reserve_gib[state], memory_pressure.min_free_gib)
+budget        = memory.ram_available_gib + ollama_held - reserve      # ohne frischen Heartbeat: nichts passt
+capacity      = memory.ram_total_gib              # fuer model_too_large und "Rolle frei moeglich"
+busy          nur ueber ein gemeldetes Spiel; keine Auslastung, kein fremdes VRAM
+GPU-Schutz    Zustand not_applicable: kein Problem, keine Deckelung
+```
+Prewarm nimmt dasselbe Budget. Die VRAM-Messung des Katalogs braucht weiter eine GPU.
+
 ## 2. Auswahl pro Anfrage
 
 Eingang: `POST /api/chat | /api/generate | /api/embed`, Body mit `model`, optional

@@ -1,84 +1,125 @@
 {
- "schema_version": 1,
- "status": "completed",
- "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
- "change_digest": "5f6284340c6310d99b9448aa1a2c37d27657008d84e91f410590e33336c86fba",
- "reviewed_paths": [
-  "CHANGELOG.md",
-  "docs/adr/0104-the-secrets-renderer-checks-its-source-and-renders-every-key-on-its-own.md",
-  "docs/adr/README.md",
-  "docs/install-router.de.md",
-  "docs/install-router.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
-  "docs/security/reviews/current.json",
-  "docs/security/threat-model.de.md",
-  "docs/security/threat-model.md",
-  "router/install.sh",
-  "router/render-env.conf.example",
-  "router/render-env.sh",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/pydeps.py",
-  "test/selftest_install.py",
-  "test/selftest_privilege_paths.py",
-  "test/selftest_pydeps.py",
-  "test/selftest_render_env.py"
- ],
- "risk_ids": [
-  "TM-14",
-  "TM-15",
-  "TM-16"
- ],
- "boundaries": [
-  "B8",
-  "B9"
- ],
- "summary": "Router 0.36.1 (ADR-0104 proposed): render-env.sh, the root helper that writes the router unit's EnvironmentFile, no longer stops at a missing MQTT_PASSWORD. Traced: the access file is still sourced only after not_router_writable (root owner, not group/other-writable, outside the router's writable paths, symlinks resolved); the store client is reached only after an explicit login step whose HTTP status is reported (no answer / refused / ready); every built-in and EXTRA_SECRET_KEYS name keeps the ADR-0080 name rule before it reaches a URL or the file; every value of every name is refused on CR/LF, now also MQTT_PASSWORD (skipped instead of keeping the old file - no injection path either way); the file is still written through mktemp in the target folder, chgrp skirnir-router + 0640 (0600 without the account) and an atomic rename, and a trap removes the temporary file on every exit. A failed fetch or a source with none of the names keeps the existing file, so an attacker who can only disturb the network can delay but not drop or replace secrets (as with an unreachable store before). New SECRET_SOURCE=file: SECRET_FILE passes the same not_router_writable check, must resolve to a regular file readable by root only (mode & 077), and is parsed line by line with bash read - never sourced or evaluated (test: a $(touch) value is copied raw and nothing runs); only rendered names are taken, invalid lines are reported by line number without content, a name given twice is dropped. The bearer token now goes to curl via stdin (-H @-) instead of argv, removing it from the process list (TM-15). install.sh --without-mqtt only removes python3-paho-mqtt from the apt list and passes --without paho-mqtt to pydeps.py; pydeps can only leave out requirements, refuses unknown names (a typo cannot silently change the plan), and hash-locked installation is unchanged (TM-16). The MQTT check in install.sh runs as root with yaml.safe_load on the root-owned config.yaml and refuses before any change. The router's runtime code is unchanged apart from VERSION; it already gates paho with find_spec (ha.py) and starts the publisher only with mqtt.host (app.py). Unit files, the EnvironmentFile path and the ADR-0073/0086 boundaries are unchanged. Added text names no organisation, host, address or person.",
- "findings": [],
- "tests": [
-  {
-   "command": "python test/selftest_render_env.py",
-   "result": "passed",
-   "evidence": "WSL Ubuntu (bash 5.3, curl 8.18, jq): 14 tests OK - no MQTT_PASSWORD, store on a closed port, refused login, one name answering 500, store without any name, stdin bearer header, file source raw copy without evaluation, refused group-readable/group-writable/router-writable/missing SECRET_FILE and unknown SECRET_SOURCE, no secret value in the output. The same 14 tests all fail against the script on origin/main."
-  },
-  {
-   "command": "python test/selftest_privilege_paths.py",
-   "result": "passed",
-   "evidence": "WSL: all passed; access-file rules for both renderers unchanged (symlink, group-writable, world-writable folder, router-writable path)."
-  },
-  {
-   "command": "python test/selftest_install.py",
-   "result": "passed",
-   "evidence": "WSL: 5 tests OK including --without-mqtt (installed, refused with mqtt.host while a refused run changes no program file, default unchanged) and router.py --check with paho blocked; Windows: the paho-less check passes, Linux cases skip."
-  },
-  {
-   "command": "python test/selftest_pydeps.py && python tools/security/lock_requirements.py check",
-   "result": "passed",
-   "evidence": "selftest_pydeps: all passed (new --without cases, unknown name exit 2); Python locks: 0 problem(s)."
-  },
-  {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure; python test/selftest_control_flow.py && python test/check_control_flow.py; python test/selftest_threat_review.py; python test/check_pinned_references.py",
-   "result": "passed",
-   "evidence": "All checks passed; configuration ok; control flow ok: 0 legacy findings; threat review selftest exit 0; Pinned references: 0 finding(s)."
-  },
-  {
-   "command": "python test/check_public_changes.py --base $(git merge-base origin/main HEAD)",
-   "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s) after replacing a credential-shaped synthetic DSN in the test."
-  },
-  {
-   "command": "python tools/security/review.py check --base origin/main --head INDEX",
-   "result": "passed",
-   "evidence": "run after staging this record."
-  }
- ],
- "limitations": [
-  "The store client was exercised against a fake store only; that the store answers a missing secret with HTTP 404 is assumed from its API. Any other status is treated as a failed fetch, keeps the existing file and is logged by name and status.",
-  "Pre-existing, both sources: a value ending in a backslash makes systemd's EnvironmentFile parser join the next line; that can lose the following key but cannot add a name. Not changed here.",
-  "As for the access file, only the file and its own folder are checked for owner and mode, not the folders above SECRET_FILE.",
-  "monitoring/render-monitoring.sh is unchanged (it never had the MQTT gate) and still treats a failed fetch like a missing name, which keeps its old file in both cases.",
-  "No real systemd, apt or venv run: install.sh was tested in its staging mode (--root, --no-venv); pydeps --without is covered by unit cases.",
-  "python test/check_adr_index.py reports non-consecutive numbers on this branch alone, because ADR-0101 to 0103 belong to other open pull requests that merge first; the index table itself is current."
- ]
+  "schema_version": 1,
+  "status": "completed",
+  "reviewer": "Claude Code (Opus 5.5) repository security review",
+  "base_sha": "4a614341aecd17f58aa55ca5e88476373442af61",
+  "change_digest": "481a506bac6351fe5d07039f58aebaff3a8b4d9656ff9de647002f761ef9b8aa",
+  "reviewed_paths": [
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "README.de.md",
+    "README.md",
+    "agent/README.md",
+    "agent/app.go",
+    "agent/config.example.yaml",
+    "agent/config.go",
+    "agent/facts.go",
+    "agent/game.go",
+    "agent/game_test.go",
+    "agent/gpu.go",
+    "agent/guard.go",
+    "agent/health.go",
+    "agent/heartbeat.go",
+    "agent/install_windows.go",
+    "agent/install_windows_test.go",
+    "agent/main.go",
+    "agent/mqtt.go",
+    "agent/nogpu_test.go",
+    "design/english-names.md",
+    "design/gpu-guard.md",
+    "design/routing-algorithm.md",
+    "docs/adr/0102-the-agent-starts-without-a-gpu.md",
+    "docs/adr/0103-game-detection-is-a-module-that-can-be-switched-off.md",
+    "docs/adr/README.md",
+    "docs/configuration.de.md",
+    "docs/configuration.md",
+    "docs/install-agent.de.md",
+    "docs/install-agent.md",
+    "docs/operations.de.md",
+    "docs/operations.md",
+    "docs/reference.de.md",
+    "docs/reference.md",
+    "docs/security/reviews/current.json",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/nodes.py",
+    "router/skirnir_router/poll.py",
+    "router/skirnir_router/problems.py",
+    "router/skirnir_router/registry.py",
+    "router/skirnir_router/scheduler.py",
+    "test/fake_agent.py",
+    "test/run_tests.py",
+    "test/selftest_availability.py",
+    "test/selftest_cpu_node.py"
+  ],
+  "risk_ids": [
+    "TM-07",
+    "TM-14",
+    "TM-15"
+  ],
+  "boundaries": [
+    "B3",
+    "B8",
+    "B9"
+  ],
+  "summary": "Agent 0.36.0 / router 0.36.0: the agent runs without an NVIDIA GPU (gpu.probe auto|nvidia|none, default auto, ADR-0102), game detection can be switched off (game.enabled, ADR-0103), the game fact's via is 'path' (router maps the old 'pfad'), Home Assistant display names can be English (mqtt.entity_language, unique_id and entity ID unchanged), and the Windows install checks the event-log source in the registry instead of matching error text. B3 (router <-> agent): new fact/heartbeat field gpu_present and the guard state not_applicable from an approved agent. The router takes gpu_present only as a real boolean (heartbeat) or literal false (facts), and memory values only as non-boolean numbers; otherwise the node stays a GPU node or nothing fits. A compromised approved agent could already misreport VRAM, utilisation and guard state (TM-07: telemetry is an assertion of that host); claiming no GPU or not_applicable gives it no capability beyond that: it can attract or repel models for its own node and avoid the require_fresh_status cap, as reporting 'normal' already did. No new route, frame, authentication path or egress. B8 (agent host): install_windows reads HKLM SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\<service> read-only in the existing admin install step; service account, ACLs, update and signing paths are unchanged. With gpu.probe auto and no NVIDIA driver at all the GPU guard does not run; without a driver no workload can use the card, so the power-limit protection loses nothing; gpu.probe nvidia keeps the refusal. POST /gpuz stays loopback-only and now answers 409 without a GPU. B9: /health (loopback) gains gpu_probe and gpu_present, MQTT discovery gains constant English names; no secret, host or user data. The fake agent and E2E use loopback and synthetic values only. Re-reviewed after merging origin/main (PR 178 structured problems / router 0.35.0 / ADR-0101, PR 176 docs) into the branch: conflicts only in CHANGELOG (both rows kept, v0.41.0 above v0.40.0), VERSION (0.36.0 kept), ADR index (regenerated, 0101-0103) and this record. Semantic overlap with router/skirnir_router/problems.py: ram_spill is already empty for a node without a GPU; the gpu_guard problem now also requires gpu_present, so a node without a GPU never raises it even if its agent claims a guard problem (an approved agent cannot plant a GPU-guard alarm for a node that has no GPU); docs/operations(.de).md say so. No other change to #178's codes, metrics or config.",
+  "findings": [],
+  "tests": [
+    {
+      "command": "python test/selftest_cpu_node.py",
+      "result": "passed",
+      "evidence": "router: facts/heartbeat without GPU values, full-size holdings, no ram_spill, RAM budget and capacity, model_too_large/vram_full, guard not_applicable not capping, older agents unchanged, pfad->path, enabled false; rejected cases: non-numeric memory, non-boolean gpu_present, facts other than false; after the merge also: no gpu_guard/ram_spill problem for nodes without a GPU (including one whose agent claims a guard problem; this check fails without the problems.py change), a GPU node still raises it."
+    },
+    {
+      "command": "python test/selftest_problems.py",
+      "result": "passed",
+      "evidence": "all passed (after the merge)."
+    },
+    {
+      "command": "python test/check_adr_index.py",
+      "result": "passed",
+      "evidence": "ADR index ok: 103 ADRs (after the merge)."
+    },
+    {
+      "command": "python test/run_tests.py (through a local lock wrapper that serialises the fixed loopback ports)",
+      "result": "passed",
+      "evidence": "0 failures, STATE passed; includes the new fake agent with FAKE_GPU=0 (online, gpu_present false, guard not_applicable, no HA problem)."
+    },
+    {
+      "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml (Windows, Python 3.12)",
+      "result": "passed",
+      "evidence": "74 self-tests after the merge; selftest_availability needed its fake node to gain capacity_gib/reserve_gib."
+    },
+    {
+      "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./...",
+      "result": "passed",
+      "evidence": "gofmt empty, vet clean on both GOOS, go test ok on Windows (incl. install_windows_test.go)."
+    },
+    {
+      "command": "GOOS=linux go test -c, test binary run under WSL Ubuntu",
+      "result": "passed",
+      "evidence": "PASS (nogpu_test.go, config, mqtt and the other Linux tests)."
+    },
+    {
+      "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_control_flow.py ; python test/selftest_control_flow.py ; python test/check_pinned_references.py ; python tools/security/lock_requirements.py check",
+      "result": "passed",
+      "evidence": "all clean."
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "result": "passed",
+      "evidence": "run after staging this record."
+    },
+    {
+      "command": "python test/check_public_changes.py",
+      "result": "passed",
+      "evidence": "Public-change scan: 0 finding(s)."
+    }
+  ],
+  "limitations": [
+    "The end-to-end suite uses a fake agent; the real agent without a GPU was exercised by Go unit tests (probe none), not on a physical CPU-only machine.",
+    "gpu.probe auto on a machine whose NVIDIA driver is missing entirely now starts as a CPU node instead of refusing (documented in ADR-0102).",
+    "The router's RAM budget trusts the agent's memory fact like the VRAM fact before (TM-07); on Linux MemAvailable can include page cache of a mapped model, so the budget is an estimate; Ollama's own memory check and memory pressure remain the guard.",
+    "The catalog's VRAM measurement (/admin/measure) still needs a GPU; not changed here.",
+    "PostgreSQL integrations were not run: no session, memory or storage code changed."
+  ]
 }

@@ -20,11 +20,13 @@ import (
 // process path under a game folder; if the path is unreadable (anti-cheat), match by name of large .exe in the folder.
 
 // GameFact is sent with every heartbeat as block "game". Supported=false: this platform does not detect games (Linux).
+// Enabled=false (0.36.0, ADR-0103): detection is switched off (game.enabled), nothing is detected.
 type GameFact struct {
 	Supported bool   `json:"supported"`
+	Enabled   bool   `json:"enabled"`
 	Running   bool   `json:"running"`
 	Name      string `json:"name,omitempty"`  // Programmname, z. B. "Diablo IV.exe"
-	Via       string `json:"via,omitempty"`   // "pfad" | "name"
+	Via       string `json:"via,omitempty"`   // "path" | "name" (until 0.35 "pfad" instead of "path")
 	Since     int64  `json:"since,omitempty"` // Unix seconds since the agent first saw it
 	Folders   int    `json:"folders"`         // Game folder in the index (0 = nothing installed, so nothing detected)
 	// 0.19.0: GPU demand of the game itself, across all its processes (Performance Counters GPU Process Memory / GPU Engine).
@@ -180,7 +182,14 @@ func exeIndex(folders []string) map[string]string {
 	return out
 }
 
-// gameHit: A process that counts as a game, and how it was detected ("path" | "name").
+// How a game was detected (wire value of GameFact.Via). Until agent 0.35 the path case was the German "pfad"; the router
+// accepts both (ADR-0103).
+const (
+	gameViaPath = "path"
+	gameViaName = "name"
+)
+
+// gameHit: A process that counts as a game, and how it was detected (gameViaPath | gameViaName).
 type gameHit struct {
 	proc procInfo
 	via  string
@@ -193,13 +202,13 @@ func gameHits(procs []procInfo, idx gameIndex) []gameHit {
 	for _, p := range procs {
 		if p.Path != "" {
 			if !gameExcludedPath(p.Path) && underFolder(p.Path, idx.folders) {
-				out = append(out, gameHit{p, "pfad"})
+				out = append(out, gameHit{p, gameViaPath})
 			}
 			continue
 		}
 		n := strings.ToLower(strings.TrimSuffix(p.Name, filepath.Ext(p.Name)))
 		if _, hit := idx.exes[n]; hit {
-			out = append(out, gameHit{p, "name"})
+			out = append(out, gameHit{p, gameViaName})
 		}
 	}
 	return out
@@ -258,12 +267,17 @@ type gpuSampler interface {
 	close()
 }
 
-func newGameWatch(log *Logger) *GameWatch {
-	return &GameWatch{log: log, fact: GameFact{Supported: gameScanSupported}}
+// newGameWatch: enabled is game.enabled (GameCfg.on): default on where the platform detects games.
+func newGameWatch(log *Logger, enabled bool) *GameWatch {
+	return &GameWatch{log: log, fact: GameFact{Supported: gameScanSupported, Enabled: enabled}}
 }
 
 func (g *GameWatch) Run(ctx context.Context) {
 	if !gameScanSupported {
+		return
+	}
+	if !g.fact.Enabled { // set once in newGameWatch, never changed: no lock needed
+		g.log.Infof("game: detection off (game.enabled: false)")
 		return
 	}
 	t := time.NewTicker(gamePoll)

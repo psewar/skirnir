@@ -11,7 +11,8 @@
 `https://<name>:11435/`, login with a user from `control_auth.users`. One page ([router/ui.html](../router/ui.html)), no
 external libraries, six tabs:
 
-- **Overview:** nodes with state, breaker, GPU, VRAM, load and loaded models; cloud providers with budget bars; operations tiles; recent decisions; **live charts** (canvas from `/metrics`): requests/min,
+- **Overview:** the active **problems** (severity, code and text in the UI language, [below](#problems));
+  nodes with state, breaker, GPU, VRAM, load and loaded models; cloud providers with budget bars; operations tiles; recent decisions; **live charts** (canvas from `/metrics`): requests/min,
   tokens/s, GPU and VRAM per node, daily history, latency histogram, shares by node/role/client, effectively used models.
 - **Agents:** registered agents with facts, approval, per-node policy (WOL, weight, busy thresholds, GPU guard, MQTT,
   auto-update), the staged agent version and the update state; a dot on the tab while an agent waits for approval.
@@ -36,7 +37,8 @@ ended early with `DELETE` ([ADR-0061](adr/0061-quiet-a-single-node-for-a-measure
 `requests_total{role,node,model,client,via,outcome}`, `tokens_total{kind,…}`, histograms `request_duration_seconds`,
 `ttft_seconds`, `queue_wait_seconds`, `events_total{event,node}`, per node `node_up`, `node_state`, `node_inflight`,
 `node_gpu_util_percent`, `node_vram_*_gib`, `node_breaker`, per model `model_loaded_gib`, `perf_gen_tps`, `perf_error_rate`,
-plus `decision_*`, `cloud_*`, `usage_today_*`, `info`.
+plus `decision_*`, `cloud_*`, `usage_today_*`, `info`, and the active problems as `problem{code,severity,node,subject}` and
+`problems_active` ([below](#problems)).
 
 ```yaml
 scrape_configs:
@@ -59,6 +61,43 @@ restarts; `?decisions=N` selects how many are returned, default 50) holds the mo
 breaker, queue, shadow, decision). `/admin/state` also shows `build` (deploy manifest) and `supply_chain` (Ollama version and
 model digests per node). Refused and limited requests are in the audit log (`client_auth.audit_log`).
 
+### Problems
+
+Conditions the operator should act on while the router keeps serving (router 0.35.0,
+[ADR-0101](adr/0101-problems-are-structured-records-exported-as-metrics.md)). They are computed without MQTT and reach
+every channel from the same list: `GET /admin/problems[?lang=de|en]` (control port, Basic Auth; records with `code`,
+`severity`, `node`, `subject`, `params`, `message`), the web UI overview, `/metrics` and the Home Assistant attribute
+`problems`.
+
+| Code | Severity | When |
+|---|---|---|
+| `no_node_online` | critical | No node is online. |
+| `role_not_servable` | critical | No online node could serve the role (`subject`), not even when free; a role that waits only for a busy node is not a problem. |
+| `agent_heartbeat_missing` | warning | The node's agent reported before and has been silent longer than `router.agent_missing_problem_s`. |
+| `ram_spill` | warning | A loaded model (`subject`) has at least `router.ram_spill_problem_gib` in system RAM. |
+| `gpu_guard` | warning | The agent reports a GPU guard problem (unavailable, deselected, hardware warning) and the router considers the guard. Never for a node without a GPU (`gpu_present: false`, ADR-0102). |
+| `agent_update_failed`, `agent_update_stalled` | warning | An agent update failed or has not reported for too long. |
+| `ollama_update_failed`, `ollama_update_stalled` | warning | The same for an Ollama update. |
+| `ollama_version_check_failing` | warning | The Ollama version check has failed for three days (or never succeeded). |
+| `cloud_budget_warning` | warning | A provider (`subject`) is above `warn_at_percent` of its monthly budget. |
+| `cloud_budget_exhausted` | critical | A provider's monthly budget is used up; it drops out as a tier. |
+
+`critical` means requests fail or a configured tier drops out now; `warning` means the router still serves, but slower,
+without a safety function or without fresh facts. In `/metrics`, `skirnir_problem` has one series per active problem
+(value 1, or the number of problems with the same labels) and none while there is nothing; an empty `node` or `subject`
+means none. Labels never carry free text; the values behind the message (minutes, GiB, an agent's error) are in
+`/admin/problems`. An alert rule without Home Assistant:
+
+```yaml
+groups:
+  - name: skirnir
+    rules:
+      - alert: SkirnirProblem
+        expr: skirnir_problem > 0
+        for: 5m
+        annotations: { summary: "{{ $labels.code }} {{ $labels.node }} {{ $labels.subject }}" }
+```
+
 ## Home Assistant entities
 
 Home Assistant is optional. Without an `mqtt:` section, or without `paho-mqtt` installed, the router publishes nothing. Routing,
@@ -69,8 +108,9 @@ either; install again without the option before adding an `mqtt:` section (the s
 
 The router registers via MQTT discovery as the device **Skirnir**: sensors for nodes online/busy, available models, ready roles
 (attribute: which node and model would be chosen right now), requests and tokens today, cloud costs this month, last assignment,
-per node state / GPU utilisation / free VRAM, a `binary_sensor` **Problem** with attribute `problems` (no node online, role not
-servable, agent silent, budget warning) and a sensor **Node awaiting approval** for new agents. Last will
+per node state / GPU utilisation / free VRAM, a `binary_sensor` **Problem** with attribute `problems` (the texts of the
+[problems](#problems) in `router.problem_language`: `de` by default, the sentences automations have matched since router
+0.1, or `en`) and a sensor **Node awaiting approval** for new agents. Last will
 `ollama-router/status=offline` (the MQTT topic and entity ids keep the old name on purpose); missing readings are `unavailable`,
 not `unknown`. Node entities are kept in sync: blocked or deleted nodes disappear from Home Assistant, even if they vanished
 during a router restart. Connecting Home Assistant as a client: [clients.md](clients.md#home-assistant).
@@ -175,9 +215,50 @@ replace-lost "<reason>"` (or `deploy.py --replace-lost-agent-key "<reason>"`) cr
 `Set-UpdateKey.cmd -Step Replace -Key <new public key>` (on Linux: set `update.public_key` by hand) before it accepts a release
 again. Neither tool creates a key implicitly: `create` (or `deploy.py --create-agent-key`) is for a new installation only.
 
+## What to back up
+
+Skirnir has no backup function of its own; back up these files with the tool you already use. Paths are the defaults of
+`install.sh` and the agent's `setup`; a different `--config-dir`, `router.state_dir` or `identity.dir` moves them.
+
+**Router**
+
+| What | Default path | Why |
+|---|---|---|
+| Configuration folder | `/etc/skirnir-router/` | `config.yaml` (written by root tools, never by the router), the certificates in `certs/` (or `tls/` on older installations) and the release folder `agent/` (`manifest.json` and the signed agent binaries; these can also be copied again from a release). |
+| Source of the secrets | your secret store, and `/etc/skirnir-router-secrets/render-env.conf` with its access (with `SECRET_SOURCE=file`: the file `SECRET_FILE` names instead of the store) | `secrets.env` is rendered from it and can be rendered again: back up the source, not the rendered file. If you maintain `secrets.env` by hand, it is the source. The access file holds a credential; keep its backup as protected as the file itself. |
+| State folder (`router.state_dir`) | `/var/lib/skirnir-router/` | Everything the router writes itself, see the next table. Without `state_dir` these files lie next to `config.yaml`. |
+| Session database (optional) | the PostgreSQL database that `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) points to | Managed sessions (turns, events, compactions) and the memory outbox. Back it up with PostgreSQL's own tools. |
+| Memory backend (optional) | outside Skirnir (Hindsight) | The long-term memory lives there; back it up as that service documents. |
+| Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), if you need the audit trail. |
+
+Files in the state folder:
+
+| File | Content | If it is lost |
+|---|---|---|
+| `nodes.json` | node registry: each agent's public key, approval state, policy and facts | every node shows up as pending and has to be approved again |
+| `roles.yaml` | what the web UI changed: roles, models, settings, clients added in the UI (token hashes) | the UI changes are gone; `config.yaml` applies alone |
+| `deletions.jsonl` | deletion journal, ids only (ADR-0076) | a restored database brings deleted sessions and memory back; see below |
+| `usage.json` | usage per client and month, including the cloud spend per provider | the monthly cloud budget starts again at zero |
+| `metrics.json`, `perf.json` | cumulative counters; measured speed per model and node for the catalog | counters and speed values start from scratch |
+| `events.jsonl` | the event and decision log the web UI shows | history only |
+| `requests.jsonl` | decision observation (`decision_engine.observe_all`) | observation data only |
+| `ollama-latest.json` | last known Ollama release | nothing, it is fetched again |
+
+The opt-in decision capture writes to its own path (`decision_engine.capture.path`, default
+`/var/lib/skirnir-router/decisions.jsonl`), inside the state folder by default.
+
+**Nodes and operator**
+
+| What | Default path | Why |
+|---|---|---|
+| Agent configuration | Windows `C:\ProgramData\skirnir-agent\config.yaml`, Linux `/etc/skirnir-agent/config.yaml` | router URL, `update.public_key(s)`, children and local settings |
+| Agent identity | the `identity.dir`: Windows `C:\ProgramData\skirnir-agent\identity\`, Linux (after `setup`) `/var/lib/skirnir-agent/identity/` | `agent-identity.key` is the node's identity towards the router; `provisioned.json` is the last bundle from the router and comes again on the next connection. On Windows both are DPAPI-protected for the machine and can only be restored onto the same Windows installation; after a reinstall the agent creates a new key and the node is approved again. |
+| Update signing key | the operator's key folder (`deploy/agent_keys.py --keys <folder>`), off the router | `agent-update.key`, a prepared `agent-update.next.key` and the retired keys. Without it no node accepts a new release until every node trusts a replacement (see [Key rotation](#key-rotation), lost signing key). Keep the backup offline and encrypted. |
+
 ## Restoring a backup
 
-Deletions are recorded outside the database, ids only, in `deletions.jsonl` next to `config.yaml` (ADR-0076):
+Deletions are recorded outside the database, ids only, in `deletions.jsonl` in the router's state folder
+(`router.state_dir`, otherwise next to `config.yaml`; ADR-0076):
 
 1. **PostgreSQL restored** (session store and memory outbox): start the router as usual. Before the memory outbox sends
    anything it applies the journal again; the log says how many sessions and operations were back and are deleted again.
