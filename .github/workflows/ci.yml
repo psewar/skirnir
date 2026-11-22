@@ -95,6 +95,7 @@ jobs:
       - run: python test/selftest_verified_delivery.py
       - run: python test/selftest_rerank_server.py
       - run: python test/selftest_slowness_signals.py
+      - run: python test/selftest_problems.py
       - run: python test/selftest_openai_node.py
       - run: python test/selftest_openai_node_release.py
       - run: python test/selftest_openai_node_standby.py
@@ -150,7 +151,7 @@ jobs:
         working-directory: agent
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: agent/go.mod
       - run: test -z "$(gofmt -l .)"
@@ -169,7 +170,7 @@ jobs:
         working-directory: agent
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: agent/go.mod
       - run: go test ./...

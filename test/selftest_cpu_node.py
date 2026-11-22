@@ -10,10 +10,11 @@ problem, and accepts the guard state not_applicable without capping the node. A 
 import os
 import sys
 import time
+from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "router"))
-from skirnir_router import config, nodes, poll, registry, scheduler, state   # noqa: E402
+from skirnir_router import config, nodes, ollamaupdate, poll, problems, registry, scheduler, state   # noqa: E402
 from skirnir_router.common import GIB   # noqa: E402
 
 FAILS = []
@@ -131,6 +132,30 @@ check("agent >= 0.36.0: via path stays path", (w.game or {}).get("via") == "path
 poll.apply_heartbeat(w, {"gpu_util_pct": 1, "vram_total_mib": 16384, "vram_used_mib": 1000, "vram_free_mib": 15384,
                          "game": {"supported": True, "enabled": False, "running": False, "folders": 0}}, time.time())
 check("game.enabled false: the router forgets the game", w.game is None and w.game_since is None, str(w.game))
+
+# --- structured problems (router 0.35.0, ADR-0101): a node without a GPU raises no GPU problem
+state.REG = SimpleNamespace(nodes={}, save=lambda: None)
+state.CLOUD = {}
+ollamaupdate.LATEST.clear()
+state.CFG.gpu_guard = dict(state.CFG.gpu_guard, enabled=True)
+now = time.time()
+c = cpu_node()
+poll.apply_heartbeat(c, dict(CPU_HB), now)
+poll.apply_ollama_state(c, tags, ps, now, source="test")
+lying = cpu_node()   # an agent that claims a guard problem while reporting no GPU: still nothing to guard
+lying.name = "cpu-lying"
+lying.guard, lying.guard_ts = {"state": "off", "problem": True, "reason": "deselected"}, now
+gpu = nodes.Node("gpu-guarded", {"vram_total_gib": 16})
+gpu.state, gpu.hb_ts = "free", now
+gpu.guard, gpu.guard_ts = {"state": "off", "problem": True, "reason": "deselected"}, now
+state.NODES.clear()
+state.NODES.update({x.name: x for x in (c, lying, gpu)})
+recs = problems.compute(now, unservable=[])
+codes = {(r["code"], r.get("node")) for r in recs}
+check("no gpu_guard or ram_spill problem for nodes without a GPU", not any(nd in ("cpu-box", "cpu-lying") and code in ("gpu_guard", "ram_spill")
+                                                                         for code, nd in codes), str(sorted(codes)))
+check("a GPU node with a guard problem still raises it", ("gpu_guard", "gpu-guarded") in codes, str(sorted(codes)))
+state.NODES.clear()
 
 print(f"\n{'ALLE GRUEN' if not FAILS else f'{len(FAILS)} FEHLER: {FAILS}'}")
 sys.exit(1 if FAILS else 0)

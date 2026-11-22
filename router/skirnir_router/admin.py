@@ -10,7 +10,7 @@ import time
 from aiohttp import ClientTimeout, web
 
 from . import auth, config, perf, state, values
-from . import admission, cloud, decision, metrics, ops
+from . import admission, cloud, decision, metrics, ops, problems
 from .outcome import failed, invalid
 from .decision.base import DecisionRequest
 from . import request as request_mod
@@ -615,6 +615,15 @@ async def handle_usage(request):
 
 async def handle_metrics(request):
     return web.Response(text=metrics.render(), content_type="text/plain", charset="utf-8")
+
+
+async def handle_problems(request):
+    """GET /admin/problems[?lang=de|en] (router 0.35.0, ADR-0101): the active problems as records; texts in `lang`,
+    default router.problem_language. Behind the control port's Basic Auth like every /admin GET."""
+    lang = request.query.get("lang") or problems.language()
+    if lang not in problems.LANGUAGES:
+        return _bad(f"lang must be one of {', '.join(problems.LANGUAGES)}")
+    return web.json_response({**problems.view(problems.compute(lang=lang)), "language": lang})
 
 
 async def handle_client_auth(request):

@@ -19,9 +19,9 @@ Built for a homelab: Home Assistant, Node-RED and local agent frameworks as clie
 not running around the clock and do not belong to the AI alone. The name: in Norse mythology Skirnir is Freyr's messenger, who
 rides into foreign realms, negotiates there and returns with the answer.
 
-**Status:** router 0.23.0, agent 0.30.0 (see [releases](https://github.com/psewar/skirnir/releases) and
-[CHANGELOG.md](CHANGELOG.md), which maps tags to router and agent versions), in continuous operation in one homelab since
-September 2026, one developer. No stability guarantees. The documentation exists in English and German; the sub-READMEs
+**Status:** in continuous operation in one homelab since September 2026, one developer. The current router and agent
+versions are in the [releases](https://github.com/psewar/skirnir/releases) and in the top row of
+[CHANGELOG.md](CHANGELOG.md), which maps tags to router and agent versions. No stability guarantees. The documentation exists in English and German; the sub-READMEs
 (agent, decision engine) are in German. If you want to run it, you should know Python, systemd and Ollama.
 
 Security development: [threat model](docs/security/threat-model.md), [risk register](docs/security/risk-register.json)
@@ -47,8 +47,8 @@ optional model reviews are advisory and require an explicitly configured endpoin
   first) tier of a role, with data classes, credential scan, monthly budget and an egress allowlist. By default nothing goes to
   the cloud.
 - **Client identities** on the inference port (Bearer, Basic, source IP), role and model locks, rate limit, audit log.
-- **Observable:** Prometheus endpoint, usage per day and client, decision log, Home Assistant device via MQTT discovery, web UI
-  with live charts, catalogue, role editor, playground and load test.
+- **Observable:** Prometheus endpoint with problems as alertable metrics, usage per day and client, decision log, Home
+  Assistant device via MQTT discovery, web UI with live charts, catalogue, role editor, playground and load test.
 - **Operations-ready:** config schema with suggestions on typos, idempotency key, canary and shadow tiers per role, deploy manifest
   with SHA-256, Ollama versions and model digests per node.
 - **TLS on every link** once configured (see [security essentials](#security-essentials)), one process, one event loop, no
@@ -188,7 +188,7 @@ Vulnerability reports: [SECURITY.md](SECURITY.md).
 | [docs/install-agent.md](docs/install-agent.md) | GPU nodes on Windows and Linux, Ollama, approval, update key |
 | [docs/configuration.md](docs/configuration.md) | Client identities, roles and tiers, scheduler and admission, auto role, cloud tiers |
 | [docs/clients.md](docs/clients.md) | Home Assistant, Node-RED, OpenAI and Anthropic clients, Claude Code, the `routing` block |
-| [docs/operations.md](docs/operations.md) | Web UI, metrics, Home Assistant entities, agent and Ollama updates, key rotation, names, measurements |
+| [docs/operations.md](docs/operations.md) | Web UI, metrics, Home Assistant entities, agent and Ollama updates, key rotation, backup and restore, names, measurements |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Status codes, pending agents, TLS errors, logs, memory states |
 | [docs/reference.md](docs/reference.md) | Interfaces, GPU guard, optional memory and session features, rerank, OpenAI-compatible nodes, limits, repo layout |
 | [docs/adr/](docs/adr/README.md) | Architecture Decision Records: why Skirnir is built this way |
