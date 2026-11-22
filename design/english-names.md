@@ -37,6 +37,9 @@ Agent entities (unique_id `<device>_<oid>`) get `<domain>.<device>_<oid>`. The t
 are renamed: `ollama_kuerzungen` → `ollama_truncations`, `ollama_letzte_kuerzung` →
 `ollama_last_truncation`, `ollama_kuerzung` → `ollama_truncation`.
 
+Agent 0.36.0 (ADR-0103) adds `mqtt.entity_language`: `de` (default) keeps the German display names, `en` uses English
+ones (`entityNamesEN` in `agent/mqtt.go`). Unique ID and entity ID are the same in both languages.
+
 **The unique IDs and discovery topics of renamed entities stay as they are.** A new unique ID would
 create a second entity and leave the old one, with its history and every automation, as an orphan.
 Only the entity ID changes.
@@ -61,6 +64,7 @@ Only the entity ID changes.
 | Catalog `source` values `gemessen`, `gemessen (nvidia-smi)`, `geschaetzt` (roles.yaml) | `measured`, `measured (nvidia-smi)`, `estimated` |
 | Node game sensor without a game: `keins` | `none` |
 | Metric `skirnir_node_gpu_guard` label `state` | the English GPU guard states above |
+| Agent game fact `via: pfad` (agent 0.36.0, ADR-0103; the router maps the old value) | `via: path` |
 
 Catalog entries already in `roles.yaml` keep their old `source` value on disk; the router reports them in
 English. This also fixes the UI, which showed models measured with nvidia-smi as estimated.

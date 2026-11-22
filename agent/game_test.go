@@ -63,7 +63,7 @@ func TestMatchGame(t *testing.T) {
 	}
 	for _, c := range []tc{
 		{"kein Spiel", []procInfo{{Name: "explorer.exe", Path: `C:\Windows\explorer.exe`}, {Name: "ollama.exe", Path: `C:\Ollama\ollama.exe`}}, "", "", false},
-		{"Pfad unter Steam (groß/klein egal)", []procInfo{{Name: "cs2.exe", Path: `d:\steamlibrary\STEAMAPPS\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe`}}, "cs2.exe", "pfad", true},
+		{"Pfad unter Steam (groß/klein egal)", []procInfo{{Name: "cs2.exe", Path: `d:\steamlibrary\STEAMAPPS\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe`}}, "cs2.exe", gameViaPath, true},
 		{"Ausnahmeordner zaehlt nicht", []procInfo{{Name: "x.exe", Path: `D:\SteamLibrary\steamapps\common\Steamworks Shared\_CommonRedist\x.exe`}}, "", "", false},
 		{"Pfad unlesbar -> per Name", []procInfo{{Name: "Diablo IV.exe", Path: ""}}, "Diablo IV.exe", "name", true},
 		{"Name gleich, aber Pfad lesbar woanders -> kein Spiel", []procInfo{{Name: "Diablo IV.exe", Path: `C:\Temp\Diablo IV.exe`}}, "", "", false},
@@ -94,7 +94,7 @@ func TestGOGLauncherAndGame(t *testing.T) {
 	if g, _, ok := matchGame([]procInfo{{Name: "GalaxyClient.exe", Path: `C:\Program Files\GOG Galaxy\GalaxyClient.exe`}}, idx); ok {
 		t.Errorf("Launcher gilt als Spiel: %q", g)
 	}
-	if g, v, ok := matchGame([]procInfo{{Name: "ExampleGame.exe", Path: `C:\Program Files\GOG Galaxy\Games\Example Game\ExampleGame.exe`}}, idx); !ok || v != "pfad" {
+	if g, v, ok := matchGame([]procInfo{{Name: "ExampleGame.exe", Path: `C:\Program Files\GOG Galaxy\Games\Example Game\ExampleGame.exe`}}, idx); !ok || v != gameViaPath {
 		t.Errorf("GOG-Spiel nicht erkannt: %q,%q,%v", g, v, ok)
 	}
 }

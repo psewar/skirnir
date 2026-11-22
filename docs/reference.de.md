@@ -25,7 +25,8 @@ Client verfällt der Verbindungszustand sonst still. Die Proben halten ihn frisc
 Agent 0.7.0, [design/gpu-guard.md](../design/gpu-guard.md). Der Agent setzt ein Power-Limit von 80 % des Standardlimits (460 W
 bei einer 575-W-Karte), geht nach 10 Minuten Dauer-Vollast für 5 Minuten auf 70 %, setzt nach Treiber-Resets nach, hebt nie über
 den Standard und warnt bei Spannungsabfall am 16-Pin-Stecker, Speichertemperatur und Hardware-Drosselung. Standard an; die
-Abwahl (`gpu_guard.enabled: false`) ist eine Entscheidung und wird deshalb als Problem gemeldet. Das Limit zu setzen braucht
+Abwahl (`gpu_guard.enabled: false`) ist eine Entscheidung und wird deshalb als Problem gemeldet. Auf einem Knoten ohne GPU
+(Agent 0.36.0, `gpu.probe`, ADR-0102) meldet der Schutz `not_applicable`; das ist kein Problem und deckelt den Knoten nicht. Das Limit zu setzen braucht
 unter Windows das Konto LocalSystem. Der Router deckelt einen gedrosselten Knoten auf eine Anfrage, zieht Score ab und reicht
 Probleme an Home Assistant (`modes.gpu_guard`, Policy je Knoten im Agenten-Register).
 

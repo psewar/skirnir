@@ -1699,6 +1699,32 @@ def main():
         http(C + f"/admin/nodes/{fp_tray}/revoke", {})
         http(C + f"/admin/nodes/{fp_tray}", method="DELETE")
         tray.terminate(); tray.wait()
+        # Node without a GPU (router/agent 0.36.0, ADR-0102): the agent reports gpu_present false and no GPU values; the
+        # router takes the node online, sizes models by its main memory and reports neither a guard nor a RAM problem.
+        logs["agent-cpu"] = open(os.path.join(HERE, "fake-agent-cpu.log"), "w+")
+        cpu = subprocess.Popen([PY, os.path.join(HERE, "fake_agent.py"), "wss://127.0.0.1:21435", "cpu", "http://127.0.0.1:21002", os.path.join(HERE, "fake-agent-cpu.key")],
+                               stdout=logs["agent-cpu"], stderr=subprocess.STDOUT, cwd=HERE,
+                               env={**os.environ, "FAKE_GPU": "0", "FAKE_OLLAMA_MANAGED": "0", "FAKE_OLLAMA_PUSH": "0"})
+        procs.append(cpu)
+        reg_cpu = lambda: next((n for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "cpu"), None)  # noqa: E731
+        for _ in range(40):
+            if reg_cpu(): break
+            time.sleep(0.25)
+        fp_cpu = reg_cpu()["fp"]
+        http(C + f"/admin/nodes/{fp_cpu}/approve", {"mqtt": False})
+        for _ in range(60):
+            nc = state()["nodes"].get("cpu") or {}
+            if nc.get("state") == "free" and nc.get("memory"): break
+            time.sleep(0.25)
+        check("Node without GPU: registered with gpu_present false, online, memory known, no GPU values",
+              reg_cpu()["facts"].get("gpu_present") is False and nc.get("state") == "free" and nc.get("gpu_present") is False
+              and (nc.get("memory") or {}).get("ram_total_gib") == 32.0 and nc.get("gpu_util") is None and nc.get("vram_free_gib") is None, str(nc)[:300])
+        check("Node without GPU: guard not_applicable, no ram_spill, no HA problem for the node",
+              (nc.get("gpu_guard") or {}).get("state") == "not_applicable" and not nc.get("ram_spill_gib")
+              and not any("Knoten cpu" in p for p in json.loads(http(C + "/admin/ha")[1])["problems"]), str(nc.get("gpu_guard")))
+        http(C + f"/admin/nodes/{fp_cpu}/revoke", {})
+        cpu.terminate(); cpu.wait()   # before deleting: a running agent would re-register the deleted key at once
+        http(C + f"/admin/nodes/{fp_cpu}", method="DELETE")
         st, raw = http(C + "/admin/config", {"settings": {"modes.ollama_update.window_start": "03:00", "modes.ollama_update.window_end": "03:01"}}, method="PUT")
         ou = json.loads(http(C + "/admin/ollama-update")[1])
         check("Ollama-Update: Night window visible from settings, currently outside", st == 200 and ou["window_start"] == "03:00" and ou["in_window"] is (time.localtime().tm_hour == 3 and time.localtime().tm_min == 0), str({k: ou[k] for k in ("window_start", "window_end", "in_window")}))

@@ -33,7 +33,8 @@ optional model reviews are advisory and require an explicitly configured endpoin
 - **Roles instead of model names.** A role is a ranked list of tiers (`model @ num_ctx`, optionally `busy_ok`). The router takes
   the best tier a node can serve right now; an already loaded model wins ("warm first").
 - **Multiple GPU nodes**, Windows or Linux, connected through a small **agent** (Go) that keeps an outbound tunnel to the router.
-  No open port on the node, no certificate, no fixed IP. Wake-on-LAN for sleeping nodes.
+  No open port on the node, no certificate, no fixed IP. Wake-on-LAN for sleeping nodes. A machine without an NVIDIA GPU
+  joins as a CPU node, sized by its main memory ([docs/install-agent.md](docs/install-agent.md#nodes-without-an-nvidia-gpu)).
 - **Busy detection.** If a game occupies the GPU (foreign VRAM, utilisation), only `busy_ok` tiers run there; large models are
   unloaded and prewarmed again after the game.
 - **Scheduler** with a score (warm, load, VRAM, speed, error rate), a circuit breaker per node and **admission control** with

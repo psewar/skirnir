@@ -25,7 +25,8 @@ somewhere on the way to the client may expire silently; the probes keep it fresh
 Agent 0.7.0, [design/gpu-guard.md](../design/gpu-guard.md) (German). The agent sets a power limit of 80 % of the card's default
 (460 W for a 575 W card), drops to 70 % for 5 minutes after 10 minutes of sustained full load, re-applies after driver resets,
 never raises above the default, and warns on 16-pin voltage sag, memory temperature and hardware throttling. On by default;
-opting out (`gpu_guard.enabled: false`) is deliberate and therefore reported as a problem. Setting the limit needs the
+opting out (`gpu_guard.enabled: false`) is deliberate and therefore reported as a problem. On a node without a GPU
+(agent 0.36.0, `gpu.probe`, ADR-0102) the guard reports `not_applicable`, which is no problem and does not cap the node. Setting the limit needs the
 LocalSystem account on Windows. The router caps a throttled node to one request, penalises it in the score and forwards
 problems to Home Assistant (`modes.gpu_guard`, per-node policy in the agent registry).
 

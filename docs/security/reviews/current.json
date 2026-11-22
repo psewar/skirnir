@@ -1,41 +1,113 @@
 {
- "schema_version": 1,
- "status": "completed",
- "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "875082c54dffdaeab321f6d0240ed9bf8effde94",
- "change_digest": "9a215ddb35514964393362b53ebe5eaae28ed71cf3a2a59d8670a7779282a0dd",
- "reviewed_paths": [
-  "CHANGELOG.md",
-  "docs/adr/0100-the-prompt-rate-counts-only-the-tokens-ollama-processed.md",
-  "docs/adr/README.md",
-  "docs/security/reviews/current.json"
- ],
- "risk_ids": [
-  "TM-15"
- ],
- "boundaries": [
-  "B9"
- ],
- "summary": "Documentation only: ADR-0100 status proposed -> accepted on the operator's decision of 2026-11-19 (after the merge and rollout of router 0.34.1), with that note in the decision outcome; the ADR index regenerated, and the released CHANGELOG row v0.39.1 extended to 'ADR-0100 proposed, accepted 2026-11-19' (the release notes keep 'proposed', which was true at release time). No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
- "findings": [],
- "tests": [
-  {
-   "command": "python test/check_adr_index.py",
-   "result": "passed",
-   "evidence": "ADR index ok: 100 ADRs (0100 accepted)."
-  },
-  {
-   "command": "python tools/security/review.py check --base origin/main --head INDEX",
-   "result": "passed",
-   "evidence": "run after staging this record."
-  },
-  {
-   "command": "python test/check_public_changes.py",
-   "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
-  }
- ],
- "limitations": [
-  "Documentation only; the behaviour it records was reviewed in the record of PR 171 (router 0.34.1)."
- ]
+  "schema_version": 1,
+  "status": "completed",
+  "reviewer": "Claude Code (Opus 5.5) repository security review",
+  "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
+  "change_digest": "d9c7f1a83095d8d054c4e4efe2c6450f0d5b2bc11d145b7134c822db7492c4d3",
+  "reviewed_paths": [
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "README.de.md",
+    "README.md",
+    "agent/README.md",
+    "agent/app.go",
+    "agent/config.example.yaml",
+    "agent/config.go",
+    "agent/facts.go",
+    "agent/game.go",
+    "agent/game_test.go",
+    "agent/gpu.go",
+    "agent/guard.go",
+    "agent/health.go",
+    "agent/heartbeat.go",
+    "agent/install_windows.go",
+    "agent/install_windows_test.go",
+    "agent/main.go",
+    "agent/mqtt.go",
+    "agent/nogpu_test.go",
+    "design/english-names.md",
+    "design/gpu-guard.md",
+    "design/routing-algorithm.md",
+    "docs/adr/0102-the-agent-starts-without-a-gpu.md",
+    "docs/adr/0103-game-detection-is-a-module-that-can-be-switched-off.md",
+    "docs/adr/README.md",
+    "docs/configuration.de.md",
+    "docs/configuration.md",
+    "docs/install-agent.de.md",
+    "docs/install-agent.md",
+    "docs/reference.de.md",
+    "docs/reference.md",
+    "docs/security/reviews/current.json",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/nodes.py",
+    "router/skirnir_router/poll.py",
+    "router/skirnir_router/registry.py",
+    "router/skirnir_router/scheduler.py",
+    "test/fake_agent.py",
+    "test/run_tests.py",
+    "test/selftest_availability.py",
+    "test/selftest_cpu_node.py"
+  ],
+  "risk_ids": [
+    "TM-07",
+    "TM-14",
+    "TM-15"
+  ],
+  "boundaries": [
+    "B3",
+    "B8",
+    "B9"
+  ],
+  "summary": "Agent 0.36.0 / router 0.36.0: the agent runs without an NVIDIA GPU (gpu.probe auto|nvidia|none, default auto, ADR-0102), game detection can be switched off (game.enabled, ADR-0103), the game fact's via is 'path' (router maps the old 'pfad'), Home Assistant display names can be English (mqtt.entity_language, unique_id and entity ID unchanged), and the Windows install checks the event-log source in the registry instead of matching error text. B3 (router <-> agent): new fact/heartbeat field gpu_present and the guard state not_applicable from an approved agent. The router takes gpu_present only as a real boolean (heartbeat) or literal false (facts), and memory values only as non-boolean numbers; otherwise the node stays a GPU node or nothing fits. A compromised approved agent could already misreport VRAM, utilisation and guard state (TM-07: telemetry is an assertion of that host); claiming no GPU or not_applicable gives it no capability beyond that: it can attract or repel models for its own node and avoid the require_fresh_status cap, as reporting 'normal' already did. No new route, frame, authentication path or egress. B8 (agent host): install_windows reads HKLM SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\<service> read-only in the existing admin install step; service account, ACLs, update and signing paths are unchanged. With gpu.probe auto and no NVIDIA driver at all the GPU guard does not run; without a driver no workload can use the card, so the power-limit protection loses nothing; gpu.probe nvidia keeps the refusal. POST /gpuz stays loopback-only and now answers 409 without a GPU. B9: /health (loopback) gains gpu_probe and gpu_present, MQTT discovery gains constant English names; no secret, host or user data. The fake agent and E2E use loopback and synthetic values only.",
+  "findings": [],
+  "tests": [
+    {
+      "command": "python test/selftest_cpu_node.py",
+      "result": "passed",
+      "evidence": "router: facts/heartbeat without GPU values, full-size holdings, no ram_spill, RAM budget and capacity, model_too_large/vram_full, guard not_applicable not capping, older agents unchanged, pfad->path, enabled false; rejected cases: non-numeric memory, non-boolean gpu_present, facts other than false."
+    },
+    {
+      "command": "python test/run_tests.py (through a local lock wrapper that serialises the fixed loopback ports)",
+      "result": "passed",
+      "evidence": "0 failures, STATE passed; includes the new fake agent with FAKE_GPU=0 (online, gpu_present false, guard not_applicable, no HA problem)."
+    },
+    {
+      "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml (Windows, Python 3.12)",
+      "result": "passed",
+      "evidence": "72 self-tests; selftest_availability needed its fake node to gain capacity_gib/reserve_gib."
+    },
+    {
+      "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./...",
+      "result": "passed",
+      "evidence": "gofmt empty, vet clean on both GOOS, go test ok on Windows (incl. install_windows_test.go)."
+    },
+    {
+      "command": "GOOS=linux go test -c, test binary run under WSL Ubuntu",
+      "result": "passed",
+      "evidence": "PASS (nogpu_test.go, config, mqtt and the other Linux tests)."
+    },
+    {
+      "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_control_flow.py ; python test/selftest_control_flow.py ; python test/check_pinned_references.py ; python tools/security/lock_requirements.py check",
+      "result": "passed",
+      "evidence": "all clean."
+    },
+    {
+      "command": "python tools/security/review.py check --base origin/main --head INDEX",
+      "result": "passed",
+      "evidence": "run after staging this record."
+    },
+    {
+      "command": "python test/check_public_changes.py",
+      "result": "passed",
+      "evidence": "Public-change scan: 0 finding(s)."
+    }
+  ],
+  "limitations": [
+    "python test/check_adr_index.py reports one finding on this branch alone: ADR numbers are not consecutive, because ADR-0101 is assigned to a parallel PR that is to be merged first; the index itself was regenerated with --write. CI stays red on that check until ADR-0101 is on main.",
+    "The end-to-end suite uses a fake agent; the real agent without a GPU was exercised by Go unit tests (probe none), not on a physical CPU-only machine.",
+    "gpu.probe auto on a machine whose NVIDIA driver is missing entirely now starts as a CPU node instead of refusing (documented in ADR-0102).",
+    "The router's RAM budget trusts the agent's memory fact like the VRAM fact before (TM-07); on Linux MemAvailable can include page cache of a mapped model, so the budget is an estimate; Ollama's own memory check and memory pressure remain the guard.",
+    "The catalog's VRAM measurement (/admin/measure) still needs a GPU; not changed here.",
+    "PostgreSQL integrations were not run: no session, memory or storage code changed."
+  ]
 }

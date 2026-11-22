@@ -63,6 +63,7 @@ jobs:
       - run: python test/selftest_vram_real.py
       - run: python test/selftest_context_sharing.py
       - run: python test/selftest_children_vram.py
+      - run: python test/selftest_cpu_node.py
       - run: python test/selftest_ollama_push.py
       - run: python test/selftest_game_prewarm.py
       - run: python test/selftest_quiet.py

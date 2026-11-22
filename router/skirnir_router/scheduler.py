@@ -275,9 +275,9 @@ def role_possible_when_free(role):
         for n in state.NODES.values():
             if n.state == "offline" or not n.offers(t["model"]):
                 continue
-            if not n.vram_total_gib:
+            if not n.capacity_gib():
                 return True
-            if state.CFG.need_gib(t["model"], t["num_ctx"], n) <= n.vram_total_gib - state.CFG.reserve.get("free", 1.0):
+            if state.CFG.need_gib(t["model"], t["num_ctx"], n) <= n.capacity_gib() - n.reserve_gib("free"):
                 return True
     return False
 
@@ -342,7 +342,7 @@ def _node_block(n, t, ctx, now):
         return None, {}
     foreign = n.foreign_vram_gib()
     info = {"need_gib": round(need, 2), "budget_gib": round(budget, 2), "foreign_vram_gib": round(foreign, 2)}
-    if n.vram_total_gib and need > n.vram_total_gib - state.CFG.reserve.get("free", 1.0):
+    if n.capacity_gib() and need > n.capacity_gib() - n.reserve_gib("free"):
         return MODEL_TOO_LARGE, info
     if foreign > 0 and need <= budget + foreign:
         return GPU_BUSY, dict(info, busy_reason="foreign_vram", gpu_util=n.gpu_util)
