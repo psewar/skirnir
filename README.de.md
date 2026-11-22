@@ -19,9 +19,9 @@ Gebaut für ein Homelab: Home Assistant, Node-RED und lokale Agenten-Frameworks 
 die nicht rund um die Uhr laufen und nicht nur der KI gehören. Der Name: Skirnir ist in der nordischen Mythologie Freyrs Bote,
 der in fremde Reiche reitet, dort verhandelt und mit der Antwort zurückkehrt.
 
-**Stand:** Router 0.23.0, Agent 0.30.0 (siehe [Releases](https://github.com/psewar/skirnir/releases) und
-[CHANGELOG.md](CHANGELOG.md), das Tags auf Router- und Agent-Versionen abbildet), seit September 2026 in einem Homelab im
-Dauerbetrieb, ein Entwickler. Keine Stabilitätszusagen. Die Dokumentation gibt es auf Englisch und Deutsch, die Unter-READMEs
+**Stand:** seit September 2026 in einem Homelab im Dauerbetrieb, ein Entwickler. Die aktuellen Router- und
+Agent-Versionen stehen in den [Releases](https://github.com/psewar/skirnir/releases) und in der obersten Zeile von
+[CHANGELOG.md](CHANGELOG.md), das Tags auf Router- und Agent-Versionen abbildet. Keine Stabilitätszusagen. Die Dokumentation gibt es auf Englisch und Deutsch, die Unter-READMEs
 (Agent, Decision Engine) sind deutsch. Wer es nachbaut, sollte Python, systemd und Ollama kennen.
 
 Sichere Entwicklung: [Threat Model](docs/security/threat-model.de.md), [Risikoregister](docs/security/risk-register.json)
@@ -188,7 +188,7 @@ Meldeweg für Sicherheitslücken: [SECURITY.md](SECURITY.md).
 | [docs/install-agent.de.md](docs/install-agent.de.md) | GPU-Knoten unter Windows und Linux, Ollama, Freigabe, Update-Schlüssel |
 | [docs/configuration.de.md](docs/configuration.de.md) | Client-Identitäten, Rollen und Stufen, Scheduler und Admission, Auto-Rolle, Cloud-Stufen |
 | [docs/clients.de.md](docs/clients.de.md) | Home Assistant, Node-RED, OpenAI- und Anthropic-Clients, Claude Code, der `routing`-Block |
-| [docs/operations.de.md](docs/operations.de.md) | Web-UI, Metriken, Home-Assistant-Entitäten, Agent- und Ollama-Updates, Schlüsselwechsel, Namen, Messwerte |
+| [docs/operations.de.md](docs/operations.de.md) | Web-UI, Metriken, Home-Assistant-Entitäten, Agent- und Ollama-Updates, Schlüsselwechsel, Sichern und Zurückspielen, Namen, Messwerte |
 | [docs/troubleshooting.de.md](docs/troubleshooting.de.md) | Statuscodes, wartende Agenten, TLS-Fehler, Logs, Gedächtnis-Zustände |
 | [docs/reference.de.md](docs/reference.de.md) | Schnittstellen, GPU-Schutz, optionale Gedächtnis- und Sitzungsfunktionen, Rerank, OpenAI-kompatible Knoten, Grenzen, Repo-Layout |
 | [docs/adr/](docs/adr/README.md) | Architecture Decision Records (englisch): warum Skirnir so gebaut ist |

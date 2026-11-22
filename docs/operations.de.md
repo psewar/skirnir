@@ -165,9 +165,51 @@ erzeugt einen neuen samt Protokoll, und jeder Knoten braucht `Set-UpdateKey.cmd 
 (unter Linux `update.public_key` von Hand setzen), bevor er wieder ein Release annimmt. Keines der Werkzeuge legt stillschweigend
 einen Schlüssel an: `create` (oder `deploy.py --create-agent-key`) ist nur für eine neue Installation.
 
+## Was sichern
+
+Skirnir hat keine eigene Backup-Funktion; diese Dateien mit dem Werkzeug sichern, das ohnehin läuft. Die Pfade sind die
+Standards von `install.sh` und vom `setup` des Agenten; ein anderes `--config-dir`, `router.state_dir` oder `identity.dir`
+verschiebt sie.
+
+**Router**
+
+| Was | Standardpfad | Warum |
+|---|---|---|
+| Konfigurationsordner | `/etc/skirnir-router/` | `config.yaml` (schreiben nur Root-Werkzeuge, nie der Router), die Zertifikate in `certs/` (oder `tls/` bei älteren Installationen) und der Release-Ordner `agent/` (`manifest.json` und die signierten Agent-Binaries; lassen sich auch erneut aus einem Release kopieren). |
+| Quelle der Secrets | der eigene Secret-Store und `/etc/skirnir-router-secrets/render-env.conf` mit dem Zugang dazu | `secrets.env` wird daraus erzeugt und lässt sich neu erzeugen: die Quelle sichern, nicht die erzeugte Datei. Wer `secrets.env` von Hand pflegt, hat sie als Quelle. Die Zugangsdatei enthält ein Geheimnis; ihr Backup so geschützt halten wie die Datei selbst. |
+| Zustandsordner (`router.state_dir`) | `/var/lib/skirnir-router/` | Alles, was der Router selbst schreibt, siehe nächste Tabelle. Ohne `state_dir` liegen diese Dateien neben der `config.yaml`. |
+| Session-Datenbank (optional) | die PostgreSQL-Datenbank, auf die `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) zeigt | Verwaltete Sessions (Turns, Ereignisse, Verdichtungen) und die Memory-Outbox. Mit den Werkzeugen von PostgreSQL sichern. |
+| Gedächtnis-Backend (optional) | ausserhalb von Skirnir (Hindsight) | Dort liegt das Langzeitgedächtnis; sichern, wie dieser Dienst es beschreibt. |
+| Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), falls der Audit-Verlauf gebraucht wird. |
+
+Dateien im Zustandsordner:
+
+| Datei | Inhalt | Wenn sie fehlt |
+|---|---|---|
+| `nodes.json` | Knotenregister: öffentlicher Schlüssel, Freigabezustand, Policy und Fakten je Agent | jeder Knoten erscheint als wartend und muss neu freigegeben werden |
+| `roles.yaml` | was die Web-UI geändert hat: Rollen, Modelle, Einstellungen, in der UI angelegte Clients (Token-Hashes) | die UI-Änderungen sind weg; es gilt nur die `config.yaml` |
+| `deletions.jsonl` | Löschjournal, nur IDs (ADR-0076) | eine zurückgespielte Datenbank bringt gelöschte Sessions und Gedächtnis zurück; siehe unten |
+| `usage.json` | Nutzung je Client und Monat, auch die Cloud-Ausgaben je Anbieter | das monatliche Cloud-Budget beginnt wieder bei null |
+| `metrics.json`, `perf.json` | kumulierte Zähler; gemessene Geschwindigkeit je Modell und Knoten für den Katalog | Zähler und Geschwindigkeitswerte beginnen von vorn |
+| `events.jsonl` | das Ereignis- und Entscheidungsprotokoll, das die Web-UI zeigt | nur Verlauf |
+| `requests.jsonl` | Entscheidungsbeobachtung (`decision_engine.observe_all`) | nur Beobachtungsdaten |
+| `ollama-latest.json` | zuletzt bekanntes Ollama-Release | nichts, wird neu geholt |
+
+Die optionale Entscheidungsaufzeichnung schreibt an ihren eigenen Pfad (`decision_engine.capture.path`, Standard
+`/var/lib/skirnir-router/decisions.jsonl`), standardmässig also in den Zustandsordner.
+
+**Knoten und Betreiber**
+
+| Was | Standardpfad | Warum |
+|---|---|---|
+| Agent-Konfiguration | Windows `C:\ProgramData\skirnir-agent\config.yaml`, Linux `/etc/skirnir-agent/config.yaml` | Router-URL, `update.public_key(s)`, Kinder und lokale Einstellungen |
+| Agent-Identität | das `identity.dir`: Windows `C:\ProgramData\skirnir-agent\identity\`, Linux (nach `setup`) `/var/lib/skirnir-agent/identity/` | `agent-identity.key` ist die Identität des Knotens gegenüber dem Router; `provisioned.json` ist das letzte Paket vom Router und kommt bei der nächsten Verbindung wieder. Unter Windows sind beide per DPAPI an die Maschine gebunden und lassen sich nur auf dieselbe Windows-Installation zurückspielen; nach einer Neuinstallation erzeugt der Agent einen neuen Schlüssel und der Knoten wird neu freigegeben. |
+| Update-Signierschlüssel | der Schlüsselordner des Betreibers (`deploy/agent_keys.py --keys <ordner>`), nicht auf dem Router | `agent-update.key`, ein vorbereiteter `agent-update.next.key` und die ausgemusterten Schlüssel. Ohne ihn nimmt kein Knoten ein neues Release an, bis jeder Knoten einem Ersatz vertraut (siehe [Schlüsselwechsel](#schlüsselwechsel), Signierschlüssel verloren). Das Backup offline und verschlüsselt aufbewahren. |
+
 ## Ein Backup zurückspielen
 
-Löschungen stehen ausserhalb der Datenbank, nur als IDs, in `deletions.jsonl` neben `config.yaml` (ADR-0076):
+Löschungen stehen ausserhalb der Datenbank, nur als IDs, in `deletions.jsonl` im Zustandsordner des Routers
+(`router.state_dir`, sonst neben der `config.yaml`; ADR-0076):
 
 1. **PostgreSQL zurückgespielt** (Session-Store und Memory-Outbox): den Router wie gewohnt starten. Bevor die Outbox etwas
    sendet, wendet er das Journal erneut an; das Log nennt, wie viele Sessions und Operationen wieder da waren und erneut

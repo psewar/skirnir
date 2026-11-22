@@ -156,9 +156,50 @@ replace-lost "<reason>"` (or `deploy.py --replace-lost-agent-key "<reason>"`) cr
 `Set-UpdateKey.cmd -Step Replace -Key <new public key>` (on Linux: set `update.public_key` by hand) before it accepts a release
 again. Neither tool creates a key implicitly: `create` (or `deploy.py --create-agent-key`) is for a new installation only.
 
+## What to back up
+
+Skirnir has no backup function of its own; back up these files with the tool you already use. Paths are the defaults of
+`install.sh` and the agent's `setup`; a different `--config-dir`, `router.state_dir` or `identity.dir` moves them.
+
+**Router**
+
+| What | Default path | Why |
+|---|---|---|
+| Configuration folder | `/etc/skirnir-router/` | `config.yaml` (written by root tools, never by the router), the certificates in `certs/` (or `tls/` on older installations) and the release folder `agent/` (`manifest.json` and the signed agent binaries; these can also be copied again from a release). |
+| Source of the secrets | your secret store, and `/etc/skirnir-router-secrets/render-env.conf` with its access | `secrets.env` is rendered from it and can be rendered again: back up the source, not the rendered file. If you maintain `secrets.env` by hand, it is the source. The access file holds a credential; keep its backup as protected as the file itself. |
+| State folder (`router.state_dir`) | `/var/lib/skirnir-router/` | Everything the router writes itself, see the next table. Without `state_dir` these files lie next to `config.yaml`. |
+| Session database (optional) | the PostgreSQL database that `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) points to | Managed sessions (turns, events, compactions) and the memory outbox. Back it up with PostgreSQL's own tools. |
+| Memory backend (optional) | outside Skirnir (Hindsight) | The long-term memory lives there; back it up as that service documents. |
+| Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), if you need the audit trail. |
+
+Files in the state folder:
+
+| File | Content | If it is lost |
+|---|---|---|
+| `nodes.json` | node registry: each agent's public key, approval state, policy and facts | every node shows up as pending and has to be approved again |
+| `roles.yaml` | what the web UI changed: roles, models, settings, clients added in the UI (token hashes) | the UI changes are gone; `config.yaml` applies alone |
+| `deletions.jsonl` | deletion journal, ids only (ADR-0076) | a restored database brings deleted sessions and memory back; see below |
+| `usage.json` | usage per client and month, including the cloud spend per provider | the monthly cloud budget starts again at zero |
+| `metrics.json`, `perf.json` | cumulative counters; measured speed per model and node for the catalog | counters and speed values start from scratch |
+| `events.jsonl` | the event and decision log the web UI shows | history only |
+| `requests.jsonl` | decision observation (`decision_engine.observe_all`) | observation data only |
+| `ollama-latest.json` | last known Ollama release | nothing, it is fetched again |
+
+The opt-in decision capture writes to its own path (`decision_engine.capture.path`, default
+`/var/lib/skirnir-router/decisions.jsonl`), inside the state folder by default.
+
+**Nodes and operator**
+
+| What | Default path | Why |
+|---|---|---|
+| Agent configuration | Windows `C:\ProgramData\skirnir-agent\config.yaml`, Linux `/etc/skirnir-agent/config.yaml` | router URL, `update.public_key(s)`, children and local settings |
+| Agent identity | the `identity.dir`: Windows `C:\ProgramData\skirnir-agent\identity\`, Linux (after `setup`) `/var/lib/skirnir-agent/identity/` | `agent-identity.key` is the node's identity towards the router; `provisioned.json` is the last bundle from the router and comes again on the next connection. On Windows both are DPAPI-protected for the machine and can only be restored onto the same Windows installation; after a reinstall the agent creates a new key and the node is approved again. |
+| Update signing key | the operator's key folder (`deploy/agent_keys.py --keys <folder>`), off the router | `agent-update.key`, a prepared `agent-update.next.key` and the retired keys. Without it no node accepts a new release until every node trusts a replacement (see [Key rotation](#key-rotation), lost signing key). Keep the backup offline and encrypted. |
+
 ## Restoring a backup
 
-Deletions are recorded outside the database, ids only, in `deletions.jsonl` next to `config.yaml` (ADR-0076):
+Deletions are recorded outside the database, ids only, in `deletions.jsonl` in the router's state folder
+(`router.state_dir`, otherwise next to `config.yaml`; ADR-0076):
 
 1. **PostgreSQL restored** (session store and memory outbox): start the router as usual. Before the memory outbox sends
    anything it applies the journal again; the log says how many sessions and operations were back and are deleted again.
