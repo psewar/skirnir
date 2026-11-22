@@ -74,13 +74,14 @@ def observe_rerank(outcome, duration_s):
     _hist("skirnir_rerank_duration_seconds", {"outcome": outcome}, RERANK_BUCKETS, duration_s)
 
 
-def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion_tokens, queued_s, cost_chf=0.0):
-    """At the end of every request from proxy.dispatch."""
+def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion_tokens, queued_s, cost=0.0):
+    """At the end of every request from proxy.dispatch. cost is in the catalogue currency (router.cloud.currency); the
+    metric and usage field names keep their historical _chf suffix (ADR-0105)."""
     client = info.get("client") or "-"
     base = {"role": info["role"], "node": info["node"], "model": info["model"], "client": client, "via": info["via"], "outcome": outcome}
     _counter("skirnir_requests_total", base)
-    if cost_chf:
-        _counter("skirnir_cloud_cost_chf_total", {"node": info["node"], "model": info["model"], "client": client, "role": info["role"]}, cost_chf)
+    if cost:
+        _counter("skirnir_cloud_cost_chf_total", {"node": info["node"], "model": info["model"], "client": client, "role": info["role"]}, cost)
     _hist("skirnir_request_duration_seconds", {"role": info["role"], "outcome": outcome}, DURATION_BUCKETS, duration_s)
     if ttft_s is not None:
         _hist("skirnir_ttft_seconds", {"model": info["model"], "node": info["node"]}, TTFT_BUCKETS, max(0.0, ttft_s))
@@ -91,7 +92,7 @@ def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion
         _counter("skirnir_tokens_total", {**tl, "kind": "prompt"}, prompt_tokens)
     if completion_tokens:
         _counter("skirnir_tokens_total", {**tl, "kind": "completion"}, completion_tokens)
-    usage_add(client, info["role"], info["model"], outcome, prompt_tokens or 0, completion_tokens or 0, cost_chf)
+    usage_add(client, info["role"], info["model"], outcome, prompt_tokens or 0, completion_tokens or 0, cost)
 
 
 # ---------------- Usage ----------------
@@ -282,8 +283,12 @@ def render():
     t = usage_totals(usage_today())
     gauge("skirnir_usage_today_requests", "requests today (all clients)", [({}, t["requests"])])
     from . import cloud
-    gauge("skirnir_cloud_spend_month_chf", "cloud spend in the current month per provider", [({"provider": p}, round(cloud.spend_month(p), 4)) for p in state.CLOUD])
-    gauge("skirnir_cloud_budget_month_chf", "monthly budget per provider", [({"provider": p}, float(t_.spec.get("budget_month_chf") or 0)) for p, t_ in state.CLOUD.items()])
+    # ADR-0105: the names keep their historical _chf suffix (dashboards and alerts use them); the amounts are in the catalogue
+    # currency, which skirnir_cloud_currency_info names
+    gauge("skirnir_cloud_spend_month_chf", "cloud spend in the current month per provider (catalogue currency)", [({"provider": p}, round(cloud.spend_month(p), 4)) for p in state.CLOUD])
+    gauge("skirnir_cloud_budget_month_chf", "monthly budget per provider (catalogue currency)", [({"provider": p}, cloud.budget_month(t_.spec)) for p, t_ in state.CLOUD.items()])
+    gauge("skirnir_cloud_currency_info", "1, labelled with the currency of cloud prices, budgets and spend (router.cloud.currency)",
+          [({"currency": cloud.currency()}, 1)] if state.CLOUD else [])
     gauge("skirnir_cloud_enabled", "1 = provider enabled and has a key", [({"provider": p}, 1 if (t_.spec.get("enabled", True) and t_.api_key) else 0) for p, t_ in state.CLOUD.items()])
     gauge("skirnir_usage_today_tokens", "tokens today", [({"kind": "prompt"}, t["prompt_tokens"]), ({"kind": "completion"}, t["completion_tokens"])])
 

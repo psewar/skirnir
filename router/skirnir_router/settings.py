@@ -38,11 +38,14 @@ _e("router.cloud.max_cloud_data_class", "choice", "Cloud bis Datenklasse", "hoec
    label_en="Cloud up to data class", help_en="highest class still allowed to go to the cloud")
 _e("router.cloud.credential_scan", "choice", "Credential-Scan", "block = Prompts mit erkennbaren Schluesseln/Passwoertern gehen nicht in die Cloud", G, "block", choices=["block", "off"],
    label_en="Credential scan", help_en="block = prompts with recognisable keys/passwords never go to the cloud")
+_e("router.cloud.currency", "str", "Waehrung", "Einheit der Katalogpreise und Budgets (drei Grossbuchstaben, z. B. CHF, EUR, USD); nur Anzeige, der Router rechnet nicht um", G, "CHF", maxlen=3,
+   label_en="Currency", help_en="unit of the catalogue prices and budgets (three capital letters, e.g. CHF, EUR, USD); display only, the router does not convert")
 P = "router.cloud.providers.*."
 _e(P + "enabled", "bool", "aktiv", "deaktiviert = Anbieter faellt als Stufe weg", "Cloud-Anbieter", True,
    label_en="enabled", help_en="disabled = provider drops out as a tier")
-_e(P + "budget_month_chf", "float", "Budget je Monat", "0 = kein Budget; erschoepft = Anbieter faellt als Stufe weg", "Cloud-Anbieter", 0, min=0, max=100000, step=0.5,
-   label_en="Budget per month", help_en="0 = no budget; exhausted = provider drops out as a tier")
+# ADR-0105: budget_month; the old path ...budget_month_chf is accepted as an alias (cost_keys.normalize_settings)
+_e(P + "budget_month", "float", "Budget je Monat", "in der Waehrung der Katalogpreise; 0 = kein Budget; erschoepft = Anbieter faellt als Stufe weg", "Cloud-Anbieter", 0, min=0, max=100000, step=0.5,
+   label_en="Budget per month", help_en="in the currency of the catalogue prices; 0 = no budget; exhausted = provider drops out as a tier")
 _e(P + "warn_at_percent", "int", "Warnung ab %", "HA-Problem 'Cloud <anbieter>: x % des Monatsbudgets'", "Cloud-Anbieter", 80, min=1, max=100,
    label_en="Warn from %", help_en="HA problem 'Cloud <provider>: x % of the monthly budget'")
 _e(P + "max_data_class", "choice", "Datenklasse max.", "eigene Obergrenze dieses Anbieters (leer = globale Grenze); hoeher als die globale Grenze nur mit trust: institutional in config.yaml", "Cloud-Anbieter", None, choices="data_classes", nullable=True,

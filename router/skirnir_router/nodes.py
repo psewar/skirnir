@@ -44,11 +44,11 @@ def nreq(node, method, path, **kw):
         return node.tunnel.request(method, path, **kw)
     if not node.url:
         # exception-ok: nreq stands in for SESSION.request; callers handle an unreachable node as a ClientError at their network boundary
-        raise NodeNotReady(f"{node.name}: kein Tunnel verbunden")
+        raise NodeNotReady(f"{node.name}: no tunnel connected")
     if node.tls:
         if node.ssl is None:
             # exception-ok: nreq stands in for SESSION.request; callers handle an unreachable node as a ClientError at their network boundary
-            raise NodeNotReady(f"{node.name}: TLS-Fingerprint unbekannt, warte auf Heartbeat")
+            raise NodeNotReady(f"{node.name}: TLS fingerprint unknown, waiting for a heartbeat")
         kw["ssl"] = node.ssl
         h = dict(kw.get("headers") or {})
         if state.CFG.heartbeat_token:   # Router token for the agent's TLS front-end (ollama_proxy, router.token)

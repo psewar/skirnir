@@ -2,27 +2,84 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "875082c54dffdaeab321f6d0240ed9bf8effde94",
- "change_digest": "9a215ddb35514964393362b53ebe5eaae28ed71cf3a2a59d8670a7779282a0dd",
+ "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
+ "change_digest": "9e8f13423955dc6fb03f1a61145d2798cfbbf98eb15743957ecb88241d680c32",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0100-the-prompt-rate-counts-only-the-tokens-ollama-processed.md",
+  "docs/adr/0105-currency-neutral-cost-keys.md",
+  "docs/adr/0106-language-dependent-defaults-live-in-the-configuration.md",
   "docs/adr/README.md",
-  "docs/security/reviews/current.json"
+  "docs/configuration.de.md",
+  "docs/configuration.md",
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "docs/security/reviews/current.json",
+  "router/config.example.yaml",
+  "router/skirnir_router/admin.py",
+  "router/skirnir_router/agentupdate.py",
+  "router/skirnir_router/cloud.py",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/cost_keys.py",
+  "router/skirnir_router/fallback_observation.py",
+  "router/skirnir_router/metrics.py",
+  "router/skirnir_router/nodes.py",
+  "router/skirnir_router/ollamaupdate.py",
+  "router/skirnir_router/perf.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/settings.py",
+  "router/skirnir_router/tunnel.py",
+  "router/ui.html",
+  "test/run_tests.py",
+  "test/selftest_locale_neutral.py",
+  "test/selftest_ollama_push.py",
+  "test/test-config.yaml"
  ],
  "risk_ids": [
-  "TM-15"
+  "TM-02",
+  "TM-03",
+  "TM-08",
+  "TM-15",
+  "TM-16"
  ],
  "boundaries": [
+  "B2",
+  "B6",
   "B9"
  ],
- "summary": "Documentation only: ADR-0100 status proposed -> accepted on the operator's decision of 2026-11-19 (after the merge and rollout of router 0.34.1), with that note in the decision outcome; the ADR index regenerated, and the released CHANGELOG row v0.39.1 extended to 'ADR-0100 proposed, accepted 2026-11-19' (the release notes keep 'proposed', which was true at release time). No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
+ "summary": "Router 0.37.0, locale-neutral defaults (ADR-0105, ADR-0106 proposed). Cost keys budget_month / price_per_m with the old _chf names as aliases (cost_keys.py), normalised per layer in Config.merged and Config.parse, in PUT /admin/config (settings paths, cloud model bodies, merge with stored roles.yaml settings, client deletion) and in the settings view; both names with different values are refused, never resolved silently. router.cloud.currency (display only, ^[A-Z]{3}$, EDITABLE as str maxlen 3, escaped in ui.html) in the provider snapshot, start log and an info metric. Wire fields, usage data and metric names unchanged; catalogue views add the old price field. router.benchmark.prompt (config.yaml only, nonempty, <= 4000 characters) sent to local nodes only, result records a SHA-256 prefix, the prompt is not logged. observe_light default resolved by the configuration check; fallback_observation reads only the configuration. English texts in nodes/tunnel/update status/common/admin hints. Traced: settings allowlist (settings.coerce/spec_for) still applies after renaming because neutral_path only maps the exact provider budget key onto its allowlisted neutral path; every budget reader (cloud.budget_month, request_block_reason, budget_problems, snapshot, metrics) reads the normalised spec built by _parse_cloud, so a budget written under the old name keeps limiting spend (TM-08); write_overrides validates the merged probe before writing, so the web UI cannot persist a conflicting pair; ha.py untouched (reads unchanged budget_view fields). No credentials, routes, auth, tunnel, enrollment, data-class or cloud-payload logic changed.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/check_adr_index.py",
+   "command": "python test/selftest_locale_neutral.py",
    "result": "passed",
-   "evidence": "ADR index ok: 100 ADRs (0100 accepted)."
+   "evidence": "OK: 0 failed (60 checks), including the rejected cases: conflicting budget and price pairs in config.yaml, conflicting settings paths in roles.yaml and in PUT /admin/config, conflicting cloud model body, invalid currencies (eur, EURO, 5, empty, 'dollars' via settings), invalid benchmark prompts, observe_light with an unknown name or a non-list."
+  },
+  {
+   "command": "all 72 python self-tests listed in .github/workflows/ci.yml (Windows, Python 3.12)",
+   "result": "passed",
+   "evidence": "every file exited 0; test/selftest_ollama_push.py adjusted to the English status message."
+  },
+  {
+   "command": "python test/run_tests.py (started through a local wrapper that serialises end-to-end runs)",
+   "result": "passed",
+   "evidence": "0 failures, STATE: passed (332 checks) with the new checks: settings item under the neutral path with the base value from the old key in test-config.yaml, roles.yaml written with the neutral key after a PUT with the old path, resets through the old and the new path, old price body shown under both names, budget exhausted and enforced with the old key, skirnir_cloud_currency_info in /metrics."
+  },
+  {
+   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure",
+   "result": "passed",
+   "evidence": "All checks passed!; configuration ok: 5 roles, 7 models in the catalog."
+  },
+  {
+   "command": "python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "control flow ok: 0 legacy findings."
+  },
+  {
+   "command": "python test/check_pinned_references.py ; python test/check_training_data.py ; python tools/security/lock_requirements.py check",
+   "result": "passed",
+   "evidence": "exit code 0 each."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -30,12 +87,16 @@
    "evidence": "run after staging this record."
   },
   {
-   "command": "python test/check_public_changes.py",
+   "command": "python test/check_public_changes.py --base <merge-base>",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
+   "evidence": "Public-change scan: 0 finding(s); added lines manually reviewed for hosts, addresses and personal data."
   }
  ],
  "limitations": [
-  "Documentation only; the behaviour it records was reviewed in the record of PR 171 (router 0.34.1)."
+  "python test/check_adr_index.py was run and reports one finding: ADR numbers not consecutive, because ADR-0101 to ADR-0104 belong to other open pull requests and ADR-0105/0106 were assigned to this one. It passes once those are merged; the index was regenerated with --write.",
+  "No live router, real cloud provider or browser session; the web UI change was syntax-checked (node --check) and covered by the end-to-end API checks, not clicked through.",
+  "Home Assistant cost sensor keeps unit CHF and HA problem texts (including the cloud budget problem) stay German: ha.py is outside this change (another PR edits it).",
+  "A roles.yaml edited by hand with both names and different values stops the router from loading the configuration (explicit error naming both keys) - intended fail-closed behaviour, documented.",
+  "Pre-existing, not introduced here: deleting a client in the same PUT that resets settings re-adds the reset settings from the stored file (admin._apply_delete_clients merges the stored block again); functional, not a security issue."
  ]
 }

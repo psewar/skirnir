@@ -104,6 +104,18 @@ roles:
   Fit check: `VRAM need = weights + context cost × num_ctx/1000 + 0.8 GiB`. Weights and context cost per model live in the
   catalogue (`models:`), measured with the UI button **Measure** (loads at 8k and 32k, reads `/api/ps`) or estimated.
   Reference values: [operations.md](operations.md#measurements-as-a-reference).
+- **Benchmark.** The UI button **Benchmark** measures generation and prompt speed of a loaded model (one warm-up, two runs,
+  200 tokens, temperature 0) with `router.benchmark.prompt` (router 0.37.0,
+  [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)). The default is the German prompt of all
+  earlier measurements, unchanged. Tokens per second depend on the language of prompt and answer (tokenizers split
+  languages into differently many tokens), so set a prompt in your clients' language and compare only results with the
+  same `prompt_id`, which every result records.
+
+  ```yaml
+  router:
+    benchmark:
+      prompt: "Explain in about 200 words what a network router does and how it differs from a switch."
+  ```
 - **Busy.** A node is `busy` when foreign VRAM (used − Ollama − desktop baseline) exceeds the threshold or the GPU is loaded
   without router requests. Then only `busy_ok` tiers run; non-`busy_ok` models are unloaded every 30 s. The desktop baseline is
   learned per node (median of hourly means while the GPU is quiet) and capped by a policy value. Leaving `busy` is easier
@@ -171,6 +183,9 @@ roles:
   the very GPU being waited for), and the decision log records `decision_observe`: class, confidence, the first free lower
   tier of the same role and `would_fallback` for the classes in `observe_light`. Routing does not change; the point is to
   measure how often a free smaller model would have been good enough before letting the router act on it.
+  Without `observe_light` the configuration check sets `[standard, assist]`, limited to the names among `options` (router
+  0.37.0, [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)); with roles named differently,
+  list your light classes. A given list is taken as is, and `[]` means that no class counts as light.
   `observe_all` goes further: every request to `/api/chat` or `/api/generate` is classified in the background when it starts,
   and when it ends the router appends one line to `requests.jsonl` next to the configuration (`observe_path`): class,
   duration, waiting time, tokens, thinking, tool count, client, role, outcome - no prompt contents. A separate file, so the
@@ -228,7 +243,7 @@ The embedding head retrains from that in seconds; the embedding model stays.
 
 ## Cloud as a tier in roles
 
-Cloud providers are **models in the catalogue** (`"openai:gpt-5-mini": {cloud: openai, provider_model: gpt-5-mini, price_chf_per_m: {...}}`)
+Cloud providers are **models in the catalogue** (`"openai:gpt-5-mini": {cloud: openai, provider_model: gpt-5-mini, price_per_m: {...}}`)
 and sit as a tier in exactly those roles that are allowed to use them. Concrete cloud model names are not directly callable
 (404), only via roles. A cold local model wins over the cloud. Three cases in which the cloud gets its turn: no local node can
 (all gaming or off), a capability is missing locally, or the client demands it (`routing.execution: cloud`).
@@ -251,10 +266,9 @@ Limits (`router.cloud`):
   A declared `routing.data_class` is never overruled.
 - **Credential scan** (`block`): prompts with recognisable keys (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
   do not go to the cloud; locally they run normally.
-- **Budget** per provider and month, in the currency of the catalogue prices (the router does not convert currencies; the
-  suffix `_chf` of keys, fields and metrics and the unit of the Home Assistant cost sensor are historical); exhausted =
-  the provider drops out as a tier, from `warn_at_percent` on a Home Assistant problem is raised. Cost per request in usage
-  and metrics.
+- **Budget** per provider and month (`budget_month`), in the currency of the catalogue prices (`price_per_m`, per million
+  tokens); exhausted = the provider drops out as a tier, from `warn_at_percent` on a Home Assistant problem is raised. Cost
+  per request in usage and metrics. See [currency](#currency-of-prices-and-budgets).
 - **Egress allowlist** for `base_url` (+ `egress_allow`), keys only from `secrets.env`, never in the log; circuit breaker as
   with nodes; shadow runs never go to the cloud.
 - **Transport:** providers require the final HTTPS endpoint. HTTP is supported only for explicitly allowlisted literal
@@ -291,6 +305,34 @@ thinks and needs `none`. The provider's thought (`reasoning_content`, or `reason
 Ollama's `thinking` (`reasoning` in the OpenAI shape, a thinking block in the Anthropic shape), except for a client that
 sent `think: false`.
 
+### Currency of prices and budgets
+
+Router 0.37.0, [ADR-0105](adr/0105-currency-neutral-cost-keys.md): the router never converts currencies. Prices
+(`models.<m>.price_per_m`), budgets (`router.cloud.providers.<p>.budget_month`), spend and usage costs are all in the
+currency you write the prices in. `router.cloud.currency` (default `CHF`, three capital letters, also in the web UI) names
+it for display: the web UI shows it with every amount, the provider snapshot carries `currency`, and `/metrics` has
+`skirnir_cloud_currency_info`. Changing it converts nothing; change the prices and budgets with it.
+
+```yaml
+router:
+  cloud:
+    currency: EUR
+    providers:
+      openai: { kind: openai, base_url: https://api.openai.com/v1, api_key_env: OPENAI_API_KEY, budget_month: 20 }
+models:
+  "openai:gpt-5-mini": { cloud: openai, price_per_m: { input: 0.25, output: 2.0 } }
+```
+
+- **Old names.** Up to router 0.36 the keys were `budget_month_chf` and `price_chf_per_m`. They stay accepted with the same
+  meaning in `config.yaml`, in `roles.yaml` (catalogue entries and the web UI's setting
+  `router.cloud.providers.<p>.budget_month_chf`) and in `PUT /admin/config`. The web UI writes the new names, so a stored
+  old name migrates with the next save.
+- **Both names in one place:** the same value is accepted; different values are refused, and the message names both keys.
+  Across files there is no conflict: a `roles.yaml` value overrides `config.yaml` whichever name each uses.
+- **Field and metric names** keep the suffix `_chf` (`spend_month_chf`, `budget_month_chf`, `cost_chf`,
+  `skirnir_cloud_*_chf*`), so dashboards, alerts and Home Assistant entities keep working; their values are in the
+  configured currency. The Home Assistant cost sensor still has the unit `CHF`.
+
 ### Institutional providers
 
 Router 0.34.0, [ADR-0099](adr/0099-institutional-providers-take-their-own-data-class-limit.md):
@@ -310,7 +352,7 @@ router:
         base_url: https://llm.example.org/v1
         api_key_env: INSTITUTION_API_KEY
         secrets_file: /etc/skirnir-router/secrets.env
-        budget_month_chf: 0
+        budget_month: 0
 ```
 
 - Its own `max_data_class` **replaces** `max_cloud_data_class` for this provider. It may be any class below the highest,
