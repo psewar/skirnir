@@ -7,6 +7,7 @@ router:
   # Read design/hindsight-memory.md before enabling; no implicit capture of client sessions.
   hindsight:
     enabled: false
+    backend: hindsight          # memory backend adapter; only hindsight so far (design/hindsight-memory.md, "Backend interface")
     endpoint_env: SKIRNIR_HINDSIGHT_URL
     api_key_env: SKIRNIR_HINDSIGHT_TOKEN
     namespace_key_env: SKIRNIR_MEMORY_NAMESPACE_KEY

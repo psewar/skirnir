@@ -17,7 +17,7 @@ from uuid import UUID
 from aiohttp import web
 
 from . import auth, cloud, metrics, recall_skips, session_api, state
-from .hindsight import BANK_MISSING, HindsightClient, endpoint_from_env
+from .memory_backend import open_backend
 from .memory_config import HindsightConfig
 from .outcome import Problem, conflict, denied, failed, invalid, unauthenticated, unavailable
 
@@ -123,17 +123,17 @@ def rejected_content(content, cfg, *, private_addresses=False):
 @dataclass(frozen=True)
 class Recall:
     """Recalled facts with the memory's state as a fact, never inferred from an empty list.
-    state: "available" (Hindsight answered; no items means no matching knowledge), "bank_missing" (the bank does
+    state: "available" (the backend answered; no items means no matching knowledge), "bank_missing" (the bank does
     not exist yet: nothing was ever retained under this scope and namespace key), "query_filtered" (the
     sensitive-data filter kept the query from being sent) or "unavailable[:<kind>]" (no usable answer; kind as in
-    hindsight.KINDS, e.g. "protocol" for an oversized or malformed response)."""
+    memory_backend.KINDS, e.g. "protocol" for an oversized or malformed response)."""
     items: list
     state: str = "available"
     trimmed: int = 0      # facts dropped by a size limit (recall_max_bytes or the client's budget)
     duplicates: int = 0   # results dropped because they repeat a fact already passed on (see single_source)
     # Which limit stopped this recall, so no setting silently has no effect: "facts" (recall_max_facts), "bytes"
-    # (recall_max_bytes), "client" (the caller's own max_tokens), "results" (everything usable Hindsight returned
-    # was passed on; more needs a larger Hindsight budget or there is no more matching knowledge). None: no lookup.
+    # (recall_max_bytes), "client" (the caller's own max_tokens), "results" (everything usable the backend returned
+    # was passed on; more needs a larger backend budget or there is no more matching knowledge). None: no lookup.
     limited_by: str | None = None
     # recall_with (0.8.9): the further projects read with this one, each as {"project", "memory_state", "items"} - their state
     # is reported here; it never turns the primary answer into an error.
@@ -149,13 +149,10 @@ def unavailable_state(kind):
 
 
 def single_source(fact):
-    """The id of the one fact an observation was derived from, or None. Hindsight returns such an observation next to its
-    fact (include.source_facts lists the ids), so the pair says the same once. An observation summarising several facts
-    is more than a copy of any of them and has no single source."""
-    sources = fact.get("source_fact_ids")
-    if fact.get("type") == "observation" and isinstance(sources, list) and len(sources) == 1 and isinstance(sources[0], str):
-        return sources[0]
-    return None
+    """The id of the one fact an observation (a memory_backend.Fact) was derived from, or None. Hindsight returns such an
+    observation next to its fact, so the pair says the same once. An observation summarising several facts is more than
+    a copy of any of them and has no single source."""
+    return fact.sources[0] if fact.type == "observation" and len(fact.sources) == 1 else None
 
 
 QUERY_FILTERED = "memory query rejected by sensitive-data filter"
@@ -207,8 +204,9 @@ def unpacked_texts(content):
 
 
 class MemoryService:
-    def __init__(self, cfg, key, client):
-        self.cfg, self.key, self.client = cfg, key, client
+    def __init__(self, cfg, key, backend):
+        # backend: a memory_backend.MemoryBackend. Everything here works on its typed values, never on a wire format.
+        self.cfg, self.key, self.backend = cfg, key, backend
         self.queue = asyncio.Queue(maxsize=cfg.queue_size)
         self.seen = OrderedDict()
         self.worker = None
@@ -237,7 +235,7 @@ class MemoryService:
         return self.active() and scope_for_principal(scope.principal, scope.project, read=read, write=write, explicit=True) == scope
 
     async def recall(self, scope, query, *, types=None, text_budget=None):
-        """A Recall carrying its state (also when Hindsight gave no usable answer; the caller decides whether that
+        """A Recall carrying its state (also when the backend gave no usable answer; the caller decides whether that
         stops it), or a Problem for a policy or request error. text_budget: a caller's own max_tokens, applied as
         Hindsight applies it, to the fact text only."""
         if not self.current(scope, read=True):
@@ -250,53 +248,46 @@ class MemoryService:
         if rejected_content(query, self.cfg, private_addresses=private):
             count("recall", "filtered")
             return Recall([], "query_filtered")
-        result = await self.client.recall(self.bank(scope), query, types=types, authorize=lambda: self.current(scope, read=True))
+        result = await self.backend.recall(self.bank(scope), query, types=types, authorize=lambda: self.current(scope, read=True))
         if failed(result) and result.status == 403:
             return POLICY_CHANGED
         if not self.current(scope, read=True):
             return POLICY_CHANGED
-        if not failed(result) and result.get(BANK_MISSING) is True:
+        if failed(result):
+            count("recall", "unavailable")
+            return Recall([], unavailable_state(result.kind))
+        if result.bank_missing:
             count("recall", "bank_missing")
             return Recall([], "bank_missing")
-        values = None if failed(result) else result.get("results")
-        if not isinstance(values, list):
-            count("recall", "unavailable")
-            return Recall([], unavailable_state(result.kind if failed(result) else "protocol"))
         items, trimmed, duplicates, shown = [], 0, 0, set()   # shown: ids passed on, incl. the single source of an observation
         by_bytes = by_client = False
         text_bytes = 0
-        # Hindsight's max_tokens is advisory: an oversized top fact may be returned. Bound the complete rendered
+        # The backend's budget (Hindsight's max_tokens) is advisory: an oversized top fact may be returned. Bound the complete rendered
         # wrapper locally by UTF-8 bytes (recall_max_bytes), a conservative upper bound on its text tokens, including
         # the notice, source labels, provenance and JSON overhead. A caller's own budget (gateway max_tokens) means
         # what it means in Hindsight: tokens of fact text, bounded conservatively by the text's bytes. Applied to the
         # whole wrapper it silently held a client's default 4096 tokens to 4 KiB whatever the server allowed.
-        for fact in values[:100]:
-            if not isinstance(fact, dict):
+        for fact in result.facts[:100]:   # at most 100 facts per answer, whatever the backend returns
+            if self.cfg.recall_min_score > 0 and (fact.score is None or not self.cfg.recall_min_score <= fact.score <= 1):
                 continue
-            if self.cfg.recall_min_score > 0:
-                score = (fact.get("scores") or {}).get("reranker") if isinstance(fact.get("scores"), dict) else None
-                if type(score) not in (int, float) or not self.cfg.recall_min_score <= score <= 1:
-                    continue
-            source, content = fact.get("id"), fact.get("text")
-            if not isinstance(source, str) or not 1 <= len(source) <= 128 or any(ord(c) < 32 for c in source):
+            source, content = fact.id, fact.text
+            if not 1 <= len(source) <= 128 or any(ord(c) < 32 for c in source):
                 continue
-            if (not isinstance(content, str) or rejected_content(content, self.cfg, private_addresses=private)
-                    or rejected_content(source, self.cfg, private_addresses=private)):
+            if rejected_content(content, self.cfg, private_addresses=private) or rejected_content(source, self.cfg, private_addresses=private):
                 continue
             candidate = {"source": source, "text": content}
-            metadata = fact.get("metadata")
-            if isinstance(metadata, dict):
-                # Server-authored provenance survives Hindsight extraction. It is
+            if fact.metadata is not None:
+                # Server-authored provenance survives the backend's extraction. It is
                 # still untrusted data and never proof that a statement is true.
                 from .provenance import recall_metadata
-                clean = recall_metadata(metadata)
+                clean = recall_metadata(fact.metadata)
                 if rejected_content(json.dumps(clean), self.cfg, private_addresses=private):
                     continue
                 if clean:
                     candidate["provenance"] = clean
-            for key in ("created_at", "updated_at"):
-                if isinstance(fact.get(key), str):
-                    candidate[key] = fact[key][:64]
+            for key, value in (("created_at", fact.created_at), ("updated_at", fact.updated_at)):
+                if value is not None:
+                    candidate[key] = value[:64]
             # The higher-ranked of a fact and its single-source observation keeps the place; the other repeats it.
             twin = single_source(fact)
             if source in shown or (twin is not None and twin in shown):
@@ -417,7 +408,7 @@ class MemoryService:
         self.queue.put_nowait((scope, operation, content, confirmed, origin))
         self.seen[operation] = fingerprint
         # Never evict active entries. Terminal entries are a bounded convenience cache;
-        # Hindsight's deterministic operation UUID supplies cross-restart deduplication.
+        # the backend's idempotent, deterministic operation UUID supplies cross-restart deduplication.
         count("retain", "queued")
         return operation
 
@@ -431,8 +422,8 @@ class MemoryService:
             success = False
             try:
                 if self.current(scope, write=True):
-                    result = await self.client.retain(self.bank(scope), content, operation, confirmed=confirmed, provenance=origin,
-                                                      authorize=lambda scope=scope: self.current(scope, write=True))
+                    result = await self.backend.retain(self.bank(scope), content, operation, confirmed=confirmed, provenance=origin,
+                                                       authorize=lambda scope=scope: self.current(scope, write=True))
                     success = not failed(result)
                     count("retain", "accepted" if success else "unavailable")
                 else:
@@ -463,7 +454,7 @@ class MemoryService:
                 waiting.cancel()
             self.worker.cancel()
             await asyncio.gather(waiting, self.worker, return_exceptions=True)
-        await self.client.close()
+        await self.backend.close()
 
 
 def count(operation, outcome, inc=1):
@@ -480,14 +471,14 @@ async def lifecycle(app):
         token = os.environ.get(cfg.api_key_env, "")
         if len(key) < 32 or len(token) > 8192 or any(ord(c) < 32 for c in token):
             raise RuntimeError("memory requires a stable namespace key (at least 32 bytes) and a valid optional API token")  # exception-ok: aborts startup
-        endpoint = endpoint_from_env(cfg)
-        if failed(endpoint):
-            raise RuntimeError(endpoint.message)  # exception-ok: aborts startup
-        service = MemoryService(cfg, key, HindsightClient(endpoint, token, cfg))
+        backend = open_backend(cfg, token)   # the adapter named by hindsight.backend (ADR-0115, ADR-0123)
+        if failed(backend):
+            raise RuntimeError(backend.message)  # exception-ok: aborts startup
+        service = MemoryService(cfg, key, backend)
         if cfg.outbox_enabled:
             service.outbox = app.get(session_api.STORE_KEY)
             if service.outbox is None:
-                await service.client.close()
+                await service.backend.close()
                 raise RuntimeError("persistent memory outbox requires an available session store")  # exception-ok: aborts startup
         service.worker = asyncio.create_task(service.run_worker())
     app[SERVICE_KEY] = service
@@ -599,31 +590,25 @@ async def _list_result(request, service):
         return invalid("list query must be a short nonempty string")
     if type(limit) is not int or not 1 <= limit <= LIST_LIMIT or type(offset) is not int or offset < 0:
         return invalid(f"list limit must be 1..{LIST_LIMIT} and offset at least 0")
-    page = await service.client.list_memories(service.bank(scope), kind=kind, query=query, limit=limit, offset=offset,
-                                              authorize=lambda: service.current(scope, read=True))
+    page = await service.backend.list(service.bank(scope), kind=kind, query=query, limit=limit, offset=offset,
+                                      authorize=lambda: service.current(scope, read=True))
     if failed(page):
         return page
     items, withheld = [], []
-    for unit in page.get("items") or []:
-        if not isinstance(unit, dict) or not isinstance(unit.get("id"), str):
-            continue
-        document = unit.get("document_id") if isinstance(unit.get("document_id"), str) else None
-        text = unit.get("text") if isinstance(unit.get("text"), str) else ""
-        if rejected_content(text, service.cfg, private_addresses=scope.private_addresses):
-            withheld.append({"id": unit["id"][:128], "document_id": document})
+    for unit in page.facts:
+        if rejected_content(unit.text, service.cfg, private_addresses=scope.private_addresses):
+            withheld.append({"id": unit.id[:128], "document_id": unit.document_id})
             continue
         from .provenance import recall_metadata
-        sources = unit.get("source_memory_ids") if isinstance(unit.get("source_memory_ids"), list) else []
-        entry = {"id": unit["id"][:128], "type": unit.get("fact_type"), "text": text, "document_id": document,
-                 "source_memory_ids": [s[:128] for s in sources[:32] if isinstance(s, str)],
-                 "provenance": recall_metadata(unit["metadata"]) if isinstance(unit.get("metadata"), dict) else {}}
-        for key in ("date", "updated_at"):
-            if isinstance(unit.get(key), str):
-                entry[key] = unit[key][:64]
+        entry = {"id": unit.id[:128], "type": unit.type, "text": unit.text, "document_id": unit.document_id,
+                 "source_memory_ids": [s[:128] for s in unit.sources[:32]],
+                 "provenance": recall_metadata(unit.metadata) if unit.metadata is not None else {}}
+        for key, value in (("date", unit.date), ("updated_at", unit.updated_at)):
+            if value is not None:
+                entry[key] = value[:64]
         items.append(entry)
     count("list", "curator")
-    total = page.get("total") if type(page.get("total")) is int else None
-    return web.json_response({"items": items, "withheld": withheld, "total": total, "offset": offset, "limit": limit,
+    return web.json_response({"items": items, "withheld": withheld, "total": page.total, "offset": offset, "limit": limit,
                               "trusted": False}, headers={"Cache-Control": "no-store"})
 
 

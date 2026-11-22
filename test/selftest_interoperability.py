@@ -526,7 +526,7 @@ class SharedGatewayTests(MemoryHarness):
     async def test_operation_status_is_owner_scoped_and_readable_after_ack(self):
         self.shared()
         await self.durable()
-        self.service.client.operation = AsyncMock(return_value={"status": "completed"})
+        self.service.backend.client.operation = AsyncMock(return_value={"status": "completed"})
         data = {"project": SHARED, "event_id": "one", "content": "Synthetic fact", "confirmed": True}
         operation = (await (await self.api(memory.PREFIX + "/retain", data)).json())["operation_id"]
         state.CFG.client_auth["clients"]["client-b"]["memory"]["projects"][SHARED]["delete"] = False   # reader, not curator
@@ -541,7 +541,7 @@ class SharedGatewayTests(MemoryHarness):
     async def test_curator_deletes_foreign_operations_only_in_its_shared_scope(self):
         self.shared()
         await self.durable()
-        self.service.client.operation = AsyncMock(return_value={"status": "completed"})
+        self.service.backend.client.operation = AsyncMock(return_value={"status": "completed"})
         shared_op = (await (await self.api(memory.PREFIX + "/retain", {"project": SHARED, "event_id": "one",
                                                                        "content": "Synthetic fact", "confirmed": True})).json())["operation_id"]
         private_op = (await (await self.api(memory.PREFIX + "/retain", {"project": PROJECT, "event_id": "two",
@@ -630,7 +630,7 @@ class SharedGatewayTests(MemoryHarness):
         self.shared()
         await self.durable()
         await self.api(memory.PREFIX + "/retain", {"project": SHARED, "event_id": "one", "content": "Synthetic fact", "confirmed": True})
-        slots = self.service.client.slots
+        slots = self.service.backend.client.slots
         for _ in range(self.service.cfg.max_inflight):
             await slots.acquire()
         task = asyncio.create_task(memory_outbox.step(self.service))
@@ -677,7 +677,7 @@ class SharedGatewayTests(MemoryHarness):
                                                document_id="synthetic-dated-document", retain_async=True)
             payload = self.jobs[str(dated.operation_id)]["payload"]
             self.assertEqual((payload["context"], payload["timestamp"]), ("Synthetic label", "2026-03-14T09:30:00+01:00"))
-            self.service.client.operation = AsyncMock(return_value={"status": "completed"})
+            self.service.backend.client.operation = AsyncMock(return_value={"status": "completed"})
             await memory_outbox.step(self.service)
             status = await client.operations.get_operation_status(bank_id=SHARED, operation_id=str(retained.operation_id))
             self.assertEqual(status.status, "completed")

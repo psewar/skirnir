@@ -69,6 +69,12 @@ Besitzer sie später löschen kann. `skirnir_memory_deletions_stuck` zählt Lös
 (Grant weg, Bank geändert): Dieses Wissen kann noch in Hindsight liegen. Der Posture-Bericht nennt Sessions ohne
 Aufbewahrungsgrenze, beim Session-Löschen behaltenes Gedächtnis und Outbox-Inhalte ohne Aufbewahrungsgrenze (Info).
 
+Outbox, Operationsstatus und Abgleich erreichen das Gedächtnissystem nur über die Schnittstelle für Gedächtnis-Backends
+([ADR-0115](../docs/adr/0115-long-term-memory-goes-through-a-memory-backend-interface.md),
+[Backend-Schnittstelle](hindsight-memory.md#backend-interface)): `retain` unter der Operations-ID des Jobs, `operation`
+für die Prüfung (`OpState`) und `delete_document` über die Operations-ID. Ein Backend, das mit der Outbox angeboten wird,
+muss alle drei können, auch das Löschen über die Dokument-ID.
+
 ## Datenbank und Überwachung
 
 Migration **4** ergänzt Diagnose-/Retry-Felder, partielle Indizes und

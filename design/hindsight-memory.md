@@ -1,11 +1,52 @@
 # Optional Hindsight memory (PR 2)
 
-> Decisions (why): [ADR-0028](../docs/adr/0028-optional-hindsight-long-term-memory.md)
+> Decisions (why): [ADR-0028](../docs/adr/0028-optional-hindsight-long-term-memory.md),
+> [ADR-0115](../docs/adr/0115-long-term-memory-goes-through-a-memory-backend-interface.md) (backend interface),
+> [ADR-0123](../docs/adr/0123-the-memory-backend-is-chosen-in-the-existing-hindsight-section.md) (where it is chosen)
 
 This adapter keeps long-term knowledge separate from raw session history and task
 checkpoints. It does not copy sessions, configure Hindsight models, install a Hermes
 plugin, or perform compaction. All existing clients stay stateless unless they
 explicitly request memory and receive a server-side grant.
+
+## Backend interface
+
+The router reaches long-term memory through one interface, `MemoryBackend` in
+`router/skirnir_router/memory_backend.py`, and works only with its typed values:
+
+| Call | Returns | Used by |
+| --- | --- | --- |
+| `health()` | `True`/`False` (the backend's own health check, no bank) | status poll (`/admin/context`, `skirnir_context_backend_available`) |
+| `recall(bank, query, types=)` | `FactList(facts, bank_missing)` | automatic and explicit recall, gateway recall |
+| `retain(bank, content, operation_id, document_id=, confirmed=, provenance=, ...)` | `None` once acknowledged | in-memory queue, outbox |
+| `operation(bank, operation_id)` | `OpState(status)`: `pending`, `processing`, `completed`, `failed`, `cancelled`, `not_found`, `unknown`, or another state as reported | outbox verification, operation status |
+| `delete_document(bank, document_id)` | `None` once gone (also when it was gone already) | outbox deletion, `reconcile-deletions` |
+| `list(bank, kind=, query=, limit=, offset=)` | `MemoryPage(facts, total)` | curator listing |
+
+Every call returns its value or a `Problem` whose `kind` names why there is no usable
+answer (`unavailable`, `upstream_auth`, `upstream_rejected`, `protocol`, `timeout`,
+`transport`); a recall reports it as `unavailable:<kind>`. A `Fact` carries id, text,
+type, score (0 to 1), source ids, document id, the stored metadata and timestamps. The
+`authorize` callback each call takes is checked right before sending, so a grant revoked
+while a request waited for a slot sends nothing.
+
+Everything that is policy stays in the router and applies to any backend: the bank id
+(`skirnir-` and an HMAC of scope and namespace key), scope and grant checks, the content
+filter on queries, facts, ids and provenance, `recall_min_score`, the recall budgets and
+`limited_by`, duplicate handling, the persistent outbox and the deletion lifecycle. The
+Hindsight-compatible gateway (`/v1/skirnir/hindsight`) keeps its wire format whatever
+backend serves it; so do the status field `hindsight` in `/admin/context` and the metric
+label `backend="hindsight"`.
+
+`router/skirnir_router/hindsight.py` is the Hindsight adapter: `HindsightClient` speaks
+the REST contract below, and `HindsightBackend` maps its answers onto the typed values;
+nothing outside that file reads Hindsight's answer shapes. `hindsight.backend` (default
+`hindsight`, the only name so far) chooses the adapter; any other name fails the
+configuration check. Further adapters, for example for mem0 or a pgvector store, come as
+pull requests with their own fake and must pass the contract suite in
+`test/selftest_memory_backend.py` (ADR-0118: adapters live in the repository, none are
+loaded at run time). A backend offered with the outbox must delete by document id, or the
+deletion lifecycle (ADR-0076) cannot hold.
 
 ## Contract and compatibility
 
