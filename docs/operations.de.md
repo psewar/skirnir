@@ -11,7 +11,8 @@
 `https://<name>:11435/`, Anmeldung mit einem Benutzer aus `control_auth.users`. Eine Seite ([router/ui.html](../router/ui.html)),
 ohne externe Bibliotheken, sechs Tabs:
 
-- **Übersicht:** Knoten mit Zustand, Breaker, GPU, VRAM, Last und geladenen Modellen; Cloud-Anbieter mit Budgetbalken;
+- **Übersicht:** die aktiven **Probleme** (Schwere, Code und Text in der Sprache der UI, [unten](#probleme));
+  Knoten mit Zustand, Breaker, GPU, VRAM, Last und geladenen Modellen; Cloud-Anbieter mit Budgetbalken;
   Betriebskacheln; letzte Entscheidungen; **Live-Grafiken** (Canvas aus `/metrics`):
   Anfragen/min, Tokens/s, GPU und VRAM je Knoten, Tage-Verlauf, Latenz-Histogramm, Anteile nach Knoten/Rolle/Client, effektiv
   genutzte Modelle.
@@ -38,7 +39,8 @@ Endpunkte in [reference.de.md](reference.de.md#schnittstellen)).
 `requests_total{role,node,model,client,via,outcome}`, `tokens_total{kind,…}`, Histogramme `request_duration_seconds`,
 `ttft_seconds`, `queue_wait_seconds`, `events_total{event,node}`, je Knoten `node_up`, `node_state`, `node_inflight`,
 `node_gpu_util_percent`, `node_vram_*_gib`, `node_breaker`, je Modell `model_loaded_gib`, `perf_gen_tps`, `perf_error_rate`,
-dazu `decision_*`, `cloud_*`, `usage_today_*`, `info`.
+dazu `decision_*`, `cloud_*`, `usage_today_*`, `info` sowie die aktiven Probleme als `problem{code,severity,node,subject}`
+und `problems_active` ([unten](#probleme)).
 
 ```yaml
 scrape_configs:
@@ -61,6 +63,42 @@ Neustarts hinweg; `?decisions=N` wählt die gelieferte Menge, Standard 50) hält
 Breaker, Warteschlange, Shadow, Decision). `/admin/state` zeigt außerdem `build` (Deploy-Manifest) und `supply_chain`
 (Ollama-Version und Modell-Digests je Knoten). Abgewiesene und begrenzte Anfragen stehen im Audit-Log (`client_auth.audit_log`).
 
+### Probleme
+
+Zustände, um die sich der Betreiber kümmern sollte, während der Router weiter bedient (Router 0.35.0,
+[ADR-0101](adr/0101-problems-are-structured-records-exported-as-metrics.md)). Sie entstehen ohne MQTT und erreichen jeden
+Kanal aus derselben Liste: `GET /admin/problems[?lang=de|en]` (Steuer-Port, Basic Auth; Einträge mit `code`, `severity`,
+`node`, `subject`, `params`, `message`), die Übersicht der Web-UI, `/metrics` und das Home-Assistant-Attribut `problems`.
+
+| Code | Schwere | Wann |
+|---|---|---|
+| `no_node_online` | critical | Kein Knoten ist online. |
+| `role_not_servable` | critical | Kein Knoten online könnte die Rolle (`subject`) bedienen, auch frei nicht; eine Rolle, die nur auf einen belegten Knoten wartet, ist kein Problem. |
+| `agent_heartbeat_missing` | warning | Der Agent des Knotens hat schon gemeldet und schweigt länger als `router.agent_missing_problem_s`. |
+| `ram_spill` | warning | Ein geladenes Modell (`subject`) liegt mit mindestens `router.ram_spill_problem_gib` im Arbeitsspeicher. |
+| `gpu_guard` | warning | Der Agent meldet ein Problem des GPU-Schutzes (nicht verfügbar, abgewählt, Hardware-Warnung), und der Router beachtet den Schutz. |
+| `agent_update_failed`, `agent_update_stalled` | warning | Ein Agent-Update ist fehlgeschlagen oder meldet sich zu lange nicht. |
+| `ollama_update_failed`, `ollama_update_stalled` | warning | Dasselbe für ein Ollama-Update. |
+| `ollama_version_check_failing` | warning | Die Ollama-Versionsprüfung scheitert seit drei Tagen (oder hat nie geklappt). |
+| `cloud_budget_warning` | warning | Ein Anbieter (`subject`) liegt über `warn_at_percent` seines Monatsbudgets. |
+| `cloud_budget_exhausted` | critical | Das Monatsbudget eines Anbieters ist aufgebraucht; er fällt als Stufe weg. |
+
+`critical` heißt, Anfragen scheitern oder eine konfigurierte Stufe fällt jetzt weg; `warning` heißt, der Router bedient
+weiter, aber langsamer, ohne eine Schutzfunktion oder ohne frische Fakten. In `/metrics` hat `skirnir_problem` eine Reihe je
+aktivem Problem (Wert 1, oder die Zahl der Probleme mit denselben Labels) und keine, solange nichts ist; leeres `node` oder
+`subject` heißt keiner. Labels tragen nie freien Text; die Werte hinter der Meldung (Minuten, GiB, der Fehler eines Agenten)
+stehen in `/admin/problems`. Eine Alarmregel ohne Home Assistant:
+
+```yaml
+groups:
+  - name: skirnir
+    rules:
+      - alert: SkirnirProblem
+        expr: skirnir_problem > 0
+        for: 5m
+        annotations: { summary: "{{ $labels.code }} {{ $labels.node }} {{ $labels.subject }}" }
+```
+
 ## Home-Assistant-Entitäten
 
 Home Assistant ist optional. Ohne `mqtt:`-Abschnitt, oder wenn `paho-mqtt` fehlt, veröffentlicht der Router nichts. Routing,
@@ -71,7 +109,8 @@ MQTT-Gerät des Agenten ist optional (`mqtt:` in der Agent-Konfiguration). Der R
 Der Router meldet sich per MQTT-Discovery als Gerät **Skirnir** an: Sensoren für Knoten online/belegt, verfügbare Modelle,
 bereite Rollen (Attribut: welcher Knoten und welches Modell jetzt gewählt würde), Anfragen und Tokens heute, Cloud-Kosten
 im Monat, letzte Zuweisung, je Knoten Zustand / GPU-Auslastung / freies VRAM, ein `binary_sensor` **Problem** mit Attribut
-`problems` (kein Knoten online, Rolle nicht bedienbar, Agent schweigt, Budget-Warnung) und ein Sensor **Knoten wartet auf
+`problems` (die Texte der [Probleme](#probleme) in `router.problem_language`: standardmäßig `de`, die Sätze, auf die
+Automationen seit Router 0.1 prüfen, oder `en`) und ein Sensor **Knoten wartet auf
 Freigabe** für neue Agenten. Last-Will `ollama-router/status=offline` (MQTT-Thema und Entitäts-IDs behalten absichtlich den
 alten Namen); fehlende Messwerte sind `unavailable`, nicht `unknown`. Knoten-Entitäten werden nachgeführt: Gesperrte oder
 gelöschte Knoten verschwinden aus HA, auch wenn sie während eines Router-Neustarts verschwanden. Home Assistant als Client

@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 
 from aiohttp import ClientTimeout
 
-from . import state
+from . import problems, state
 from .common import DATA_CLASSES_DEFAULT, REASONING_OFF, log, parse_tool_args, read_env_value
 from .nodes import Breaker
 
@@ -325,17 +325,19 @@ def budget_view():
 
 
 def budget_problems():
+    """Problem records (problems.py, ADR-0101): budget exhausted or above warn_at_percent, per provider."""
     probs = []
     for name, t in state.CLOUD.items():
         budget = float(t.spec.get("budget_month_chf") or 0)
         if not budget:
             continue
-        pct = 100 * spend_month(name) / budget
+        spend = spend_month(name)
+        pct = 100 * spend / budget
         warn = float(t.spec.get("warn_at_percent", 80))
         if pct >= 100:
-            probs.append(f"Cloud {name}: Monatsbudget erschoepft ({spend_month(name):.2f}/{budget:.2f})")
+            probs.append(problems.make("cloud_budget_exhausted", subject=name, provider=name, spend=spend, budget=budget))
         elif pct >= warn:
-            probs.append(f"Cloud {name}: {pct:.0f} % des Monatsbudgets ({spend_month(name):.2f}/{budget:.2f})")
+            probs.append(problems.make("cloud_budget_warning", subject=name, provider=name, spend=spend, budget=budget, percent=pct))
     return probs
 
 

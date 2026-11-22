@@ -46,8 +46,9 @@ und [Anleitung für PR-Review/CI](design/continuous-security-review.md). Jeder P
   erste) Stufe in Rollen liegen, mit Datenklassen, Credential-Scan, Monatsbudget und Egress-Allowlist. Standardmäßig geht nichts
   in die Cloud.
 - **Client-Identitäten** auf dem Inferenz-Port (Bearer, Basic, Quell-IP), Rollen- und Modellsperren, Rate Limit, Audit-Log.
-- **Beobachtbar:** Prometheus-Endpunkt, Nutzung je Tag und Client, Entscheidungsprotokoll, Home-Assistant-Gerät per MQTT-Discovery,
-  Web-UI mit Live-Grafiken, Katalog, Rollen-Editor, Probierfeld und Lasttest.
+- **Beobachtbar:** Prometheus-Endpunkt mit Problemen als alarmierbaren Metriken, Nutzung je Tag und Client,
+  Entscheidungsprotokoll, Home-Assistant-Gerät per MQTT-Discovery, Web-UI mit Live-Grafiken, Katalog, Rollen-Editor,
+  Probierfeld und Lasttest.
 - **Betriebsfest:** Config-Schema mit Vorschlägen bei Tippfehlern, Idempotency-Key, Canary- und Shadow-Stufen je Rolle,
   Deploy-Manifest mit SHA-256, Ollama-Versionen und Modell-Digests je Knoten.
 - **TLS auf jeder Strecke**, sobald konfiguriert (siehe [Sicherheit](#sicherheit-das-wichtigste)), ein Prozess, ein Event-Loop,

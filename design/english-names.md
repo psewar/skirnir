@@ -84,7 +84,10 @@ Nothing outside the code sees these, so they follow in a release of their own:
 These texts stay German on purpose, because they end up in front of the operator in German:
 
 - Home Assistant problem texts and display names. This includes the GPU guard reasons and events and the
-  agent's and Ollama's update errors, which the router passes into the Home Assistant problem list.
+  agent's and Ollama's update errors, which the router passes into the Home Assistant problem list. Since router 0.35.0
+  every problem also has a fixed English code (`router/skirnir_router/problems.py`, used by `/metrics` and
+  `/admin/problems`); the German text is the default of `router.problem_language`, English is the alternative
+  ([ADR-0101](../docs/adr/0101-problems-are-structured-records-exported-as-metrics.md)).
 - The labels and help texts of the settings UI (bilingual).
 - The German keywords of the `rules` decision engine and the German prompts (`local_llm`, measurement prompt).
 
