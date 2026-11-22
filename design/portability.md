@@ -1,6 +1,6 @@
 # Portability roadmap
 
-> Status: proposed (2026-11-23). Decisions (why): [ADR-0107](../docs/adr/0107-status-sinks-instead-of-a-fixed-home-assistant-publisher.md),
+> Status: proposed (2026-11-23). Decisions (why): [ADR-0109](../docs/adr/0109-status-sinks-instead-of-a-fixed-home-assistant-publisher.md),
 > [ADR-0110](../docs/adr/0110-a-backend-protocol-for-ollama-nodes-openai-compatible-servers-and-cloud-providers.md),
 > [ADR-0111](../docs/adr/0111-the-agent-talks-to-its-inference-server-through-a-runtime-interface.md),
 > [ADR-0112](../docs/adr/0112-the-agent-probes-gpus-through-an-interface-and-reports-a-list-of-devices.md),
@@ -60,9 +60,9 @@ in detail:
 
 | Step | What | Why | Depends on |
 |---|---|---|---|
-| 1.1 Status sinks | `StatusSink` with `mqtt_ha` (today), `mqtt_plain`, `webhook`, `none`; several at once; a per-node MQTT login or no MQTT in the agent bundle, the router's discovery prefix passed on ([ADR-0107](../docs/adr/0107-status-sinks-instead-of-a-fixed-home-assistant-publisher.md)) | operators without Home Assistant get the same problems; nodes stop holding the router's broker credential | phase 0 structured problems |
-| 1.2 Protocol specification | written router–agent protocol with a version and capability list; `test/fake_agent.py` becomes a conformance test (its own PR and ADR) | third-party agents (for example for macOS) without reading `tunnel.go`; a base for 2.2 and 2.3 | – |
-| 1.3 Pure node assessment | one assessment function for candidate selection, blocking reasons, prewarm and residency budget, without side effects (its own PR and ADR) | removes duplicated feasibility logic that can drift; a base for 2.1 and 2.4 | – |
+| 1.1 Status sinks | `StatusSink` with `mqtt_ha` (today), `mqtt_plain`, `webhook`, `none`; several at once; a per-node MQTT login or no MQTT in the agent bundle, the router's discovery prefix passed on ([ADR-0109](../docs/adr/0109-status-sinks-instead-of-a-fixed-home-assistant-publisher.md)) | operators without Home Assistant get the same problems; nodes stop holding the router's broker credential | phase 0 structured problems |
+| 1.2 Protocol specification | written router–agent protocol with a version and capability list; `test/fake_agent.py` becomes a conformance test (ADR-0107, its own PR) | third-party agents (for example for macOS) without reading `tunnel.go`; a base for 2.2 and 2.3 | – |
+| 1.3 Pure node assessment | one assessment function for candidate selection, blocking reasons, prewarm and residency budget, without side effects (ADR-0108, its own PR) | removes duplicated feasibility logic that can drift; a base for 2.1 and 2.4 | – |
 | 1.4 Shape protocol | standard methods instead of `hasattr` checks on the API front-door shapes in `proxy.py` (its own PR) | smaller surface for 2.1 | – |
 
 1.1 and 1.2 give the most to other users per effort; 1.3 and 1.4 give the most to maintainability.

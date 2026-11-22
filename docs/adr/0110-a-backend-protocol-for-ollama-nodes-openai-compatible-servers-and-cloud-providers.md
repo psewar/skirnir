@@ -10,7 +10,7 @@ decision-makers: maintainer (proposed by Claude)
 > [ADR-0018](0018-api-front-doors-translated-to-ollama-chat.md) (Ollama JSON as the one internal format),
 > [ADR-0032](0032-openai-compatible-server-as-node-backend.md) (OpenAI-compatible server as node backend) and
 > [ADR-0014](0014-cloud-as-a-role-tier-with-declared-data-classes.md) (cloud as a role tier). Depends on the pure
-> node assessment of phase 1 (its own PR and ADR). Adapter rule:
+> node assessment of phase 1 (ADR-0108, its own PR). Adapter rule:
 > [ADR-0118](0118-adapters-live-in-the-repository-and-are-chosen-by-configuration.md).
 
 ## Context and Problem Statement

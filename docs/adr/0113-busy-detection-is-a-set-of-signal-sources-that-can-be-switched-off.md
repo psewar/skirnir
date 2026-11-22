@@ -10,7 +10,7 @@ decision-makers: maintainer (proposed by Claude)
 > [ADR-0004](0004-busy-detection-is-a-first-class-scheduler-input.md) (busy detection is a first-class scheduler input);
 > keeps [ADR-0019](0019-gpu-guard-power-limit-on-by-default.md) (GPU guard) and
 > [ADR-0022](0022-components-report-state-as-facts.md) (facts). Follows the phase 0 switch for game detection (its own
-> PR) and the pure node assessment of phase 1 (its own PR and ADR). Adapter rule:
+> PR) and the pure node assessment of phase 1 (ADR-0108, its own PR). Adapter rule:
 > [ADR-0118](0118-adapters-live-in-the-repository-and-are-chosen-by-configuration.md).
 
 ## Context and Problem Statement

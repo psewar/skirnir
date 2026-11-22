@@ -10,7 +10,7 @@ decision-makers: maintainer (proposed by Claude)
 > change that lets the agent start without a GPU (its own PR and ADR). Builds on
 > [ADR-0025](0025-measured-vram-instead-of-estimates.md) (measured VRAM) and
 > [ADR-0019](0019-gpu-guard-power-limit-on-by-default.md) (GPU guard). Depends on the versioned protocol specification
-> (its own PR and ADR). Adapter rule:
+> (ADR-0107, its own PR). Adapter rule:
 > [ADR-0118](0118-adapters-live-in-the-repository-and-are-chosen-by-configuration.md).
 
 ## Context and Problem Statement

@@ -7,7 +7,7 @@ decision-makers: maintainer (proposed by Claude)
 # Adapters live in the repository and are chosen by configuration
 
 > Part of the portability roadmap ([design/portability.md](../../design/portability.md)). Applies to every interface the
-> roadmap introduces: status sinks (ADR-0107), backends (ADR-0110), agent runtimes (ADR-0111), GPU probes (ADR-0112),
+> roadmap introduces: status sinks (ADR-0109), backends (ADR-0110), agent runtimes (ADR-0111), GPU probes (ADR-0112),
 > busy signal sources (ADR-0113), session stores (ADR-0114), memory backends (ADR-0115), wakers and release sources
 > (ADR-0117) and context redactors (ADR-0119).
 
@@ -57,7 +57,7 @@ the SBOM and the signed agent binary complete, and needs no new trust decision a
 * Third-party adapters come as pull requests with tests, documentation in both languages and, where they cross a trust
   boundary, a security review like any other change.
 * Where a seam needs to reach other software, it does so through a protocol (HTTP webhook, MQTT, a database URL), not
-  through loaded code. The webhook sink (ADR-0107) and the HTTP waker (ADR-0117) are the escape hatches.
+  through loaded code. The webhook sink (ADR-0109) and the HTTP waker (ADR-0117) are the escape hatches.
 
 ### Consequences
 

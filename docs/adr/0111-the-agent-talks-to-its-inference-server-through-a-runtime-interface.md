@@ -10,7 +10,7 @@ decision-makers: maintainer (proposed by Claude)
 > [ADR-0032](0032-openai-compatible-server-as-node-backend.md) (OpenAI-compatible server as node backend),
 > [ADR-0021](0021-ollama-as-agent-child-updated-through-the-router.md) (Ollama as the agent's child) and
 > [ADR-0073](0073-close-router-paths-to-host-privileges.md) (the agent forwards only allowed paths). Depends on the
-> versioned protocol specification (its own PR and ADR). Router side: ADR-0110. Adapter rule:
+> versioned protocol specification (ADR-0107, its own PR). Router side: ADR-0110. Adapter rule:
 > [ADR-0118](0118-adapters-live-in-the-repository-and-are-chosen-by-configuration.md).
 
 ## Context and Problem Statement
