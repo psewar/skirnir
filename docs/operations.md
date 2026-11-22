@@ -64,7 +64,8 @@ model digests per node). Refused and limited requests are in the audit log (`cli
 Home Assistant is optional. Without an `mqtt:` section, or without `paho-mqtt` installed, the router publishes nothing. Routing,
 the UI, `/admin/*`, `/metrics` and every fact the agents report work the same way: GPU, game, memory, sleep. The agent's own MQTT
 device is optional as well (`mqtt:` in the agent configuration). The router publishes over MQTT with TLS (port 8883), the
-password comes from `secrets.env`.
+password comes from `secrets.env`. A router installed with `install.sh --without-mqtt` has no MQTT library and publishes nothing
+either; install again without the option before adding an `mqtt:` section (the script refuses the option while one is set).
 
 The router registers via MQTT discovery as the device **Skirnir**: sensors for nodes online/busy, available models, ready roles
 (attribute: which node and model would be chosen right now), requests and tokens today, cloud costs this month, last assignment,
@@ -136,6 +137,24 @@ node, and it prewarms once when the update is done. The router therefore chooses
 since agent 0.31.0 no older version: an order below the installed Ollama (or a pre-release) is refused unless the node's
 configuration sets `ollama_update.allow_downgrade: true` for a deliberate rollback (ADR-0073). Windows nodes only for now;
 Linux archives are tar.zst.
+
+## Secrets renderer
+
+`render-env.sh` renders `secrets.env` before every router start (`skirnir-router-secrets.service`) and, with the optional
+timer, daily (`skirnir-router-secrets-refresh.service`, restarts the router when the file changed). Its output is in the
+journal: `journalctl -u skirnir-router-secrets -u skirnir-router-secrets-refresh`. Every run ends with a state line
+([install-router.md](install-router.md#secrets), ADR-0104):
+
+| State | Meaning | Next step |
+|---|---|---|
+| `STATE: written` | The file was replaced; the line before names how many of the names were present. | None. Names reported as `missing in the source` are simply not in the file. |
+| `STATE: unchanged` | Same content as before. | None. |
+| `STATE: kept` | The existing file stays: the source is not ready (`secret store not reachable`, `refused the login (HTTP ...)`, `SECRET_FILE ... missing`), a name could not be fetched (`fetch failed (...)`; nothing is dropped because of a transient fault), or the source holds none of the names. | Fix what the line above names; the next run or `systemctl start skirnir-router-secrets` renders again. To empty the file on purpose, delete it by hand. |
+| `STATE: not-configured` | No `render-env.conf`: `secrets.env` is maintained by hand. | None, or set up a source. |
+| `STATE: refused` | `render-env.conf`, `SECRET_STORE_AUTH_FILE` or `SECRET_FILE` failed a check (owner, mode, a path the router may write), the configuration is incomplete, or `SECRET_SOURCE` is unknown. | Fix the file the line above names. |
+
+A value with a line break is never written (it would start a further variable in the router unit's environment); the name
+is reported and skipped. No secret value appears in the output.
 
 ## Key rotation
 
