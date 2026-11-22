@@ -2,40 +2,48 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "875082c54dffdaeab321f6d0240ed9bf8effde94",
- "change_digest": "9a215ddb35514964393362b53ebe5eaae28ed71cf3a2a59d8670a7779282a0dd",
+ "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
+ "change_digest": "9f931b5e80f186072f410473bb3b21f02614fe5f122411b9ad6e6777e0c4b7fa",
  "reviewed_paths": [
-  "CHANGELOG.md",
-  "docs/adr/0100-the-prompt-rate-counts-only-the-tokens-ollama-processed.md",
-  "docs/adr/README.md",
+  "README.md",
+  "README.de.md",
+  "docs/operations.md",
+  "docs/operations.de.md",
   "docs/security/reviews/current.json"
  ],
  "risk_ids": [
+  "TM-07",
+  "TM-12",
+  "TM-13",
   "TM-15"
  ],
  "boundaries": [
+  "B3",
+  "B8",
   "B9"
  ],
- "summary": "Documentation only: ADR-0100 status proposed -> accepted on the operator's decision of 2026-11-19 (after the merge and rollout of router 0.34.1), with that note in the decision outcome; the ADR index regenerated, and the released CHANGELOG row v0.39.1 extended to 'ADR-0100 proposed, accepted 2026-11-19' (the release notes keep 'proposed', which was true at release time). No code, configuration, version, workflow or review-policy change. The added text names no organisation, host, address or person.",
+ "summary": "Documentation only. (1) The README status line (EN/DE) no longer names router and agent versions, which had gone stale (0.23.0/0.30.0); it points to the releases and the top CHANGELOG row instead, so it cannot go stale again. (2) docs/operations.md and its German twin gain a 'What to back up' section before 'Restoring a backup', derived from the code: config folder (/etc/skirnir-router: config.yaml, certs/ or tls/, agent/ release folder; agentupdate.agent_dir, ops.manifest_path, router-layout.sh), the secret source rather than the rendered secrets.env (render-env.sh, install-router docs), the state folder files written via common.state_dir / Config._locate (nodes.json from app.py, roles.yaml, deletions.jsonl, usage.json incl. monthly cloud spend, metrics.json, perf.json, events.jsonl, requests.jsonl, ollama-latest.json; same list as router-layout.sh STATE_FILES), the optional PostgreSQL session database and outbox, the external memory backend, the audit log, the agent configuration and identity.dir (agent-identity.key and provisioned.json, DPAPI LOCAL_MACHINE on Windows per platform_windows.go) and the operator's update signing key folder (deploy/agent_keys.py). The 'Restoring a backup' intro now says deletions.jsonl lives in router.state_dir (since ADR-0086), not next to config.yaml. Security-relevant content of the text: it tells operators to back up the secret source rather than secrets.env, to protect the backup of the secret-store access file like the file itself, and to keep the signing-key backup offline and encrypted; it keeps the existing advice that deletions.jsonl must not be restored older than the database (TM-12). It discloses no secret, endpoint, host or credential, and names only default paths that the install scripts and existing docs already publish. No code, configuration, version, workflow or review-policy change.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/check_adr_index.py",
+   "command": "python tools/security/review.py snapshot --base origin/main --head INDEX",
    "result": "passed",
-   "evidence": "ADR index ok: 100 ADRs (0100 accepted)."
+   "evidence": "security_relevant false; changed paths README.md, README.de.md, docs/operations.md, docs/operations.de.md."
+  },
+  {
+   "command": "python test/check_public_changes.py --base <merge-base>",
+   "result": "passed",
+   "evidence": "Public-change scan: 0 finding(s)."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
    "result": "passed",
    "evidence": "run after staging this record."
-  },
-  {
-   "command": "python test/check_public_changes.py",
-   "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
   }
  ],
  "limitations": [
-  "Documentation only; the behaviour it records was reviewed in the record of PR 171 (router 0.34.1)."
+  "Documentation only; no behaviour changed, so no negative test applies.",
+  "The backup list was derived from origin/main at fb19cb6; parallel open PRs (secrets renderer, status sinks) may change the secret source or add state files, and would then update this section.",
+  "TM-15's next action 'backup controls for these files' is only partly addressed: the list names the files and how to protect sensitive backups, but Skirnir still has no backup tooling, retention or integrity check of its own; the risk register is unchanged."
  ]
 }
