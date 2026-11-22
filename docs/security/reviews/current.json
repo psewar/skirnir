@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
-  "change_digest": "d9c7f1a83095d8d054c4e4efe2c6450f0d5b2bc11d145b7134c822db7492c4d3",
+  "base_sha": "4a614341aecd17f58aa55ca5e88476373442af61",
+  "change_digest": "481a506bac6351fe5d07039f58aebaff3a8b4d9656ff9de647002f761ef9b8aa",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
     "CHANGELOG.md",
@@ -35,12 +35,15 @@
     "docs/configuration.md",
     "docs/install-agent.de.md",
     "docs/install-agent.md",
+    "docs/operations.de.md",
+    "docs/operations.md",
     "docs/reference.de.md",
     "docs/reference.md",
     "docs/security/reviews/current.json",
     "router/skirnir_router/common.py",
     "router/skirnir_router/nodes.py",
     "router/skirnir_router/poll.py",
+    "router/skirnir_router/problems.py",
     "router/skirnir_router/registry.py",
     "router/skirnir_router/scheduler.py",
     "test/fake_agent.py",
@@ -58,13 +61,23 @@
     "B8",
     "B9"
   ],
-  "summary": "Agent 0.36.0 / router 0.36.0: the agent runs without an NVIDIA GPU (gpu.probe auto|nvidia|none, default auto, ADR-0102), game detection can be switched off (game.enabled, ADR-0103), the game fact's via is 'path' (router maps the old 'pfad'), Home Assistant display names can be English (mqtt.entity_language, unique_id and entity ID unchanged), and the Windows install checks the event-log source in the registry instead of matching error text. B3 (router <-> agent): new fact/heartbeat field gpu_present and the guard state not_applicable from an approved agent. The router takes gpu_present only as a real boolean (heartbeat) or literal false (facts), and memory values only as non-boolean numbers; otherwise the node stays a GPU node or nothing fits. A compromised approved agent could already misreport VRAM, utilisation and guard state (TM-07: telemetry is an assertion of that host); claiming no GPU or not_applicable gives it no capability beyond that: it can attract or repel models for its own node and avoid the require_fresh_status cap, as reporting 'normal' already did. No new route, frame, authentication path or egress. B8 (agent host): install_windows reads HKLM SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\<service> read-only in the existing admin install step; service account, ACLs, update and signing paths are unchanged. With gpu.probe auto and no NVIDIA driver at all the GPU guard does not run; without a driver no workload can use the card, so the power-limit protection loses nothing; gpu.probe nvidia keeps the refusal. POST /gpuz stays loopback-only and now answers 409 without a GPU. B9: /health (loopback) gains gpu_probe and gpu_present, MQTT discovery gains constant English names; no secret, host or user data. The fake agent and E2E use loopback and synthetic values only.",
+  "summary": "Agent 0.36.0 / router 0.36.0: the agent runs without an NVIDIA GPU (gpu.probe auto|nvidia|none, default auto, ADR-0102), game detection can be switched off (game.enabled, ADR-0103), the game fact's via is 'path' (router maps the old 'pfad'), Home Assistant display names can be English (mqtt.entity_language, unique_id and entity ID unchanged), and the Windows install checks the event-log source in the registry instead of matching error text. B3 (router <-> agent): new fact/heartbeat field gpu_present and the guard state not_applicable from an approved agent. The router takes gpu_present only as a real boolean (heartbeat) or literal false (facts), and memory values only as non-boolean numbers; otherwise the node stays a GPU node or nothing fits. A compromised approved agent could already misreport VRAM, utilisation and guard state (TM-07: telemetry is an assertion of that host); claiming no GPU or not_applicable gives it no capability beyond that: it can attract or repel models for its own node and avoid the require_fresh_status cap, as reporting 'normal' already did. No new route, frame, authentication path or egress. B8 (agent host): install_windows reads HKLM SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\<service> read-only in the existing admin install step; service account, ACLs, update and signing paths are unchanged. With gpu.probe auto and no NVIDIA driver at all the GPU guard does not run; without a driver no workload can use the card, so the power-limit protection loses nothing; gpu.probe nvidia keeps the refusal. POST /gpuz stays loopback-only and now answers 409 without a GPU. B9: /health (loopback) gains gpu_probe and gpu_present, MQTT discovery gains constant English names; no secret, host or user data. The fake agent and E2E use loopback and synthetic values only. Re-reviewed after merging origin/main (PR 178 structured problems / router 0.35.0 / ADR-0101, PR 176 docs) into the branch: conflicts only in CHANGELOG (both rows kept, v0.41.0 above v0.40.0), VERSION (0.36.0 kept), ADR index (regenerated, 0101-0103) and this record. Semantic overlap with router/skirnir_router/problems.py: ram_spill is already empty for a node without a GPU; the gpu_guard problem now also requires gpu_present, so a node without a GPU never raises it even if its agent claims a guard problem (an approved agent cannot plant a GPU-guard alarm for a node that has no GPU); docs/operations(.de).md say so. No other change to #178's codes, metrics or config.",
   "findings": [],
   "tests": [
     {
       "command": "python test/selftest_cpu_node.py",
       "result": "passed",
-      "evidence": "router: facts/heartbeat without GPU values, full-size holdings, no ram_spill, RAM budget and capacity, model_too_large/vram_full, guard not_applicable not capping, older agents unchanged, pfad->path, enabled false; rejected cases: non-numeric memory, non-boolean gpu_present, facts other than false."
+      "evidence": "router: facts/heartbeat without GPU values, full-size holdings, no ram_spill, RAM budget and capacity, model_too_large/vram_full, guard not_applicable not capping, older agents unchanged, pfad->path, enabled false; rejected cases: non-numeric memory, non-boolean gpu_present, facts other than false; after the merge also: no gpu_guard/ram_spill problem for nodes without a GPU (including one whose agent claims a guard problem; this check fails without the problems.py change), a GPU node still raises it."
+    },
+    {
+      "command": "python test/selftest_problems.py",
+      "result": "passed",
+      "evidence": "all passed (after the merge)."
+    },
+    {
+      "command": "python test/check_adr_index.py",
+      "result": "passed",
+      "evidence": "ADR index ok: 103 ADRs (after the merge)."
     },
     {
       "command": "python test/run_tests.py (through a local lock wrapper that serialises the fixed loopback ports)",
@@ -74,7 +87,7 @@
     {
       "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml (Windows, Python 3.12)",
       "result": "passed",
-      "evidence": "72 self-tests; selftest_availability needed its fake node to gain capacity_gib/reserve_gib."
+      "evidence": "74 self-tests after the merge; selftest_availability needed its fake node to gain capacity_gib/reserve_gib."
     },
     {
       "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./...",
@@ -103,7 +116,6 @@
     }
   ],
   "limitations": [
-    "python test/check_adr_index.py reports one finding on this branch alone: ADR numbers are not consecutive, because ADR-0101 is assigned to a parallel PR that is to be merged first; the index itself was regenerated with --write. CI stays red on that check until ADR-0101 is on main.",
     "The end-to-end suite uses a fake agent; the real agent without a GPU was exercised by Go unit tests (probe none), not on a physical CPU-only machine.",
     "gpu.probe auto on a machine whose NVIDIA driver is missing entirely now starts as a CPU node instead of refusing (documented in ADR-0102).",
     "The router's RAM budget trusts the agent's memory fact like the VRAM fact before (TM-07); on Linux MemAvailable can include page cache of a mapped model, so the budget is an estimate; Ollama's own memory check and memory pressure remain the guard.",
