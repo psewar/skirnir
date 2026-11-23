@@ -40,7 +40,7 @@ probability and the number of removed entries, never text.
 
 | Name | Recognises | Removes | Cannot redact |
 |---|---|---|---|
-| `ha_assist` | Home Assistant's JSON envelope with a `result` text; text with live-context entries (`- names:` blocks) | entries whose `domain`, `device_class` or name is configured | JSON nested too deeply for the parser |
+| `ha_assist` | Home Assistant's JSON envelope with a `result` text; text with live-context entries (`- names:` blocks) | entries whose `domain`, `device_class` or name is configured | JSON nested deeper than 512 levels (counted on the text before parsing, the same on every Python version) |
 | `generic_json` | JSON objects and lists from tools in `generic_json.tools` (`*` = every tool) | dotted paths (`*` = every key or element) and keys at any depth | a result of a named tool that is not JSON; JSON nested deeper than 100 levels |
 
 A redactor is a small class with `name` and `redact(tool_names, content) -> Redaction`, registered in

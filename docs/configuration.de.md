@@ -417,8 +417,8 @@ router:
 ```
 
 Eine Anfrage, die die Schwärzung lokal hält, bekommt die Ablehnung wie jede andere; das Journal hält `result: unredacted`
-mit `by: redaction:generic_json` oder `redaction:unrecognised` fest. JSON, das zu tief verschachtelt ist, um es zu
-prüfen (jenseits des Parsers, oder tiefer als 100 Ebenen bei `generic_json`), hält die Anfrage ebenfalls lokal.
+mit `by: redaction:generic_json` oder `redaction:unrecognised` fest. JSON, das tiefer als 512 Ebenen verschachtelt ist
+(100 bei `generic_json`), wird nicht geprüft und hält die Anfrage ebenfalls lokal.
 `/admin/state` zeigt Länderpaket, Schwärzer, Modus
 und für `generic_json` nur die Anzahl Werkzeuge und Schlüssel. Mit `unrecognised_tool_results: pass` (Vorgabe) gehen
 Werkzeugergebnisse in Formaten, die kein Schwärzer kennt, unverändert hinaus: Die Inhaltsprüfung schützt, was der Nutzer

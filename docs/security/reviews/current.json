@@ -3,7 +3,7 @@
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
  "base_sha": "c69cfa1ad0b0263c91af26ba87b548f3b08a5585",
- "change_digest": "26b026bdd833eab10c6581e1368e0cb0b1aeed82156ed446e0608da7cceea8ad",
+ "change_digest": "d681521b3348928c7db22aecaf870cafc34b6cf5aa6c46cf7b6da84c85af16b3",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
@@ -12,6 +12,7 @@
   "docs/adr/README.md",
   "docs/configuration.de.md",
   "docs/configuration.md",
+  "docs/security/reviews/current.json",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
@@ -32,13 +33,13 @@
   "B6",
   "B7"
  ],
- "summary": "Router 0.42.0: the content check before a cloud tier (privacy.py, called only from proxy._Relay._via_cloud when cloud.needs_privacy_check holds) gets context redactors per tool format (redactors.py: ha_assist = the previous Home Assistant code moved unchanged, generic_json = configured dotted paths/keys) and locale packs (privacy_locale.py: ch-de = the previous patterns, keywords, refusal and marker, default; en = e-mail/phone/IBAN, English keywords). Merged with origin/main (all other portability PRs, incl. #179 Shape protocol in proxy.py and #183 cost keys in cloud.py; neither touches privacy.py, and the cloud path still calls privacy.check before cloud.run and answers a refusal through the shape). Implements ADR-0119 (now on main, proposed) and adds ADR-0125 (unrecognised tool results pass by default; keep_local is an explicit switch). Traced B6: the verdict body is still what cloud.run sends; a refused or unredacted verdict returns the refusal before cloud.run; the redaction runs on a deep copy; redact_tools is applied before any redactor, so choosing other redactors cannot drop it. B7 unchanged: classifier call, loopback endpoint check and fail-closed handling are untouched. Default behaviour verified byte-identical (recorded corpus of 35 synthetic payloads from the base commit's privacy.py and re-recorded identically on the current main c69cfa1; 12,000 randomized synthetic payloads compared against the current origin/main privacy.py, 0 differences). The new keys are config.yaml only (not in settings.EDITABLE, asserted by test). Load-time refusals prevent configurations that look configured but redact nothing (empty/unknown/duplicate redactors, generic_json without its redactor and vice versa, malformed paths, unknown locale or mode). /admin/state shows generic_json only as counts. Found and fixed during the review: generic_json walks JSON recursively, so a deeply nested tool result could exhaust the stack; it now checks depth iteratively (limit 100) and treats deeper JSON as unredactable (request stays local). The pre-existing RecursionError of json.loads on extremely deep JSON (it reached the unexpected-error middleware as a 500 under ha_assist) now keeps the request local with the refusal; no payload left in either case. Regexes of the en pack use only bounded quantifiers. No secrets, hostnames or personal data added; test data is synthetic (example domains, published example IBANs, fictional UK/NANP numbers).",
+ "summary": "Router 0.42.0: the content check before a cloud tier (privacy.py, called only from proxy._Relay._via_cloud when cloud.needs_privacy_check holds) gets context redactors per tool format (redactors.py: ha_assist = the previous Home Assistant code moved unchanged, generic_json = configured dotted paths/keys) and locale packs (privacy_locale.py: ch-de = the previous patterns, keywords, refusal and marker, default; en = e-mail/phone/IBAN, English keywords). Merged with origin/main (all other portability PRs, incl. #179 Shape protocol in proxy.py and #183 cost keys in cloud.py; neither touches privacy.py, and the cloud path still calls privacy.check before cloud.run and answers a refusal through the shape). Implements ADR-0119 (now on main, proposed) and adds ADR-0125 (unrecognised tool results pass by default; keep_local is an explicit switch). Traced B6: the verdict body is still what cloud.run sends; a refused or unredacted verdict returns the refusal before cloud.run; the redaction runs on a deep copy; redact_tools is applied before any redactor, so choosing other redactors cannot drop it. B7 unchanged: classifier call, loopback endpoint check and fail-closed handling are untouched. Default behaviour verified byte-identical (recorded corpus of 35 synthetic payloads from the base commit's privacy.py and re-recorded identically on the current main c69cfa1; 12,000 randomized synthetic payloads compared against the current origin/main privacy.py, 0 differences). The new keys are config.yaml only (not in settings.EDITABLE, asserted by test). Load-time refusals prevent configurations that look configured but redact nothing (empty/unknown/duplicate redactors, generic_json without its redactor and vice versa, malformed paths, unknown locale or mode). /admin/state shows generic_json only as counts. Found and fixed during the review: generic_json walks JSON recursively, so a deeply nested tool result could exhaust the stack; it now checks depth iteratively (limit 100) and treats deeper JSON as unredactable (request stays local). Before parsing, every tool result that starts like a JSON container has its nesting counted on the text (strings removed by a linear regex, brackets accumulated, no recursion); deeper than 512 levels it is not parsed and is unredactable, so the request stays local. This replaces relying on json.loads raising RecursionError, which the container CI showed to be interpreter-dependent: on Python 3.14 (C-stack based recursion check) a 100,000-level array parsed with a large stack, and ha_assist then passed it as plain text (reproduced locally in the 3.14 image with a 64 MiB stack against the previous head; fixed code passes with the default and the large stack). Before router 0.42.0 such a payload failed the request with a 500 or, on 3.14 with a large stack, passed; no live-context entries were hidden in it either way. Regexes of the en pack use only bounded quantifiers. No secrets, hostnames or personal data added; test data is synthetic (example domains, published example IBANs, fictional UK/NANP numbers).",
  "findings": [],
  "tests": [
   {
    "command": "python test/selftest_privacy_redactors.py",
    "result": "passed",
-   "evidence": "117 checks ALL OK after the merge (relay test now uses OllamaShape like the other privacy tests, since #179): default corpus byte-identical (35 cases, re-recorded on current main c69cfa1 with an identical file), every ch-de pattern and keyword group blocks, every default domain/device class/listed tool redacted, too-deep JSON stays local, en hits and non-hits, generic_json paths/keys/*/depth limit, named non-JSON stays local, keep_local mode, 13 refused configurations, nothing editable from the web UI, proxy refusal without provider call. Fault injection (AHV pattern removed; default mode flipped to keep_local) made it fail with 3 and 9 failures."
+   "evidence": "121 checks ALL OK on Python 3.12.10 and inside the router image on Python 3.14.10 with the default and with a 64 MiB stack (the previous head fails there with the large stack: the 100,000-level case passed); new checks: 513 levels not parsed at all (json.loads not called) and kept local, 512 levels parsed as before, brackets inside JSON strings not counted, plain text with many brackets passes as before. After the merge (relay test now uses OllamaShape like the other privacy tests, since #179): default corpus byte-identical (35 cases, re-recorded on current main c69cfa1 with an identical file), every ch-de pattern and keyword group blocks, every default domain/device class/listed tool redacted, too-deep JSON stays local, en hits and non-hits, generic_json paths/keys/*/depth limit, named non-JSON stays local, keep_local mode, 13 refused configurations, nothing editable from the web UI, proxy refusal without provider call. Fault injection (AHV pattern removed; default mode flipped to keep_local) made it fail with 3 and 9 failures."
   },
   {
    "command": "python test/selftest_privacy_check.py",
@@ -53,12 +54,17 @@
   {
    "command": "every python command of the python job in .github/workflows/ci.yml on Windows except PostgreSQL integrations, run_tests.py and check_public_changes (separate entries)",
    "result": "passed",
-   "evidence": "85 commands, 0 failed, after merging origin/main; check_adr_index now reports ADR index ok: 125 ADRs."
+   "evidence": "85 commands, 0 failed, on the final tree (after the depth fix); check_adr_index reports ADR index ok: 125 ADRs."
   },
   {
    "command": "python C:/<ops>/e2e/run_locked.py <worktree> (end-to-end suite through the lock wrapper)",
    "result": "passed",
-   "evidence": "STATE: passed, 0 failures, 337 PASS lines, on the merged tree (origin/main c69cfa1 + this change). The suite does not exercise the privacy path."
+   "evidence": "STATE: passed, 0 failures, 337 PASS lines, on the merged tree (origin/main c69cfa1 + this change), before the depth fix; not rerun after it (the fix is confined to redactors.py, which the suite does not reach). The suite does not exercise the privacy path."
+  },
+  {
+   "command": "bash test/smoke_container.sh --engine podman --image <local 3.14 router image> --no-build --selftests",
+   "result": "passed",
+   "evidence": "71 router self-tests pass inside the image (Python 3.14.10), STATE: passed; the image was built earlier from main by the smoke script, the checkout is mounted read-only."
   },
   {
    "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/selftest_control_flow.py && python test/check_control_flow.py",

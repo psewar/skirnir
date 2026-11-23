@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from itertools import accumulate
 from typing import Protocol
 
 
@@ -42,15 +43,32 @@ class ContextRedactor(Protocol):
 
 
 TEXT, JSON, TOO_DEEP = "text", "json", "too_deep"
-MAX_JSON_DEPTH = 100   # generic_json walks results up to this nesting; deeper ones cannot be redacted
+MAX_JSON_DEPTH = 100    # generic_json walks results up to this nesting; deeper ones cannot be redacted
+MAX_PARSE_DEPTH = 512   # no tool result nested deeper than this is parsed at all (well below any interpreter's limit)
+_JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"', re.S)
+_NOT_BRACKET = re.compile(r"[^\[\]{}]")
+_STEP = {"[": 1, "{": 1, "]": -1, "}": -1}
+
+
+def _nesting_exceeds(text, limit):
+    """Would this text, parsed as JSON, nest containers deeper than limit? Counted on the text before parsing, without
+    recursion, so the answer is the same on every Python version: how deep the json module itself can go depends on the
+    interpreter (3.14 measures the C stack instead of counting calls, so a nesting that raised RecursionError on 3.12
+    may parse there). Only text that starts like a JSON container can nest; brackets inside JSON strings do not count."""
+    if text.lstrip(" \t\n\r")[:1] not in ("[", "{") or text.count("[") + text.count("{") <= limit:
+        return False
+    brackets = _NOT_BRACKET.sub("", _JSON_STRING.sub("", text))
+    return max(accumulate(map(_STEP.__getitem__, brackets)), default=0) > limit
 
 
 def _parse(content):
     """A tool result's JSON value and what it is: (value, JSON), (None, TEXT) for plain text, (None, TOO_DEEP) for JSON
-    nested beyond what the parser handles."""
+    nested deeper than MAX_PARSE_DEPTH, which is not parsed."""
+    if _nesting_exceeds(content, MAX_PARSE_DEPTH):
+        return None, TOO_DEEP
     try:
         return json.loads(content), JSON
-    except RecursionError:   # exception-ok: the nesting depth is only known by parsing; too deep to inspect = cannot redact
+    except RecursionError:   # exception-ok: safety net only; the depth check above keeps the parser far from its limit
         return None, TOO_DEEP
     except ValueError:   # exception-ok: a plain-text tool result is valid; json has no "is this JSON" check
         return None, TEXT
@@ -105,8 +123,9 @@ class HaAssistRedactor:
 
     def redact(self, tool_names, content):
         """Tool result as Home Assistant sends it: JSON with a `result` text, or plain text. Recognised: the JSON envelope
-        with a `result` text, or text that carries live-context entries. JSON nested too deeply to parse cannot be
-        inspected and keeps the request local (until router 0.42.0 it failed the request with an internal error)."""
+        with a `result` text, or text that carries live-context entries. JSON nested deeper than MAX_PARSE_DEPTH (512) is
+        not parsed and keeps the request local (until router 0.42.0 a nesting too deep for the json module failed the
+        request with an internal error)."""
         if not isinstance(content, str):
             return Redaction(content)
         data, kind = _parse(content)

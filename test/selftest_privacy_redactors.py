@@ -227,6 +227,25 @@ async def main():
     v = await privacy.check(body(NEUTRAL, tool(deep)), d)
     check("default: JSON too deep to parse keeps the request local (no internal error)", not v.allowed
           and v.by == "redaction:ha_assist", str(v.journal()))
+    # the depth limit is counted on the text, not left to the json module (whose limit differs between Python versions)
+    from skirnir_router import redactors
+    calls = []
+    real_loads = redactors.json.loads
+    redactors.json.loads = lambda s: calls.append(len(s)) or real_loads(s)
+    at_limit = "[" * redactors.MAX_PARSE_DEPTH + "]" * redactors.MAX_PARSE_DEPTH
+    over = '{"a":' * redactors.MAX_PARSE_DEPTH + "[1]" + "}" * redactors.MAX_PARSE_DEPTH
+    r_over = privacy.redact_request(body(NEUTRAL, tool(over)), d)
+    check("default: 513 levels are not parsed at all and keep the request local", r_over.keep_local == "redaction:ha_assist"
+          and not calls, f"{r_over.keep_local} {calls}")
+    r_at = privacy.redact_request(body(NEUTRAL, tool(at_limit)), d)
+    check("default: 512 levels are parsed and pass as before", not r_at.keep_local and calls == [len(at_limit)], str(calls))
+    redactors.json.loads = real_loads
+    in_string = json.dumps({"result": "[" * 5000 + "Live Context:\n- names: Haustuer\n  domain: lock\n"})
+    r = privacy.redact_request(body(NEUTRAL, tool(in_string)), d)
+    check("default: brackets inside JSON strings do not count", not r.keep_local and r.removed == 1, f"{r.keep_local} {r.removed}")
+    r = privacy.redact_request(body(NEUTRAL, tool("Note: " + "[" * 5000, "notes")), d)
+    check("default: plain text with many brackets is not JSON and passes as before", not r.keep_local
+          and r.body["messages"][2]["content"] == "Note: " + "[" * 5000)
     nested = lambda n: json.dumps(json.loads("[" * (n - 1) + '{"email": 1}' + "]" * (n - 1)))  # noqa: E731
     r = privacy.redact_request(body(NEUTRAL, tool(nested(101), "any")), star)
     check("generic_json: deeper than its walk limit keeps the request local", r.keep_local == "redaction:generic_json")

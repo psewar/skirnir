@@ -408,8 +408,8 @@ router:
 ```
 
 A request kept local by the redaction gets the refusal like any other; the journal records `result: unredacted` with
-`by: redaction:generic_json` or `redaction:unrecognised`. JSON nested too deeply to inspect (beyond the parser, or beyond
-100 levels for `generic_json`) also keeps the request local. `/admin/state` shows the locale, the redactors, the mode and,
+`by: redaction:generic_json` or `redaction:unrecognised`. JSON nested deeper than 512 levels (100 for `generic_json`) is not
+inspected and also keeps the request local. `/admin/state` shows the locale, the redactors, the mode and,
 for `generic_json`, only the number of tools and keys. With `unrecognised_tool_results: pass` (the default), tool results
 of formats no redactor knows are sent as they are: the content check protects what the user wrote and the house context
 in known formats. Redactors for openHAB or ioBroker are not built yet; they will be added together with test data of
