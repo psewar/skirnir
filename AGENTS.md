@@ -84,8 +84,10 @@ bash test/smoke_container.sh   # router image: build, --init, start, health (Doc
   container image (ADR-0121; `test/selftest_container_image.py` compares them); never edit a lock by hand.
 - The router image (`router/Dockerfile`, `router/compose.yaml`) ships the same program files as `router/install.sh`;
   CI's `container` job builds and starts it and runs the router self-tests inside it. A new program file goes into both.
-- PostgreSQL integrations (`test/integration_sessions.py`, `integration_context.py`, `integration_interoperability.py`)
-  run when `SKIRNIR_TEST_SESSION_DSN` points to a disposable test database.
+- Session store integrations (`test/integration_sessions.py`, `integration_context.py`,
+  `integration_deletion_lifecycle.py`, `integration_interoperability.py`) run their contract on SQLite always (no server
+  needed) and on PostgreSQL when `SKIRNIR_TEST_SESSION_DSN` points to a disposable test database (ADR-0114). A store
+  change passes both engines.
 - Agent (Go, in `agent/`): `gofmt -l .` must print nothing; `go vet ./...` also with `GOOS=windows`; `go test ./...`
   on Linux and Windows (the agent runs as a Windows service in production, file locking and `*_windows_test.go` only
   show there). Platform code lives in `*_windows.go` with a `*_other.go` counterpart.

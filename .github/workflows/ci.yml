@@ -114,6 +114,11 @@ jobs:
       - run: python test/selftest_locale_neutral.py
       - run: python test/selftest_shape.py
       - run: python test/integration_live_memory.py
+      # Session store contract on SQLite (ADR-0114), no server needed; the PostgreSQL half runs in sessions-postgres.
+      - run: python test/integration_sessions.py
+      - run: python test/integration_context.py
+      - run: python test/integration_deletion_lifecycle.py
+      - run: python test/integration_interoperability.py
       - run: python test/benchmark_context.py
       - name: Check added lines for common public-data leaks
         if: github.event_name == 'pull_request'

@@ -72,8 +72,9 @@ router:
     auto_checkpoints: false
   session_store:
     enabled: false
-    dsn_env: SKIRNIR_SESSION_DSN
-    min_pool_size: 1
+    dsn_env: SKIRNIR_SESSION_DSN   # names the env variable with the store URL (ADR-0114): postgresql://... or, on a single
+    #                              # host, sqlite:///sessions.db (a relative file lies in state_dir, created owner-only)
+    min_pool_size: 1               # pool sizes apply to PostgreSQL; SQLite uses one connection
     max_pool_size: 5
     timeout_s: 5
     handoff_enabled: false

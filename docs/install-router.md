@@ -13,7 +13,7 @@ configuration in [configuration.md](configuration.md).
 |---|---|
 | Operating system | Debian 12 or Ubuntu (or comparable; `install.sh` supports Debian and Ubuntu, elsewhere follow [Manual installation](#manual-installation)). A system container (LXC) is fine; for Docker or Podman use the router image ([Container](#container)). On Windows the router runs with the default event loop (development). |
 | Python | 3.11 or newer |
-| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installs missing ones). `python3-paho-mqtt` is needed only for Home Assistant over MQTT (`install.sh --without-mqtt` leaves it out). What the distribution lacks or ships too old (on Debian 12: `asyncpg` for the session store) comes into the venv only from the hash-locked `router/requirements-lock.txt` (ADR-0074). |
+| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installs missing ones). `python3-paho-mqtt` is needed only for Home Assistant over MQTT (`install.sh --without-mqtt` leaves it out). What the distribution lacks or ships too old (on Debian 12: `asyncpg` for a PostgreSQL session store) comes into the venv only from the hash-locked `router/requirements-lock.txt` (ADR-0074). A SQLite session store (`sqlite:///...`, ADR-0114) uses Python's own `sqlite3` and needs SQLite 3.37 or newer (Debian 12 has 3.40). |
 | Ports | **11434** for clients (Ollama, OpenAI and Anthropic APIs), **11435** for the agents' tunnel, the web UI, `/admin/*` and `/metrics` |
 | Name and certificate | A DNS name that clients and nodes use (`<name>`, e.g. `router.example.net`) and a TLS certificate for it, see [TLS certificate](#tls-certificate) |
 
@@ -289,6 +289,9 @@ for `router.session_store` (password in its own `postgres.env`; the posture repo
 until PostgreSQL has TLS), `--profile decision` the embedding decision service (`docker build -t skirnir-embed
 decision-embed/` first, endpoint `http://embed:8082`). Agents stay native binaries on the GPU nodes and connect to
 `https://<name>:11435` as with any router.
+
+On a single host the session store needs no PostgreSQL: `SKIRNIR_SESSION_DSN=sqlite:///sessions.db` in `secrets.env` keeps it as an owner-only file in the `state` volume (ADR-0114; the image has Python's `sqlite3`); back it up as `sessions.db` in
+[operations](operations.md#what-to-back-up).
 
 ## Security checklist
 

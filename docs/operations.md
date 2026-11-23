@@ -227,7 +227,7 @@ Skirnir has no backup function of its own; back up these files with the tool you
 | Configuration folder | `/etc/skirnir-router/` | `config.yaml` (written by root tools, never by the router), the certificates in `certs/` (or `tls/` on older installations) and the release folder `agent/` (`manifest.json` and the signed agent binaries; these can also be copied again from a release). |
 | Source of the secrets | your secret store, and `/etc/skirnir-router-secrets/render-env.conf` with its access (with `SECRET_SOURCE=file`: the file `SECRET_FILE` names instead of the store) | `secrets.env` is rendered from it and can be rendered again: back up the source, not the rendered file. If you maintain `secrets.env` by hand, it is the source. The access file holds a credential; keep its backup as protected as the file itself. |
 | State folder (`router.state_dir`) | `/var/lib/skirnir-router/` | Everything the router writes itself, see the next table. Without `state_dir` these files lie next to `config.yaml`. |
-| Session database (optional) | the PostgreSQL database that `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) points to | Managed sessions (turns, events, compactions) and the memory outbox. Back it up with PostgreSQL's own tools. |
+| Session database (optional) | the PostgreSQL database or the SQLite file that `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) names (ADR-0114) | Sessions (events, managed turns, compactions, handoff imports) and the memory outbox. PostgreSQL: back it up with its own tools. SQLite: see `sessions.db` below. |
 | Memory backend (optional) | outside Skirnir (Hindsight) | The long-term memory lives there; back it up as that service documents. |
 | Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), if you need the audit trail. |
 
@@ -238,6 +238,7 @@ Files in the state folder:
 | `nodes.json` | node registry: each agent's public key, approval state, policy and facts | every node shows up as pending and has to be approved again |
 | `roles.yaml` | what the web UI changed: roles, models, settings, clients added in the UI (token hashes) | the UI changes are gone; `config.yaml` applies alone |
 | `deletions.jsonl` | deletion journal, ids only (ADR-0076) | a restored database brings deleted sessions and memory back; see below |
+| `sessions.db` (with `sqlite:///sessions.db`; the name is yours) | the SQLite session store: session content and the memory outbox, owner-only (0600). While the router runs, copy it only with `sqlite3 sessions.db ".backup /backup/sessions.db"`; a plain copy can miss what is still in `sessions.db-wal`. Stopped, a plain copy of the file is enough | stored sessions and pending memory jobs are gone; the router creates an empty store |
 | `usage.json` | usage per client and month, including the cloud spend per provider | the monthly cloud budget starts again at zero |
 | `metrics.json`, `perf.json` | cumulative counters; measured speed per model and node for the catalog | counters and speed values start from scratch |
 | `events.jsonl` | the event and decision log the web UI shows | history only |
@@ -260,7 +261,8 @@ The opt-in decision capture writes to its own path (`decision_engine.capture.pat
 Deletions are recorded outside the database, ids only, in `deletions.jsonl` in the router's state folder
 (`router.state_dir`, otherwise next to `config.yaml`; ADR-0076):
 
-1. **PostgreSQL restored** (session store and memory outbox): start the router as usual. Before the memory outbox sends
+1. **Session database restored** (PostgreSQL, or the SQLite file copied back with the router stopped and its `-wal` and
+   `-shm` files removed): start the router as usual. Before the memory outbox sends
    anything it applies the journal again; the log says how many sessions and operations were back and are deleted again.
    Restore `deletions.jsonl` never older than the database - keep it out of the database restore.
 2. **Hindsight restored**: documents of deleted memory operations are back. Delete them again, page by page:

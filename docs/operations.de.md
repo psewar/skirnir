@@ -237,7 +237,7 @@ verschiebt sie.
 | Konfigurationsordner | `/etc/skirnir-router/` | `config.yaml` (schreiben nur Root-Werkzeuge, nie der Router), die Zertifikate in `certs/` (oder `tls/` bei älteren Installationen) und der Release-Ordner `agent/` (`manifest.json` und die signierten Agent-Binaries; lassen sich auch erneut aus einem Release kopieren). |
 | Quelle der Secrets | der eigene Secret-Store und `/etc/skirnir-router-secrets/render-env.conf` mit dem Zugang dazu (mit `SECRET_SOURCE=file`: statt des Stores die Datei, die `SECRET_FILE` nennt) | `secrets.env` wird daraus erzeugt und lässt sich neu erzeugen: die Quelle sichern, nicht die erzeugte Datei. Wer `secrets.env` von Hand pflegt, hat sie als Quelle. Die Zugangsdatei enthält ein Geheimnis; ihr Backup so geschützt halten wie die Datei selbst. |
 | Zustandsordner (`router.state_dir`) | `/var/lib/skirnir-router/` | Alles, was der Router selbst schreibt, siehe nächste Tabelle. Ohne `state_dir` liegen diese Dateien neben der `config.yaml`. |
-| Session-Datenbank (optional) | die PostgreSQL-Datenbank, auf die `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) zeigt | Verwaltete Sessions (Turns, Ereignisse, Verdichtungen) und die Memory-Outbox. Mit den Werkzeugen von PostgreSQL sichern. |
+| Session-Datenbank (optional) | die PostgreSQL-Datenbank oder die SQLite-Datei, die `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) nennt (ADR-0114) | Sessions (Ereignisse, verwaltete Turns, Verdichtungen, Übergabe-Importe) und die Memory-Outbox. PostgreSQL: mit dessen eigenen Werkzeugen sichern. SQLite: siehe `sessions.db` unten. |
 | Gedächtnis-Backend (optional) | ausserhalb von Skirnir (Hindsight) | Dort liegt das Langzeitgedächtnis; sichern, wie dieser Dienst es beschreibt. |
 | Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), falls der Audit-Verlauf gebraucht wird. |
 
@@ -248,6 +248,7 @@ Dateien im Zustandsordner:
 | `nodes.json` | Knotenregister: öffentlicher Schlüssel, Freigabezustand, Policy und Fakten je Agent | jeder Knoten erscheint als wartend und muss neu freigegeben werden |
 | `roles.yaml` | was die Web-UI geändert hat: Rollen, Modelle, Einstellungen, in der UI angelegte Clients (Token-Hashes) | die UI-Änderungen sind weg; es gilt nur die `config.yaml` |
 | `deletions.jsonl` | Löschjournal, nur IDs (ADR-0076) | eine zurückgespielte Datenbank bringt gelöschte Sessions und Gedächtnis zurück; siehe unten |
+| `sessions.db` (bei `sqlite:///sessions.db`; der Name ist frei) | der SQLite-Session-Store: Session-Inhalte und die Memory-Outbox, nur für den Besitzer lesbar (0600). Bei laufendem Router nur mit `sqlite3 sessions.db ".backup /backup/sessions.db"` kopieren; eine einfache Kopie kann verpassen, was noch in `sessions.db-wal` steht. Bei gestopptem Router genügt eine Kopie der Datei | gespeicherte Sessions und offene Memory-Aufträge sind weg; der Router legt einen leeren Store an |
 | `usage.json` | Nutzung je Client und Monat, auch die Cloud-Ausgaben je Anbieter | das monatliche Cloud-Budget beginnt wieder bei null |
 | `metrics.json`, `perf.json` | kumulierte Zähler; gemessene Geschwindigkeit je Modell und Knoten für den Katalog | Zähler und Geschwindigkeitswerte beginnen von vorn |
 | `events.jsonl` | das Ereignis- und Entscheidungsprotokoll, das die Web-UI zeigt | nur Verlauf |
@@ -270,7 +271,8 @@ Die optionale Entscheidungsaufzeichnung schreibt an ihren eigenen Pfad (`decisio
 Löschungen stehen ausserhalb der Datenbank, nur als IDs, in `deletions.jsonl` im Zustandsordner des Routers
 (`router.state_dir`, sonst neben der `config.yaml`; ADR-0076):
 
-1. **PostgreSQL zurückgespielt** (Session-Store und Memory-Outbox): den Router wie gewohnt starten. Bevor die Outbox etwas
+1. **Session-Datenbank zurückgespielt** (PostgreSQL, oder die SQLite-Datei bei gestopptem Router zurückkopiert und ihre
+   `-wal`- und `-shm`-Dateien entfernt): den Router wie gewohnt starten. Bevor die Outbox etwas
    sendet, wendet er das Journal erneut an; das Log nennt, wie viele Sessions und Operationen wieder da waren und erneut
    gelöscht sind. `deletions.jsonl` nie älter als die Datenbank zurückspielen - aus dem Datenbank-Restore heraushalten.
 2. **Hindsight zurückgespielt**: Dokumente gelöschter Operationen sind wieder da. Seitenweise erneut löschen:

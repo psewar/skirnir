@@ -67,7 +67,7 @@ API und Control sind logische Zugangspunkte desselben Router-Vertrauensbereichs,
 | B1 / F1: Client → Router | Inhalte, Modell-/Routingwahl, Projektalias, Token | Authentifizierung ersetzt keine Autorisierung. IP-Zuordnung ist schwächer als Credential-Identität. |
 | B2 / F2: Admin → Control | Clientrechte, Knotenfreigabe, Konfiguration, Updates | Admin-Rechte sind hochprivilegiert; Browser- und Proxy-Sicherheit gehören dazu. |
 | B3 / F3: Router ↔ Agent | Challenge/Identität, Metadaten, Requests, Antworten, Steueraufträge | Genehmigung bedeutet Vertrauen in den gesamten verarbeitenden Host; Telemetrie ist eine Behauptung des Agenten. |
-| B4 / F4: Router ↔ PostgreSQL | Raw Events, Compactions, Checkpoints, Outbox, Ledger | DB-Administrator und Backups liegen außerhalb der API-Eigentümerisolation. |
+| B4 / F4: Router ↔ Session-Store (PostgreSQL oder seit ADR-0114 eine SQLite-Datei im Zustandsordner) | Raw Events, Compactions, Checkpoints, Outbox, Ledger | DB-Administrator, Dateizugriff und Backups liegen außerhalb der API-Eigentümerisolation. |
 | B5 / F5: Router ↔ Hindsight | Recall-Anfragen, gespeicherte Inhalte, Provenienz | Gateway-Rechte schützen nicht vor direktem Backend-Zugang; eigene Modellaufrufe des Backends separat kontrollieren. |
 | B6 / F6: Router → Cloud | Nutzinhalt, eventuell Recall, Provider-Key | Freigabe muss am tatsächlich versandten Payload gelten; gesendete Daten lassen sich nicht zurückholen. |
 | B7 / F7: Router → Klassifikator | Zu klassifizierender Text | Lokalität und Fehlerverhalten prüfen; ein Klassifikator ist keine verlässliche DLP-Grenze. |

@@ -140,9 +140,9 @@ Hermes-Agent-Lauf sind damit ausdrücklich nicht durchgeführt.
 ## Persistente Outbox und Wiederanlauf
 
 `router.hindsight.outbox_enabled: true` erfordert aktiviertes Hindsight und den
-Session Store. Ohne Opt-in bleibt die bisherige flüchtige Queue verfügbar.
+Session Store (PostgreSQL oder auf einem einzelnen Host SQLite; ADR-0114). Ohne Opt-in bleibt die bisherige flüchtige Queue verfügbar.
 Im persistenten Modus wird der Auftrag vor der 202-Antwort von
-`POST /v1/skirnir/memory/retain` in PostgreSQL committet. Ohne Datenbank gibt es
+`POST /v1/skirnir/memory/retain` im Session Store committet. Ohne Datenbank gibt es
 503 und keine falsche Dauerhaftigkeitszusage. Automatische Output-Erfassung bleibt
 Best Effort: Eine erfolgreiche Inferenzantwort allein bestätigt keine Retention.
 Für verbindliche Speicherung die explizite API und den Operationsstatus verwenden.
