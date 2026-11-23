@@ -46,7 +46,7 @@ def ha_snapshot(now=None):
         models |= n.models
     roles = {}
     for _exposed, role in state.CFG.roles.items():
-        pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # View: no breaker switching from the HA view
+        pick = scheduler.choose(role, role["tiers"], None, now)   # View: no probe_breakers, no breaker switching from the HA view
         if pick:
             i, tier, ctx, node = pick
             roles[role["name"]] = {"ready": True, "node": node.name, "model": tier["model"], "tier": i, "num_ctx": ctx,

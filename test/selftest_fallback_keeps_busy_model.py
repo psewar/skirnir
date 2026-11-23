@@ -60,7 +60,7 @@ def choose(tiers=TIERS):
 n = node("gpu-node")
 state.NODES = {n.name: n}
 now = time.time()
-_, _, cands = scheduler.candidates_for(TIERS[1], None, now)
+_, cands = scheduler.candidates_for(TIERS[1], None, now)
 check("setup: the 20 GiB tier is a cold candidate on the busy node (budget counts the answering model)", cands == [n],
       f"budget {n.budget_gib(now, MID):.1f} need {state.CFG.need_gib(MID, 8192, n):.1f}")
 check("setup: the first model is warm and at its max_parallel limit", n.is_loaded(FIRST) and scheduler.admission.saturated(n, FIRST))

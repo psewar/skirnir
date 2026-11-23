@@ -109,8 +109,8 @@ async def main():
     n.state = "busy"
     tier_small = {"model": SMALL, "num_ctx": 8192, "busy_ok": True}
     tier_big = {"model": BIG, "num_ctx": 131072, "busy_ok": False}
-    small_code, _ = scheduler._node_block(n, tier_small, 8192, time.time())
-    big_code, _ = scheduler._node_block(n, tier_big, 131072, time.time())
+    small_code, _ = scheduler.assess(n, tier_small, 8192, time.time())
+    big_code, _ = scheduler.assess(n, tier_big, 131072, time.time())
     check("busy: busy_ok model of the standby is not blocked by the game", small_code != scheduler.GPU_BUSY, str(small_code))
     check("busy: the held server's model is blocked (no release during a game)", big_code == scheduler.GPU_BUSY, str(big_code))
 
