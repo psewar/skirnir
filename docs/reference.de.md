@@ -74,6 +74,11 @@ ausgeschlossen. Hermes mit eigenem Memory-Provider behält `memory.owner: client
 [Konfiguration, API und Grenzen (Englisch)](../design/hindsight-memory.md). Gedächtnis-Zustände in Antworten:
 [troubleshooting.de.md](troubleshooting.de.md#gedächtnis-zustände).
 
+Der Router spricht das Gedächtnis über eine Backend-Schnittstelle an; Hindsight ist ihr einziger Adapter
+(`hindsight.backend: hindsight`, Vorgabe). Grants, Inhaltsfilter, Recall-Budgets, Outbox und Löschablauf gelten für jedes
+Backend gleich, und das Hindsight-kompatible Gateway behält sein Format. Weitere Adapter (etwa mem0 oder pgvector) kämen
+als Pull-Request mit denselben Vertragstests ([Backend-Schnittstelle](../design/hindsight-memory.md#backend-interface)).
+
 CI prüft neue Zeilen auf gängige identifizierende Angaben und Secrets; die [Repository-Vorgaben](../AGENTS.md) verlangen
 zusätzlich eine manuelle Datenschutzprüfung. Tests und Beispiele nutzen synthetische Daten. Echte Verbindungswerte und
 Memory-Daten gehören nicht ins Repository.

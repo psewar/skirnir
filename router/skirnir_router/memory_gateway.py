@@ -1,6 +1,8 @@
 """Allowlisted Hindsight recall/retain compatibility gateway and operation control.
 
-The path bank is a configured project alias, not an upstream identifier. No arbitrary
+The gateway speaks Hindsight's wire format to clients (a public contract, kept byte for byte) whatever memory backend
+serves it; it works only on the router's typed values (memory.Recall, memory_backend.OpState), never on a backend's
+answers. The path bank is a configured project alias, not an upstream identifier. No arbitrary
 proxying, reflect, bank administration, payload/status disclosure or tenant selection.
 Functions return their result or a Problem (outcome.py).
 """
@@ -203,10 +205,10 @@ async def operation_control(request, service, principal, gateway):
         return SCOPE_DENIED
     result = {k: row[k] for k in ("operation_id", "state", "attempts", "created_at", "updated_at")}
     if row["state"] == "accepted":   # acknowledged, not yet verified by the outbox: show the live upstream state
-        upstream = await service.client.operation(service.bank(scope), upstream_id(operation, row), authorize=lambda: service.current(scope))
+        upstream = await service.backend.operation(service.bank(scope), upstream_id(operation, row), authorize=lambda: service.current(scope))
         if failed(upstream):
             return SCOPE_DENIED if upstream.status == 403 else upstream
-        result["upstream_status"] = upstream.get("status", "unknown")
+        result["upstream_status"] = upstream.status   # memory_backend.OpState: the backend's state, "unknown" if unreadable
     for field in ("last_error", "retry_rounds", "upstream_attempts"):
         result[field] = row.get(field)
     result["action"] = "delete" if row.get("delete_requested") else "retain"

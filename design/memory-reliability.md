@@ -77,6 +77,13 @@ it later. `skirnir_memory_deletions_stuck` counts deletions whose job ended dead
 that knowledge may still be in Hindsight. The posture report names sessions without retention, memory kept on session
 deletion and outbox payloads without retention (info).
 
+The outbox, the operation status and the reconciliation reach the memory system only through the memory backend
+interface ([ADR-0115](../docs/adr/0115-long-term-memory-goes-through-a-memory-backend-interface.md),
+[backend interface](hindsight-memory.md#backend-interface)): `retain` under the job's operation id, `operation` for the
+verification (`OpState`) and `delete_document` by the operation id. A backend offered with the outbox must support all
+three, deletion by document id included. The job ledger behind them is the session store's `OutboxStore` on either
+engine (PostgreSQL or SQLite, ADR-0114), so any memory backend works with either store.
+
 ## Ledger growth and monitoring
 
 Migration **4** adds retry/diagnostic fields, partial indexes and an aggregate

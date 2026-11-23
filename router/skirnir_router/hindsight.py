@@ -1,7 +1,10 @@
-"""Bounded official Hindsight REST adapter; no redirects or ambient credentials.
+"""Hindsight adapter for the memory backend interface (memory_backend.py, ADR-0115).
 
-Every call returns its result or a Problem (outcome.py) whose `kind` is one of KINDS.
-Network faults are caught at the HTTP boundary in `_exchange` and nowhere else.
+HindsightClient is the bounded official Hindsight REST transport (no redirects or ambient credentials) and speaks
+Hindsight's wire format. HindsightBackend maps that format onto the router's typed values (Fact, FactList, MemoryPage,
+OpState): all knowledge of Hindsight's answer shapes (`results`, `scores.reranker`, `source_fact_ids`, `fact_type`, ...)
+lives in this file. Every call returns its result or a Problem (outcome.py) whose `kind` is one of KINDS. Network
+faults are caught at the HTTP boundary in `_exchange` and nowhere else.
 """
 import asyncio
 import os
@@ -14,23 +17,20 @@ from uuid import UUID
 from aiohttp import ClientError, ClientSession, ClientTimeout, DummyCookieJar, TCPConnector
 
 from . import metrics
-from .outcome import Problem, denied, failed, invalid, unavailable
+from .memory_backend import NOT_FOUND, POLICY_CHANGED, UNKNOWN, Fact, FactList, MemoryPage, OpState, unavailable_as
+from .outcome import Problem, failed, invalid
 from .session_api import parse_json_value
 
-KINDS = ("unavailable", "upstream_auth", "upstream_rejected", "protocol", "timeout", "transport", "remote_pending")
 RETRY_STATUSES = (429, 500, 502, 503, 504)
-# Set by this client (never by Hindsight) on the empty result for a bank that does not exist (HTTP 404), so a caller
+RECALL_RESULTS = 100   # recall results read per answer, in Hindsight's ranking
+LIST_SOURCES = 32      # source ids read per listed unit
+# Set by this client (never by Hindsight) on the empty result for a bank that does not exist (HTTP 404), so the adapter
 # can report it as a state instead of reading it as "nothing matched".
 BANK_MISSING = "skirnir_bank_missing"
 BANK_TEXT = re.compile(r"skirnir-[0-9a-f]{64}")
 # Host names, IPv4 or the IPv6 loopback literal; an optional path prefix of plain URL characters.
 URL_TEXT = re.compile(r"(?P<scheme>https?)://(?P<host>[A-Za-z0-9.-]+|\[::1\])(?::(?P<port>[0-9]{1,5}))?(?:/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?")
 LOOPBACK_V4 = re.compile(r"127(?:\.[0-9]{1,3}){3}")
-POLICY_CHANGED = denied("memory policy changed before dispatch")
-
-
-def unavailable_as(kind):
-    return unavailable("memory backend unavailable", kind if kind in KINDS else "unavailable")
 
 
 def is_loopback(host):
@@ -172,7 +172,7 @@ class HindsightClient:
         status, value = reply
         if status == 404:
             self.healthy = True
-            return {"status": "not_found"} if method == "GET" else {"deleted": True}
+            return {"status": NOT_FOUND} if method == "GET" else {"deleted": True}
         if value is None:
             return unavailable_as("upstream_auth" if status in (401, 403) else "upstream_rejected")
         self.healthy = True
@@ -190,4 +190,90 @@ class HindsightClient:
         page = await self.control(bank, "/memories/list?" + urlencode(params), authorize=authorize)
         if failed(page):
             return page
-        return {"items": [], "total": 0} if page.get("status") == "not_found" else page
+        return {"items": [], "total": 0} if page.get("status") == NOT_FOUND else page
+
+
+def _text(value):
+    return value if isinstance(value, str) else None
+
+
+def recalled_fact(raw):
+    """A Fact from one recall result, or None for a result without a text id and text. The score is Hindsight's reranker
+    score where it is a number; source ids count only when every one is text (a malformed list names no source)."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("id"), str) or not isinstance(raw.get("text"), str):
+        return None
+    scores = raw.get("scores")
+    score = scores.get("reranker") if isinstance(scores, dict) else None
+    sources = raw.get("source_fact_ids")
+    return Fact(raw["id"], raw["text"], type=_text(raw.get("type")), score=score if type(score) in (int, float) else None,
+                sources=tuple(sources) if isinstance(sources, list) and all(isinstance(s, str) for s in sources) else (),
+                metadata=raw["metadata"] if isinstance(raw.get("metadata"), dict) else None,
+                created_at=_text(raw.get("created_at")), updated_at=_text(raw.get("updated_at")))
+
+
+def listed_fact(raw):
+    """A Fact from one memories/list unit, or None for a unit without a text id. The text of a unit without one is empty."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("id"), str):
+        return None
+    sources = raw.get("source_memory_ids") if isinstance(raw.get("source_memory_ids"), list) else []
+    return Fact(raw["id"], raw["text"] if isinstance(raw.get("text"), str) else "", type=_text(raw.get("fact_type")),
+                sources=tuple(s for s in sources[:LIST_SOURCES] if isinstance(s, str)), document_id=_text(raw.get("document_id")),
+                metadata=raw["metadata"] if isinstance(raw.get("metadata"), dict) else None,
+                date=_text(raw.get("date")), updated_at=_text(raw.get("updated_at")))
+
+
+class HindsightBackend:
+    """MemoryBackend for Hindsight: HindsightClient's answers normalised to the router's typed values."""
+
+    def __init__(self, client):
+        self.client = client
+
+    async def health(self):
+        return await self.client.health()
+
+    async def recall(self, bank, query, *, types=None, authorize=None):
+        result = await self.client.recall(bank, query, types=types, authorize=authorize)
+        if failed(result):
+            return result
+        if result.get(BANK_MISSING) is True:
+            return FactList((), bank_missing=True)
+        values = result.get("results")
+        if not isinstance(values, list):
+            return unavailable_as("protocol")
+        return FactList(tuple(fact for fact in map(recalled_fact, values[:RECALL_RESULTS]) if fact is not None))
+
+    async def retain(self, bank, content, operation_id, *, document_id=None, confirmed, provenance=None, shared_observations=False,
+                     context=None, timestamp=None, authorize=None):
+        return await self.client.retain(bank, content, operation_id, document_id=document_id, confirmed=confirmed, provenance=provenance,
+                                        shared_observations=shared_observations, context=context, timestamp=timestamp, authorize=authorize)
+
+    async def operation(self, bank, operation_id, *, authorize=None):
+        """Hindsight names its states as OPERATION_STATUSES does; "not_found" is the client's reading of HTTP 404."""
+        value = await self.client.operation(bank, operation_id, authorize=authorize)
+        if failed(value):
+            return value
+        status = value.get("status", UNKNOWN)
+        return OpState(status if isinstance(status, str) else UNKNOWN)
+
+    async def delete_document(self, bank, document_id, *, authorize=None):
+        result = await self.client.delete_document(bank, document_id, authorize=authorize)
+        return result if failed(result) else None
+
+    async def list(self, bank, *, kind=None, query=None, limit=20, offset=0, authorize=None):
+        page = await self.client.list_memories(bank, kind=kind, query=query, limit=limit, offset=offset, authorize=authorize)
+        if failed(page):
+            return page
+        units = page.get("items")
+        facts = tuple(fact for fact in map(listed_fact, units if isinstance(units, list) else []) if fact is not None)
+        return MemoryPage(facts, page["total"] if type(page.get("total")) is int else None)
+
+    async def close(self):
+        await self.client.close()
+
+
+def open_backend(cfg, token):
+    """HindsightBackend for the endpoint in the environment, or a Problem for an invalid endpoint."""
+    endpoint = endpoint_from_env(cfg)
+    if failed(endpoint):
+        return endpoint
+    return HindsightBackend(HindsightClient(endpoint, token, cfg))

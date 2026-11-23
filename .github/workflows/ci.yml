@@ -97,6 +97,7 @@ jobs:
       - run: python test/selftest_interoperability.py
       - run: python test/selftest_reliability.py
       - run: python test/selftest_verified_delivery.py
+      - run: python test/selftest_memory_backend.py
       - run: python test/selftest_rerank_server.py
       - run: python test/selftest_slowness_signals.py
       - run: python test/selftest_problems.py

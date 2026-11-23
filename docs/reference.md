@@ -78,6 +78,13 @@ Hermes clients with their own memory provider keep `memory.owner: client` to pre
 double processing. See [configuration, API contract and limitations](../design/hindsight-memory.md).
 Memory states in responses: [troubleshooting.md](troubleshooting.md#memory-states).
 
+The router reaches memory through a backend interface; Hindsight is its only adapter
+(`hindsight.backend: hindsight`, the default). Grants, the content filter, recall budgets,
+the outbox and the deletion lifecycle apply to every backend alike, and the
+Hindsight-compatible gateway keeps its format. Further adapters (for example mem0 or
+pgvector) would come as pull requests with the same contract tests
+([backend interface](../design/hindsight-memory.md#backend-interface)).
+
 Public changes are checked for common identifying/secret patterns in CI, with manual
 privacy review required by [repository guidance](../AGENTS.md). Examples/tests use only
 synthetic data; connection values and real memory data must stay outside the repository.
