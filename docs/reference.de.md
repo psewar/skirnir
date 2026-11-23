@@ -20,6 +20,20 @@ schickt CANCEL, der Agent beendet die Ollama-Anfrage. Der Inferenz-Port nutzt TC
 alle 15 s, nach 4 ohne Antwort tot): Eine Anfrage ohne Stream kann minutenlang ohne ein Byte laufen, und irgendwo auf dem Weg zum
 Client verfällt der Verbindungszustand sonst still. Die Proben halten ihn frisch und lassen eine tote Verbindung als Fehler auffallen.
 
+**Kostenfelder** (Router 0.37.0, [ADR-0105](adr/0105-currency-neutral-cost-keys.md)): Beträge stehen in der Währung der
+Katalogpreise, die `router.cloud.currency` nennt; der Router rechnet nie um. Feld- und Metriknamen behalten ihre historische
+Endung `_chf`: `spend_month_chf`, `budget_month_chf` und `currency` je Anbieter in `/admin/state` (`cloud`), `cost_chf` in
+`/admin/usage`, `skirnir_cloud_spend_month_chf`, `skirnir_cloud_budget_month_chf` und `skirnir_cloud_cost_chf_total` in
+`/metrics`, dazu `skirnir_cloud_currency_info{currency="CHF"} 1`. Katalogeinträge in `GET /admin/config` (`models`) und
+`/admin/state` (`catalog_effective`) tragen den Preis als `price_per_m` und mit demselben Wert als `price_chf_per_m`.
+`PUT /admin/config` nimmt beide Preisnamen und beide Pfade der Budget-Einstellung an.
+
+**Benchmark** (`POST /admin/bench`, [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)): ein
+Aufwärmlauf und zwei Messläufe mit `router.benchmark.prompt`, 200 Tokens, Temperatur 0. Jedes Ergebnis in `/admin/state`
+(`perf.<modell>@<knoten>.bench`) nennt `prompt_id`, die ersten 12 Hex-Ziffern des SHA-256 des Prompts; ein Ergebnis ohne sie
+lief mit dem Standard-Prompt. Tokens pro Sekunde hängen von der Sprache von Prompt und Antwort ab, vergleiche also nur
+Ergebnisse mit derselben `prompt_id`.
+
 ## GPU-Schutz
 
 Agent 0.7.0, [design/gpu-guard.md](../design/gpu-guard.md). Der Agent setzt ein Power-Limit von 80 % des Standardlimits (460 W

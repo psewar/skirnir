@@ -1,6 +1,7 @@
 """Performance data (passive + benchmark) and model profiling for the catalog."""
 
 import asyncio
+import hashlib
 import os
 import time
 
@@ -132,8 +133,15 @@ def ewma_gen_tps(model, node_name):
     return ((state.PERF.get(f"{model}@{node_name}") or {}).get("ewma") or {}).get("gen_tps")
 
 
-BENCH_PROMPT = ("Erkläre in etwa 200 Wörtern, was ein Netzwerk-Router macht, welche Aufgaben er im Heimnetz übernimmt "
-                "und worin er sich von einem Switch unterscheidet. Antworte auf Deutsch in ganzen Sätzen.")
+def bench_prompt():
+    """The benchmark prompt: router.benchmark.prompt, default config.BENCH_PROMPT_DEFAULT (the prompt of all earlier
+    measurements). Generation speed depends on its language, so compare tok/s only between runs with the same prompt."""
+    return getattr(state.CFG, "bench_prompt", None) or config.BENCH_PROMPT_DEFAULT
+
+
+def prompt_id(prompt):
+    """Short fingerprint of a benchmark prompt, stored with each result so runs with different prompts can be told apart."""
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
 
 
 async def bench_model(model, node):
@@ -142,7 +150,8 @@ async def bench_model(model, node):
     node.inflight += 1
     try:
         ctx = node.loaded_context(model) or 8192
-        runs = await _bench_runs(model, node, ctx)
+        prompt = bench_prompt()
+        runs = await _bench_runs(model, node, ctx, prompt)
         if failed(runs):
             log.warning("bench %s on %s failed: %s", model, node.name, runs.message)
             state.BENCHING[model].update(step="error", error=runs.message)
@@ -152,7 +161,7 @@ async def bench_model(model, node):
         e = state.PERF.setdefault(key, {"model": model, "node": node.name, "samples": [], "count": 0})
         e["bench"] = {"gen_tps": med("gen_tps"), "prompt_tps": med("prompt_tps"), "ttft_ms": med("ttft_ms"),
                       "tokens": runs[-1]["tokens"], "prompt_tokens": runs[-1]["prompt_tokens"], "num_ctx": ctx,
-                      "at": time.strftime("%Y-%m-%d %H:%M"), "gpu": node.gpu}
+                      "at": time.strftime("%Y-%m-%d %H:%M"), "gpu": node.gpu, "prompt_id": prompt_id(prompt)}
         perf_save()
         log.info("bench %s on %s: %.1f tok/s gen, %s tok/s prompt, ttft %d ms (ctx %d)", model, node.name,
                  e["bench"]["gen_tps"], e["bench"]["prompt_tps"], e["bench"]["ttft_ms"], ctx)
@@ -164,10 +173,10 @@ async def bench_model(model, node):
         state.BENCHING.pop(model, None)
 
 
-async def _bench_runs(model, node, ctx):
+async def _bench_runs(model, node, ctx, prompt):
     """Warmup + 2 measurement runs: the two measurements or a Problem."""
     body = {"model": model, "stream": False, "keep_alive": "5m", "options": {"num_ctx": ctx, "num_predict": 200, "temperature": 0, "seed": 42},
-            "messages": [{"role": "user", "content": BENCH_PROMPT}]}
+            "messages": [{"role": "user", "content": prompt}]}
     runs = []
     for i in range(3):
         state.BENCHING[model]["step"] = "warmup" if i == 0 else f"run {i}/2"

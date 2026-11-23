@@ -2,78 +2,105 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "d29ece8e1281e889f75577a2480d49df3871ae63",
- "change_digest": "0c2b46d38ef0499b1016119f75da292db6229a03830c4402c05a6dd63c54752d",
+ "base_sha": "b9389908f74964001ee1a5b74b37e787690231ad",
+ "change_digest": "180b03b50f9fa64fd51fbc15e3724f55d7679b7a996ed1dc070744368751758e",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0104-the-secrets-renderer-checks-its-source-and-renders-every-key-on-its-own.md",
+  "docs/adr/0105-currency-neutral-cost-keys.md",
+  "docs/adr/0106-language-dependent-defaults-live-in-the-configuration.md",
   "docs/adr/README.md",
-  "docs/install-router.de.md",
-  "docs/install-router.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
+  "docs/reference.de.md",
+  "docs/reference.md",
   "docs/security/reviews/current.json",
-  "docs/security/threat-model.de.md",
-  "docs/security/threat-model.md",
-  "router/install.sh",
-  "router/render-env.conf.example",
-  "router/render-env.sh",
+  "router/config.example.yaml",
+  "router/skirnir_router/admin.py",
+  "router/skirnir_router/agentupdate.py",
+  "router/skirnir_router/cloud.py",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/pydeps.py",
-  "test/selftest_install.py",
-  "test/selftest_privilege_paths.py",
-  "test/selftest_pydeps.py",
-  "test/selftest_render_env.py"
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/cost_keys.py",
+  "router/skirnir_router/fallback_observation.py",
+  "router/skirnir_router/metrics.py",
+  "router/skirnir_router/nodes.py",
+  "router/skirnir_router/ollamaupdate.py",
+  "router/skirnir_router/perf.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/settings.py",
+  "router/skirnir_router/tunnel.py",
+  "router/ui.html",
+  "test/run_tests.py",
+  "test/selftest_locale_neutral.py",
+  "test/selftest_ollama_push.py",
+  "test/test-config.yaml"
  ],
  "risk_ids": [
-  "TM-14",
+  "TM-02",
+  "TM-03",
+  "TM-08",
   "TM-15",
   "TM-16"
  ],
  "boundaries": [
-  "B8",
+  "B2",
+  "B6",
   "B9"
  ],
- "summary": "Re-review after merging main (PRs 178 and 181: structured problems, agent without a GPU). The changed paths against the new merge-base are exactly this PR's own; the merge touched only CHANGELOG (v0.41.1 row above v0.41.0/v0.40.0, agent column 0.36.0), VERSION 0.36.1, the regenerated ADR index (0101-0104 consecutive) and one row of the backup table in operations EN+DE that now names SECRET_FILE as the source with SECRET_SOURCE=file. Re-checked after the merge that the router still gates paho with find_spec (ha.py) and creates the MQTT publisher only with mqtt.host (app.py), and that no merged module reads secrets.env, render-env or MQTT_PASSWORD differently. Substance unchanged from the first review: render-env.sh no longer stops at a missing MQTT_PASSWORD; the access file is still sourced only after not_router_writable; the store is used only after an explicit login step whose HTTP status is reported; every name keeps the ADR-0080 rule; every value is refused on CR/LF; the file is written through mktemp in the target folder, group skirnir-router 0640 (0600 without the account) and an atomic rename; a failed fetch or a source with none of the names keeps the existing file. SECRET_SOURCE=file: SECRET_FILE passes not_router_writable, must be a regular file readable by root only, and is parsed with bash read, never sourced or evaluated. The bearer token goes to curl via stdin instead of argv (TM-15). install.sh --without-mqtt removes only python3-paho-mqtt and passes --without paho-mqtt to pydeps.py, which can only leave out requirements and refuses unknown names; hash-locked installation unchanged (TM-16). Added text names no organisation, host, address or person.",
+ "summary": "Router 0.37.0, locale-neutral defaults (ADR-0105, ADR-0106 proposed). Cost keys budget_month / price_per_m with the old _chf names as aliases (cost_keys.py), normalised per layer in Config.merged and Config.parse, in PUT /admin/config (settings paths, cloud model bodies, merge with stored roles.yaml settings, client deletion) and in the settings view; both names with different values are refused, never resolved silently. router.cloud.currency (display only, ^[A-Z]{3}$, EDITABLE as str maxlen 3, escaped in ui.html) in the provider snapshot, start log and an info metric. Wire fields, usage data and metric names unchanged; catalogue views add the old price field. router.benchmark.prompt (config.yaml only, nonempty, <= 4000 characters) sent to local nodes only, result records a SHA-256 prefix, the prompt is not logged. observe_light default resolved by the configuration check; fallback_observation reads only the configuration. English texts in nodes/tunnel/update status/common/admin hints. Traced: settings allowlist (settings.coerce/spec_for) still applies after renaming because neutral_path only maps the exact provider budget key onto its allowlisted neutral path; every budget reader (cloud.budget_month, request_block_reason, budget_problems, snapshot, metrics) reads the normalised spec built by _parse_cloud, so a budget written under the old name keeps limiting spend (TM-08); write_overrides validates the merged probe before writing, so the web UI cannot persist a conflicting pair; ha.py untouched (reads unchanged budget_view fields). No credentials, routes, auth, tunnel, enrollment, data-class or cloud-payload logic changed. Re-reviewed after merging main (problems.py/ADR-0101, agent without GPU, secrets renderer): cloud.budget_problems from #178 now calls cloud.budget_month, and budget_month / request_cost also read the old key on an entry built in code (selftest_problems.py builds provider specs with budget_month_chf directly) - found by that test after the merge and fixed so a budget can never read as 0 = unlimited because of its name (TM-08). The translated strings are not part of the problems.py message catalogue; the only message-text check left (agentupdate retry delay for old agents) concerns agent-sent text, unchanged.",
  "findings": [],
  "tests": [
   {
-   "command": "every python command of .github/workflows/ci.yml, run in WSL Ubuntu with CI=1 (includes selftest_render_env, selftest_install, selftest_privilege_paths)",
+   "command": "python test/selftest_locale_neutral.py",
    "result": "passed",
-   "evidence": "83 commands after the merge: all pass except check_pinned_references and check_public_changes (they need a git checkout WSL cannot resolve in this worktree; both rerun on Windows and passed) and test/run_tests.py, which the script started there by mistake outside the lock wrapper and which failed at its first route check; the suite then passed through the lock wrapper (entry below). selftest_render_env 14 OK, selftest_install 5 OK, selftest_privilege_paths all passed."
+   "evidence": "OK: 0 failed (62 checks, including the old key names on entries built in code), including the rejected cases: conflicting budget and price pairs in config.yaml, conflicting settings paths in roles.yaml and in PUT /admin/config, conflicting cloud model body, invalid currencies (eur, EURO, 5, empty, 'dollars' via settings), invalid benchmark prompts, observe_light with an unknown name or a non-list."
   },
   {
-   "command": "python test/selftest_pydeps.py && python tools/security/lock_requirements.py check",
+   "command": "all 74 python self-tests listed in .github/workflows/ci.yml after merging main (Windows, Python 3.12)",
    "result": "passed",
-   "evidence": "selftest_pydeps: all passed; Python locks: 0 problem(s)."
+   "evidence": "every file exited 0, including test/selftest_problems.py (all passed) and test/selftest_cpu_node.py; test/selftest_ollama_push.py adjusted to the English status message."
   },
   {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/selftest_control_flow.py && python test/check_control_flow.py; python test/check_pinned_references.py",
+   "command": "python test/check_adr_index.py",
    "result": "passed",
-   "evidence": "All checks passed; configuration ok; ADR index ok: 104 ADRs; control flow ok: 0 legacy findings; Pinned references: 0 finding(s)."
+   "evidence": "ADR index ok: 106 ADRs."
   },
   {
-   "command": "python test/run_tests.py (end-to-end suite, run through a lock wrapper because of its fixed ports)",
+   "command": "python test/run_tests.py (started through a local wrapper that serialises end-to-end runs)",
    "result": "passed",
-   "evidence": "After the merge (router Python changed through main): 0 failures, STATE: passed."
+   "evidence": "after merging main: 0 failures, STATE: passed (334 checks), including HA budget problem with the old key in test-config.yaml, roles.yaml written with the neutral key after a PUT with the old path, old price body shown under both names, skirnir_cloud_currency_info in /metrics."
   },
   {
-   "command": "python test/check_public_changes.py --base $(git merge-base origin/main HEAD)",
+   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
+   "evidence": "All checks passed!; configuration ok: 5 roles, 7 models in the catalog."
+  },
+  {
+   "command": "python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "control flow ok: 0 legacy findings."
+  },
+  {
+   "command": "python test/check_pinned_references.py ; python test/check_training_data.py ; python tools/security/lock_requirements.py check",
+   "result": "passed",
+   "evidence": "exit code 0 each."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
    "result": "passed",
    "evidence": "run after staging this record."
+  },
+  {
+   "command": "python test/check_public_changes.py --base <merge-base>",
+   "result": "passed",
+   "evidence": "Public-change scan: 0 finding(s); added lines manually reviewed for hosts, addresses and personal data."
   }
  ],
  "limitations": [
-  "The store client was exercised against a fake store only; that the store answers a missing secret with HTTP 404 is assumed from its API. Any other status is treated as a failed fetch, keeps the existing file and is logged by name and status.",
-  "Pre-existing, both sources: a value ending in a backslash makes systemd's EnvironmentFile parser join the next line; that can lose the following key but cannot add a name. Not changed here.",
-  "As for the access file, only the file and its own folder are checked for owner and mode, not the folders above SECRET_FILE.",
-  "monitoring/render-monitoring.sh is unchanged (it never had the MQTT gate) and still treats a failed fetch like a missing name, which keeps its old file in both cases.",
-  "No real systemd, apt or venv run: install.sh was tested in its staging mode (--root, --no-venv); pydeps --without is covered by unit cases.",
-  "The code merged from main (PRs 178 and 181) was reviewed in their own records and is outside this record's change set; only its interaction with MQTT and secrets handling was re-checked here."
+  "No live router, real cloud provider or browser session; the web UI change was syntax-checked (node --check) and covered by the end-to-end API checks, not clicked through.",
+  "The Home Assistant cost sensor keeps the unit CHF (ha.py is outside this change); the budget problem text comes from the problems.py catalogue of ADR-0101 (de/en) and does not name the currency.",
+  "A roles.yaml edited by hand with both names and different values stops the router from loading the configuration (explicit error naming both keys) - intended fail-closed behaviour, documented.",
+  "Pre-existing, not introduced here: deleting a client in the same PUT that resets settings re-adds the reset settings from the stored file (admin._apply_delete_clients merges the stored block again); functional, not a security issue."
  ]
 }

@@ -610,7 +610,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 // esc() alone is not enough there: the browser decodes &#39; back to ' before the JavaScript runs (TM-03).
 const js = s => esc(JSON.stringify(String(s ?? '')));
 const isCloud = m => !!((CFG && CFG.models[m]) || {}).cloud;
-const fmtCost = v => (v ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 4 });   // currency of the catalog prices
+// amounts in the currency of the catalog prices (router.cloud.currency, ADR-0105; the router does not convert)
+const fmtCost = v => (v ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + ' ' + esc(((STATE && STATE.cloud_config) || {}).currency || 'CHF');
 
 const TABS = ['uebersicht', 'agenten', 'rollen', 'clients', 'katalog', 'einstellungen'];
 const NEW_TOKENS = {};   // Client -> einmalig gezeigtes Secret (nur im Browser-Speicher dieser Seite)
@@ -730,7 +731,7 @@ function renderModels() {
       return `<div title="${esc(p.node)}${b ? ', Benchmark ' + esc(b.at) + ' @' + b.num_ctx : ''}">${perf.length > 1 ? '<span class="muted">' + esc(p.node) + ':</span> ' : ''}${bt}</div>${at}`;
     }).join('') : '<span class="muted">–</span>';
     if (isCloud(m)) {
-      const pr = c.price_chf_per_m || {};
+      const pr = c.price_per_m || c.price_chf_per_m || {};   // price_chf_per_m: the old name (ADR-0105)
       const uiModel = (CFG.ui_models || []).includes(m);
       const ed = (k, v, ph) => `<input class="inl" type="number" step="0.01" min="0" value="${v ?? ''}" placeholder="${ph}" title="${t('{ph} je 1 Mio. Tokens', { ph })}" onchange="modelField(${js(m)},${js(k)},this.value)">`;
       tb.insertAdjacentHTML('beforeend', `<tr><td><span class="cloudc">☁</span> ${esc(m)}${c.provider_model ? `<div class="muted">${esc(c.provider_model)}</div>` : ''}${uiModel ? `<div class="muted">${t('aus der UI')}</div>` : ''}</td><td class="muted">–</td><td class="muted">–</td>
@@ -815,15 +816,15 @@ function renderRoles() {
 
 function modelField(m, k, v) {
   const c = CFG.models[m] || {};
-  const e = MODEL_CHANGES[m] || { cloud: c.cloud, provider_model: c.provider_model, price_chf_per_m: { ...(c.price_chf_per_m || {}) }, context_tokens: c.context_tokens, reasoning: c.reasoning, reasoning_off: c.reasoning_off, capabilities: c.capabilities };
-  if (k === 'context_tokens') e.context_tokens = v ? +v : undefined; else e.price_chf_per_m[k] = +v;
+  const e = MODEL_CHANGES[m] || { cloud: c.cloud, provider_model: c.provider_model, price_per_m: { ...(c.price_per_m || c.price_chf_per_m || {}) }, context_tokens: c.context_tokens, reasoning: c.reasoning, reasoning_off: c.reasoning_off, capabilities: c.capabilities };
+  if (k === 'context_tokens') e.context_tokens = v ? +v : undefined; else e.price_per_m[k] = +v;
   MODEL_CHANGES[m] = e; dirty = true; $('#kmsg').innerHTML = `<span class="warn">${t('ungespeicherte Änderungen')}</span>`; markDirty();
 }
 function addCloudModel() {
   const name = $('#nmName').value.trim(), prov = $('#nmProv').value;
   if (!name || !prov) { $('#kmsg').innerHTML = `<span class="bad">${t('Name und Anbieter angeben')}</span>`; return; }
   if (!name.includes(':')) { $('#kmsg').innerHTML = `<span class="bad">${t('Name als anbieter:modell, z. B. openai:gpt-5.4')}</span>`; return; }
-  MODEL_CHANGES[name] = { cloud: prov, provider_model: $('#nmPM').value.trim() || undefined, price_chf_per_m: { input: +$('#nmIn').value || 0, output: +$('#nmOut').value || 0 },
+  MODEL_CHANGES[name] = { cloud: prov, provider_model: $('#nmPM').value.trim() || undefined, price_per_m: { input: +$('#nmIn').value || 0, output: +$('#nmOut').value || 0 },
     context_tokens: +$('#nmCtx').value || undefined, reasoning: $('#nmReason').checked, capabilities: { tools: true, vision: true, structured: prov !== 'anthropic', thinking: false } };
   CFG.models[name] = { ...MODEL_CHANGES[name] }; dirty = true; renderModels(); renderRoles();
   $('#kmsg').innerHTML = `<span class="warn">${t('{n} vorgemerkt – Speichern nicht vergessen', { n: esc(name) })}</span>`; markDirty();
