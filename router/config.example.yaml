@@ -128,6 +128,14 @@ router:
       endpoint: http://127.0.0.1:8082   # fail closed; erlaubt -> Werkzeugergebnisse geschwaerzt, sonst lokal + refusal als Antwort
       terms: []                  #   eigene Begriffe (Namen der Familie, Orte), ganze Woerter
       # redact_domains / redact_device_classes / redact_names / redact_tools / threshold / refusal: Vorgaben in privacy.py
+      # Since router 0.42.0 (ADR-0119, ADR-0125); the values below are the defaults and behave exactly as before:
+      locale: ch-de              #   patterns, keyword groups, refusal and marker: ch-de (Swiss/German) or en (neutral English)
+      redactors: [ha_assist]     #   tool formats redacted, in order: ha_assist (Home Assistant live context), generic_json
+      unrecognised_tool_results: pass   # keep_local = a tool result no redactor recognises keeps the request local
+      # generic_json:            #   with 'generic_json' in redactors: tool name (or "*") -> dotted paths to remove,
+      #   tools: {calendar_events: ["events.*.attendees", owner], status: []}   # [] = recognised, nothing removed
+      #   keys: [email, phone]   #   keys removed at any depth in those results; a listed tool whose result is not JSON
+      #                          #   keeps the request local
     # Use final HTTPS endpoints. HTTP requires an explicitly allowed literal loopback address.
     # Weitere Hosts fuer OpenAI-kompatible Anbieter (Vorgabe: api.openai.com, api.anthropic.com, generativelanguage.googleapis.com)
     egress_allow: [api.eu.mistral.ai, llm.example.org]

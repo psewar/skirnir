@@ -315,6 +315,7 @@ Schranken (`router.cloud`):
   `refusal` als Antwort. Bevor eine erlaubte Anfrage hinausgeht, werden Werkzeugergebnisse geschwärzt: Einträge des
   Home-Assistant-Live-Kontexts aus `redact_domains` (person, device_tracker, todo, lock, camera, …),
   `redact_device_classes` (motion, presence, door, window, …) und `redact_names`, und das ganze Ergebnis der `redact_tools`.
+  Muster und Texte für andere Länder und andere Werkzeugformate: [unten](#inhaltsprüfung-länderpakete-und-schwärzer).
   Das Journal hält `privacy_check` mit Ergebnis, Regel oder Wahrscheinlichkeit und Anzahl geschwärzter Einträge fest, nie
   den Text. Eine deklarierte `routing.data_class` wird nie übergangen.
 - **Credential-Scan** (`block`): Prompts mit erkennbaren Schlüsseln (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
@@ -387,6 +388,43 @@ models:
 - **Feld- und Metriknamen** behalten die Endung `_chf` (`spend_month_chf`, `budget_month_chf`, `cost_chf`,
   `skirnir_cloud_*_chf*`), damit Dashboards, Alarme und Home-Assistant-Entitäten weiterlaufen; ihre Werte stehen in der
   eingestellten Währung. Der Home-Assistant-Kostensensor hat weiterhin die Einheit `CHF`.
+
+### Inhaltsprüfung: Länderpakete und Schwärzer
+
+Router 0.42.0 ([ADR-0119](adr/0119-privacy-redaction-per-tool-format-and-locale-pack.md), [ADR-0125](adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md)).
+Ohne die neuen Schlüssel verhält sich die Inhaltsprüfung genau wie bisher (Schweizer und deutsche Muster,
+Home-Assistant-Schwärzung, unerkannte Werkzeugergebnisse gehen durch). Alle stehen nur in `config.yaml`; die Web-UI kann
+sie nicht ändern.
+
+| Schlüssel unter `router.cloud.privacy_check` | Vorgabe | Bedeutung |
+|---|---|---|
+| `locale` | `ch-de` | Länderpaket: die Muster und Stichwortgruppen, die die Regeln prüfen, der vorgegebene `refusal` und die Markierung, die ein ganzes Werkzeugergebnis ersetzt. `ch-de`: E-Mail, Schweizer Telefonnummern, IBAN, AHV-Nummer, Straßenadressen mit deutschen Endungen, deutsche und englische Wortanfänge, deutsche Ablehnung. `en`: E-Mail, Telefonnummern (international mit `+`/`00`, nordamerikanisch, national mit führender 0), IBAN, englische Wortanfänge, englische Ablehnung; keine nationale Kennnummer und keine Straßenadresse. Eigene `terms` und `refusal` gelten bei beiden zusätzlich. |
+| `redactors` | `[ha_assist]` | Geschwärzte Werkzeugformate, in dieser Reihenfolge. `ha_assist`: Live-Kontext von Home Assistant (Einträge aus `redact_domains`, `redact_device_classes`, `redact_names`). `generic_json`: eingestellte Pfade und Schlüssel von JSON-Werkzeugergebnissen (unten). Mindestens einer; `redact_tools` gilt unabhängig von der Liste. |
+| `generic_json` | – | Nötig mit dem Schwärzer `generic_json`, ohne ihn abgelehnt. `tools` ordnet einem Werkzeugnamen, oder `*` für jedes JSON-Ergebnis, Pfade mit Punkten zu, die entfernt werden (`events.*.attendees`: `*` steht für jeden Schlüssel eines Objekts oder jedes Element einer Liste); eine leere Liste kennzeichnet ein Werkzeug als erkannt, ohne etwas zu entfernen. `keys` entfernt Schlüssel dieser Namen in jeder Tiefe dieser Ergebnisse. Ist das Ergebnis eines in `tools` genannten Werkzeugs kein JSON, bleibt die Anfrage lokal. |
+| `unrecognised_tool_results` | `pass` | `keep_local`: Ein Werkzeugergebnis, das kein Schwärzer erkennt, hält die Anfrage lokal. Erkannt werden das JSON von Home Assistant mit einem `result`-Text, Text mit Live-Kontext-Einträgen, ein Werkzeug aus `redact_tools` und ein JSON-Ergebnis eines Werkzeugs aus `generic_json.tools`. Bei Home Assistant sind Intent-Ergebnisse wie `HassTurnOn` kein Live-Kontext; solche Werkzeuge mit `[]` unter `generic_json.tools` eintragen, wenn sie durchgehen dürfen. |
+
+```yaml
+router:
+  cloud:
+    privacy_check:
+      enabled: true
+      locale: en
+      redactors: [ha_assist, generic_json]
+      generic_json:
+        tools: {calendar_events: ["events.*.attendees", owner], HassTurnOn: []}
+        keys: [email, phone]
+      unrecognised_tool_results: keep_local
+```
+
+Eine Anfrage, die die Schwärzung lokal hält, bekommt die Ablehnung wie jede andere; das Journal hält `result: unredacted`
+mit `by: redaction:generic_json` oder `redaction:unrecognised` fest. JSON, das tiefer als 512 Ebenen verschachtelt ist
+(100 bei `generic_json`), wird nicht geprüft und hält die Anfrage ebenfalls lokal.
+`/admin/state` zeigt Länderpaket, Schwärzer, Modus
+und für `generic_json` nur die Anzahl Werkzeuge und Schlüssel. Mit `unrecognised_tool_results: pass` (Vorgabe) gehen
+Werkzeugergebnisse in Formaten, die kein Schwärzer kennt, unverändert hinaus: Die Inhaltsprüfung schützt, was der Nutzer
+geschrieben hat, und den Hauskontext in bekannten Formaten. Schwärzer für openHAB oder ioBroker gibt es noch nicht; sie
+kommen zusammen mit Testdaten ihrer echten Formate. Länderpakete kommen nur zusammen mit Testsätzen für ihre Muster. Der
+Datenschutz-Klassifikator ist auf deutschen und englischen Sätzen trainiert; ein anderes Länderpaket ändert daran nichts.
 
 ### Institutionelle Anbieter
 

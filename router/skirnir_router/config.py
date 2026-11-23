@@ -101,7 +101,8 @@ SCHEMA = {
                                           "max_concurrent": None, "max_body_mib": None,
                                           "cloud": None, "data_class": None, "privacy_check": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
-                  "egress_allow": None, "privacy_check": dict.fromkeys(PRIVACY_FIELDS),
+                  # since 0.42.0: locale, redactors, generic_json (tool names are free), unrecognised_tool_results
+                  "egress_allow": None, "privacy_check": {**dict.fromkeys(PRIVACY_FIELDS), "generic_json": {"tools": None, "keys": None}},
                   "currency": None,   # since 0.37.0 (ADR-0105): unit of prices and budgets, display only
                   # ADR-0105: budget_month; budget_month_chf is its old name (alias, cost_keys.py)
                   "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None,
