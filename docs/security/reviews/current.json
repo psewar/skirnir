@@ -2,90 +2,92 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "d1e72850dd397c991b19726ef2c3bfb779079717",
- "change_digest": "7e834bf83b172b9513a9a595911764a1347d563b80b20a395d2ff14848d75337",
+ "base_sha": "d274dc52e11efaa940d4baaa74c5af20d9e779a9",
+ "change_digest": "090c359c3ca1bff7944dc3e7c9b900145f7b9d691dcc5e27df150b2fa2f818b9",
  "reviewed_paths": [
-  "design/portability.md",
-  "docs/adr/0109-status-sinks-instead-of-a-fixed-home-assistant-publisher.md",
-  "docs/adr/0110-a-backend-protocol-for-ollama-nodes-openai-compatible-servers-and-cloud-providers.md",
-  "docs/adr/0111-the-agent-talks-to-its-inference-server-through-a-runtime-interface.md",
-  "docs/adr/0112-the-agent-probes-gpus-through-an-interface-and-reports-a-list-of-devices.md",
-  "docs/adr/0113-busy-detection-is-a-set-of-signal-sources-that-can-be-switched-off.md",
-  "docs/adr/0114-the-session-store-is-chosen-by-its-connection-url.md",
-  "docs/adr/0115-long-term-memory-goes-through-a-memory-backend-interface.md",
-  "docs/adr/0116-an-official-container-image-for-the-router.md",
-  "docs/adr/0117-waking-nodes-and-fetching-ollama-releases-go-through-replaceable-sources.md",
-  "docs/adr/0118-adapters-live-in-the-repository-and-are-chosen-by-configuration.md",
-  "docs/adr/0119-privacy-redaction-per-tool-format-and-locale-pack.md",
+  ".github/workflows/ci.yml",
+  "CHANGELOG.md",
+  "docs/adr/0120-response-shapes-share-a-base-class-with-default-methods.md",
   "docs/adr/README.md",
-  "docs/security/reviews/current.json",
-  "docs/adr/0101-problems-are-structured-records-exported-as-metrics.md",
-  "docs/adr/0102-the-agent-starts-without-a-gpu.md",
-  "docs/adr/0103-game-detection-is-a-module-that-can-be-switched-off.md",
-  "docs/adr/0104-the-secrets-renderer-checks-its-source-and-renders-every-key-on-its-own.md",
-  "docs/adr/0105-currency-neutral-cost-keys.md",
-  "docs/adr/0106-language-dependent-defaults-live-in-the-configuration.md",
-  "docs/adr/0107-versioned-router-agent-protocol-with-a-written-specification.md",
-  "docs/adr/0108-one-pure-node-assessment-for-selection-and-explanation.md"
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "router/skirnir_router/anthropic_api.py",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/openai_api.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/shape.py",
+  "test/selftest_cloud_final_payload.py",
+  "test/selftest_institutional_provider.py",
+  "test/selftest_privacy_check.py",
+  "test/selftest_shape.py",
+  "docs/security/reviews/current.json"
  ],
  "risk_ids": [
+  "TM-04",
   "TM-05",
-  "TM-07",
-  "TM-08",
+  "TM-06",
   "TM-09",
-  "TM-11",
-  "TM-12",
-  "TM-13",
-  "TM-14",
   "TM-15",
   "TM-16"
  ],
  "boundaries": [
-  "B3",
+  "B1",
   "B4",
-  "B5",
   "B6",
-  "B7",
-  "B8",
   "B9"
  ],
- "summary": "Documentation only, re-reviewed after merging origin/main (d1e7285, with ADR-0101..0108 and the code of PRs 176, 178, 180-184). Changes against main: design/portability.md (portability roadmap; phase 0 and phase 1.2/1.3 now marked done with links to ADR-0101..0108, phase 1.4 marked in review as PR 179 / ADR-0120, the 'Why' section states what phase 0 already fixed), eleven ADRs with status proposed (0109-0119) and the regenerated ADR index (119 ADRs, consecutive). No code, configuration, version, workflow, checker or review-policy change; nothing proposed here is built. All file and line references in ADR-0109..0119 were re-checked on the new main and corrected where the merged PRs moved them (ha.py, app.py, agent/config.go, proxy.py, agent app/facts/ollamawatch/heartbeat/gpu/guard, poll.py, nodes.py, scheduler.py, config.py, install.sh, config.example.yaml, ollamaupdate.py); contexts that the merged PRs changed were rewritten to the new facts without changing the decisions: ADR-0109 (problems are now structured records pullable from /metrics, GET /admin/problems and the UI per ADR-0101; pushing still only through Home Assistant), ADR-0112 (gpu.probe and gpu_present per ADR-0102; still one NVIDIA GPU or none), ADR-0113 (game switch per ADR-0103 and no GPU busy detection without a GPU per ADR-0102; a server with a GPU still cannot switch off foreign VRAM, utilisation or guard), ADR-0111/0112 (the passthrough allowlist, facts and heartbeat are now part of the protocol specification of ADR-0107 and its conformance tests, which each runtime or the gpus[] list must update). Security content of the proposals is unchanged from the earlier review: ADR-0118 forbids loading code named by configuration (TM-16); ADR-0109 bounds webhook egress (B9, TM-08) and proposes per-node MQTT logins; ADR-0110 keeps the cloud checks before the backend (B6/B7, TM-05); ADR-0111 keeps a per-runtime allowlist in the signed binary with a TM-11 review per runtime; ADR-0112 loads vendor libraries only from the system path and fails closed (B8, TM-14); ADR-0114/0115 keep owner isolation, deletion replay and memory safeguards (B4/B5, TM-09, TM-12); ADR-0116 keeps pinning, hash locks, non-root and provenance (TM-14, TM-16); ADR-0117 keeps router-chooses-version-only (B8, TM-13); ADR-0119 fails closed on unknown tool formats (B6, TM-05). The texts name no host, address, person or deployment path.",
- "findings": [
-  {
-   "id": "TM-07",
-   "disposition": "baseline",
-   "severity": "low",
-   "boundary": "B3/B9 (also touches TM-15)",
-   "evidence": "Pre-existing, re-checked on d1e7285: router/skirnir_router/registry.py provision_bundle (lines 142-154) still puts the router's own MQTT username and password (read_mqtt_password, line 135) into the provisioning bundle of every approved node with MQTT enabled. Attacker prerequisite: control of an approved node. Impact: publish or subscribe on the broker with the router's identity, e.g. forge router state topics read by home automation. Controls today: operator approval of nodes (ADR-0009), the per-node policy switch policy.mqtt, broker-side ACLs if the operator configures them. Confidence high.",
-   "resolution": "Not introduced by this change (documentation only, no code touched). ADR-0109 proposes a per-node MQTT login or none in the bundle, with a negative test that the bundle carries the router's password only when no per-node login is configured; the fix belongs to the PR that implements ADR-0109."
-  }
- ],
+ "summary": "Refreshed after merging main (merge-base d274dc5: PRs 176-184 and 177 with ADR-0101..0119). The diff against the new merge-base is the same refactoring as before; proxy.py merged without conflicts, and the changes from main (structured problems ADR-0101, cost keys ADR-0105, node assessment ADR-0108 in _Acquire) are kept unchanged - the diff of proxy.py against main contains only the shape changes and _close_stream, and no hasattr/getattr/`shape is None` on the shape came back. Conflicts were only in CHANGELOG (row v0.42.2 on top, agent 0.36.0), VERSION (0.37.2), ci.yml (both new self-tests kept), ADR index (regenerated, 0001-0120 consecutive) and this record. The outcome invariants _close_stream relies on (no path sets an outcome before the end of a cloud/OpenAI-node stream) still hold on the merged code. ADR-0120 now links ADR-0110. Refactoring of the response relay (router 0.37.2, ADR-0120 proposed), no intended behaviour change. A Shape base class (new module shape.py) with default methods and two stated facts (verbatim, reports_abort_in_stream) replaces hasattr/getattr/`shape is None` checks in proxy._Relay; the native Ollama format becomes OllamaShape; the OpenAI and Anthropic shapes inherit from it; the end of a relayed stream is one helper (_close_stream) for Ollama nodes, cloud providers and OpenAI-compatible nodes. Traced: client authentication, concrete-model rights and routing-block checks run in middleware and _prepare before route_request and are untouched (B1, TM-04). The live memory-policy recheck at the start of _Relay.run still refuses with 403 in every client format before any node or provider is contacted (B4, TM-09). Managed turns still commit before the held success chunk is written on all three streaming paths; the helper keeps the order commit -> terminal chunk -> tail -> EOF and returns the problem response on a failed commit, as both previous blocks did (TM-09). The unary paths keep their own managed handling; the cloud and OpenAI-node unary completions were deliberately not merged because a managed turn on a cloud node cannot be ruled out from the relay alone. The cloud content check, redaction and final payload in _via_cloud and cloud.run are unchanged; no new route, destination or data flow to a provider (B6, TM-05, TM-06). Error handling: a node's 4xx still reaches native clients raw and other clients as the extracted message in their format; Ollama's mid-stream error line, unparsable lines and unparsable unary bodies reach native clients verbatim and are dropped or converted for other formats exactly as before; context-sensitive log redaction and the journal entries are unchanged, and no log line was added (B9, TM-15). The workflow change only adds the new self-test step (TM-16). A normalised byte comparison of 40 path/answer combinations (native chat and generate, OpenAI chat and completions, Anthropic messages; stream, unary, unparsable, node 4xx) between the base and this change was identical; the new self-test's wire assertions also pass against the base code.",
+ "findings": [],
  "tests": [
-  {
-   "command": "python tools/security/review.py snapshot --base origin/main --head INDEX",
-   "result": "passed",
-   "evidence": "base d1e7285, security_relevant false; 13 changed paths (design/portability.md, ADR-0109..0119, docs/adr/README.md)."
-  },
   {
    "command": "python test/check_adr_index.py",
    "result": "passed",
-   "evidence": "ADR index ok: 119 ADRs."
+   "evidence": "ADR index ok: 120 ADRs."
   },
   {
-   "command": "python test/check_public_changes.py --base <merge-base>",
+   "command": "python test/selftest_shape.py",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s); manual review of the added lines found no host, address, person or ops path."
+   "evidence": "13 tests OK on the merged branch; the 8 wire tests also pass against the new origin/main router code, and a normalised byte comparison of 40 path/answer combinations against the new main was identical."
+  },
+  {
+   "command": "python test/selftest_privacy_check.py && python test/selftest_institutional_provider.py && python test/selftest_cloud_final_payload.py",
+   "result": "passed",
+   "evidence": "cloud content check, institutional provider wiring and final cloud payload unchanged (hand-built relays now carry OllamaShape)."
+  },
+  {
+   "command": "python test/selftest_context.py && python test/selftest_memory.py && python test/selftest_interoperability.py && python test/selftest_anthropic_messages.py && python test/selftest_openai_node.py",
+   "result": "passed",
+   "evidence": "managed turns persist before success on native, OpenAI and Anthropic, unary and stream; memory policy and OpenAI-node paths unchanged."
+  },
+  {
+   "command": "wsl: all run steps of ci.yml jobs python + sessions-postgres (local PostgreSQL 16)",
+   "result": "passed",
+   "evidence": "After the merge: 83 steps ok including PostgreSQL integrations, selftest_shape and selftest_locale_neutral; the 5 environment-only failures in WSL (git on the Windows worktree, packaging, pwsh) pass on Windows: pinned references 0 failures, pydeps + lock check 0 problems, sbom all passed, both .ps1 self-tests all passed."
+  },
+  {
+   "command": "python test/run_tests.py (end-to-end suite via the lock wrapper)",
+   "result": "passed",
+   "evidence": "After the merge: 0 failures, STATE: passed."
+  },
+  {
+   "command": "ruff check . && python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "All checks passed; control flow ok, 0 findings."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
    "result": "passed",
    "evidence": "run after staging this record."
+  },
+  {
+   "command": "python test/check_public_changes.py",
+   "result": "passed",
+   "evidence": "Public-change scan: 0 finding(s)."
   }
  ],
  "limitations": [
-  "Documentation only; the proposals are reviewed as designs, not as code. Each implementing PR needs its own review against the then-current code.",
-  "Line references in ADR-0109..0119 are for origin/main at d1e7285; the open shape-protocol PR (179) touches proxy.py and may move the proxy.py lines cited in ADR-0110.",
-  "The pre-existing shared MQTT credential is recorded here but not added to the risk register; that is the maintainer's call.",
-  "ADR-0101..0108 listed in reviewed_paths were read for the facts they establish (to rewrite the contexts and the design document), not re-reviewed; they were reviewed in their own PRs."
+  "Review by the authoring agent, not an independent reviewer.",
+  "The byte comparison covers native, OpenAI and Anthropic client formats against a synthetic Ollama upstream; cloud-provider and OpenAI-compatible-node streams are covered by the existing self-tests and the end-to-end suite, not by a byte-for-byte comparison.",
+  "Pre-existing, unchanged and not security-relevant: a native client whose stream breaks off after the first byte gets the connection ended with HTTP 502 instead of an NDJSON error line; now stated as the fact reports_abort_in_stream = False."
  ]
 }
