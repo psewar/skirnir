@@ -17,7 +17,7 @@ decision-makers: maintainer (proposed by Claude)
 ## Context and Problem Statement
 
 The router is installed only on Debian or Ubuntu with systemd: `router/install.sh` refuses other distributions (around
-lines 52-55), uses fixed paths (`/opt/skirnir-router`, `/etc/skirnir-router`, lines 17-18; `/var/lib/skirnir-router`
+lines 64-66), uses fixed paths (`/opt/skirnir-router`, `/etc/skirnir-router`, lines 19-20; `/var/lib/skirnir-router`
 and `/var/log/skirnir-router` in `router/router-layout.sh`) and relies on systemd units for hardening, the secret
 renderer and certificate renewal. The repository ships Dockerfiles only for the optional decision services
 (`decision-embed/Dockerfile`, `decision-jevlike/Dockerfile`) and a compose file for the monitoring stack

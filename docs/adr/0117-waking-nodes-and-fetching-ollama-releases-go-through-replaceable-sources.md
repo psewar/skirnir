@@ -16,14 +16,14 @@ decision-makers: maintainer (proposed by Claude)
 
 **Waking.** The router wakes an offline node only by Wake-on-LAN: `send_magic_packet` in
 `router/skirnir_router/wol.py` (lines 11-18) sends a UDP broadcast to port 9 on each address in
-`wol.broadcast_addresses` (`router/skirnir_router/config.py`, line 514), and `wake` (from line 21) sends it, polls the
-node and retries; the proxy calls it before a request to an offline node (`router/skirnir_router/proxy.py`, line 323).
+`wol.broadcast_addresses` (`router/skirnir_router/config.py`, line 558), and `wake` (from line 21) sends it, polls the
+node and retries; the proxy calls it before a request to an offline node (`router/skirnir_router/proxy.py`, line 325).
 Machines that are switched by a smart plug, a Home Assistant or ioBroker script, IPMI or a cloud API, or that sit in
 another broadcast domain, cannot be woken.
 
 **Ollama releases.** The router's version check is GitHub-shaped: `release_url` defaults to the GitHub API's latest
-release of `ollama/ollama` (`router/config.example.yaml`, line 321), and `_fetch_release` in
-`router/skirnir_router/ollamaupdate.py` (from line 98) reads `tag_name`, `assets` and `browser_download_url` and the
+release of `ollama/ollama` (`router/config.example.yaml`, line 327), and `_fetch_release` in
+`router/skirnir_router/ollamaupdate.py` (from line 99) reads `tag_name`, `assets` and `browser_download_url` and the
 release's `sha256sum.txt`, with asset names fixed per platform (`ASSETS`, lines 31-32). The agent downloads the archive
 itself from its own source, `ollama_update.source` with the default GitHub download prefix and the layout
 `<source>v<version>/<file>` plus `sha256sum.txt` (`agent/ollamaupdate.go`, lines 36 and 42), and compares the hash with

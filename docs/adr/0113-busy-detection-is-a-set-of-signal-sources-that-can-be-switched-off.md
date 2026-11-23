@@ -9,29 +9,31 @@ decision-makers: maintainer (proposed by Claude)
 > Part of the portability roadmap, phase 2 ([design/portability.md](../../design/portability.md)). Refines
 > [ADR-0004](0004-busy-detection-is-a-first-class-scheduler-input.md) (busy detection is a first-class scheduler input);
 > keeps [ADR-0019](0019-gpu-guard-power-limit-on-by-default.md) (GPU guard) and
-> [ADR-0022](0022-components-report-state-as-facts.md) (facts). Follows the phase 0 switch for game detection (its own
-> PR) and the pure node assessment of phase 1 (ADR-0108, its own PR). Adapter rule:
+> [ADR-0022](0022-components-report-state-as-facts.md) (facts). Follows
+> [ADR-0103](0103-game-detection-is-a-module-that-can-be-switched-off.md) (game detection can be switched off) and
+> [ADR-0108](0108-one-pure-node-assessment-for-selection-and-explanation.md) (one pure node assessment). Adapter rule:
 > [ADR-0118](0118-adapters-live-in-the-repository-and-are-chosen-by-configuration.md).
 
 ## Context and Problem Statement
 
 Skirnir was built for GPU nodes that are also gaming PCs. Whether a node is busy is decided in `evaluate`
-(`router/skirnir_router/poll.py`, from line 177) from several signals at once: GPU utilisation held above a threshold
+(`router/skirnir_router/poll.py`, from line 182) from several signals at once: GPU utilisation held above a threshold
 together with foreign VRAM (`util_hot`, `hot_long`), foreign VRAM above a threshold for a while (`foreign`), a running
 game that needs the GPU (`game_since`, `game_heavy`), and, as separate brakes, memory pressure (`Node.mem_pressure`,
-`router/skirnir_router/nodes.py`, line 203) and the GPU guard state used by the scheduler
-(`router/skirnir_router/scheduler.py`, around line 94). The thresholds are configurable (`modes.busy_enter`,
-`router/skirnir_router/config.py`, from line 517), but the signals themselves are not.
+`router/skirnir_router/nodes.py`, line 220) and the GPU guard state used by the scheduler
+(`router/skirnir_router/scheduler.py`, around line 79). The thresholds are configurable (`modes.busy_enter`,
+`router/skirnir_router/config.py`, from line 561), but the signals themselves are not.
 
 `evaluate` decides and acts in the same function: on a transition it starts `unload_big_models` and `prewarm` itself
-(`poll.py`, around lines 230-257), and it also catches up a prewarm after a game. That mixes policy with effects and makes
-the state machine hard to test without its side effects. It is also the most tuned code in the router: each threshold and
+(`poll.py`, around lines 243-262), and it also catches up a prewarm after a game. That mixes policy with effects and makes
+the state machine hard to test without its side effects. ADR-0108 made the per-request assessment (`scheduler.assess`)
+pure; the busy state machine that feeds it is not. It is also the most tuned code in the router: each threshold and
 hold time has a measured incident behind it (see the comments in `evaluate` and ADR-0095 to ADR-0097).
 
-On the agent, game detection always runs (`newGameWatch` in `agent/app.go`, line 63); on Linux it reports
-`supported: false` (`agent/game_other.go`). A dedicated inference server has no games and no desktop user whose foreign
-VRAM should push the router away, yet it cannot switch these signals off; foreign VRAM from another service on a server is
-a different case from a game on a desktop.
+Two signals can already be left out: game detection has a switch since ADR-0103 (`game.enabled`, `newGameWatch` in
+`agent/app.go`, line 65), and a node without a GPU has no GPU busy detection since ADR-0102. A dedicated inference server
+*with* a GPU, however, cannot switch off foreign VRAM, GPU utilisation or the guard as busy signals; foreign VRAM from
+another service on a server is a different case from a game on a desktop.
 
 ## Decision Drivers
 
@@ -57,8 +59,8 @@ sense for it and makes the state machine testable, without retuning anything.
   `PrewarmDue(reason)`, `UnloadDue`) instead of spawning tasks; a dispatcher executes them with today's conditions
   (`unload_on_busy`, `quiet`, `prewarm_on_free`). Behaviour stays identical; the existing tests are the net.
 * Second step: the signal switches. A switched-off source neither makes the node busy nor blocks a prewarm.
-* The agent's game detection uses the phase 0 switch; the router treats a missing game report as "no signal", not as
-  "free".
+* The `game` source follows the agent's `game.enabled` (ADR-0103), which the router already treats as "no game known";
+  the router-side switch only adds the option to ignore reported games.
 
 ### Consequences
 

@@ -10,7 +10,7 @@ decision-makers: maintainer (proposed by Claude)
 > [ADR-0018](0018-api-front-doors-translated-to-ollama-chat.md) (Ollama JSON as the one internal format),
 > [ADR-0032](0032-openai-compatible-server-as-node-backend.md) (OpenAI-compatible server as node backend) and
 > [ADR-0014](0014-cloud-as-a-role-tier-with-declared-data-classes.md) (cloud as a role tier). Depends on the pure
-> node assessment of phase 1 (ADR-0108, its own PR). Adapter rule:
+> node assessment of phase 1 ([ADR-0108](0108-one-pure-node-assessment-for-selection-and-explanation.md)). Adapter rule:
 > [ADR-0118](0118-adapters-live-in-the-repository-and-are-chosen-by-configuration.md).
 
 ## Context and Problem Statement
@@ -18,14 +18,14 @@ decision-makers: maintainer (proposed by Claude)
 The router sends a request to one of three kinds of target, and the kind is decided by branches spread over several
 modules instead of by one interface:
 
-* `_Relay.run` in `router/skirnir_router/proxy.py` (lines 472-482) picks `_via_cloud()` when `is_cloud`, switches to the
+* `_Relay.run` in `router/skirnir_router/proxy.py` (lines 474-484) picks `_via_cloud()` when `is_cloud`, switches to the
   standby Ollama, then `_via_openai_node()` when `node.serves_openai(model)`, else `_via_node()`.
 * `CloudTarget` in `router/skirnir_router/cloud.py` (line 51) imitates a node: it sets `is_cloud = True` and
   `speaks_openai = False` (lines 54-55) and copies node attributes by hand so that scheduler and proxy code can treat it
-  like one; `proxy.py` line 388 asks `getattr(node, "is_cloud", False)`.
-* The branches on `is_cloud` / `speaks_openai` / `openai` appear in `nodes.py`, `proxy.py`, `poll.py`, `cloud.py` and
-  `openai_node.py`.
-* `_Relay` (`proxy.py`, from line 431 to the end of the class, about 570 lines) holds request state, streaming, retries
+  like one; `proxy.py` line 390 asks `getattr(node, "is_cloud", False)`.
+* The branches on `is_cloud` / `speaks_openai` / `serves_openai` appear in `proxy.py`, `poll.py`, `nodes.py`,
+  `cloud.py`, `openai_node.py`, `scheduler.py`, `ops.py` and `context_check.py`.
+* `_Relay` (`proxy.py`, from line 433 to the end of the class, about 570 lines) holds request state, streaming, retries
   and three separate completion paths for the three kinds.
 
 Every new kind of target (vLLM or llama-server spoken natively, llama-swap, a CPU-only node) means a branch at each of

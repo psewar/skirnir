@@ -8,28 +8,32 @@ decision-makers: maintainer (proposed by Claude)
 
 > Part of the portability roadmap, phase 1 ([design/portability.md](../../design/portability.md)). Builds on
 > [ADR-0013](0013-observability-without-opentelemetry.md) (observability without OpenTelemetry) and
-> [ADR-0022](0022-components-report-state-as-facts.md) (components report state as facts). Adapter rule:
+> [ADR-0022](0022-components-report-state-as-facts.md) (components report state as facts), and on
+> [ADR-0101](0101-problems-are-structured-records-exported-as-metrics.md) (problems are structured records exported as
+> metrics). Adapter rule:
 > [ADR-0118](0118-adapters-live-in-the-repository-and-are-chosen-by-configuration.md).
 
 ## Context and Problem Statement
 
-The router reports its state to the operator through one fixed publisher: `HAPublisher` in
-`router/skirnir_router/ha.py` (line 146), started in `router/skirnir_router/app.py` (around line 185) when `mqtt.host`
+The router pushes its state to the operator through one fixed publisher: `HAPublisher` in
+`router/skirnir_router/ha.py` (line 123), started in `router/skirnir_router/app.py` (around line 187) when `mqtt.host`
 is set. It publishes a snapshot (`ha_snapshot`, line 40) as Home Assistant MQTT discovery entities under the prefix
-`discovery_prefix` (default `homeassistant`, line 160) and the base topic `skirnir-router`. The queue between the core
+`discovery_prefix` (default `homeassistant`, line 137) and the base topic `skirnir-router`. The queue between the core
 and the publisher is named after it: `state.MQTT_DIRTY` and `state.MQTT_EVENTS` (`router/skirnir_router/state.py`,
 lines 18-20).
 
-The problem list in that snapshot (`ha.py`, lines 80-121: no node online, a role not servable, a lost heartbeat, a model
-spilled to RAM, GPU protection, failed agent or Ollama updates, cloud budget) reaches the operator only through this
-path. A separate PR from the same roadmap makes problems structured and exports them in `/metrics` (phase 0); it gives
-Prometheus users an alarm path, but people who use ioBroker, openHAB, Node-RED, ntfy, Gotify or Matrix still get
-nothing, and they see discovery entities they did not ask for when they read the raw topics.
+Since ADR-0101 the problems (no node online, a role not servable, a lost heartbeat, a model spilled to RAM, GPU
+protection, failed agent or Ollama updates, cloud budget) are structured records computed in
+`router/skirnir_router/problems.py`, independent of MQTT. They can be pulled from `/metrics` (`skirnir_problem`),
+`GET /admin/problems` and the web UI, and `ha_snapshot` takes their texts (`ha.py`, around line 95). Pushed to the
+operator, though, they are still only through the Home Assistant publisher: people who use ioBroker, openHAB, Node-RED,
+ntfy, Gotify or Matrix and run no Prometheus get no notification, and they see discovery entities they did not ask for
+when they read the raw topics.
 
 Agents publish their own MQTT device. The router hands each approved agent an MQTT login in the provisioning bundle:
 `provision_bundle` in `router/skirnir_router/registry.py` (lines 142-154) copies `mqtt.username` and the router's
 password (`read_mqtt_password`, line 135), so every node holds the router's broker credential. The agent's discovery
-prefix is fixed to `homeassistant` (`agent/config.go`, line 393) and the router does not pass its own
+prefix is fixed to `homeassistant` (`agent/config.go`, line 430) and the router does not pass its own
 `discovery_prefix` on.
 
 ## Decision Drivers
@@ -53,7 +57,8 @@ Chosen option: "A `StatusSink` interface with several implementations", because 
 today and gives everyone else a direct path without a second monitoring stack.
 
 * Interface: `start()`, `publish_state(snapshot)`, `publish_event(event)`, `sync_nodes(names)`, `stop()`. The snapshot
-  and the events carry structured problems (`code`, `node`, `severity`, text), not only display strings.
+  and the events carry the structured problem records of ADR-0101 (`code`, `severity`, `node`, `subject`, `params`,
+  `message`), not only display strings.
 * Implementations in the repository: `mqtt_ha` (today's publisher, discovery and raw topics), `mqtt_plain` (raw state
   and event topics without discovery, for ioBroker, openHAB, Node-RED), `webhook` (HTTP POST of events and problem
   changes, for ntfy, Gotify, Matrix bridges, n8n; target URL and secret from the configuration and environment, egress
@@ -78,7 +83,7 @@ today and gives everyone else a direct path without a second monitoring stack.
 ### Confirmation
 
 Self-tests per sink with a fake broker or HTTP receiver: the default configuration produces exactly today's topics and
-payloads (the existing tests that use `ha_snapshot` and `HAPublisher`, such as `test/selftest_english_names.py`,
+payloads (the existing tests that use `ha_snapshot` and `HAPublisher`, such as `test/selftest_problems.py`, `test/selftest_english_names.py`,
 `test/selftest_power.py` and `test/selftest_slowness_signals.py`, stay green unchanged), several sinks receive the same problems, a failing
 webhook does not block the publish loop, and an unknown sink kind is refused at configuration load. A test checks that
 the provisioning bundle contains the router's password only when no per-node login is configured.

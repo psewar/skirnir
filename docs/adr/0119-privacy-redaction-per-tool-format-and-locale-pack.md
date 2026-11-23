@@ -14,7 +14,7 @@ decision-makers: maintainer (proposed by Claude)
 
 ## Context and Problem Statement
 
-The content check before a cloud tier (`router/skirnir_router/privacy.py`, called from `proxy.py` around line 799) has
+The content check before a cloud tier (`router/skirnir_router/privacy.py`, called from `proxy.py` around line 801) has
 three parts: rules on what the user wrote, a classifier, and redaction of house context in tool results. Two of them are
 tied to one home automation system and one region:
 
@@ -27,6 +27,8 @@ tied to one home automation system and one region:
   with German suffixes; phone numbers follow a Swiss shape; the keyword groups are German and English word starts
   (`KEYWORDS`, from line 38); the default refusal and the redaction marker are German (`DEFAULT_REFUSAL`, line 33;
   `REDACTED`, line 34). The refusal can already be configured (`refusal`, line 72), the patterns cannot.
+  [ADR-0106](0106-language-dependent-defaults-live-in-the-configuration.md) moved other language-dependent defaults
+  into the configuration; the privacy patterns and texts were not part of it.
 
 The check is fail-closed for the classifier, but redaction that does not recognise a format silently passes the content
 through. That is the opposite of what a user outside Home Assistant or outside Switzerland expects.
