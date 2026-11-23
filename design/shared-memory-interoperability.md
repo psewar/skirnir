@@ -253,7 +253,7 @@ part of these CI tests.
 
 ## Durable admission, recovery and deletion
 
-`outbox_enabled` requires both Hindsight and the existing PostgreSQL store. With
+`outbox_enabled` requires both Hindsight and the session store (PostgreSQL or, on a single host, SQLite; ADR-0114). With
 it disabled, the old bounded in-memory queue remains available and is not durable.
 With it enabled, `/v1/skirnir/memory/retain` commits the job before returning 202;
 a missing database returns 503. A 202 is not upstream extraction success. Automatic

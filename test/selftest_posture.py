@@ -3,9 +3,9 @@
 
 Builds synthetic configurations and checks each finding of posture.findings: observe mode, unlocked policy, shared
 tokens, address-only clients (info when limited to rerank), control port without users or open on loopback, API port
-without TLS, a static node over plain HTTP, and the session store's TLS mode read from the DSN in the environment
-(never printed). A configuration without any of these reports POSTURE: ok, and no output contains a token hash or the
-DSN. Also runs `router.py --posture` as a process. Synthetic values only."""
+without TLS, a static node over plain HTTP, the session store's TLS mode read from the DSN in the environment
+(never printed), an unsupported URL scheme, and for a SQLite URL the file's place and mode (ADR-0114). A configuration
+without any of these reports POSTURE: ok, and no output contains a token hash or the DSN. Also runs `router.py --posture` as a process. Synthetic values only."""
 import copy
 import hashlib
 import os
@@ -135,6 +135,36 @@ class PostureTests(unittest.TestCase):
         self.assertNotIn("session_store_unverified_tls", codes(cfg, local))
         text = "\n".join(posture.report(cfg, weak)[0])
         self.assertNotIn(DSN_SECRET, text, "the DSN is never printed")
+
+    def test_session_store_url_scheme_and_sqlite_file_facts(self):
+        # ADR-0114: an unsupported scheme is named (the router refuses to start), a SQLite file is reported with its place
+        # and mode, never with TLS findings, and a file others can read is a finding of its own.
+        raw = clean_raw()
+        raw["router"]["session_store"] = {"enabled": True}
+        cfg = load(raw)
+        env = cfg.session_store.dsn_env
+        unsupported = {env: "mysql://" + "skirnir:" + DSN_SECRET + "@192.0.2.60/skirnir"}
+        self.assertEqual(codes(cfg, unsupported).get("session_store_url_unsupported"), "medium")
+        self.assertNotIn(DSN_SECRET, "\n".join(posture.report(cfg, unsupported)[0]))
+        with tempfile.TemporaryDirectory() as folder:
+            cfg.state_dir = folder
+            sqlite = {env: "sqlite:///sessions.db"}
+            found = codes(cfg, sqlite)
+            self.assertEqual(found.get("session_store_sqlite_file"), "info")
+            self.assertNotIn("session_store_unverified_tls", found)
+            self.assertNotIn("session_store_url_unsupported", found)
+            path = os.path.join(folder, "sessions.db")
+            text = "\n".join(posture.report(cfg, sqlite)[0])
+            self.assertIn(path, text)
+            self.assertIn("not created yet", text)
+            with open(path, "w", encoding="utf-8"):
+                pass
+            if os.name == "posix":
+                os.chmod(path, 0o644)
+                self.assertEqual(codes(cfg, sqlite).get("session_store_file_readable"), "medium")
+                self.assertIn("mode 0644", "\n".join(posture.report(cfg, sqlite)[0]))
+                os.chmod(path, 0o600)
+                self.assertNotIn("session_store_file_readable", codes(cfg, sqlite))
 
     def test_no_token_hash_in_the_report(self):
         raw = clean_raw()

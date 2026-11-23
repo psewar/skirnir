@@ -96,7 +96,7 @@ def unservable_roles(now):
     from . import scheduler   # late: scheduler imports nodes, which pull in much of the router
     unservable, limited = [], []
     for _exposed, role in state.CFG.roles.items():
-        if scheduler.choose(role, role["tiers"], None, now, mutate=False):
+        if scheduler.choose(role, role["tiers"], None, now):   # view: no probe_breakers (ADR-0108)
             continue
         (limited if scheduler.role_possible_when_free(role) else unservable).append(role["name"])
     return unservable, limited

@@ -1,0 +1,84 @@
+# Skirnir router as a container (ADR-0116). Copy this file into a folder of your own (it holds your configuration and
+# secrets, so keep it outside the source clone) and follow docs/install-router.md#container:
+#
+#   docker build -t skirnir-router <clone>/router        build the image from a release or clone (no registry image yet)
+#   mkdir config && docker run ... --init ...            first configuration, see the documentation
+#   touch secrets.env && docker compose up -d            start; podman compose works the same way
+#
+# Your folder:   config/       -> /etc/skirnir-router, read-only: config.yaml and certs/ (fullchain.pem, privkey.pem)
+#                secrets.env   environment for the `*_env` keys in config.yaml (KEY=value lines; may be empty)
+# Volumes:       state -> /var/lib/skirnir-router (router.state_dir), logs -> /var/log/skirnir-router (audit log)
+# The router's own log goes to stdout: docker compose logs -f router
+#
+# Optional services stay off unless their profile is named: `docker compose --profile sessions up -d` adds PostgreSQL for
+# router.session_store, `--profile decision` the embedding decision service (build it from decision-embed/ first).
+name: skirnir
+
+services:
+  router:
+    image: skirnir-router          # the image built above; never pulled from a registry
+    pull_policy: never
+    restart: unless-stopped
+    # The same limits as skirnir-router.service where a container has them (ADR-0086): no root, no capabilities, no
+    # privilege gain, everything read-only except the two volumes and a small /tmp.
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    env_file: [secrets.env]
+    ports:
+      - "11434:11434"              # API port (clients)
+      - "11435:11435"              # control port (agents' tunnel, web UI); firewall it to GPU nodes and admin machines
+    volumes:
+      - ./config:/etc/skirnir-router:ro
+      - state:/var/lib/skirnir-router
+      - logs:/var/log/skirnir-router
+    healthcheck:                   # the image has the same one; podman's default image format drops it, so it is here too
+      test: ["CMD", "python", "/opt/skirnir-router/container/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # router.session_store (ADR-0076): config.yaml sets session_store.enabled: true, and secrets.env sets
+  # SKIRNIR_SESSION_DSN to a postgresql:// URL for user skirnir, host postgres, port 5432, database skirnir, with the
+  # password from postgres.env (POSTGRES_PASSWORD=..., its own file so this service never sees the router's secrets).
+  # The connection stays on this compose network; posture still reports session_store_unverified_tls until PostgreSQL
+  # gets TLS and the DSN sslmode=verify-full. On a single host, SKIRNIR_SESSION_DSN=sqlite:///sessions.db instead keeps
+  # the store as an owner-only file in the state volume, without this service (ADR-0114).
+  postgres:
+    profiles: [sessions]
+    image: postgres:19-trixie@sha256:bb6e70add742cd868fb62cb3b2f67d1dd2bdd2b65a521e778420748753687c60
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: skirnir
+      POSTGRES_DB: skirnir
+    env_file: [postgres.env]
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "skirnir", "-d", "skirnir"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Embedding decision service (decision-embed/, ADR-0116): build it with `docker build -t skirnir-embed <clone>/decision-embed`,
+  # put the model and head into ./models/e5-small (decision-embed/README.md) and set in config.yaml
+  #   decision_engine.embed.endpoint: http://embed:8082
+  embed:
+    profiles: [decision]
+    image: skirnir-embed
+    pull_policy: never
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ./models:/models:ro
+    mem_limit: 768m
+    memswap_limit: 768m
+
+volumes:
+  state:
+  logs:
+  postgres:

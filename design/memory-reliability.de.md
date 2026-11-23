@@ -57,8 +57,8 @@ verschwinden:
 
 | Speicher | Inhalt | Aufbewahrung | Löschen | Nach einem Restore |
 |---|---|---|---|---|
-| Sessions (PostgreSQL) | Nachrichten, Checkpoints, Verdichtungen, Handoff-Importe | `session_store.retention_days`, `archived_retention_days` (0 = bleibt) | Besitzer `DELETE /v1/skirnir/sessions/{id}` (Kaskade) | im Journal; der Router löscht sie beim Start erneut |
-| Memory-Outbox (PostgreSQL) | Retain-Inhalt bis zum Ende des Jobs | `hindsight.outbox_retention_days` entfernt Inhalte beendeter Jobs; die Zeile bleibt als Tombstone | `POST .../memory/operations/{id}/delete` (Grant `delete`); mit `session_store.delete_memory_with_session` auch jede Operation aus den Antworten der gelöschten Session | im Journal; beim Start erneut markiert, bevor etwas gesendet wird |
+| Sessions (Session-Store: PostgreSQL oder SQLite, ADR-0114) | Nachrichten, Checkpoints, Verdichtungen, Handoff-Importe | `session_store.retention_days`, `archived_retention_days` (0 = bleibt) | Besitzer `DELETE /v1/skirnir/sessions/{id}` (Kaskade) | im Journal; der Router löscht sie beim Start erneut |
+| Memory-Outbox (Session-Store) | Retain-Inhalt bis zum Ende des Jobs | `hindsight.outbox_retention_days` entfernt Inhalte beendeter Jobs; die Zeile bleibt als Tombstone | `POST .../memory/operations/{id}/delete` (Grant `delete`); mit `session_store.delete_memory_with_session` auch jede Operation aus den Antworten der gelöschten Session | im Journal; beim Start erneut markiert, bevor etwas gesendet wird |
 | Hindsight | Dokumente und abgeleitete Fakten (`document_id` = Operations-ID) | Hindsights eigene | aus der Outbox (`delete_document`), sobald die Extraktion beendet ist | `POST /admin/memory/reconcile-deletions` löscht das Dokument jeder gelöschten Operation erneut |
 | `deletions.jsonl` neben `config.yaml` | IDs abgeschlossener Löschungen (kein Inhalt) | bleibt | - | darf nicht älter als die Datenbank zurückgespielt werden |
 | `decisions.jsonl` (Entscheidungsaufzeichnung, opt-in) | anonymisierte Prompt-Auszüge | höchstens 64 MiB plus eine rotierte Datei | Aufzeichnung abschalten und Dateien entfernen | - |
@@ -73,7 +73,8 @@ Outbox, Operationsstatus und Abgleich erreichen das Gedächtnissystem nur über 
 ([ADR-0115](../docs/adr/0115-long-term-memory-goes-through-a-memory-backend-interface.md),
 [Backend-Schnittstelle](hindsight-memory.md#backend-interface)): `retain` unter der Operations-ID des Jobs, `operation`
 für die Prüfung (`OpState`) und `delete_document` über die Operations-ID. Ein Backend, das mit der Outbox angeboten wird,
-muss alle drei können, auch das Löschen über die Dokument-ID.
+muss alle drei können, auch das Löschen über die Dokument-ID. Das Auftragsbuch dahinter ist der `OutboxStore` des
+Session-Stores auf beiden Engines (PostgreSQL oder SQLite, ADR-0114); jedes Gedächtnis-Backend arbeitet also mit beiden.
 
 ## Datenbank und Überwachung
 
@@ -132,7 +133,7 @@ liefert einen Konflikt statt einer stillen Überschreibung.
 
 ## Echte Integrationstests
 
-Normale PR-CI verwendet synthetische HTTP-Dienste und PostgreSQL 16.
+Normale PR-CI verwendet synthetische HTTP-Dienste, PostgreSQL 16 und SQLite (die Outbox-Tests laufen auf beiden Engines).
 `test/integration_live_memory.py` läuft nur mit `SKIRNIR_RUN_LIVE_MEMORY_TEST=1`;
 ohne Opt-in werden echte Tests ausdrücklich als übersprungen ausgewiesen.
 Bei Opt-in mit fehlender Konfiguration scheitert der Test.

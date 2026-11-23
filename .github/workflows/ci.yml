@@ -42,6 +42,8 @@ jobs:
       - run: python test/selftest_process_view.py
       - run: python test/selftest_init.py
       - run: python test/selftest_install.py
+      - name: Router container image files (ADR-0116)
+        run: python test/selftest_container_image.py
       - run: pwsh -NoProfile -File test/selftest_ollama_loopback.ps1
       - run: pwsh -NoProfile -File test/selftest_ollama_protected.ps1
       - run: python test/selftest_privilege_paths.py
@@ -80,6 +82,8 @@ jobs:
       - run: python test/selftest_control_flow_admin.py
       - run: python test/selftest_control_flow_rest.py
       - run: python test/selftest_tunnel_cancel.py
+      - name: Router-agent protocol matches its specification (ADR-0107)
+        run: python test/selftest_protocol.py
       - run: python test/selftest_anthropic_messages.py
       - run: python test/selftest_keepalive.py
       - run: python test/selftest_max_parallel.py
@@ -104,10 +108,18 @@ jobs:
       - run: python test/selftest_system_append.py
       - run: python test/selftest_cloud_wait_for_load.py
       - run: python test/selftest_fallback_keeps_busy_model.py
+      - run: python test/selftest_node_assessment.py
       - run: python test/selftest_poll_yields_to_push.py
       - run: python test/selftest_cloud_reasoning.py
       - run: python test/selftest_privacy_check.py
+      - run: python test/selftest_locale_neutral.py
+      - run: python test/selftest_shape.py
       - run: python test/integration_live_memory.py
+      # Session store contract on SQLite (ADR-0114), no server needed; the PostgreSQL half runs in sessions-postgres.
+      - run: python test/integration_sessions.py
+      - run: python test/integration_context.py
+      - run: python test/integration_deletion_lifecycle.py
+      - run: python test/integration_interoperability.py
       - run: python test/benchmark_context.py
       - name: Check added lines for common public-data leaks
         if: github.event_name == 'pull_request'
@@ -143,6 +155,22 @@ jobs:
       - run: python test/integration_context.py
       - run: python test/integration_deletion_lifecycle.py
       - run: python test/integration_interoperability.py
+
+  container:
+    # ADR-0116: the router image builds from the pinned base and the container lock, passes --check, writes a first
+    # configuration with --init, starts unprivileged with a read-only configuration and answers its health probe.
+    # Nothing is pushed: publishing an image to a registry is the maintainer's release decision.
+    name: Router container image (build, check, start, health)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build, first configuration, start, health, hardening
+        run: bash test/smoke_container.sh --engine docker --image skirnir-router-ci
+      - name: Router self-tests on the image's Python and packages
+        run: bash test/smoke_container.sh --engine docker --image skirnir-router-ci --no-build --selftests
 
   go:
     name: Agent vet, test, Windows cross-build

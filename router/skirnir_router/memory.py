@@ -476,6 +476,8 @@ async def lifecycle(app):
             raise RuntimeError(backend.message)  # exception-ok: aborts startup
         service = MemoryService(cfg, key, backend)
         if cfg.outbox_enabled:
+            # The job ledger is the session store's OutboxStore (PostgreSQL or SQLite, ADR-0114); the memory system behind
+            # it is the MemoryBackend above. The outbox worker (memory_outbox.py) uses exactly these two interfaces.
             service.outbox = app.get(session_api.STORE_KEY)
             if service.outbox is None:
                 await service.backend.close()

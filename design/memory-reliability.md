@@ -21,8 +21,8 @@ Set `outbox_client_capacity` to a positive number smaller than `outbox_capacity`
 to bound each authenticated owner's active jobs across all projects. This limits
 one owner's occupancy; it is not a strict round-robin scheduler or a reservation
 for every possible client. Global admission still applies. Admission and retries
-share a PostgreSQL transaction/advisory lock, so concurrent submissions cannot
-exceed the limits. Duplicate submissions do not consume another slot.
+share a PostgreSQL transaction/advisory lock (on SQLite the one `BEGIN IMMEDIATE` writer, ADR-0122), so concurrent
+submissions cannot exceed the limits. Duplicate submissions do not consume another slot.
 
 `outbox_workers` accepts 1..16. HTTP concurrency remains bounded by `max_inflight`;
 each worker has a database lease and the existing upstream operation UUID. Shutdown
@@ -65,8 +65,8 @@ Decision: [ADR-0076](../docs/adr/0076-deletion-lifecycle-across-stores-and-resto
 
 | Store | Content | Retention | Deletion | After a restore |
 |---|---|---|---|---|
-| Sessions (PostgreSQL) | messages, checkpoints, compactions, handoff imports | `session_store.retention_days`, `archived_retention_days` (0 = kept) | owner `DELETE /v1/skirnir/sessions/{id}` (cascade) | journaled; the router deletes it again at start |
-| Memory outbox (PostgreSQL) | retain payload until the job ends | `hindsight.outbox_retention_days` drops payloads of finished jobs; the row stays as tombstone | `POST .../memory/operations/{id}/delete` (grant `delete`); with `session_store.delete_memory_with_session` also every operation retained from the deleted session's answers | journaled; marked again at start before anything is sent |
+| Sessions (session store: PostgreSQL or SQLite, ADR-0114) | messages, checkpoints, compactions, handoff imports | `session_store.retention_days`, `archived_retention_days` (0 = kept) | owner `DELETE /v1/skirnir/sessions/{id}` (cascade) | journaled; the router deletes it again at start |
+| Memory outbox (session store) | retain payload until the job ends | `hindsight.outbox_retention_days` drops payloads of finished jobs; the row stays as tombstone | `POST .../memory/operations/{id}/delete` (grant `delete`); with `session_store.delete_memory_with_session` also every operation retained from the deleted session's answers | journaled; marked again at start before anything is sent |
 | Hindsight | documents and derived facts (`document_id` = operation id) | Hindsight's own | from the outbox (`delete_document`) once the extraction ended | `POST /admin/memory/reconcile-deletions` deletes every deleted operation's document again |
 | `deletions.jsonl` next to `config.yaml` | ids of completed deletions (no content) | kept | - | must not be restored older than the database |
 | `decisions.jsonl` (decision capture, opt-in) | anonymised prompt excerpts | at most 64 MiB plus one rotated file | turn the capture off and remove the files | - |
@@ -81,7 +81,8 @@ The outbox, the operation status and the reconciliation reach the memory system 
 interface ([ADR-0115](../docs/adr/0115-long-term-memory-goes-through-a-memory-backend-interface.md),
 [backend interface](hindsight-memory.md#backend-interface)): `retain` under the job's operation id, `operation` for the
 verification (`OpState`) and `delete_document` by the operation id. A backend offered with the outbox must support all
-three, deletion by document id included.
+three, deletion by document id included. The job ledger behind them is the session store's `OutboxStore` on either
+engine (PostgreSQL or SQLite, ADR-0114), so any memory backend works with either store.
 
 ## Ledger growth and monitoring
 
@@ -142,7 +143,7 @@ extraction option is a conflict, not an implicit overwrite.
 
 ## Real-service smoke tests
 
-Regular CI uses synthetic HTTP servers and PostgreSQL 16. The live smoke file
+Regular CI uses synthetic HTTP servers, PostgreSQL 16 and SQLite (the outbox tests run on both engines). The live smoke file
 `test/integration_live_memory.py` is explicitly skipped unless
 `SKIRNIR_RUN_LIVE_MEMORY_TEST=1`. No successful real-service validation is claimed
 for those skips. An explicit opt-in with missing configuration fails.

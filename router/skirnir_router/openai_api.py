@@ -9,6 +9,7 @@ from aiohttp import web
 
 from . import anthropic_api, proxy, state
 from .common import openai_error, parse_tool_args, read_json
+from .shape import Shape
 
 
 def oa_id(prefix):
@@ -137,10 +138,11 @@ def oa_chat_to_native(b):
     return native
 
 
-class OpenAIChatShape:
-    """Formt Antworten von /api/chat als chat.completion bzw. SSE-Chunks."""
+class OpenAIChatShape(Shape):
+    """Formats /api/chat answers as chat.completion or SSE chunks."""
     name = "openai"
     stream_content_type = "text/event-stream"
+    reports_abort_in_stream = True   # error object as its own SSE event (stream_error)
 
     def __init__(self, include_usage=False):
         self.id = oa_id("chatcmpl")
@@ -241,7 +243,8 @@ class OpenAICompletionShape(OpenAIChatShape):
         return out
 
 
-class OpenAIEmbedShape:
+class OpenAIEmbedShape(Shape):
+    """Formats /api/embed answers as an embeddings list; never streamed."""
     name = "openai"
     stream_content_type = "application/json"
     error = staticmethod(openai_error)

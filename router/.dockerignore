@@ -1,0 +1,6 @@
+# Build context of router/Dockerfile: the Dockerfile copies named files only; keep caches and local data out anyway.
+**/__pycache__
+**/*.pyc
+config/
+secrets.env
+*.env

@@ -5,7 +5,8 @@ whether the extraction completed (accepted -> completed). An extraction the back
 e.g. because the local model was busy for hours - is resubmitted later under a new upstream operation id
 with the same document id, a bounded number of times. Functions return their result or a Problem
 (outcome.py); the worker records each outcome as a fixed state and diagnostic category on the row. The
-backend is reached only through memory_backend.MemoryBackend and its typed values (OpState).
+backend is reached only through memory_backend.MemoryBackend and its typed values (OpState); the job ledger only
+through session_store.OutboxStore, which every session store engine provides (PostgreSQL, SQLite; ADR-0114).
 """
 import asyncio
 import hashlib

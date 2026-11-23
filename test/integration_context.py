@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Real disposable PostgreSQL tests for leases, compactions and inference lifecycle."""
+"""Leases, compactions and inference lifecycle on every session store engine (ADR-0114): SQLite always, PostgreSQL
+against a disposable database (SKIRNIR_TEST_SESSION_DSN)."""
 import asyncio
 import copy
 import hashlib
-import os
 import unittest
 from dataclasses import replace
 from uuid import UUID, uuid4
@@ -13,16 +13,14 @@ from skirnir_router import session_api
 from skirnir_router.context_config import ContextConfig
 from skirnir_router.context_manager import compose, estimate, project
 from skirnir_router.session_config import SessionConfig
-from skirnir_router.session_store import PostgresSessionStore
 from skirnir_router.session_types import NOT_FOUND
+from store_engines import POSTGRES_ONLY, PostgresEngine, SqliteEngine, prepare
 
-DSN = os.environ.get("SKIRNIR_TEST_SESSION_DSN")
 
-
-@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
-class ManagedPostgresTests(unittest.IsolatedAsyncioTestCase):
+class ManagedContract:
     async def asyncSetUp(self):
-        self.store = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
+        prepare(self)
+        self.store = await self.engine.open(SessionConfig(enabled=True))
         self.owner = "test-" + uuid4().hex
         self.other = "test-" + uuid4().hex
         self.session = await self.store.create(self.owner, PROJECT, "personal", {}, mode="skirnir-managed")
@@ -31,7 +29,7 @@ class ManagedPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         try:
-            async with self.store.pool.acquire() as conn:
+            async with self.store.connection() as conn:
                 await conn.execute("DELETE FROM skirnir_sessions.sessions WHERE owner=ANY($1::text[])", [self.owner, self.other])
         finally:
             await self.store.close()
@@ -57,7 +55,7 @@ class ManagedPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_expired_worker_cannot_commit_or_renew_new_lease(self):
         turn = await self.claim()
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.turns SET lease_until=clock_timestamp()-interval '1 second' WHERE owner=$1 AND session_id=$2", self.owner, self.sid)
         replacement = await self.claim()
         for action in (self.store.renew(self.owner, self.sid, turn["lease"], 90),
@@ -96,7 +94,7 @@ class ManagedPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((first["version"], second["version"]), (1, 2))
         self.assertEqual(before, await self.store.read(self.owner, self.sid, "message", 0, 100))
         await self.store.close()
-        self.store = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
+        self.store = await self.engine.open(SessionConfig(enabled=True))
         self.assertEqual((await self.store.context(self.owner, self.sid, self.cfg))["compaction"], second)
         self.assertEqual(await self.store.compactions(self.owner, self.sid, 0, 1), [first])
         self.assertEqual(await self.store.compactions(self.owner, self.sid, 1, 10), [second])
@@ -123,7 +121,7 @@ class ManagedPostgresTests(unittest.IsolatedAsyncioTestCase):
         await self.store.delete(self.owner, self.sid)
         self.assertEqual(await self.store.finish_turn(self.owner, self.sid, turn["lease"], {"role": "assistant", "content": "late"}), NOT_FOUND)
         await self.store.fail_turn(self.owner, self.sid, turn["lease"])
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             for table in ("events", "turns", "compactions"):
                 self.assertEqual(await conn.fetchval(f"SELECT count(*) FROM skirnir_sessions.{table} WHERE owner=$1 AND session_id=$2", self.owner, self.sid), 0)
 
@@ -145,11 +143,20 @@ class ManagedPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["tool_name"], "example_tool")
 
 
-@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
-class ManagedInferencePostgresTests(ManagedHarness):
+@POSTGRES_ONLY
+class ManagedPostgresTests(ManagedContract, unittest.IsolatedAsyncioTestCase):
+    engine_class = PostgresEngine
+
+
+class ManagedSqliteTests(ManagedContract, unittest.IsolatedAsyncioTestCase):
+    engine_class = SqliteEngine
+
+
+class ManagedInferenceContract:
     async def asyncSetUp(self):
         # Open before the harness installs its mock startup adapter.
-        self.real = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
+        prepare(self)
+        self.real = await self.engine.open(SessionConfig(enabled=True))
         await super().asyncSetUp()
         self.session = await self.real.create("client-a", PROJECT, "personal", {}, mode="skirnir-managed")
         self.sid = UUID(self.session["id"])
@@ -229,8 +236,17 @@ class ManagedInferencePostgresTests(ManagedHarness):
                 await task
         self.assertIs(proxy._Relay.run, original)
         self.assertEqual(len(await self.real.read("client-a", self.sid, "message", 0, 100)), 1)
-        async with self.real.pool.acquire() as conn:
+        async with self.real.connection() as conn:
             self.assertEqual(await conn.fetchval("SELECT state FROM skirnir_sessions.turns WHERE owner=$1 AND session_id=$2", "client-a", self.sid), "failed")
+
+
+@POSTGRES_ONLY
+class ManagedInferencePostgresTests(ManagedInferenceContract, ManagedHarness):
+    engine_class = PostgresEngine
+
+
+class ManagedInferenceSqliteTests(ManagedInferenceContract, ManagedHarness):
+    engine_class = SqliteEngine
 
 
 if __name__ == "__main__":

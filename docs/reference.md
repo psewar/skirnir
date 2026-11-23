@@ -12,13 +12,27 @@
 | **11434 `/rerank`, `/info`** | Optional TEI-compatible reranking on a GPU node through the agent tunnel (off by default, client right `rerank`), see [rerank endpoint](#optional-rerank-endpoint). | Memory services |
 | **11434 `/v1/skirnir/…`** | Optional session and memory APIs, off by default ([below](#optional-persistent-session-api)). | Agent frameworks |
 | **11435** | Web UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/problems` (active problems as records, [operations.md](operations.md#problems)), `/admin/nodes` (`POST`/`DELETE /admin/nodes/{fp}/quiet`: quiet one node for a measurement, no unloading or prewarming until a given time, [ADR-0061](adr/0061-quiet-a-single-node-for-a-measurement.md)), `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2 hashes in the configuration, a verified pair is cached for 10 min). Every non-GET request to `/admin/*` also needs the header `X-Skirnir-UI: 1` (CSRF protection, [ADR-0042](adr/0042-admin-writes-require-a-custom-header.md); the web UI sends it). Default listener `127.0.0.1:11435`; set `control_listen` for remote agents and browsers ([ADR-0040](adr/0040-authentication-fails-closed-control-port-on-loopback-by-default.md)). Without `control_auth.users` the port answers 503, also on loopback; unauthenticated loopback access only with `control_auth.allow_unauthenticated_loopback: true` for development ([ADR-0053](adr/0053-control-port-requires-users-even-on-loopback.md)). TLS with `control_tls`. | Browser, scripts, Prometheus |
-| **11435 `/v1/tunnel`** | WebSocket from the agent: login with an Ed25519 signature over a challenge, heartbeat, configuration package, all Ollama calls as multiplexed streams (REQ/RESP/DATA/END/ERR/CANCEL). | Agent → router |
+| **11435 `/v1/tunnel`** | WebSocket from the agent: login with an Ed25519 signature over a challenge, heartbeat, configuration package, all Ollama calls as multiplexed streams (REQ/RESP/DATA/END/ERR/CANCEL). Specified in [protocol.md](protocol.md) with JSON Schemas in `docs/protocol/`. | Agent → router |
 | MQTT 8883 | Discovery and states for Home Assistant (TLS, password from `secrets.env`). | Router → broker |
 
 Requests may take up to 600 s (`request_timeout_s`). If the client disconnects, the router closes the upstream response, the tunnel
 sends CANCEL and the agent terminates the Ollama request. The inference port uses TCP keepalive (first probe after 60 s of
 silence, then every 15 s, dead after 4): a non-streaming request can run for minutes without a single byte, and connection state
 somewhere on the way to the client may expire silently; the probes keep it fresh and make a dead connection show up as an error.
+
+**Cost fields** (router 0.37.0, [ADR-0105](adr/0105-currency-neutral-cost-keys.md)): amounts are in the currency of the
+catalogue prices, named by `router.cloud.currency`; the router never converts. The field and metric names keep their
+historical `_chf` suffix: `spend_month_chf`, `budget_month_chf` and `currency` per provider in `/admin/state` (`cloud`),
+`cost_chf` in `/admin/usage`, `skirnir_cloud_spend_month_chf`, `skirnir_cloud_budget_month_chf` and
+`skirnir_cloud_cost_chf_total` in `/metrics`, plus `skirnir_cloud_currency_info{currency="CHF"} 1`. Catalogue entries in
+`GET /admin/config` (`models`) and `/admin/state` (`catalog_effective`) carry the price as `price_per_m` and, with the same
+value, `price_chf_per_m`. `PUT /admin/config` accepts both price names and both budget setting paths.
+
+**Benchmark** (`POST /admin/bench`, [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)): one
+warm-up and two measured runs with `router.benchmark.prompt`, 200 tokens, temperature 0. Each result in `/admin/state`
+(`perf.<model>@<node>.bench`) records `prompt_id`, the first 12 hex digits of the prompt's SHA-256; a result without it used
+the default prompt. Tokens per second depend on the language of prompt and answer, so compare only results with the same
+`prompt_id`.
 
 ## GPU guard
 
@@ -32,11 +46,12 @@ problems to Home Assistant (`modes.gpu_guard`, per-node policy in the agent regi
 
 ## Optional persistent session API
 
-The router can persist explicit client events in PostgreSQL using an opt-in session
-API at `/v1/skirnir/sessions`. It is **disabled by default** and adds no dependency
-or service requirement to existing installations. Enable `router.session_store`,
-install `router/requirements-session.txt` (`install.sh` does), supply the DSN through the configured
-environment variable, and grant `session_projects` to individual authenticated clients.
+The router can persist explicit client events using an opt-in session API at `/v1/skirnir/sessions`. It is
+**disabled by default** and adds no dependency or service requirement to existing installations. Enable
+`router.session_store`, supply the store's URL through the configured environment variable, and grant
+`session_projects` to individual authenticated clients. The URL picks the engine (ADR-0114): `postgresql://...` for a
+PostgreSQL database (install `router/requirements-session.txt`; `install.sh` does), or `sqlite:///sessions.db` for a file
+in the state folder on a single host, without a database server or extra package.
 
 The API supports session metadata/status, append-only messages, idempotent event IDs,
 paginated history, versioned task checkpoints and explicit session deletion. Owner
@@ -91,7 +106,7 @@ limits and migration/rollback](../design/managed-context.md).
 
 ## Optional shared memory and agent interoperability
 
-Server-controlled shared scopes, a durable PostgreSQL memory outbox, signed agent
+Server-controlled shared scopes, a durable memory outbox in the session store, signed agent
 handoffs and session discovery extend the existing optional context gateway. New
 strategies, tool-result reduction, automatic checkpoints and retention remain off
 by default. Private bank IDs and existing inference clients stay compatible.
@@ -235,7 +250,7 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 
 | Path | Content |
 |---|---|
-| `router/router.py`, `router/skirnir_router/` | Service: `app`, `config` (schema), `proxy` (Ollama API), `openai_api`, `request` (routing block), `scheduler`, `admission`, `nodes`, `poll` (state machine, prewarm), `registry` (agent registry), `tunnel`, `auth`, `cloud`, `decision/` (engines), `metrics`, `perf`, `ops` (idempotency, canary, shadow, manifest), `ha` (MQTT), `admin`, `settings` (UI allowlist), `toolcall_rescue` (tool calls that Ollama's parser loses as text are recovered), `wol`, `posture`, `process_view` (what the running router could change), `setup_init` (`--init`) |
+| `router/router.py`, `router/skirnir_router/` | Service: `app`, `config` (schema), `proxy` (Ollama API), `openai_api`, `anthropic_api`, `shape` (response formats: native, OpenAI, Anthropic; ADR-0120), `request` (routing block), `scheduler`, `admission`, `nodes`, `poll` (state machine, prewarm), `registry` (agent registry), `tunnel`, `auth`, `cloud`, `decision/` (engines), `metrics`, `perf`, `ops` (idempotency, canary, shadow, manifest), `ha` (MQTT), `admin`, `settings` (UI allowlist), `toolcall_rescue` (tool calls that Ollama's parser loses as text are recovered), `wol`, `posture`, `process_view` (what the running router could change), `setup_init` (`--init`) |
 | `router/ui.html`, `router/skirnir.png`, `router/favicon.png` | Web UI and logo |
 | `router/install.sh` | Install or upgrade the router on Debian/Ubuntu |
 | `router/config.minimal.yaml`, `router/config.example.yaml` | Minimal first configuration (template for `--init`) and full reference |
@@ -249,7 +264,7 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 | `rerank-server/` | Optional cross-encoder reranker with the TEI `/rerank` protocol on OpenVINO (Intel iGPU, CPU, NPU), run as an agent child for a memory service such as Hindsight; own README |
 | `deploy/` | `agent_keys.py` (signing keys and signed agent releases, standalone), `deploy.py` and `ops_env.py` (the maintainer's LXC deploy) |
 | `design/` | Design notes: `routing-algorithm.md`, `roadmap.md` (stages and decisions), `decision-engine.md`, `gpu-guard.md`, memory and session designs; logos (generated with an image model, metadata removed) |
-| `docs/` | User documentation (this folder, English and German), `docs/adr/` (Architecture Decision Records, MADR 4.0, index in `docs/adr/README.md`), `docs/security/` (threat model, risk register, reviews) |
+| `docs/` | User documentation (this folder, English and German), `docs/adr/` (Architecture Decision Records, MADR 4.0, index in `docs/adr/README.md`), `docs/protocol/` (router–agent protocol schemas), `docs/security/` (threat model, risk register, reviews) |
 | `test/` | Test suite, fakes, dev environment, test bench |
 | `tools/` | measurement scripts for the GPU guard (load test, stage-2 night run) |
 | `monitoring/` | Prometheus + Grafana next to the router (compose, scrape config, provisioned dashboard, secret renderer, `deploy_ct.py`), own README |

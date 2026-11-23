@@ -87,7 +87,7 @@ async def main():
     # 0) The instrument: the scheduler alone still picks the cloud tier while the local model is loading
     n = loading_node()
     state.NODES = {n.name: n}
-    _, _, cands = scheduler.candidates_for(LOCAL_TIER, None, time.time())
+    _, cands = scheduler.candidates_for(LOCAL_TIER, None, time.time())
     check("setup: the loading node is no candidate for the local tier (claim takes the budget)", cands == [], str(cands))
     check("setup: tier_loading sees the load of the tier's own model", scheduler.tier_loading([LOCAL_TIER], time.time()) == (n, LOCAL))
     acq, role, req = acquire(tiers)
@@ -141,7 +141,7 @@ async def main():
     small_tiers = [LOCAL_TIER, SMALL_TIER, CLOUD_TIER]
     n = loading_node(free_gib=9.0)
     state.NODES = {n.name: n}
-    _, _, cands = scheduler.candidates_for(SMALL_TIER, None, time.time())
+    _, cands = scheduler.candidates_for(SMALL_TIER, None, time.time())
     check("setup: the small tier fits beside the claim (cold candidate)", cands == [n], str(cands))
     acq, role, req = acquire(small_tiers)
     pick = scheduler.choose(role, small_tiers, None, time.time(), (), req)
