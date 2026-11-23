@@ -2,97 +2,73 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "eb48c1276f88105e10891becb9f9f9e60a5a5331",
- "change_digest": "22e79ae32741376a1f052e2517a8d91797e6f3f3ebe69e5dc48a7f6bcf31965f",
+ "base_sha": "c69cfa1ad0b0263c91af26ba87b548f3b08a5585",
+ "change_digest": "26b026bdd833eab10c6581e1368e0cb0b1aeed82156ed446e0608da7cceea8ad",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "README.de.md",
-  "README.md",
-  "design/routing-algorithm.md",
-  "docs/adr/0124-wake-webhooks-and-release-documents-follow-the-cloud-transport-rules.md",
+  "design/privacy-check.md",
+  "docs/adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md",
   "docs/adr/README.md",
   "docs/configuration.de.md",
   "docs/configuration.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
-  "docs/reference.de.md",
-  "docs/reference.md",
-  "docs/security/reviews/current.json",
+  "docs/security/risk-register.json",
+  "docs/security/threat-model.de.md",
+  "docs/security/threat-model.md",
   "router/config.example.yaml",
+  "router/skirnir_router/admin.py",
   "router/skirnir_router/common.py",
   "router/skirnir_router/config.py",
-  "router/skirnir_router/nodes.py",
-  "router/skirnir_router/ollamaupdate.py",
-  "router/skirnir_router/proxy.py",
-  "router/skirnir_router/registry.py",
-  "router/skirnir_router/scheduler.py",
-  "router/skirnir_router/settings.py",
-  "router/skirnir_router/values.py",
-  "router/skirnir_router/waker_config.py",
-  "router/skirnir_router/wakers.py",
-  "router/skirnir_router/wol.py",
-  "test/run_tests.py",
-  "test/selftest_release_source.py",
-  "test/selftest_wakers.py",
-  "test/test-config.yaml"
+  "router/skirnir_router/privacy.py",
+  "router/skirnir_router/privacy_locale.py",
+  "router/skirnir_router/redactors.py",
+  "test/privacy_default_corpus.json",
+  "test/selftest_privacy_redactors.py"
  ],
  "risk_ids": [
-  "TM-03",
-  "TM-06",
-  "TM-08",
-  "TM-13",
-  "TM-14",
-  "TM-15"
+  "TM-05"
  ],
  "boundaries": [
-  "B2",
-  "B7",
-  "B8",
-  "B9"
+  "B6",
+  "B7"
  ],
- "summary": "Refreshed after merging main at eb48c12 (no change to this PR's own code; conflicts only in CHANGELOG, VERSION, ci.yml, operations/reference docs and the ADR index). Router 0.41.0 implements ADR-0117 (waker and release-source interfaces) with ADR-0124 (transport rules). Two new outbound destinations: (1) the http_webhook waker POSTs a fixed body {event, node, mac} to a URL from config.yaml; (2) release_source: document GETs a neutral release document. Both go through values.egress_url (ADR-0048 rules: final URL, HTTPS or HTTP to literal 127.0.0.1/::1 only, no userinfo/query/fragment) and refuse 3xx without following (allow_redirects=False), with total timeouts (webhook 1-60 s, document 20 s), trust_env off. Traced callers: proxy._wake_or_refuse -> wakers.wake (shared wait/poll loop, unchanged cadence and cooldown for wol), scheduler.wakeable_for -> wakers.can_wake (wol eligibility identical to `n.wol and n.mac`), registry.node_policy and node_spec_from_entry (B2: the admin policy may only name 'wol' or a configured waker; URL and token_env are config-file only, consistent with ADR-0016), settings.EDITABLE (release_source added as a choice beside the already UI-editable release_url; UI writes are validated by the probe parse in write_overrides, so a document URL must pass egress_url there too), ollamaupdate.check_latest -> _fetch_document/parse_document -> LATEST -> order_update (B8: the order still carries only version, canonical archive name, sha256 and size; the agent downloads from its own ollama_update.source and refuses a hash that differs from that source's sha256sum.txt, agent TestOllamaUpdateRun; downgrade refusals of ADR-0073 unchanged). Secrets/logs (B9): the bearer token is read from the environment at call time and never logged; a configured but empty token fails closed without a request; log lines carry only the receiver host and exception class, never the URL path (a webhook ID can be a secret). No command execution was added; command/ipmi kinds are refused at load. Found and fixed during review: a deeply nested release document under the size cap raised RecursionError past the JSON boundary (now caught, test added); an OS error from the magic-packet socket used to escape as an exception (now a wake_send_failed fact, socket closed).",
+ "summary": "Router 0.42.0: the content check before a cloud tier (privacy.py, called only from proxy._Relay._via_cloud when cloud.needs_privacy_check holds) gets context redactors per tool format (redactors.py: ha_assist = the previous Home Assistant code moved unchanged, generic_json = configured dotted paths/keys) and locale packs (privacy_locale.py: ch-de = the previous patterns, keywords, refusal and marker, default; en = e-mail/phone/IBAN, English keywords). Merged with origin/main (all other portability PRs, incl. #179 Shape protocol in proxy.py and #183 cost keys in cloud.py; neither touches privacy.py, and the cloud path still calls privacy.check before cloud.run and answers a refusal through the shape). Implements ADR-0119 (now on main, proposed) and adds ADR-0125 (unrecognised tool results pass by default; keep_local is an explicit switch). Traced B6: the verdict body is still what cloud.run sends; a refused or unredacted verdict returns the refusal before cloud.run; the redaction runs on a deep copy; redact_tools is applied before any redactor, so choosing other redactors cannot drop it. B7 unchanged: classifier call, loopback endpoint check and fail-closed handling are untouched. Default behaviour verified byte-identical (recorded corpus of 35 synthetic payloads from the base commit's privacy.py and re-recorded identically on the current main c69cfa1; 12,000 randomized synthetic payloads compared against the current origin/main privacy.py, 0 differences). The new keys are config.yaml only (not in settings.EDITABLE, asserted by test). Load-time refusals prevent configurations that look configured but redact nothing (empty/unknown/duplicate redactors, generic_json without its redactor and vice versa, malformed paths, unknown locale or mode). /admin/state shows generic_json only as counts. Found and fixed during the review: generic_json walks JSON recursively, so a deeply nested tool result could exhaust the stack; it now checks depth iteratively (limit 100) and treats deeper JSON as unredactable (request stays local). The pre-existing RecursionError of json.loads on extremely deep JSON (it reached the unexpected-error middleware as a 500 under ha_assist) now keeps the request local with the refusal; no payload left in either case. Regexes of the en pack use only bounded quantifiers. No secrets, hostnames or personal data added; test data is synthetic (example domains, published example IBANs, fictional UK/NANP numbers).",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_wakers.py",
+   "command": "python test/selftest_privacy_redactors.py",
    "result": "passed",
-   "evidence": "18 tests: magic packet bytes/addresses/port 9 and SO_BROADCAST pinned, WOL cadence every retry_interval_s, cooldown, eligibility as before; webhook fixed body + bearer token, missing token sends nothing, 301/302/303/307/308 refused and target never contacted, HTTP 500 refused, 0.5 s timeout while another coroutine keeps running, unreachable port; config refusals (plain HTTP non-loopback, localhost, query, fragment, userinfo, ftp, bad port, command/ipmi kinds, name wol, unknown key, token value instead of env name, timeout range/type, repeat type) and policy refusal of a URL as waker."
+   "evidence": "117 checks ALL OK after the merge (relay test now uses OllamaShape like the other privacy tests, since #179): default corpus byte-identical (35 cases, re-recorded on current main c69cfa1 with an identical file), every ch-de pattern and keyword group blocks, every default domain/device class/listed tool redacted, too-deep JSON stays local, en hits and non-hits, generic_json paths/keys/*/depth limit, named non-JSON stays local, keep_local mode, 13 refused configurations, nothing editable from the web UI, proxy refusal without provider call. Fault injection (AHV pattern removed; default mode flipped to keep_local) made it fail with 3 and 9 failures."
   },
   {
-   "command": "python test/selftest_release_source.py",
+   "command": "python test/selftest_privacy_check.py",
    "result": "passed",
-   "evidence": "10 tests: document equals GitHub source output for the same release; redirect refused (target not fetched), oversized with and without Content-Length, timeout, HTTP 404, invalid JSON, invalid UTF-8, 30000-deep nesting (fails without the RecursionError catch, checked), every malformed field; release_source/release_url refused at config load for http non-loopback, query, empty URL, unknown kind."
+   "evidence": "unchanged file, ALLE OK."
   },
   {
-   "command": "python test/run_tests.py (end-to-end, run under a local port lock)",
+   "command": "differential script outside the repository: origin/main privacy.py vs branch, default and 4 more configurations, 3 classifier outcomes",
    "result": "passed",
-   "evidence": "STATE passed, 0 failures, 337 PASS lines after merging main at eb48c12 (first wave, #185, #187, #188), including policy waker refusal/accept/reset and the unchanged WOL attempt + cooldown checks."
+   "evidence": "compared 12000 synthetic payloads, 0 differences (redacted body, rule hit, verdict journal, verdict body)."
   },
   {
-   "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml (Windows, Python 3.12)",
+   "command": "every python command of the python job in .github/workflows/ci.yml on Windows except PostgreSQL integrations, run_tests.py and check_public_changes (separate entries)",
    "result": "passed",
-   "evidence": "81 of 81 exit 0 after merging main at eb48c12, including selftest_node_assessment (#184: the assessment treats an offline node as node_offline and never decides waking; wakeable_for is the only wake decision and goes through wakers.can_wake)."
+   "evidence": "85 commands, 0 failed, after merging origin/main; check_adr_index now reports ADR index ok: 125 ADRs."
   },
   {
-   "command": "cd agent && go test -run 'TestOllamaUpdateRun|TestOllamaVerifyOrder' ./...",
+   "command": "python C:/<ops>/e2e/run_locked.py <worktree> (end-to-end suite through the lock wrapper)",
    "result": "passed",
-   "evidence": "ok; the agent still refuses an order whose sha256 differs from its source's sha256sum.txt (no agent code changed)."
+   "evidence": "STATE: passed, 0 failures, 337 PASS lines, on the merged tree (origin/main c69cfa1 + this change). The suite does not exercise the privacy path."
   },
   {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_control_flow.py",
+   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/selftest_control_flow.py && python test/check_control_flow.py",
    "result": "passed",
-   "evidence": "All checks passed; configuration ok; control flow 0 findings."
+   "evidence": "All checks passed; configuration ok; control flow ok, 0 findings."
   },
   {
    "command": "python test/check_public_changes.py --base <merge-base>",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s) after replacing a broadcast address and a credential URL in the test with reserved examples."
-  },
-  {
-   "command": "python test/check_adr_index.py",
-   "result": "passed",
-   "evidence": "ADR index ok: 124 ADRs."
+   "evidence": "0 finding(s)."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -101,12 +77,10 @@
   }
  ],
  "limitations": [
-  "The configured destinations are trusted operator input: DNS of the configured host is not pinned, so a host whose name resolves into the LAN is reachable by design (no redirect can add a second destination).",
-  "The pre-existing github release source still follows redirects and has no size cap (unchanged; GitHub serves sha256sum.txt through a redirect). Its JSON comes from api.github.com by default.",
-  "release_url stays editable from the web UI as before; with release_source document an admin session can point the router at another document, which can only select a version/hash that the agent then verifies against its own source (B2 admin trust, TM-03).",
-  "/admin/config shows the configured webhook URL to admins like other configuration values; a webhook ID embedded in the path is visible there (not in logs).",
-  "No native ipmi waker (deferred); no UI control for the waker choice yet (config file and policy API only).",
-  "Webhook and document were exercised against loopback test servers only; no real Home Assistant/ioBroker/openHAB receiver or mirror was contacted.",
-  "PostgreSQL integrations were not run; no session/memory/storage code changed."
+  "With the default unrecognised_tool_results: pass, tool results in formats no redactor knows still reach the provider unredacted (pre-existing; now documented, keep_local available).",
+  "No openHAB or ioBroker redactor: their tool-result formats could not be verified with real data.",
+  "The privacy classifier stays German/English (ADR-0077); the en pack's patterns are heuristics checked by test sentences, not a DLP guarantee.",
+  "The end-to-end suite does not cover the privacy path; it is covered by self-tests with fakes for classifier and provider.",
+  "ADR-0119 (on main, proposed) is implemented here; one deviation is recorded in ADR-0125 for the maintainer to decide."
  ]
 }
