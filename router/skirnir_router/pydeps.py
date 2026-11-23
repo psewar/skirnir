@@ -11,7 +11,9 @@ module decides which lock entries that is, with the interpreter of the venv, bef
 plan prints the lock lines to install (possibly none) and exits 0; it exits 2 when an unmet requirement has no lock entry
 or its locked version does not meet the requirement. A package that pip put into the venv earlier and that differs from its
 locked version is planned again, so the venv holds what the lock names. verify exits 0 when every requirement is met by an
-installed distribution, 1 otherwise, and names each one.
+installed distribution, 1 otherwise, and names each one. Both take --without NAME (repeatable) to leave out an optional
+requirement the operator declined (install.sh --without-mqtt, ADR-0104); a NAME that is not a requirement is refused
+(exit 2), so a typo never silently installs what it meant to leave out.
 
 Standard library plus `packaging`, or the copy vendored in pip when `packaging` is not installed; runs as a plain file
 (no package imports), so install.sh and deploy.py can call it before the router is in place.
@@ -107,16 +109,24 @@ def installed():
     return out
 
 
-def active(reqs, env=None):
-    """Requirements whose marker holds for this interpreter (or for env, a marker environment overriding it)."""
+def active(reqs, env=None, without=()):
+    """Requirements whose marker holds for this interpreter (or for env, a marker environment overriding it), minus the
+    names in without."""
     e = dict(env or {}, extra="")
-    return [r for r in reqs if r.marker is None or r.marker.evaluate(e)]
+    left_out = {canonicalize_name(n) for n in without}
+    return [r for r in reqs if (r.marker is None or r.marker.evaluate(e)) and canonicalize_name(r.name) not in left_out]
 
 
-def plan(reqs, lock, have, env=None):
+def unknown_names(reqs, without):
+    """The names in without that are no requirement at all (a typo would otherwise leave out nothing)."""
+    known = {canonicalize_name(r.name) for r in reqs}
+    return [n for n in without if canonicalize_name(n) not in known]
+
+
+def plan(reqs, lock, have, env=None, without=()):
     """(lines to install, problems)."""
     lines, problems = [], []
-    for r in active(reqs, env):
+    for r in active(reqs, env, without):
         key = canonicalize_name(r.name)
         got = have.get(key)
         entry = lock.get(key)
@@ -136,9 +146,9 @@ def plan(reqs, lock, have, env=None):
     return lines, problems
 
 
-def verify(reqs, have, env=None):
+def verify(reqs, have, env=None, without=()):
     missing = []
-    for r in active(reqs, env):
+    for r in active(reqs, env, without):
         got = have.get(canonicalize_name(r.name))
         if got is None or not meets(r, got[0]):
             missing.append(f"{r}: {got[0] if got else 'missing'}")
@@ -150,19 +160,28 @@ def main(argv=None):
     p.add_argument("command", choices=("plan", "verify"))
     p.add_argument("--requirements", required=True)
     p.add_argument("--lock")
+    p.add_argument("--without", action="append", default=[], metavar="NAME",
+                   help="leave out this optional requirement (repeatable)")
     a = p.parse_args(argv)
     reqs = read_requirements(a.requirements)
+    unknown = unknown_names(reqs, a.without)
+    if unknown:
+        print(f"pydeps: --without {' '.join(unknown)}: not a requirement in {a.requirements}", file=sys.stderr)
+        return 2
+    for name in a.without:
+        print(f"pydeps: {name} left out on request", file=sys.stderr)
     have = installed()
     if a.command == "verify":
-        missing = verify(reqs, have)
+        missing = verify(reqs, have, without=a.without)
+        n = len(active(reqs, without=a.without))
         for m in missing:
             print(f"not met: {m}", file=sys.stderr)
-        print(f"pydeps verify: {len(active(reqs)) - len(missing)} of {len(active(reqs))} requirements met", file=sys.stderr)
+        print(f"pydeps verify: {n - len(missing)} of {n} requirements met", file=sys.stderr)
         return 1 if missing else 0
     if not a.lock:
         p.error("plan needs --lock")
     lock, bad = read_lock(open(a.lock, encoding="utf-8").read())
-    lines, problems = plan(reqs, lock, have)
+    lines, problems = plan(reqs, lock, have, without=a.without)
     problems = [f"lock line is not name==version --hash=sha256:...: {b}" for b in bad] + problems
     for pr in problems:
         print(f"pydeps plan: {pr}", file=sys.stderr)

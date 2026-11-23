@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Response head (agent to router, binary frame RESP)",
+  "description": "First frame of every answered stream. The response body follows in DATA frames (the Go agent sends at most 32 KiB per frame) and the stream ends with END. If the first frame of a stream is not a RESP with an integer status (ERR, or an unreadable head), the router fails the request.",
+  "type": "object",
+  "properties": {
+    "status": {"type": "integer", "minimum": 100, "maximum": 999, "description": "HTTP status of the upstream answer, or 403/405 when the agent refuses the request itself. A JSON boolean is not accepted.", "x-since-agent": "baseline"},
+    "headers": {
+      "type": "object",
+      "description": "Response headers, first value of each.",
+      "additionalProperties": {"type": "string"},
+      "x-since-agent": "baseline"
+    }
+  },
+  "required": ["status"],
+  "additionalProperties": true,
+  "examples": [
+    {"status": 200, "headers": {"Content-Type": "application/x-ndjson"}},
+    {"status": 403, "headers": {"Content-Type": "application/json"}}
+  ]
+}

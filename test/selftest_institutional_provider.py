@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "router"))
 from skirnir_router import cloud, config, privacy, proxy, request, settings, state  # noqa: E402
 from skirnir_router.outcome import failed  # noqa: E402
+from skirnir_router.shape import OllamaShape  # noqa: E402
 
 EXAMPLE = os.path.join(HERE, "..", "router", "config.example.yaml")
 FAILS = []
@@ -177,7 +178,7 @@ async def main(tmp):
         x.path, x.stream, x.model, x.exposed = "/api/chat", False, model, "assist:latest"
         x.out = {"model": "assist:latest", "stream": False, "messages": [{"role": "user", "content": "Wann ist das Teammeeting?"}]}
         x.node = state.CLOUD[provider]
-        x.shape, x.headers, x.memory_capture, x.info = None, {}, None, None
+        x.shape, x.headers, x.memory_capture, x.info = OllamaShape(), {}, None, None
         return x
 
     resp = await proxy._Relay._via_cloud(relay("institution", INST["model"]))

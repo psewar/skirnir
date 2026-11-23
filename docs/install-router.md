@@ -13,7 +13,7 @@ configuration in [configuration.md](configuration.md).
 |---|---|
 | Operating system | Debian 12 or Ubuntu (or comparable; `install.sh` supports Debian and Ubuntu, elsewhere follow [Manual installation](#manual-installation)). A system container (LXC) is fine; for Docker or Podman use the router image ([Container](#container)). On Windows the router runs with the default event loop (development). |
 | Python | 3.11 or newer |
-| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installs missing ones). What the distribution lacks or ships too old (on Debian 12: `asyncpg` for the session store) comes into the venv only from the hash-locked `router/requirements-lock.txt` (ADR-0074). |
+| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installs missing ones). `python3-paho-mqtt` is needed only for Home Assistant over MQTT (`install.sh --without-mqtt` leaves it out). What the distribution lacks or ships too old (on Debian 12: `asyncpg` for the session store) comes into the venv only from the hash-locked `router/requirements-lock.txt` (ADR-0074). |
 | Ports | **11434** for clients (Ollama, OpenAI and Anthropic APIs), **11435** for the agents' tunnel, the web UI, `/admin/*` and `/metrics` |
 | Name and certificate | A DNS name that clients and nodes use (`<name>`, e.g. `router.example.net`) and a TLS certificate for it, see [TLS certificate](#tls-certificate) |
 
@@ -42,8 +42,10 @@ Before changing anything the script checks: root, Debian/Ubuntu, Python 3.11 or 
 
 The last line is always `STATE: installed`, `STATE: checked` or `STATE: refused` (with the reason above it).
 **Upgrade** = run the script again from the new release, then `systemctl restart skirnir-router`. Options: `--prefix DIR`
-(default `/opt/skirnir-router`), `--config-dir DIR` (default `/etc/skirnir-router`); `--root DIR`, `--no-venv` and
-`--os-release FILE` are for packaging and tests (`--help` lists them).
+(default `/opt/skirnir-router`), `--config-dir DIR` (default `/etc/skirnir-router`); `--without-mqtt` for a router without
+Home Assistant: the MQTT library (`python3-paho-mqtt`, `paho-mqtt` from the lock) is not installed, and the script refuses
+while `config.yaml` names an MQTT broker (`mqtt.host`); without the option it is installed as before (ADR-0104).
+`--root DIR`, `--no-venv` and `--os-release FILE` are for packaging and tests (`--help` lists them).
 
 ## First configuration
 
@@ -126,7 +128,7 @@ The start log lists the posture findings (lines `posture …`). Then open `https
 |---|---|
 | `skirnir-router.service` | The router. Runs `/opt/skirnir-router/venv/bin/python router.py /etc/skirnir-router/config.yaml` as its own account `skirnir-router` without capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=tmpfs`, `PrivateTmp`, `UMask=0077` (ADR-0086). Writes only its state directory `/var/lib/skirnir-router` (`router.state_dir`) and its log directory `/var/log/skirnir-router`; `/etc/skirnir-router` stays root's and is read through the group. Reads `secrets.env` as environment. `install.sh` and `deploy.py` create the account and set owners and modes with `router-layout.sh`. |
 | `skirnir-router-cert.path` + `.service` | Optional: restart on a renewed certificate (see above). |
-| `skirnir-router-secrets.service` | Renders `secrets.env` before the router starts (`render-env.sh`); does nothing without `render-env.conf`. |
+| `skirnir-router-secrets.service` | Renders `secrets.env` before the router starts (`render-env.sh`, from a secret store or a root-only file); does nothing without `render-env.conf`. |
 | `skirnir-router-secrets.timer` + `-secrets-refresh.service` | Optional: renders daily and restarts the router when a secret changed. |
 
 ## Firewall
@@ -141,15 +143,38 @@ The start log lists the posture findings (lines `posture …`). Then open `https
 
 The router reads `/etc/skirnir-router/secrets.env` (root, 0640 for its group `skirnir-router`) as environment: `MQTT_PASSWORD`, `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, the keys named in `EXTRA_SECRET_KEYS` (further cloud providers, ADR-0080) and, for the optional memory
-layers, the variables their configuration names. Maintain it by hand, or let
-`render-env.sh` render it from a secret store with a universal-auth API: access goes into
-`/etc/skirnir-router-secrets/render-env.conf` (folder 0700 root, file 0600; template
-[router/render-env.conf.example](../router/render-env.conf.example)); the daily timer restarts the router when a secret
-changed. If the secret store is unreachable the last file stays. The access file is read by root, so it must not lie in
-a folder the router may write: `render-env.sh` refuses a file (or `SECRET_STORE_AUTH_FILE`) under `/etc/skirnir-router`,
-`/var/lib/skirnir-router` or `/var/log/skirnir-router`, or one that is not owned by root or writable by group or others,
-and the router unit cannot see `/etc/skirnir-router-secrets` at all. `install.sh` and `deploy.py` move an old
-`/etc/skirnir-router/render-env.conf` there (ADR-0073).
+layers, the variables their configuration names. Every one of them is optional: `MQTT_PASSWORD` only matters with an
+`mqtt:` section. There are three ways to provide them:
+
+1. **By hand**: write `secrets.env` yourself (`KEY=value` per line, root:skirnir-router 0640) and create no
+   `render-env.conf`; `render-env.sh` then renders nothing (`STATE: not-configured`).
+2. **`render-env.sh` from a root-only file** (`SECRET_SOURCE=file`, `SECRET_FILE=...` in `render-env.conf`): the renderer
+   copies the file with the same checks as for a store - only built-in and `EXTRA_SECRET_KEYS` names, no value with a line
+   break, a name given twice is skipped. The file must be owned by root, readable by root only (0600) and lie outside the
+   router's paths, e.g. `/etc/skirnir-router-secrets/secrets.source.env`. It is read line by line, never sourced.
+3. **`render-env.sh` from a secret store** with a universal-auth API (`SECRET_SOURCE=store`, the default): access goes
+   into `render-env.conf` (`SECRET_STORE_DOMAIN`, `SECRET_STORE_CLIENT_ID`, `SECRET_STORE_CLIENT_SECRET` or
+   `SECRET_STORE_AUTH_FILE`, `PROJECT_ID`, `ENVIRONMENT`).
+
+`render-env.conf` lives in `/etc/skirnir-router-secrets/` (folder 0700 root, file 0600; template
+[router/render-env.conf.example](../router/render-env.conf.example)). The renderer works in three steps (ADR-0104): it
+checks that its source is ready and says so (store: not reachable, login refused, or ready; file: missing, refused, or
+ready), then fetches every name on its own (present, missing, or fetch failed), then writes every present name. The
+existing file stays when the source is not ready, when any fetch failed (a transient fault drops no secret) and when the
+source holds none of the names. Its last line is `STATE: written`, `unchanged`, `kept`, `not-configured` or `refused`
+([operations.md](operations.md#secrets-renderer)). The daily timer restarts the router when the file changed.
+
+systemd `LoadCredential=` is an alternative for the values the router reads from a file: point `mqtt.password_file` or a
+cloud provider's `secrets_file` at the credential (`/run/credentials/skirnir-router.service/<name>`, a `KEY=value` file).
+The session-store and memory variables come only from the environment and need `secrets.env` (or another
+`EnvironmentFile`). A client for a further store (e.g. Vault) is not built in; it would be one more source in
+`render-env.sh`.
+
+`render-env.conf` and `SECRET_STORE_AUTH_FILE` are sourced by root, so they must not lie in a folder the router may write:
+`render-env.sh` refuses such a file (and `SECRET_FILE`) under `/etc/skirnir-router`, `/var/lib/skirnir-router` or
+`/var/log/skirnir-router`, or one that is not owned by root or writable by group or others, and the router unit cannot see
+`/etc/skirnir-router-secrets` at all. `install.sh` and `deploy.py` move an old `/etc/skirnir-router/render-env.conf` there
+(ADR-0073).
 
 ## Optional: decision engine for the auto role
 

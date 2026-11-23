@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Challenge (router to agent, text frame)",
+  "description": "First message of every tunnel session, sent by the router right after the WebSocket upgrade. The agent signs the nonce in its hello. The agent waits at most 15 s for it.",
+  "type": "object",
+  "properties": {
+    "t": {
+      "const": "challenge",
+      "description": "Message type."
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "description": "Random bytes, standard base64 with padding. The router sends 32 bytes; the agent refuses fewer than 16.",
+      "x-since-router": "baseline"
+    },
+    "router": {
+      "type": "string",
+      "description": "Router version, informational. The Go agent ignores it.",
+      "x-since-router": "baseline",
+      "x-ignored-by-receiver": true
+    }
+  },
+  "required": ["t", "nonce"],
+  "additionalProperties": true,
+  "examples": [
+    {"t": "challenge", "nonce": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA=", "router": "0.34.1"}
+  ]
+}

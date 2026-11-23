@@ -367,10 +367,9 @@ async def prewarm(node, delay, reason, since=None):
     now = time.time()
     # Budget = card minus reserve minus what is truly foreign (desktop baseline + foreign VRAM); Ollama's own
     # models are evictable and don't count. Previously this was the full card - on gpu-laptop (16 GiB) gemma4 was loaded next to
-    # a running game.
-    # Without a GPU (0.36.0, ADR-0102): available main memory plus what Ollama holds, as for a request (Node.budget_gib).
-    budget = (node.vram_total_gib - state.CFG.reserve.get("free", 1.0) - node.baseline_gib() - node.foreign_vram_gib()
-              if node.gpu_present else node.budget_gib(now, None))
+    # a running game. Without a GPU (0.36.0, ADR-0102): available main memory plus what Ollama holds, as for a request.
+    # One helper for both (Node.prewarm_budget_gib, ADR-0108).
+    budget = node.prewarm_budget_gib(now)
     planned, used = [], 0.0
     for role in state.CFG.roles.values():
         t = role["tiers"][0]
@@ -531,7 +530,9 @@ def residency_check(node, now):
         return
     # Only if a missing rank-1 model would actually fit next to the loaded rank-1 models; otherwise
     # prewarm would load nothing anyway and we would report the same thing every minute.
-    room = node.capacity_gib() - node.reserve_gib("free") - sum(node.loaded_size(m) for m, _ in rank1 if node.is_loaded(m))
+    # Coarse pre-check on the empty node (nodes.empty_room_gib: card or main memory), without baseline and foreign VRAM:
+    # prewarm checks those
+    room = nodes.empty_room_gib(node, "free") - sum(node.loaded_size(m) for m, _ in rank1 if node.is_loaded(m))
     if not any(cfg.need_gib(m, ctx, node) <= room for m, ctx in missing):
         return
     if node.quiet(now):
