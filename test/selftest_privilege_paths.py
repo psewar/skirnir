@@ -100,7 +100,8 @@ def renderer_cases(script):
         good = os.path.join(secrets, "render-env.conf")
         write(good, f"touch {marker('conf-good')}\n")
         rc, out = run(good)
-        check(rc == 0 and os.path.exists(marker("conf-good")) and "unvollstaendig" in out,
+        incomplete = {"render-env.sh": "incomplete", "render-monitoring.sh": "unvollstaendig"}[name]
+        check(rc == 0 and os.path.exists(marker("conf-good")) and incomplete in out,
               f"{name}: a root-only access file is read ({out.strip()[-80:]!r})")
 
         write(good, f"touch {marker('conf-good2')}\nSECRET_STORE_AUTH_FILE={auth_rw}\n")

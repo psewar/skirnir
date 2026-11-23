@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 
 from aiohttp import ClientTimeout
 
-from . import problems, state
+from . import cost_keys, problems, state
 from .common import DATA_CLASSES_DEFAULT, REASONING_OFF, log, parse_tool_args, read_env_value
 from .nodes import Breaker
 
@@ -105,11 +105,13 @@ class CloudTarget(Breaker):
 
     def snapshot(self):
         spend = spend_month(self.provider)
-        budget = float(self.spec.get("budget_month_chf") or 0)
+        budget = budget_month(self.spec)
+        # ADR-0105: the field names keep their historical _chf suffix (Home Assistant, UI, scripts read them); `currency`
+        # names the unit, which is whatever the catalogue prices are written in
         return {"provider": self.provider, "kind": self.spec["kind"], "enabled": bool(self.spec.get("enabled", True)),
                 "key": bool(self.api_key), "key_source": self.key_source, "base_url": self.spec["base_url"], "region": self.spec.get("region"),
                 "models": sorted(self.models), "inflight": self.inflight, "breaker": self.breaker,
-                "spend_month_chf": round(spend, 4), "budget_month_chf": budget,
+                "spend_month_chf": round(spend, 4), "budget_month_chf": budget, "currency": currency(),
                 "budget_percent": round(100 * spend / budget, 1) if budget else None, "max_data_class": self.spec.get("max_data_class"),
                 "trust": self.spec.get("trust", "cloud"), "ceiling": ceiling(self)}
 
@@ -126,9 +128,9 @@ def setup():
         t.models = {m for m, e in state.CFG.models.items() if (e or {}).get("cloud") == name}
         t.api_key, t.key_source = _load_key(spec)
         new[name] = t
-        log.info("cloud provider %s (%s, trust %s): %s, key %s, %d models, budget %s/month, data up to %s", name, spec["kind"],
+        log.info("cloud provider %s (%s, trust %s): %s, key %s, %d models, budget %s %s/month, data up to %s", name, spec["kind"],
                  spec.get("trust", "cloud"), "active" if spec.get("enabled", True) else "disabled",
-                 f"from {t.key_source}" if t.api_key else "MISSING", len(t.models), spec.get("budget_month_chf"), ceiling(t))
+                 f"from {t.key_source}" if t.api_key else "MISSING", len(t.models), spec.get("budget_month"), currency(), ceiling(t))
         own = spec.get("max_data_class")
         if own and own != ceiling(t):
             log.warning("cloud provider %s: max_data_class %s is above max_cloud_data_class and has no effect without "
@@ -249,7 +251,7 @@ def provider_block_reason(tier, req=None):
         why = _class_block_reason(t, req)
         if why:
             return why
-    budget = float(t.spec.get("budget_month_chf") or 0)
+    budget = budget_month(t.spec)
     if budget and spend_month(t.provider) >= budget:
         return f"cloud provider {t.provider}: monthly budget {budget:.2f} exhausted"
     return None
@@ -305,14 +307,36 @@ def spend_month(provider):
     return float(((state.USAGE.get("cloud") or {}).get(provider) or {}).get(month_key(), 0.0))
 
 
-def cost_chf(model, prompt_tokens, completion_tokens):
+def currency():
+    """Unit of prices, budgets and spend (router.cloud.currency, ADR-0105); display only, the router never converts."""
+    return (getattr(state.CFG, "cloud", None) or {}).get("currency") or cost_keys.CURRENCY_DEFAULT
+
+
+def _neutral(entry, aliases, key):
+    """The value of a neutral cost key; on an entry that did not pass through the configuration check (a spec built
+    in code), the old name with the same meaning. A budget must never read as 0 = unlimited because of the name."""
+    if key in entry:
+        return entry[key]
+    old = next((o for o, n in aliases.items() if n == key), None)
+    return entry.get(old) if old else None
+
+
+def budget_month(spec):
+    """Monthly budget of a provider in the catalogue currency; 0 = none. config.py already moved the old name
+    budget_month_chf to budget_month (ADR-0105); a spec built elsewhere may still carry the old name."""
+    return float(_neutral(spec, cost_keys.PROVIDER_ALIASES, "budget_month") or 0)
+
+
+def request_cost(model, prompt_tokens, completion_tokens):
+    """Cost of one request in the catalogue currency (models.<m>.price_per_m per million tokens)."""
     e = state.CFG.models.get(model) or {}
-    p = e.get("price_chf_per_m") or {}
+    p = _neutral(e, cost_keys.MODEL_ALIASES, "price_per_m") or {}
     return (prompt_tokens or 0) / 1e6 * float(p.get("input", 0)) + (completion_tokens or 0) / 1e6 * float(p.get("output", 0))
 
-def add_spend(provider, chf):
+
+def add_spend(provider, amount):
     c = state.USAGE.setdefault("cloud", {}).setdefault(provider, {})
-    c[month_key()] = round(c.get(month_key(), 0.0) + chf, 6)
+    c[month_key()] = round(c.get(month_key(), 0.0) + amount, 6)
     state.USAGE_DIRTY[0] = time.time()
 
 
@@ -328,7 +352,7 @@ def budget_problems():
     """Problem records (problems.py, ADR-0101): budget exhausted or above warn_at_percent, per provider."""
     probs = []
     for name, t in state.CLOUD.items():
-        budget = float(t.spec.get("budget_month_chf") or 0)
+        budget = budget_month(t.spec)
         if not budget:
             continue
         spend = spend_month(name)

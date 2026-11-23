@@ -104,7 +104,9 @@ groups:
 Home Assistant ist optional. Ohne `mqtt:`-Abschnitt, oder wenn `paho-mqtt` fehlt, veröffentlicht der Router nichts. Routing,
 UI, `/admin/*`, `/metrics` und alle Fakten der Agenten funktionieren genauso: GPU, Spiel, Speicher, Schlaf. Auch das eigene
 MQTT-Gerät des Agenten ist optional (`mqtt:` in der Agent-Konfiguration). Der Router veröffentlicht über MQTT mit TLS (Port
-8883), das Passwort kommt aus `secrets.env`.
+8883), das Passwort kommt aus `secrets.env`. Ein mit `install.sh --without-mqtt` installierter Router hat keine MQTT-Bibliothek
+und veröffentlicht ebenfalls nichts; vor einem `mqtt:`-Abschnitt ohne die Option erneut installieren (das Skript lehnt die
+Option ab, solange einer gesetzt ist).
 
 Der Router meldet sich per MQTT-Discovery als Gerät **Skirnir** an: Sensoren für Knoten online/belegt, verfügbare Modelle,
 bereite Rollen (Attribut: welcher Knoten und welches Modell jetzt gewählt würde), Anfragen und Tokens heute, Cloud-Kosten
@@ -208,6 +210,24 @@ Art: `wake_no_mac`, `wake_send_failed`, `wake_unknown_waker`, `wake_secret_missi
 `wake_refused`; dann wartet der Router nicht, sondern antwortet sofort mit 503. Konfiguration:
 [configuration.de.md](configuration.de.md#knoten-wecken).
 
+## Secrets-Renderer
+
+`render-env.sh` rendert `secrets.env` vor jedem Start des Routers (`skirnir-router-secrets.service`) und mit dem optionalen
+Timer täglich (`skirnir-router-secrets-refresh.service`, startet den Router neu, wenn sich die Datei geändert hat). Seine
+Ausgabe steht im Journal: `journalctl -u skirnir-router-secrets -u skirnir-router-secrets-refresh`. Jeder Lauf endet mit einer
+Zustandszeile ([install-router.de.md](install-router.de.md#secrets), ADR-0104):
+
+| Zustand | Bedeutung | Nächster Schritt |
+|---|---|---|
+| `STATE: written` | Die Datei wurde ersetzt; die Zeile davor nennt, wie viele der Namen vorhanden waren. | Keiner. Als `missing in the source` gemeldete Namen stehen einfach nicht in der Datei. |
+| `STATE: unchanged` | Gleicher Inhalt wie bisher. | Keiner. |
+| `STATE: kept` | Die bestehende Datei bleibt: Die Quelle ist nicht bereit (`secret store not reachable`, `refused the login (HTTP ...)`, `SECRET_FILE ... missing`), ein Name liess sich nicht abrufen (`fetch failed (...)`; ein vorübergehender Fehler lässt nichts wegfallen), oder die Quelle enthält keinen der Namen. | Beheben, was die Zeile davor nennt; der nächste Lauf oder `systemctl start skirnir-router-secrets` rendert erneut. Um die Datei bewusst zu leeren, sie von Hand löschen. |
+| `STATE: not-configured` | Keine `render-env.conf`: `secrets.env` wird von Hand gepflegt. | Keiner, oder eine Quelle einrichten. |
+| `STATE: refused` | `render-env.conf`, `SECRET_STORE_AUTH_FILE` oder `SECRET_FILE` hat eine Prüfung nicht bestanden (Besitzer, Modus, ein Pfad, den der Router schreiben darf), die Konfiguration ist unvollständig, oder `SECRET_SOURCE` ist unbekannt. | Die Datei beheben, die die Zeile davor nennt. |
+
+Ein Wert mit Zeilenumbruch wird nie geschrieben (er würde eine weitere Variable in der Umgebung der Router-Unit beginnen);
+der Name wird gemeldet und übersprungen. Kein Secret-Wert erscheint in der Ausgabe.
+
 ## Schlüsselwechsel
 
 Der Signierschlüssel der Agenten lässt sich ohne Lücke wechseln
@@ -242,9 +262,9 @@ verschiebt sie.
 | Was | Standardpfad | Warum |
 |---|---|---|
 | Konfigurationsordner | `/etc/skirnir-router/` | `config.yaml` (schreiben nur Root-Werkzeuge, nie der Router), die Zertifikate in `certs/` (oder `tls/` bei älteren Installationen) und der Release-Ordner `agent/` (`manifest.json` und die signierten Agent-Binaries; lassen sich auch erneut aus einem Release kopieren). |
-| Quelle der Secrets | der eigene Secret-Store und `/etc/skirnir-router-secrets/render-env.conf` mit dem Zugang dazu | `secrets.env` wird daraus erzeugt und lässt sich neu erzeugen: die Quelle sichern, nicht die erzeugte Datei. Wer `secrets.env` von Hand pflegt, hat sie als Quelle. Die Zugangsdatei enthält ein Geheimnis; ihr Backup so geschützt halten wie die Datei selbst. |
+| Quelle der Secrets | der eigene Secret-Store und `/etc/skirnir-router-secrets/render-env.conf` mit dem Zugang dazu (mit `SECRET_SOURCE=file`: statt des Stores die Datei, die `SECRET_FILE` nennt) | `secrets.env` wird daraus erzeugt und lässt sich neu erzeugen: die Quelle sichern, nicht die erzeugte Datei. Wer `secrets.env` von Hand pflegt, hat sie als Quelle. Die Zugangsdatei enthält ein Geheimnis; ihr Backup so geschützt halten wie die Datei selbst. |
 | Zustandsordner (`router.state_dir`) | `/var/lib/skirnir-router/` | Alles, was der Router selbst schreibt, siehe nächste Tabelle. Ohne `state_dir` liegen diese Dateien neben der `config.yaml`. |
-| Session-Datenbank (optional) | die PostgreSQL-Datenbank, auf die `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) zeigt | Verwaltete Sessions (Turns, Ereignisse, Verdichtungen) und die Memory-Outbox. Mit den Werkzeugen von PostgreSQL sichern. |
+| Session-Datenbank (optional) | die PostgreSQL-Datenbank oder die SQLite-Datei, die `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) nennt (ADR-0114) | Sessions (Ereignisse, verwaltete Turns, Verdichtungen, Übergabe-Importe) und die Memory-Outbox. PostgreSQL: mit dessen eigenen Werkzeugen sichern. SQLite: siehe `sessions.db` unten. |
 | Gedächtnis-Backend (optional) | ausserhalb von Skirnir (Hindsight) | Dort liegt das Langzeitgedächtnis; sichern, wie dieser Dienst es beschreibt. |
 | Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), falls der Audit-Verlauf gebraucht wird. |
 
@@ -255,6 +275,7 @@ Dateien im Zustandsordner:
 | `nodes.json` | Knotenregister: öffentlicher Schlüssel, Freigabezustand, Policy und Fakten je Agent | jeder Knoten erscheint als wartend und muss neu freigegeben werden |
 | `roles.yaml` | was die Web-UI geändert hat: Rollen, Modelle, Einstellungen, in der UI angelegte Clients (Token-Hashes) | die UI-Änderungen sind weg; es gilt nur die `config.yaml` |
 | `deletions.jsonl` | Löschjournal, nur IDs (ADR-0076) | eine zurückgespielte Datenbank bringt gelöschte Sessions und Gedächtnis zurück; siehe unten |
+| `sessions.db` (bei `sqlite:///sessions.db`; der Name ist frei) | der SQLite-Session-Store: Session-Inhalte und die Memory-Outbox, nur für den Besitzer lesbar (0600). Bei laufendem Router nur mit `sqlite3 sessions.db ".backup /backup/sessions.db"` kopieren; eine einfache Kopie kann verpassen, was noch in `sessions.db-wal` steht. Bei gestopptem Router genügt eine Kopie der Datei | gespeicherte Sessions und offene Memory-Aufträge sind weg; der Router legt einen leeren Store an |
 | `usage.json` | Nutzung je Client und Monat, auch die Cloud-Ausgaben je Anbieter | das monatliche Cloud-Budget beginnt wieder bei null |
 | `metrics.json`, `perf.json` | kumulierte Zähler; gemessene Geschwindigkeit je Modell und Knoten für den Katalog | Zähler und Geschwindigkeitswerte beginnen von vorn |
 | `events.jsonl` | das Ereignis- und Entscheidungsprotokoll, das die Web-UI zeigt | nur Verlauf |
@@ -277,7 +298,8 @@ Die optionale Entscheidungsaufzeichnung schreibt an ihren eigenen Pfad (`decisio
 Löschungen stehen ausserhalb der Datenbank, nur als IDs, in `deletions.jsonl` im Zustandsordner des Routers
 (`router.state_dir`, sonst neben der `config.yaml`; ADR-0076):
 
-1. **PostgreSQL zurückgespielt** (Session-Store und Memory-Outbox): den Router wie gewohnt starten. Bevor die Outbox etwas
+1. **Session-Datenbank zurückgespielt** (PostgreSQL, oder die SQLite-Datei bei gestopptem Router zurückkopiert und ihre
+   `-wal`- und `-shm`-Dateien entfernt): den Router wie gewohnt starten. Bevor die Outbox etwas
    sendet, wendet er das Journal erneut an; das Log nennt, wie viele Sessions und Operationen wieder da waren und erneut
    gelöscht sind. `deletions.jsonl` nie älter als die Datenbank zurückspielen - aus dem Datenbank-Restore heraushalten.
 2. **Hindsight zurückgespielt**: Dokumente gelöschter Operationen sind wieder da. Seitenweise erneut löschen:

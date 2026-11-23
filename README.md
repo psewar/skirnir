@@ -104,6 +104,10 @@ a safe configuration with the role `standard`. Put the TLS certificate and key f
 `sudo systemctl enable --now skirnir-router` and open `https://<name>:11435/` (user `admin`). Details, TLS options and the
 firewall: [docs/install-router.md](docs/install-router.md).
 
+**Or as a container** (Docker, Podman, Unraid, TrueNAS): `docker build -t skirnir-router router/`, the same `--init` in a
+one-off container, then `docker compose up -d` with [router/compose.yaml](router/compose.yaml). The image is unprivileged,
+digest-pinned and hash-locked; steps in [docs/install-router.md#container](docs/install-router.md#container).
+
 **3. Add a GPU node.** Install Ollama and keep it on loopback (`OLLAMA_HOST=127.0.0.1`), then pull the model of the role:
 `ollama pull qwen3:8b`. Download the agent from the [release](https://github.com/psewar/skirnir/releases):
 
@@ -185,13 +189,14 @@ Vulnerability reports: [SECURITY.md](SECURITY.md).
 
 | Document | Content |
 |---|---|
-| [docs/install-router.md](docs/install-router.md) | Requirements, `install.sh`, first configuration, TLS, firewall, secrets, command reference, manual install, LXC deploy |
+| [docs/install-router.md](docs/install-router.md) | Requirements, `install.sh`, first configuration, TLS, firewall, secrets, command reference, manual install, container (Docker, Podman), LXC deploy |
 | [docs/install-agent.md](docs/install-agent.md) | GPU nodes on Windows and Linux, Ollama, approval, update key |
 | [docs/configuration.md](docs/configuration.md) | Client identities, roles and tiers, scheduler and admission, auto role, cloud tiers |
 | [docs/clients.md](docs/clients.md) | Home Assistant, Node-RED, OpenAI and Anthropic clients, Claude Code, the `routing` block |
 | [docs/operations.md](docs/operations.md) | Web UI, metrics, Home Assistant entities, agent and Ollama updates, key rotation, backup and restore, names, measurements |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Status codes, pending agents, TLS errors, logs, memory states |
 | [docs/reference.md](docs/reference.md) | Interfaces, GPU guard, optional memory and session features, rerank, OpenAI-compatible nodes, limits, repo layout |
+| [docs/protocol.md](docs/protocol.md) | Router–agent protocol: login, frames, messages, JSON Schemas, conformance tests (for writing an agent of your own) |
 | [docs/adr/](docs/adr/README.md) | Architecture Decision Records: why Skirnir is built this way |
 | [agent/README.md](agent/README.md) | Agent internals (German) |
 

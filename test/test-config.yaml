@@ -34,7 +34,7 @@ router:
     max_cloud_data_class: internal
     credential_scan: block
     egress_allow: ["127.0.0.1"]
-    providers:
+    providers:                   # budget_month_chf and price_chf_per_m below: the old names on purpose (aliases, ADR-0105)
       testcloud:  { kind: openai,    base_url: "http://127.0.0.1:21010/v1", api_key_env: CLOUD_TEST_KEY,  secrets_file: secrets.env, budget_month_chf: 1.9, warn_at_percent: 50, max_inflight: 4 }
       testclaude: { kind: anthropic, base_url: "http://127.0.0.1:21010",    api_key_env: CLAUDE_TEST_KEY, secrets_file: secrets.env, budget_month_chf: 5.0 }
   wol:

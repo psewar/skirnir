@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent update order (router to agent, text frame)",
+  "description": "Orders a self-update of an approved, idle agent (ADR-0020). The agent trusts only the operator's signature over manifest, never the router: it verifies signature against its configured public keys, takes the file entry for its os and arch from the manifest, refuses a downgrade, downloads url with the bearer token (valid 15 minutes), checks size and SHA-256 against the manifest, and reports progress in the heartbeat field update. It runs one order at a time.",
+  "type": "object",
+  "properties": {
+    "t": {"const": "update", "description": "Message type."},
+    "version": {"type": "string", "description": "Version to install; must equal the manifest's version.", "x-since-agent": "0.8.0"},
+    "file": {"type": "string", "description": "File name of the binary in the manifest.", "x-since-agent": "0.8.0"},
+    "url": {"type": "string", "description": "Download URL on the router (/v1/agent/binary/<file>).", "x-since-agent": "0.8.0"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the binary, hex; must equal the manifest entry.", "x-since-agent": "0.8.0"},
+    "size": {"type": "integer", "minimum": 0, "description": "Size of the binary in bytes (0 when the manifest has none).", "x-since-agent": "0.8.0"},
+    "token": {"type": "string", "description": "Bearer token for url, bound to this identity and file, valid 15 minutes. A secret: agents must not log it.", "x-since-agent": "0.8.0"},
+    "manifest": {"type": "string", "description": "The signed release manifest, exactly the signed bytes (compact JSON).", "x-since-agent": "0.8.0"},
+    "signature": {"type": "string", "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$", "description": "Ed25519 signature of the operator over manifest, standard base64.", "x-since-agent": "0.8.0"}
+  },
+  "required": ["t", "version", "file", "url", "sha256", "size", "token", "manifest", "signature"],
+  "additionalProperties": true,
+  "examples": [
+    {
+      "t": "update",
+      "version": "0.35.3",
+      "file": "skirnir-agent-windows-amd64.exe",
+      "url": "https://router.example.net:11435/v1/agent/binary/skirnir-agent-windows-amd64.exe",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 12345678,
+      "token": "example-token",
+      "manifest": "{\"files\":[],\"version\":\"0.35.3\"}",
+      "signature": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJCrze8SNFZ4kA=="
+    }
+  ]
+}

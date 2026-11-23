@@ -1,9 +1,12 @@
 # Optional persistent sessions (PR 1)
 
-> Decisions (why): [ADR-0027](../docs/adr/0027-optional-session-store-in-postgresql.md)
+> Decisions (why): [ADR-0027](../docs/adr/0027-optional-session-store-in-postgresql.md) (optional store),
+> [ADR-0114](../docs/adr/0114-the-session-store-is-chosen-by-its-connection-url.md) (engine chosen by the URL, SQLite for
+> single hosts), [ADR-0122](../docs/adr/0122-the-sqlite-session-store-runs-the-postgresql-statements-on-one-connection.md)
+> (how the SQLite store is built)
 
-Skirnir can store **explicit client events** in PostgreSQL. It never records ordinary
-inference requests automatically. For separately enabled, explicit `skirnir-managed`
+Skirnir can store **explicit client events** in PostgreSQL or, on a single host, in a SQLite file. It never records
+ordinary inference requests automatically. For separately enabled, explicit `skirnir-managed`
 inference, see [managed context](managed-context.md). Default: off, no database or `asyncpg` dependency.
 OpenAI, Anthropic, Ollama, streaming and tool-call translation are unchanged.
 
@@ -15,6 +18,20 @@ a different principal. A session ID is never a credential.
 
 ## Enable
 
+The store's URL, in the environment variable that `session_store.dsn_env` names, picks the engine
+(`session_url.py`, `session_store.open_session_store`):
+
+| URL | Engine | For |
+| --- | --- | --- |
+| `postgresql://...` or `postgres://...` | PostgreSQL over `asyncpg`, unchanged | existing installations, several routers or a database host |
+| `sqlite:///sessions.db` | a SQLite file in the router's state folder (`router.state_dir`) | a single host without a database server |
+| `sqlite:////var/lib/x/sessions.db` | a SQLite file at that absolute path (on Windows `sqlite:///C:/x/sessions.db`) | a file outside the state folder |
+
+Any other scheme, a SQLite URL with a query, a fragment, `..` or `:memory:` stops the start with a fixed message that
+never contains the URL; `router.py --posture` names it in advance (`session_store_url_unsupported`).
+
+PostgreSQL:
+
 1. Use Python 3.11+ and install `pip install -r router/requirements-session.txt`.
    Ordinary installations keep using `router/requirements.txt`.
 2. Provide a dedicated PostgreSQL database (tested in CI with PostgreSQL 16;
@@ -24,7 +41,17 @@ a different principal. A session ID is never a credential.
    databases and protect credentials through the service's environment/secret manager.
 3. Set `SKIRNIR_SESSION_DSN` to the connection URI through the service environment.
    Do not put connection strings in config.yaml, logs, shell history or the repo.
-4. Enable the backend and grant specific projects to specific authenticated clients:
+
+SQLite (single host):
+
+1. Nothing to install: Python's `sqlite3` with SQLite 3.37 or newer (Debian 12 has 3.40; the start checks it).
+2. Set `SKIRNIR_SESSION_DSN=sqlite:///sessions.db` in the service environment. The file is created on first start,
+   owner-only (0600); an existing file and its `-wal`/`-shm` files are tightened to 0600 at every start, and a symbolic
+   link in place of the file is refused. Its folder must exist and be on a local disk (WAL mode).
+3. `min_pool_size`/`max_pool_size` do not apply; `timeout_s` bounds each call and the wait for another process
+   holding the file.
+
+Then enable the backend and grant specific projects to specific authenticated clients:
 
 ```yaml
 router:
@@ -113,6 +140,36 @@ automatic write retry; a response lost after commit can safely be retried with t
 same event ID. Cancellation rolls back open transactions; a commit whose result was
 lost is resolved by idempotent retry. Session responses have `Cache-Control: no-store`.
 
+## SQLite engine
+
+`sqlite_store.SqliteSessionStore` provides every method of the `SessionStore` and `OutboxStore` protocols with the
+PostgreSQL store's own code (`CoreStore`, `ManagedStore`, `ReliabilityStore`, `ExchangeStore`); only the connection
+differs ([ADR-0122](../docs/adr/0122-the-sqlite-session-store-runs-the-postgresql-statements-on-one-connection.md)):
+
+* One `sqlite3` connection, used only by one worker thread, so the event loop never blocks. Every store call holds one
+  asyncio lock for its whole block and runs as one `BEGIN IMMEDIATE` transaction: one writer at a time, which is what
+  the row locks, advisory locks and `SKIP LOCKED` achieve between PostgreSQL connections. Leases, the single pending
+  turn, idempotent appends, outbox claims and exact outbox totals keep their meaning. A second process on the same file
+  (a backup, an accidental second router) waits up to `timeout_s` (`busy_timeout`) instead of interleaving. Switching
+  a new file to WAL is the one lock SQLite does not queue behind the busy timeout; the store asks again until it has WAL
+  or `timeout_s` has passed, so several processes starting on a new file at once all come up.
+* Cancellation or a timeout queues the rollback in the worker thread behind the statement that may still run and
+  before the next caller's `BEGIN`; the caller gets 503 like on PostgreSQL.
+* `sqlite_store.translate` turns each PostgreSQL statement into SQLite once (cached): parameters, schema prefix, casts,
+  intervals in microseconds, arrays as JSON lists (`json_each`), `jsonb` operators, row locks and advisory locks.
+  Columns PostgreSQL fills with `DEFAULT now()` are set to the transaction's start in the `INSERT`.
+* Values are stored as UUID text, JSON text (checked by `json_valid`), integer microseconds (UTC) and 0/1, in STRICT
+  tables; the store returns them as asyncpg does (UUID, timezone-aware datetime, dict/list, bool), so API responses
+  have the same shape.
+* `trusted_schema` off (no trigger or view in the file may call an application function), foreign keys on,
+  `secure_delete` on (deleted content is overwritten in the database file instead of staying in free pages), WAL with
+  `synchronous=FULL` (a reported commit is on disk). Older page versions stay in the `-wal` file until the next
+  checkpoint (automatic after about 4 MiB of writes, and when the router stops), as PostgreSQL keeps them in dead rows
+  and WAL segments until vacuum and recycling; backups keep what they copied. Unicode `lower()` is registered for search
+  and discovery.
+* Substring search compares against the stored JSON text, whose key order and spacing differ slightly from PostgreSQL's
+  `jsonb` text; the content itself matches the same way.
+
 ## Migrations, backups, rollback
 
 `session_migrations.py` contains ordered migrations and a schema-version table.
@@ -121,6 +178,16 @@ multiple routers starting concurrently. Errors roll back the whole migration. A
 schema version newer than the binary is rejected. Do not edit released migrations;
 append migrations for compaction versions or additional session modes in later PRs.
 The dedicated schema avoids modifications to existing application tables.
+
+SQLite has its own `sqlite_migrations.py` (migration 1 is the schema PostgreSQL reaches after its migrations 1-6), run
+inside `BEGIN IMMEDIATE`, with the same rules: atomic, a newer schema is refused, released migrations stay unchanged. A
+later schema change adds a migration to both files.
+
+Back up a SQLite store with `sqlite3 sessions.db ".backup /backup/sessions.db"` (or the router stopped and a copy of the
+file); a plain copy of a running store can miss what is still in the `-wal` file. Restore it with the router stopped and
+the old `-wal`/`-shm` files removed; the start replays the deletion journal as for PostgreSQL. The file and its backups
+hold session content and the memory outbox: protect them like the database. `router.py --posture` reports the file's
+place and mode (`session_store_sqlite_file`) and a file others can read (`session_store_file_readable`).
 
 Back up this schema/database before upgrades. Disabling the backend and restarting,
 or reverting to the previous router binary, leaves stored data untouched. A downgrade
@@ -149,13 +216,15 @@ Raw history, compacted context and external long-term knowledge remain separate.
 
 ```sh
 python test/selftest_sessions.py           # no database/asyncpg needed
+python test/integration_sessions.py        # SQLite half always; PostgreSQL half with the variable below
 pip install -r router/requirements-session.txt
 # Set SKIRNIR_TEST_SESSION_DSN to a disposable local PostgreSQL database first.
 python test/integration_sessions.py
 ```
 
-The integration test skips without that environment variable; CI supplies a fresh
-PostgreSQL 16 service and exercises real transactions, concurrent/idempotent writers,
+The contract classes run once per engine (`test/store_engines.py`): SQLite on a fresh file per test in every CI run,
+PostgreSQL when the variable is set; CI supplies a fresh PostgreSQL 16 service and exercises real transactions,
+concurrent/idempotent writers,
 owner isolation through HTTP, restart persistence, bounded reads, archive/delete,
 timeout/cancellation rollback, migration rollback and redacted failures. Tests use
 synthetic owners and remove their sessions; never point them at production data.

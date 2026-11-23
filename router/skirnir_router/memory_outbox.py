@@ -1,10 +1,12 @@
 """Persistent retain submission and bounded multi-router retry worker with verified delivery.
 
-A job is sent (pending -> processing -> accepted), then verified: the worker asks Hindsight whether
-the extraction completed (accepted -> completed). An extraction Hindsight reports as failed - e.g.
-because the local model was busy for hours - is resubmitted later under a new upstream operation id
+A job is sent (pending -> processing -> accepted), then verified: the worker asks the memory backend
+whether the extraction completed (accepted -> completed). An extraction the backend reports as failed -
+e.g. because the local model was busy for hours - is resubmitted later under a new upstream operation id
 with the same document id, a bounded number of times. Functions return their result or a Problem
-(outcome.py); the worker records each outcome as a fixed state and diagnostic category on the row.
+(outcome.py); the worker records each outcome as a fixed state and diagnostic category on the row. The
+backend is reached only through memory_backend.MemoryBackend and its typed values (OpState); the job ledger only
+through session_store.OutboxStore, which every session store engine provides (PostgreSQL, SQLite; ADR-0114).
 """
 import asyncio
 import hashlib
@@ -14,6 +16,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid5
 
 from . import metrics
+from .memory_backend import CANCELLED, COMPLETED, FAILED, NOT_FOUND
 from .outcome import denied, failed
 
 
@@ -22,7 +25,7 @@ def digest(payload):
 
 
 def upstream_id(operation, row):
-    """Upstream operation id of the current send: the job's own UUID until Hindsight reported an extraction as failed,
+    """Upstream operation id of the current send: the job's own UUID until the backend reported an extraction as failed,
     then a new id per resubmission (Hindsight answers a known id with its old state and would never retry it).
     The document id stays the job's UUID, so a resubmission replaces the same document and deletion keeps working."""
     attempt = row.get("upstream_attempts") or 0
@@ -66,19 +69,19 @@ async def submit(service, scope, event_id, content, confirmed, provenance=None, 
 
 
 async def deliver(service, scope, operation, row):
-    """Hand one claimed send to Hindsight. (status, error category) for the outbox row."""
+    """Hand one claimed send to the memory backend. (status, error category) for the outbox row."""
     if service.bank(scope) != row["scope"].get("__bank"):
         return "revoked", "policy_changed"   # namespace binding changed
     if row.get("delete_requested"):
         if not (service.current(scope) and scope.delete):
             return "revoked", "policy_changed"
-        upstream = await service.client.operation(service.bank(scope), upstream_id(operation, row), authorize=lambda: service.current(scope))
+        upstream = await service.backend.operation(service.bank(scope), upstream_id(operation, row), authorize=lambda: service.current(scope))
         if failed(upstream):
             return ("revoked", "policy_changed") if upstream.status == 403 else ("retry", upstream.kind)
-        # Delete only when no write can follow: the extraction is completed, or Hindsight gave up on it.
-        if upstream.get("status") not in ("completed", "failed"):
+        # Delete only when no write can follow: the extraction is completed, or the backend gave up on it.
+        if upstream.status not in (COMPLETED, FAILED):
             return "retry", "remote_pending"
-        deleted = await service.client.delete_document(service.bank(scope), str(operation), authorize=lambda: service.current(scope))
+        deleted = await service.backend.delete_document(service.bank(scope), str(operation), authorize=lambda: service.current(scope))
         if failed(deleted):
             return ("revoked", "policy_changed") if deleted.status == 403 else ("retry", deleted.kind)
         return "deleted", None
@@ -88,35 +91,35 @@ async def deliver(service, scope, operation, row):
             and not rejected_content(payload["content"], service.cfg, private_addresses=scope.private_addresses)
             and not rejected_content(payload.get("context", ""), service.cfg, private_addresses=scope.private_addresses)):
         return "revoked", "policy_changed"
-    sent = await service.client.retain(service.bank(scope), payload["content"], upstream_id(operation, row), document_id=str(operation),
-                                       confirmed=payload["confirmed"], provenance=payload.get("provenance"),
-                                       **({"shared_observations": True} if payload.get("shared_observations") else {}),
-                                       context=payload.get("context"), timestamp=payload.get("timestamp"),
-                                       authorize=lambda: service.current(scope, write=True))
+    sent = await service.backend.retain(service.bank(scope), payload["content"], upstream_id(operation, row), document_id=str(operation),
+                                        confirmed=payload["confirmed"], provenance=payload.get("provenance"),
+                                        **({"shared_observations": True} if payload.get("shared_observations") else {}),
+                                        context=payload.get("context"), timestamp=payload.get("timestamp"),
+                                        authorize=lambda: service.current(scope, write=True))
     if failed(sent):
         return ("revoked", "policy_changed") if sent.status == 403 else ("retry", sent.kind)
     return "accepted", None
 
 
 async def verify(service, scope, operation, row):
-    """Ask Hindsight whether the accepted extraction completed. (status, error category, delay, upstream_attempts)."""
+    """Ask the backend whether the accepted extraction completed. (status, error category, delay, upstream_attempts)."""
     cfg = service.cfg
     if service.bank(scope) != row["scope"].get("__bank"):
         return "revoked", "policy_changed", 0, None
-    upstream = await service.client.operation(service.bank(scope), upstream_id(operation, row), authorize=lambda: service.current(scope))
+    upstream = await service.backend.operation(service.bank(scope), upstream_id(operation, row), authorize=lambda: service.current(scope))
     if failed(upstream):
         if upstream.status == 403:
             return "revoked", "policy_changed", 0, None
         return "accepted", upstream.kind, verify_delay(cfg, row), None   # status not readable right now: check again later
-    status = upstream.get("status")
-    if status == "completed":
+    status = upstream.status
+    if status == COMPLETED:
         return "completed", None, 0, None
-    if status in ("failed", "cancelled"):
+    if status in (FAILED, CANCELLED):
         attempt = (row.get("upstream_attempts") or 0) + 1
         if attempt - (row.get("upstream_base") or 0) > cfg.upstream_attempts:
             return "dead", "upstream_failed", 0, None
         return "pending", "upstream_failed", resubmit_delay(cfg, attempt - (row.get("upstream_base") or 0)), attempt
-    if status == "not_found":   # Hindsight no longer knows the operation: completion cannot be confirmed
+    if status == NOT_FOUND:   # the backend no longer knows the operation: completion cannot be confirmed
         return "dead", "remote_unknown", 0, None
     # The value comes from our own record(): always an ISO timestamp with time zone once the job was accepted.
     accepted_at = datetime.fromisoformat(row["accepted_at"])

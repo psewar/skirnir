@@ -16,6 +16,7 @@ from aiohttp import web
 
 from . import context_check, proxy, state
 from .common import anthropic_error, anthropic_error_body, log, parse_tool_args, read_json
+from .shape import Shape
 
 KEEPALIVE_S = 15            # Default for router.anthropic.keepalive_s (Prefill for 196k context up to ~2 min)
 TOOL_ERROR_PREFIX = "Error: "
@@ -251,11 +252,12 @@ def sse(event, obj):
     return f"event: {event}\ndata: {json.dumps(obj, ensure_ascii=False)}\n\n".encode()
 
 
-class AnthropicShape:
+class AnthropicShape(Shape):
     """Formats /api/chat responses as Anthropic Message or SSE event sequence (message_start, blocks, message_delta,
     message_stop). A block is closed before the next begins; indices run continuously."""
     name = "anthropic"
     stream_content_type = "text/event-stream"
+    reports_abort_in_stream = True   # `event: error` (stream_error)
     error = staticmethod(anthropic_error)
 
     def __init__(self, model, keepalive_s=KEEPALIVE_S, show_thinking=True):

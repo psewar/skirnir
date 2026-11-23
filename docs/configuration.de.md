@@ -7,7 +7,7 @@
 | Datei | Zweck |
 |---|---|
 | `/etc/skirnir-router/config.yaml` | Die Konfiguration (root, 0640: der Router liest sie über seine Gruppe `skirnir-router`, ADR-0086). Ausgangspunkt ist [router/config.minimal.yaml](../router/config.minimal.yaml) (ein kleiner, sicherer Start: eine Rolle, ein Client; `router.py --init` füllt sie aus, siehe [install-router.de.md](install-router.de.md#erste-konfiguration)) oder [router/config.example.yaml](../router/config.example.yaml) (die volle Referenz mit jeder Option und ihrem Kommentar). |
-| `/var/lib/skirnir-router/roles.yaml` | Overrides, die die Web-UI in den Zustandsordner des Routers schreibt (`router.state_dir`); überlebt Deploys und Aktualisierungen. Der Router schreibt alle eigenen Dateien dorthin - `roles.yaml`, `nodes.json`, Journale, Metriken - und nichts in `/etc/skirnir-router` (ADR-0086). Ohne `state_dir` liegen sie neben der `config.yaml`, was nur für die Entwicklung taugt: das Konto des Dienstes kann `/etc/skirnir-router` nicht schreiben. |
+| `/var/lib/skirnir-router/roles.yaml` | Overrides, die die Web-UI in den Zustandsordner des Routers schreibt (`router.state_dir`); überlebt Deploys und Aktualisierungen. Der Router schreibt alle eigenen Dateien dorthin - `roles.yaml`, `nodes.json`, Journale, Metriken, einen SQLite-Session-Store, den eine relative `sqlite:///`-URL nennt (ADR-0114) - und nichts in `/etc/skirnir-router` (ADR-0086). Ohne `state_dir` liegen sie neben der `config.yaml`, was nur für die Entwicklung taugt: das Konto des Dienstes kann `/etc/skirnir-router` nicht schreiben. |
 | `/etc/skirnir-router/secrets.env` | Secrets als Umgebung (root, 0640 für die Gruppe des Routers; [install-router.de.md](install-router.de.md#secrets)). |
 
 Rollen, Katalog und die meisten Laufzeit-Einstellungen sind in der UI editierbar; die UI schreibt sie in die `roles.yaml`.
@@ -105,6 +105,18 @@ roles:
   Passt-Prüfung: `VRAM-Bedarf = Gewichte + Kontext-Kosten × num_ctx/1000 + 0,8 GiB`. Gewichte und Kontext-Kosten je Modell
   stehen im Katalog (`models:`), gemessen per UI-Knopf **Messen** (lädt bei 8k und 32k, liest `/api/ps`) oder geschätzt.
   Anhaltspunkte: [operations.de.md](operations.de.md#messwerte-als-anhaltspunkt).
+- **Benchmark.** Der UI-Knopf **Benchmark** misst Erzeugungs- und Prompt-Tempo eines geladenen Modells (ein Aufwärmlauf, zwei
+  Läufe, 200 Tokens, Temperatur 0) mit `router.benchmark.prompt` (Router 0.37.0,
+  [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)). Vorgabe ist der deutsche Prompt aller
+  bisherigen Messungen, unverändert. Tokens pro Sekunde hängen von der Sprache von Prompt und Antwort ab (Tokenizer zerlegen
+  Sprachen in unterschiedlich viele Tokens); setze also einen Prompt in der Sprache deiner Clients und vergleiche nur
+  Ergebnisse mit derselben `prompt_id`, die jedes Ergebnis festhält.
+
+  ```yaml
+  router:
+    benchmark:
+      prompt: "Explain in about 200 words what a network router does and how it differs from a switch."
+  ```
 - **Busy.** Ein Knoten ist `busy`, wenn fremdes VRAM (belegt − Ollama − Desktop-Grundverbrauch) über der Schwelle liegt oder die
   GPU ohne Router-Anfragen ausgelastet ist. Dann laufen nur `busy_ok`-Stufen; nicht-`busy_ok`-Modelle werden alle 30 s entladen.
   Der Desktop-Grundverbrauch wird je Knoten gelernt (Median der Stundenmittel bei ruhiger GPU) und durch einen Policy-Wert gedeckelt.
@@ -177,6 +189,9 @@ roles:
   anstellen würde, auf die gewartet wird), und das Entscheidungslog hält `decision_observe` fest: Klasse, Sicherheit, die
   erste freie tiefere Stufe derselben Rolle und `would_fallback` für die Klassen in `observe_light`. Am Routing ändert sich
   nichts; es soll erst messen, wie oft ein freies kleineres Modell gereicht hätte, bevor der Router danach handelt.
+  Ohne `observe_light` setzt die Konfigurationsprüfung `[standard, assist]`, beschränkt auf die Namen unter `options` (Router
+  0.37.0, [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)); heißen die Rollen anders, nenne
+  die leichten Klassen selbst. Eine angegebene Liste gilt wie angegeben, `[]` heißt: keine Klasse gilt als leicht.
   `observe_all` geht weiter: Jede Anfrage an `/api/chat` oder `/api/generate` wird beim Start im Hintergrund eingeordnet, und
   an ihrem Ende hängt der Router eine Zeile an `requests.jsonl` neben der Konfiguration (`observe_path`): Klasse, Dauer,
   Wartezeit, Token, Denken, Zahl der Werkzeuge, Client, Rolle, Ergebnis - keine Prompt-Inhalte. Eigene Datei, damit das
@@ -280,7 +295,7 @@ E-Mail, IP, URL, lange Zahlen) und mit Gruppen-Hash; echte Rollenwahlen der Clie
 
 ## Cloud als Stufe in Rollen
 
-Cloud-Anbieter sind **Modelle im Katalog** (`"openai:gpt-5-mini": {cloud: openai, provider_model: gpt-5-mini, price_chf_per_m: {...}}`)
+Cloud-Anbieter sind **Modelle im Katalog** (`"openai:gpt-5-mini": {cloud: openai, provider_model: gpt-5-mini, price_per_m: {...}}`)
 und liegen als Stufe in genau den Rollen, die es dürfen. Konkrete Cloud-Modellnamen sind nicht direkt aufrufbar (404), nur über
 Rollen. Ein kaltes lokales Modell gewinnt vor der Cloud. Drei Fälle, in denen die Cloud zum Zug kommt: kein lokaler Knoten kann
 (alle spielen oder aus), eine Fähigkeit fehlt lokal, oder der Client verlangt es (`routing.execution: cloud`).
@@ -304,9 +319,9 @@ Schranken (`router.cloud`):
   den Text. Eine deklarierte `routing.data_class` wird nie übergangen.
 - **Credential-Scan** (`block`): Prompts mit erkennbaren Schlüsseln (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
   gehen nicht in die Cloud; lokal laufen sie normal.
-- **Budget** je Anbieter und Monat, in der Währung der Katalogpreise (der Router rechnet keine Währungen um; die Endung
-  `_chf` von Schlüsseln, Feldern und Metriken und die Einheit des HA-Kostensensors sind historisch); erschöpft =
-  Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem. Kosten je Anfrage in Usage und Metriken.
+- **Budget** je Anbieter und Monat (`budget_month`), in der Währung der Katalogpreise (`price_per_m`, je Million Tokens);
+  erschöpft = Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem. Kosten je Anfrage in Usage und Metriken.
+  Siehe [Währung](#währung-von-preisen-und-budgets).
 - **Egress-Allowlist** für `base_url` (+ `egress_allow`), Schlüssel nur aus `secrets.env`, nie im Log; Circuit Breaker wie bei
   Knoten; Schattenläufe gehen nie in die Cloud.
 - **Transport:** Anbieter benötigen den endgültigen HTTPS-Endpunkt. HTTP ist nur für explizit erlaubte, wörtliche
@@ -344,6 +359,35 @@ Modell noch und braucht `none`. Der Gedanke des Anbieters (`reasoning_content`, 
 kommt als Ollamas `thinking` an (`reasoning` in der OpenAI-Form, ein Thinking-Block in der Anthropic-Form), außer für
 einen Client, der `think: false` gesendet hat.
 
+### Währung von Preisen und Budgets
+
+Router 0.37.0, [ADR-0105](adr/0105-currency-neutral-cost-keys.md): Der Router rechnet nie Währungen um. Preise
+(`models.<m>.price_per_m`), Budgets (`router.cloud.providers.<p>.budget_month`), Ausgaben und Usage-Kosten stehen alle in der
+Währung, in der du die Preise schreibst. `router.cloud.currency` (Vorgabe `CHF`, drei Großbuchstaben, auch in der Web-UI)
+nennt sie für die Anzeige: Die Web-UI zeigt sie bei jedem Betrag, der Anbieter-Schnappschuss trägt `currency`, und
+`/metrics` hat `skirnir_cloud_currency_info`. Ändern rechnet nichts um; Preise und Budgets mit ändern.
+
+```yaml
+router:
+  cloud:
+    currency: EUR
+    providers:
+      openai: { kind: openai, base_url: https://api.openai.com/v1, api_key_env: OPENAI_API_KEY, budget_month: 20 }
+models:
+  "openai:gpt-5-mini": { cloud: openai, price_per_m: { input: 0.25, output: 2.0 } }
+```
+
+- **Alte Namen.** Bis Router 0.36 hießen die Schlüssel `budget_month_chf` und `price_chf_per_m`. Sie gelten weiter mit
+  derselben Bedeutung in `config.yaml`, in `roles.yaml` (Katalogeinträge und die Web-UI-Einstellung
+  `router.cloud.providers.<p>.budget_month_chf`) und in `PUT /admin/config`. Die Web-UI schreibt die neuen Namen, ein
+  gespeicherter alter Name wandert also beim nächsten Speichern mit.
+- **Beide Namen an einer Stelle:** Derselbe Wert ist erlaubt; verschiedene Werte werden abgelehnt, die Meldung nennt beide
+  Schlüssel. Über Dateien hinweg gibt es keinen Konflikt: Ein Wert in `roles.yaml` übersteuert `config.yaml`, gleich welchen
+  Namen jede Datei nutzt.
+- **Feld- und Metriknamen** behalten die Endung `_chf` (`spend_month_chf`, `budget_month_chf`, `cost_chf`,
+  `skirnir_cloud_*_chf*`), damit Dashboards, Alarme und Home-Assistant-Entitäten weiterlaufen; ihre Werte stehen in der
+  eingestellten Währung. Der Home-Assistant-Kostensensor hat weiterhin die Einheit `CHF`.
+
 ### Institutionelle Anbieter
 
 Router 0.34.0, [ADR-0099](adr/0099-institutional-providers-take-their-own-data-class-limit.md):
@@ -363,7 +407,7 @@ router:
         base_url: https://llm.example.org/v1
         api_key_env: INSTITUTION_API_KEY
         secrets_file: /etc/skirnir-router/secrets.env
-        budget_month_chf: 0
+        budget_month: 0
 ```
 
 - Die eigene `max_data_class` **ersetzt** `max_cloud_data_class` für diesen Anbieter. Erlaubt ist jede Klasse unter der

@@ -67,7 +67,7 @@ class IsolationRotationTests(MemoryHarness):
         self.store.create.return_value = self.session
         self.store.get.return_value = self.session
         self.session_patches = [patch.object(session_api.PostgresSessionStore, "open", return_value=self.store),
-                                patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "test-only"})]
+                                patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "postgresql://test-only"})]
         for p in self.session_patches:
             p.start()
         api, ctl = app.build_apps()

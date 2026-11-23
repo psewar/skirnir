@@ -144,6 +144,54 @@ Eigenschaften:
 - Eine 8-GB-Karte trägt rechnerisch nur die 8b/4b-Tiers. Wird also automatisch
   zum "busy-Ausweich- und Assist-Knoten", ohne Sonderregel.
 
+### Node assessment as implemented (router 0.37.1, ADR-0108)
+
+The draft above has grown; this is how the code decides today. One pure function, `scheduler.assess(node, tier, ctx,
+now)`, judges whether a local node that offers the tier's model can serve it and returns `(None, {})` or a base code
+with the facts for the client. `candidates_for` keeps the nodes without a code, `blockers()`/`unavailable()` turn the
+codes into the 503 reason (`code`, `retry_after_s`, `blockers`, `detail`), so selection and explanation cannot differ.
+
+```
+assess(node, tier, ctx, now):
+    offline                                   -> node_offline
+    draining (agent update)                   -> node_draining
+    busy and not tier.busy_ok                 -> gpu_busy (busy_reason, game name)
+    breaker does not allow (open, or a half-open probe running)
+                                              -> node_failing
+    release of the held server (standby serves, the server's model is asked for):
+        memory pressure                       -> memory_pressure (node RAM figures)
+        agent keeps the server held for RAM   -> memory_pressure (agent's figures, agent: true)
+        else                                  -> ok, no budget (the server sizes itself to the card)
+    switch to the standby (server answers, the standby's store has the model):
+        memory pressure                       -> memory_pressure
+        else fit against card_budget_gib(node.state)
+    loaded with enough context                -> ok, no budget
+    memory pressure                           -> memory_pressure
+    fit against budget_gib (free VRAM + Ollama's own - reserve; without a GPU, ADR-0102: available RAM + Ollama's
+                            own - the larger of reserve and memory_pressure.min_free_gib)
+
+fit(need, budget):
+    need <= budget                            -> ok
+    need > empty_room_gib(free)               -> model_too_large (waiting does not help)
+    foreign VRAM > 0 and need <= budget + foreign
+                                              -> gpu_busy (busy_reason foreign_vram)
+    else                                      -> vram_full
+```
+
+The selection changes no node. Its one former side effect, moving an expired open breaker to `half_open` (one probe)
+with a journal entry, is a separate step, `probe_breakers(tiers, now, exclude, req)`, that the request path
+(`proxy._Acquire`) and a shadow run call right before they select; it reaches the same targets the selection judges
+(tiers the request does not block, targets not excluded, nodes past the state gate). Views (Home Assistant, `/metrics`,
+availability, fallback observation) never call it.
+
+Budgets share helpers: `nodes.empty_room_gib(node, state)` is the empty node minus that state's reserve, the card or,
+on a node without a GPU, its main memory (`budget_gib` without a fresh report, the residency room, the too-large test);
+`Node.card_budget_gib(state)` is the card minus reserve, desktop baseline and foreign VRAM (standby switch with the
+node's own reserve); `Node.prewarm_budget_gib(now)` is that with the free reserve on a GPU node, and the request budget
+from available RAM on a node without one. `role_possible_when_free` uses only the too-large test, since it asks past busy, draining and the breaker.
+`test/selftest_node_assessment.py` asserts over a matrix of node states that selection, explanation, blockers and probe
+agree.
+
 ## 3. Weiterleitung
 
 ```

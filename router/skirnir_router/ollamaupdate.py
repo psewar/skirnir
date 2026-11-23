@@ -247,7 +247,7 @@ async def release_swap(node, version):
             return   # Task is ongoing, aborted, or replaced
         if node.inflight > 0:
             now = time.time()
-            u.update(state="failed", message=f"Knoten wurde in {SWAP_WAIT_S // 60} min nicht leer ({node.inflight} Anfragen) - nicht getauscht",
+            u.update(state="failed", message=f"node did not become idle within {SWAP_WAIT_S // 60} min ({node.inflight} requests) - not swapped",
                      t=now, ts=_ts(now))
             e["ollama_update"] = u
             state.REG.save()
@@ -316,7 +316,7 @@ def note_version(node, version, now=None, source="poll"):
         state.MQTT_DIRTY.append(True)
     u = e.get("ollama_update") or {}
     if u.get("version") and u.get("state") not in ("done", "failed") and u["version"] == version:
-        u.update(state="done", message=f"laeuft mit {version}", t=now, ts=_ts(now))
+        u.update(state="done", message=f"running {version}", t=now, ts=_ts(now))
         e["ollama_update"] = u
         state.REG.save()
         state.remember({"event": "ollama_update", "node": e["name"], "state": "done", "version": version})

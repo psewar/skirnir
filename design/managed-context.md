@@ -62,7 +62,7 @@ EOF and the database commit. Intermediate streamed text can already be visible.
 Disconnects and ambiguous transport errors require checking persisted history;
 database commit and client receipt cannot be made atomic.
 
-A renewable PostgreSQL lease permits one in-flight turn per session, across router
+A renewable lease in the session store (PostgreSQL or SQLite) permits one in-flight turn per session, across router
 processes. Concurrent turns return 409. Interrupted turns keep their raw input and
 release/expire their lease. Retry the **same** event ID and input: no duplicate raw
 messages are appended. Once a newer message was accepted, an older failed turn
