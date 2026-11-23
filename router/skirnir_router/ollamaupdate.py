@@ -3,9 +3,11 @@ service, the Tray-App updater no longer works (runs as the user, Pro-user instal
 takes over the updater role: it knows the latest version and when a node is free.
 
 Flow
-  1. Version check: every `check_interval_h` hours GET `release_url` (GitHub-API, latest release of ollama/ollama),
-     plus the release's `sha256sum.txt` -> LATEST = {version, files: {"windows/amd64": {name, url, size, sha256}, ...}},
-     persisted in <config-dir>/ollama-latest.json (survives restarts).
+  1. Version check: every `check_interval_h` hours GET `release_url` -> LATEST = {version, files: {"windows/amd64":
+     {name, url, size, sha256}, ...}}, persisted in <config-dir>/ollama-latest.json (survives restarts). The release source
+     (`release_source`, ADR-0117) is either `github` (default: GitHub-API, latest release of ollama/ollama, plus the
+     release's `sha256sum.txt`) or `document`: a neutral release document {version, files: {"<os>/<arch>": {url, sha256,
+     size}}} at the final HTTPS URL, no redirect, at most DOCUMENT_MAX_BYTES (ADR-0124). Both yield the same LATEST.
   2. Task (UI button or rollout loop): node admitted, connected, `free`, nothing inflight. Via the tunnel goes
      {"t": "ollama-update", version, file, url, sha256, size}. The Agent downloads the archive ITSELF from its fixed source
      (GitHub) and compares the hash with the sha256sum.txt there - the router can only choose the version, not the
@@ -17,6 +19,7 @@ Flow
      first (`canary`, otherwise the one from the Agent update), the others only after `canary_clean_h` hours of clean operation.
 """
 import asyncio
+import json
 import os
 import re
 import time
@@ -27,10 +30,19 @@ from aiohttp import web
 from . import problems as problems_mod, state
 from .common import VERSION, load_json_file, log, save_json_file, state_dir
 from .outcome import bad_gateway, failed, invalid
+from .values import egress_url
 
 ASSETS = {("windows", "amd64"): "ollama-windows-amd64.zip", ("windows", "arm64"): "ollama-windows-arm64.zip",
           ("linux", "amd64"): "ollama-linux-amd64.tar.zst", ("linux", "arm64"): "ollama-linux-arm64.tar.zst"}
 LATEST = {"version": None, "checked": 0.0, "checked_ts": None, "files": {}, "error": None, "source": None}
+# Release document (release_source: document): small, strict, same version grammar as the agent (ollamaupdate.go)
+DOCUMENT_MAX_BYTES = 65536
+DOCUMENT_TIMEOUT_S = 20
+DOCUMENT_MAX_FILES = 32
+DOCUMENT_MAX_SIZE = 16 * 1024 ** 3
+VERSION_RE = re.compile(r"^[0-9]+(\.[0-9]+){1,3}([-+][0-9A-Za-z.]+)?$")
+SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+PLATFORM_RE = re.compile(r"^[a-z0-9]{1,16}/[a-z0-9]{1,16}$")
 RUNNING = ("requested", "checking", "downloading", "extracting", "ready", "swapping", "applied")
 DRAIN_S = 1800     # Agents without approval step (< 0.15.0): no new requests to the node from task until swap
 SWAP_DRAIN_S = 1800   # from "ready": how long it may take to drain, after which the router aborts (Agent waits 30 min)
@@ -79,9 +91,11 @@ def parse_checksums(txt):
 
 
 async def check_latest():
-    """Query latest version from the source (GitHub-API: tag_name, assets) including sha256sum.txt; result in LATEST."""
+    """Query latest version from the release source (GitHub-API: tag_name, assets, sha256sum.txt; or a release document);
+    result in LATEST."""
     url = _cfg().get("release_url") or ""
-    found = await _fetch_release(url) if url else invalid("modes.ollama_update.release_url is empty")
+    fetch = _fetch_document if _cfg().get("release_source") == "document" else _fetch_release
+    found = await fetch(url) if url else invalid("modes.ollama_update.release_url is empty")
     if failed(found):
         LATEST.update(error=found.message[:200], checked=time.time(), checked_ts=_ts())
         log.warning("ollama-update: version check: %s", LATEST["error"])
@@ -130,6 +144,69 @@ async def _fetch_release(url):
     return (version, files) if files else bad_gateway("no known archive in the release")
 
 
+async def _fetch_document(url):
+    """(version, {"os/arch": archive}) from a release document, or a Problem 502 with the reason. The document only names the
+    version and the expected hashes; the agent still downloads from its own source and checks that source's sha256sum.txt,
+    so a document can never hand code to a node (ADR-0021, ADR-0117)."""
+    if failed(checked := egress_url(url, "modes.ollama_update.release_url")):
+        return bad_gateway(checked.message)   # configuration load checks it too; checked again where it is used
+    headers = {"Accept": "application/json", "User-Agent": f"skirnir-router/{VERSION}"}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=DOCUMENT_TIMEOUT_S), trust_env=False) as s:
+            async with s.get(url, headers=headers, allow_redirects=False) as r:
+                if 300 <= r.status < 400:   # ADR-0048/0124: never follow; the operator enters the final URL
+                    return bad_gateway(f"release document: redirect {r.status} refused; configure the final URL")
+                if r.status != 200:
+                    return bad_gateway(f"release document: HTTP {r.status}")
+                if (r.content_length or 0) > DOCUMENT_MAX_BYTES:
+                    return bad_gateway(f"release document larger than {DOCUMENT_MAX_BYTES} bytes")
+                raw = b""
+                while len(raw) <= DOCUMENT_MAX_BYTES:   # read() returns what has arrived; stop one byte past the limit
+                    chunk = await r.content.read(DOCUMENT_MAX_BYTES + 1 - len(raw))
+                    if not chunk:
+                        break
+                    raw += chunk
+        if len(raw) > DOCUMENT_MAX_BYTES:
+            return bad_gateway(f"release document larger than {DOCUMENT_MAX_BYTES} bytes")
+        doc = json.loads(raw.decode("utf-8"))
+    except (aiohttp.ClientError, asyncio.TimeoutError, UnicodeDecodeError, ValueError, RecursionError) as e:  # exception-ok: network boundary and the untrusted JSON (deep nesting raises RecursionError)
+        return bad_gateway(f"release document: {e.__class__.__name__}")
+    return parse_document(doc)
+
+
+def parse_document(doc):
+    """Check a release document {version, files: {"<os>/<arch>": {url, sha256, size}}} -> (version, files) in the same shape
+    as the GitHub source, or a Problem 502. Platforms the agent has no archive for are skipped; a malformed entry for a
+    known platform refuses the whole document."""
+    if not isinstance(doc, dict) or not isinstance(doc.get("version"), str) or not isinstance(doc.get("files"), dict):
+        return bad_gateway("release document: expected {version, files}")
+    version = doc["version"]
+    if not VERSION_RE.match(version):
+        return bad_gateway("release document: version is not a version number")
+    if len(doc["files"]) > DOCUMENT_MAX_FILES:
+        return bad_gateway(f"release document: more than {DOCUMENT_MAX_FILES} files")
+    files = {}
+    for platform, entry in doc["files"].items():
+        if not isinstance(platform, str) or not PLATFORM_RE.match(platform):
+            return bad_gateway("release document: file keys must be <os>/<arch>")
+        name = ASSETS.get(tuple(platform.split("/")))
+        if name is None:
+            continue
+        if not isinstance(entry, dict) or set(entry) - {"url", "sha256", "size"}:
+            return bad_gateway(f"release document: {platform}: expected {{url, sha256, size}}")
+        if failed(link := egress_url(entry.get("url"), f"release document: {platform}.url")):
+            return bad_gateway(link.message)
+        if link.name != name:   # the agent fetches exactly this archive name from its own source
+            return bad_gateway(f"release document: {platform}.url must end in {name}")
+        if not isinstance(entry.get("sha256"), str) or not SHA256_RE.match(entry["sha256"]):
+            return bad_gateway(f"release document: {platform}.sha256 must be 64 hex digits")
+        size = entry.get("size", 0)
+        if type(size) is not int or not 0 <= size <= DOCUMENT_MAX_SIZE:
+            return bad_gateway(f"release document: {platform}.size must be a byte count")
+        files[platform] = {"name": name, "url": str(link), "size": size, "sha256": entry["sha256"].lower()}
+    return (version, files) if files else bad_gateway("no known archive in the release document")
+
+
 def available_for(e):
     """(latest version, archive) for the node's OS/Arch, or (None, None)."""
     facts = e.get("facts") or {}
@@ -170,7 +247,7 @@ async def release_swap(node, version):
             return   # Task is ongoing, aborted, or replaced
         if node.inflight > 0:
             now = time.time()
-            u.update(state="failed", message=f"Knoten wurde in {SWAP_WAIT_S // 60} min nicht leer ({node.inflight} Anfragen) - nicht getauscht",
+            u.update(state="failed", message=f"node did not become idle within {SWAP_WAIT_S // 60} min ({node.inflight} requests) - not swapped",
                      t=now, ts=_ts(now))
             e["ollama_update"] = u
             state.REG.save()
@@ -239,7 +316,7 @@ def note_version(node, version, now=None, source="poll"):
         state.MQTT_DIRTY.append(True)
     u = e.get("ollama_update") or {}
     if u.get("version") and u.get("state") not in ("done", "failed") and u["version"] == version:
-        u.update(state="done", message=f"laeuft mit {version}", t=now, ts=_ts(now))
+        u.update(state="done", message=f"running {version}", t=now, ts=_ts(now))
         e["ollama_update"] = u
         state.REG.save()
         state.remember({"event": "ollama_update", "node": e["name"], "state": "done", "version": version})

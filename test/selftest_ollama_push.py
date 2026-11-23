@@ -99,7 +99,7 @@ check("active request: node excluded from routing, but no release yet", before =
 check("request finished: swap released", after == [{"t": "ollama-swap", "version": "0.35.0"}] and k.swap_pending is None, str(after))
 (before, after, u, k) = asyncio.run(swap_scenario(False))
 check("node does not become empty: no release, task failed, node back in routing",
-      after == [] and u["state"] == "failed" and "nicht leer" in u["message"] and time.time() >= k.draining_until, f"{after} {u}")
+      after == [] and u["state"] == "failed" and "did not become idle" in u["message"] and time.time() >= k.draining_until, f"{after} {u}")
 state.REG = Reg({"name": "gpu-desktop", "facts": {}, "ollama_update": {"version": "0.35.0", "state": "downloading", "t": time.time()}})
 k = nodes.Node("gpu-desktop", {"vram_total_gib": 31.8})
 k.fp = "fp1"

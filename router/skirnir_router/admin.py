@@ -10,7 +10,7 @@ import time
 from aiohttp import ClientTimeout, web
 
 from . import auth, config, perf, state, values
-from . import admission, cloud, decision, metrics, ops, problems
+from . import admission, cloud, cost_keys, decision, metrics, ops, problems
 from .outcome import failed, invalid
 from .decision.base import DecisionRequest
 from . import request as request_mod
@@ -41,7 +41,8 @@ async def handle_asset(request):
 async def handle_config_get(request):
     ov = config.read_overrides()
     base_models = set((state.CFG.base().get("models") or {}))
-    return web.json_response({"roles": config.roles_as_config(), "models": state.CFG.models, "nodes": state.CFG.nodes,
+    models = {m: cost_keys.with_legacy_price(e) for m, e in state.CFG.models.items()}   # ADR-0105: old field name kept
+    return web.json_response({"roles": config.roles_as_config(), "models": models, "nodes": state.CFG.nodes,
                               "expose_concrete_models": state.CFG.expose_concrete, "modes": state.CFG.raw.get("modes", {}),
                               "warm_first": state.CFG.warm_first,
                               "settings": config.settings_view(lang=request.query.get("lang", "de")),                     # Stage 7: UI-editable settings
@@ -80,7 +81,7 @@ def clients_view():
     out = {}
     out[state.INTERNAL_CLIENT] = {"source": "intern", "has_token": True, "token_prefix": "", "token_rotated": None, "created": None, "ip": ["127.0.0.1"],
                                   "roles": ["*"], "models": True, "requests_per_minute": None, "max_priority": None, "cloud": True, "data_class": None,
-                                  "note": "der Router selbst: Knopf „Ausprobieren“; Secret entsteht bei jedem Start neu, nur im Speicher, nur von localhost"}
+                                  "note": "the router itself: the Try button; its secret is created anew at every start, held only in memory, accepted only from localhost"}
     for name, c in (state.CFG.client_auth.get("clients") or {}).items():
         th = c.get("token_sha256") or ""
         out[name] = {"source": "config.yaml" if name in base else "ui", "has_token": bool(th), "token_prefix": th[:8],
@@ -143,8 +144,8 @@ async def handle_client_token(request):
     auth.audit("client_token_rotated", client=name, by="admin-ui", sha256_prefix=digest[:8])
     state.remember({"event": "config", "client_token": name})
     return web.json_response({"ok": True, "client": name, "token": token, "sha256_prefix": digest[:8],
-                              "hint": "Einmalig sichtbar. In den Client eintragen (HA: API-Key im Ollama-Eintrag, Node-RED: apiKey der llm-config) "
-                                      "und in Secret-Store ablegen - der Router speichert nur den Hash."})
+                              "hint": "Shown once. Enter it in the client (Home Assistant: API key of the Ollama entry, Node-RED: apiKey "
+                                      "of the llm-config) and keep it in a secret store - the router stores only its hash."})
 
 
 def _bad(msg):
@@ -217,8 +218,8 @@ def _overrides_from_request(b):
         ov["roles"] = _roles_from(b["roles"] or {})
     if "models" in b:
         ov["models"] = _models_from(b["models"] or {})
-    if "settings" in b:
-        ov["settings"] = dict(b["settings"] or {})
+    if "settings" in b:   # ADR-0105: an old path (...budget_month_chf) lands under its neutral name
+        ov["settings"] = cost_keys.normalize_settings(dict(b["settings"] or {}), "settings")
     if "delete_models" in b:
         ov["delete_models"] = [str(m) for m in (b["delete_models"] or [])]
     if "clients" in b:   # Clients tab: new clients or fields of existing ones; the secret comes separately via /admin/clients/<n>/token
@@ -289,14 +290,17 @@ def _cloud_model_entry(m, v):
     """Stage 7: Create/edit cloud model in catalog (provider, prices, context, capabilities)."""
     if v["cloud"] not in (state.CFG.cloud.get("providers") or {}):
         return invalid(f"model {m}: cloud provider {v['cloud']} is not configured")
-    pr = v.get("price_chf_per_m") or {}
+    v = dict(v)
+    if failed(problem := cost_keys.normalize_entry(v, cost_keys.MODEL_ALIASES, f"model {m}")):   # ADR-0105: old name accepted
+        return problem
+    pr = v.get("price_per_m") or {}
     if not isinstance(pr, dict) or not isinstance(v.get("capabilities") or {}, dict):
-        return invalid(f"model {m}: price_chf_per_m and capabilities must be mappings")
-    prices = {k: values.number(pr.get(k, 0), f"model {m}: price_chf_per_m.{k}") for k in ("input", "output")}
+        return invalid(f"model {m}: price_per_m and capabilities must be mappings")
+    prices = {k: values.number(pr.get(k, 0), f"model {m}: price_per_m.{k}") for k in ("input", "output")}
     problem = next((p for p in prices.values() if failed(p)), None)
     if problem:
         return problem
-    e = {"cloud": str(v["cloud"]), "price_chf_per_m": prices}
+    e = {"cloud": str(v["cloud"]), "price_per_m": prices}
     if v.get("provider_model"):
         e["provider_model"] = str(v["provider_model"]).strip()
     if v.get("context_tokens"):
@@ -359,7 +363,11 @@ def _merge_overrides(current, ov):
             merged[m] = e
         ov["models"] = merged
     if "settings" in ov:
-        merged = dict(current.get("settings") or {})
+        # ADR-0105: a roles.yaml written before router 0.37.0 may hold the old path; under the neutral name the new value
+        # replaces it, and roles.yaml is written with the neutral name only
+        merged = cost_keys.normalize_settings(dict(current.get("settings") or {}), "roles.yaml settings")
+        if failed(merged):
+            return merged
         for k, v in ov["settings"].items():
             if v is None:
                 merged.pop(k, None)
@@ -407,7 +415,10 @@ def _apply_delete_clients(current, ov):
         return invalid(f"client(s) {blocked} are in config.yaml and can only be removed by deploy")
     gone = set(ov.pop("delete_clients"))
     ov["clients"] = {n: v for n, v in {**(current.get("clients") or {}), **ov.get("clients", {})}.items() if n not in gone}
-    ov["settings"] = {k: v for k, v in {**(current.get("settings") or {}), **ov.get("settings", {})}.items()
+    kept = cost_keys.normalize_settings(dict(current.get("settings") or {}), "roles.yaml settings")   # ADR-0105, as above
+    if failed(kept):
+        return kept
+    ov["settings"] = {k: v for k, v in {**kept, **ov.get("settings", {})}.items()
                       if not any(k.startswith(f"router.client_auth.clients.{n}.") for n in gone)}
 
 
@@ -568,7 +579,7 @@ def catalog_effective():
             e = state.CFG.models[m]
             src = e.get("source") or ("estimated" if e.get("note") else "measured")
             src = CATALOG_SOURCE_BEFORE_0_9.get(src, src)
-            out[m] = {**e, "source": src}
+            out[m] = {**cost_keys.with_legacy_price(e), "source": src}   # ADR-0105: old price field name kept
             continue
         twin = None
         for n in state.NODES.values():
@@ -577,7 +588,7 @@ def catalog_effective():
                 twin = next((cm for cm in state.CFG.models if n.digest_of.get(cm) == d), None)
                 if twin:
                     break
-        out[m] = {**state.CFG.models[twin], "source": f"Alias von {twin}"} if twin else {"source": None}
+        out[m] = {**cost_keys.with_legacy_price(state.CFG.models[twin]), "source": f"Alias von {twin}"} if twin else {"source": None}
     return out
 
 

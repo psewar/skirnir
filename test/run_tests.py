@@ -733,7 +733,7 @@ def main():
               and ha_["cloud"]["testcloud"]["budget_percent"] >= 100, str(ha_["problems"]) + f" spend={ha_['cloud_spend_month_chf']}")
         txt = http(C + "/metrics")[1].decode()
         check("/metrics: Cloud outputs and budget per provider", 'skirnir_cloud_spend_month_chf{provider="testcloud"}' in txt and 'skirnir_cloud_budget_month_chf{provider="testcloud"} 1.9' in txt
-              and 'skirnir_cloud_cost_chf_total{' in txt, " | ".join(l for l in txt.splitlines() if l.startswith("skirnir_cloud_"))[:300])
+              and 'skirnir_cloud_cost_chf_total{' in txt and 'skirnir_cloud_currency_info{currency="CHF"} 1' in txt, " | ".join(l for l in txt.splitlines() if l.startswith("skirnir_cloud_"))[:300])
         st, raw = http(R + "/api/chat", {"model": "testcloud:mini", "messages": msg, "stream": False})
         check("specific Cloud model name is NOT directly callable (only via roles)", st == 404, f"{st}")
         st, raw = http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"data_class": "geheimnis"}})
@@ -742,11 +742,12 @@ def main():
         # --- Tier 7: Settings via UI (settings block in roles.yaml, allowlist settings.py), cloud models in catalog, logo ---
         cfg7 = json.loads(http(C + "/admin/config")[1])
         items7 = {i["path"]: i for i in cfg7.get("settings", {}).get("items", [])}
-        bud7 = items7.get("router.cloud.providers.testcloud.budget_month_chf") or {}
+        bud7 = items7.get("router.cloud.providers.testcloud.budget_month") or {}   # ADR-0105: neutral path; test-config.yaml keeps the old key
         check("GET /admin/config: editable settings with value/base/group (budget per provider, client data class, score); endpoints not included",
               bud7.get("value") == 1.9 and bud7.get("group") == "Cloud-Anbieter" and bud7.get("entity") == "testcloud"
               and "router.client_auth.clients.tester.data_class" in items7 and items7["modes.score.warm"]["set"] is False and items7["modes.score.warm"]["default"] == 100.0
-              and "router.cloud.providers.testcloud.base_url" not in items7 and "router.client_auth.clients.tester.token_sha256" not in items7, str(sorted(items7)[:5]))
+              and "router.cloud.providers.testcloud.base_url" not in items7 and "router.client_auth.clients.tester.token_sha256" not in items7
+              and bud7.get("base") == 1.9 and "router.cloud.providers.testcloud.budget_month_chf" not in items7, str(sorted(items7)[:5]))
         st, raw = http(C + "/admin/config", {"settings": {"router.cloud.providers.testcloud.budget_month_chf": 50, "router.cloud.providers.testcloud.warn_at_percent": 90}}, method="PUT")
         s7 = state()["cloud"]["testcloud"]
         check("PUT settings: budget changed live (1.9 -> 50), provider back under the limit", st == 200 and s7["budget_month_chf"] == 50.0 and s7["budget_percent"] < 10, f"{st} {s7}")
@@ -769,7 +770,8 @@ def main():
         ri = rinfo(raw2, st2)
         check("Reset (null): back to config.yaml, data class back to personal", st == 200 and ri.get("model") == "qwen3.6:35b-a3b" and any("personal" in s_["reason"] for s_ in ri.get("skipped", [])), str(ri.get("skipped")))
         txt7 = open(os.path.join(HERE, "roles.yaml"), encoding="utf-8").read()
-        check("roles.yaml carries the settings block (budget), the reset client entry is gone", "budget_month_chf: 50" in txt7 and "tester.data_class" not in txt7, txt7[-300:])
+        check("roles.yaml carries the settings block (budget, written under the neutral key after a PUT with the old path), the reset client entry is gone",
+              "testcloud.budget_month: 50" in txt7 and "budget_month_chf" not in txt7 and "tester.data_class" not in txt7, txt7[-300:])
         rc7 = subprocess.run([PY, os.path.join(HERE, "..", "router", "router.py"), "--check", os.path.join(HERE, "test-config.yaml")], cwd=HERE, capture_output=True, text=True)
         check("--check accepts roles.yaml with settings (Deploy check on the CT)", rc7.returncode == 0 and "with roles.yaml" in rc7.stdout, (rc7.stdout + rc7.stderr)[-200:])
         st, raw = http(C + "/admin/config", {"settings": {"modes.score.errors": 42, "modes.keep_alive.busy": "7m", "router.openai.default_think": None}}, method="PUT")
@@ -787,7 +789,9 @@ def main():
               and "\nsettings:" not in (open(os.path.join(HERE, "roles.yaml"), encoding="utf-8").read()), "")
         st, raw = http(C + "/admin/config", {"models": {"testcloud:maxi": {"cloud": "testcloud", "provider_model": "maxi-2", "price_chf_per_m": {"input": 2, "output": 8}, "context_tokens": 200000, "reasoning": True}}}, method="PUT")
         cfg7 = json.loads(http(C + "/admin/config")[1])
-        check("Cloud model via UI into the catalog: provider, prices, context; marked as UI model", st == 200 and (cfg7["models"].get("testcloud:maxi") or {}).get("price_chf_per_m", {}).get("output") == 8.0
+        check("Cloud model via UI into the catalog (old price name accepted, shown under both names): provider, prices, context; marked as UI model",
+              st == 200 and (cfg7["models"].get("testcloud:maxi") or {}).get("price_per_m", {}).get("output") == 8.0
+              and (cfg7["models"].get("testcloud:maxi") or {}).get("price_chf_per_m", {}).get("output") == 8.0
               and "testcloud:maxi" in cfg7["ui_models"] and "testcloud:mini" not in cfg7["ui_models"], raw.decode()[:120])
         st, raw = http(C + "/admin/config", {"models": {"x:y": {"cloud": "nope"}}}, method="PUT")
         check("Cloud model with unknown provider -> 400", st == 400, raw.decode()[:100])
@@ -830,7 +834,7 @@ def main():
         ri = rinfo(*http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"execution": "cloud"}})[::-1])
         check("Source IP + data class via UI: request without header is pi-voice and may go to cloud", st == 200 and ri.get("client") == "pi-voice" and ri.get("node") == "cloud:testcloud",
               f"{st} {raw.decode()[:80]} client={ri.get('client')} node={ri.get('node')} {ri.get('skipped')}")
-        http(C + "/admin/config", {"settings": {"router.cloud.providers.testcloud.budget_month_chf": None}}, method="PUT")
+        http(C + "/admin/config", {"settings": {"router.cloud.providers.testcloud.budget_month": None}}, method="PUT")   # the neutral path resets the old one
         st, raw = http(C + "/admin/config", {"settings": {"router.client_auth.clients.pi-voice.ip": "nix"}}, method="PUT")
         check("invalid IP -> 400", st == 400 and "IP address" in raw.decode(), raw.decode()[:100])
         st, raw = http(C + "/admin/config", {"clients": {"pi-voice": {"token_sha256": "00"}}}, method="PUT")
@@ -998,6 +1002,14 @@ def main():
         st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"mac": "AA-BB-CC-DD-EE-01", "busy_foreign_gib": None, "busy_gpu_util_pct": None})
         check("Policy: MAC is normalized", st == 200 and json.loads(raw)["policy"].get("mac") == "aa:bb:cc:dd:ee:01", raw.decode()[:80])
         http(C + f"/admin/nodes/{fpb}/policy", {"mac": None})
+        # ADR-0117/0124: the policy picks a waker configured in router.wakers by name, never a destination
+        st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"waker": "https://elsewhere.example.net/hook"})
+        check("Policy: waker that is not configured -> 400", st == 400 and "waker" in raw.decode(), raw.decode()[:80])
+        st, raw = http(C + f"/admin/nodes/{fpb}/policy", {"waker": "e2e-hook"})
+        check("Policy: configured waker accepted and shown on the node", st == 200 and state()["nodes"]["big"].get("waker") == "e2e-hook",
+              raw.decode()[:80])
+        http(C + f"/admin/nodes/{fpb}/policy", {"waker": None})
+        check("Policy: waker removed -> Wake-on-LAN again", state()["nodes"]["big"].get("waker") == "wol")
         for _ in range(12):
             if state()["nodes"].get("big", {}).get("state") not in (None, "offline"):
                 break

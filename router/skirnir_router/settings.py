@@ -17,6 +17,7 @@ from . import values
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES, THINK_MODES  # noqa: E402
 from .outcome import failed, invalid  # noqa: E402
 from .problems import LANGUAGES as PROBLEM_LANGUAGES  # noqa: E402
+RELEASE_SOURCES = ("github", "document")   # modes.ollama_update.release_source (ADR-0117)
 SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open", "switch")
 
 # typ: int | float | bool | str | choice | list | iplist | keep_alive | tristate
@@ -39,11 +40,14 @@ _e("router.cloud.max_cloud_data_class", "choice", "Cloud bis Datenklasse", "hoec
    label_en="Cloud up to data class", help_en="highest class still allowed to go to the cloud")
 _e("router.cloud.credential_scan", "choice", "Credential-Scan", "block = Prompts mit erkennbaren Schluesseln/Passwoertern gehen nicht in die Cloud", G, "block", choices=["block", "off"],
    label_en="Credential scan", help_en="block = prompts with recognisable keys/passwords never go to the cloud")
+_e("router.cloud.currency", "str", "Waehrung", "Einheit der Katalogpreise und Budgets (drei Grossbuchstaben, z. B. CHF, EUR, USD); nur Anzeige, der Router rechnet nicht um", G, "CHF", maxlen=3,
+   label_en="Currency", help_en="unit of the catalogue prices and budgets (three capital letters, e.g. CHF, EUR, USD); display only, the router does not convert")
 P = "router.cloud.providers.*."
 _e(P + "enabled", "bool", "aktiv", "deaktiviert = Anbieter faellt als Stufe weg", "Cloud-Anbieter", True,
    label_en="enabled", help_en="disabled = provider drops out as a tier")
-_e(P + "budget_month_chf", "float", "Budget je Monat", "0 = kein Budget; erschoepft = Anbieter faellt als Stufe weg", "Cloud-Anbieter", 0, min=0, max=100000, step=0.5,
-   label_en="Budget per month", help_en="0 = no budget; exhausted = provider drops out as a tier")
+# ADR-0105: budget_month; the old path ...budget_month_chf is accepted as an alias (cost_keys.normalize_settings)
+_e(P + "budget_month", "float", "Budget je Monat", "in der Waehrung der Katalogpreise; 0 = kein Budget; erschoepft = Anbieter faellt als Stufe weg", "Cloud-Anbieter", 0, min=0, max=100000, step=0.5,
+   label_en="Budget per month", help_en="in the currency of the catalogue prices; 0 = no budget; exhausted = provider drops out as a tier")
 _e(P + "warn_at_percent", "int", "Warnung ab %", "HA-Problem 'Cloud <anbieter>: x % des Monatsbudgets'", "Cloud-Anbieter", 80, min=1, max=100,
    label_en="Warn from %", help_en="HA problem 'Cloud <provider>: x % of the monthly budget'")
 _e(P + "max_data_class", "choice", "Datenklasse max.", "eigene Obergrenze dieses Anbieters (leer = globale Grenze); hoeher als die globale Grenze nur mit trust: institutional in config.yaml", "Cloud-Anbieter", None, choices="data_classes", nullable=True,
@@ -136,8 +140,10 @@ _e("modes.ollama_update.timezone", "str", "Zeitzone des Fensters", "IANA-Name, z
    label_en="Window time zone", help_en="IANA name, e.g. Europe/Zurich; empty = router local time (containers often run on UTC)")
 _e("modes.ollama_update.check_interval_h", "float", "Pruefung alle h", "wie oft der Router die neueste Version erfragt", G, 6, min=1, max=168,
    label_en="Check every h", help_en="how often the router asks for the latest version")
-_e("modes.ollama_update.release_url", "str", "Release-Quelle", "GitHub-API des neuesten Releases (tag_name, assets, sha256sum.txt); der Agent laedt von seiner eigenen festen Quelle", G, "https://api.github.com/repos/ollama/ollama/releases/latest",
-   label_en="Release source", help_en="GitHub API of the latest release (tag_name, assets, sha256sum.txt); the agent downloads from its own fixed source")
+_e("modes.ollama_update.release_url", "str", "Release-Quelle", "GitHub-API des neuesten Releases (tag_name, assets, sha256sum.txt) oder bei Art 'document' die endgueltige HTTPS-Adresse des Release-Dokuments; der Agent laedt von seiner eigenen festen Quelle", G, "https://api.github.com/repos/ollama/ollama/releases/latest",
+   label_en="Release source", help_en="GitHub API of the latest release (tag_name, assets, sha256sum.txt), or with kind 'document' the final HTTPS URL of the release document; the agent downloads from its own fixed source")
+_e("modes.ollama_update.release_source", "choice", "Art der Release-Quelle", "github = GitHub-API (wie bisher); document = neutrales Release-Dokument {version, files} (Spiegel, internes Verzeichnis)", G, "github",
+   choices=list(RELEASE_SOURCES), label_en="Release source kind", help_en="github = GitHub API (as before); document = neutral release document {version, files} (mirror, internal repository)")
 
 G = "OpenAI-Server"   # Router 0.16.0: an OpenAI-compatible server (Strata) only in a window or on request
 _e("modes.upstream_window.enabled", "bool", "Nur im Fenster oder auf Anfrage",

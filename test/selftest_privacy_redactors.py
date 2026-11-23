@@ -23,6 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "router"))
 from skirnir_router import cloud, privacy, proxy  # noqa: E402
 from skirnir_router.outcome import failed  # noqa: E402
+from skirnir_router.shape import OllamaShape  # noqa: E402
 
 CORPUS = os.path.join(HERE, "privacy_default_corpus.json")
 FAILS = []
@@ -291,7 +292,7 @@ async def main():
         x.req = type("Q", (), {"cloud_privacy": True, "data_class_effective": "personal", "request_id": "t1", "explicit": False})()
         x.path, x.out, x.stream, x.model, x.exposed = "/api/chat", b, False, "openai:gpt-5-mini", "assist:latest"
         x.node = type("N", (), {"name": "cloud:openai", "is_cloud": True, "spec": {"kind": "openai", "trust": "cloud"}})()
-        x.shape, x.headers, x.memory_capture, x.info = None, {}, None, None
+        x.shape, x.headers, x.memory_capture, x.info = OllamaShape(), {}, None, None
         return x
 
     state.CFG.cloud = {**state.CFG.cloud, "enabled": True, "privacy_check": gj}

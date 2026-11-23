@@ -6,7 +6,7 @@ classes), [ADR-0038](../docs/adr/0038-content-check-before-a-cloud-tier-opt-in.m
 [ADR-0043](../docs/adr/0043-configured-client-data-class-is-a-floor.md) (a configured class is a floor),
 [ADR-0078](../docs/adr/0078-privacy-threshold-from-out-of-fold-scores.md) (classifier threshold),
 [ADR-0099](../docs/adr/0099-institutional-providers-take-their-own-data-class-limit.md) (institutional providers),
-ADR-0119 (redactors per tool format and locale packs, proposed in PR #177) and
+[ADR-0119](../docs/adr/0119-privacy-redaction-per-tool-format-and-locale-pack.md) (redactors per tool format and locale packs) and
 [ADR-0125](../docs/adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md) (unrecognised tool
 results). Configuration: [docs/configuration.md](../docs/configuration.md#content-check-locale-packs-and-redactors).
 

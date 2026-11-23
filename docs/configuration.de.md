@@ -7,7 +7,7 @@
 | Datei | Zweck |
 |---|---|
 | `/etc/skirnir-router/config.yaml` | Die Konfiguration (root, 0640: der Router liest sie über seine Gruppe `skirnir-router`, ADR-0086). Ausgangspunkt ist [router/config.minimal.yaml](../router/config.minimal.yaml) (ein kleiner, sicherer Start: eine Rolle, ein Client; `router.py --init` füllt sie aus, siehe [install-router.de.md](install-router.de.md#erste-konfiguration)) oder [router/config.example.yaml](../router/config.example.yaml) (die volle Referenz mit jeder Option und ihrem Kommentar). |
-| `/var/lib/skirnir-router/roles.yaml` | Overrides, die die Web-UI in den Zustandsordner des Routers schreibt (`router.state_dir`); überlebt Deploys und Aktualisierungen. Der Router schreibt alle eigenen Dateien dorthin - `roles.yaml`, `nodes.json`, Journale, Metriken - und nichts in `/etc/skirnir-router` (ADR-0086). Ohne `state_dir` liegen sie neben der `config.yaml`, was nur für die Entwicklung taugt: das Konto des Dienstes kann `/etc/skirnir-router` nicht schreiben. |
+| `/var/lib/skirnir-router/roles.yaml` | Overrides, die die Web-UI in den Zustandsordner des Routers schreibt (`router.state_dir`); überlebt Deploys und Aktualisierungen. Der Router schreibt alle eigenen Dateien dorthin - `roles.yaml`, `nodes.json`, Journale, Metriken, einen SQLite-Session-Store, den eine relative `sqlite:///`-URL nennt (ADR-0114) - und nichts in `/etc/skirnir-router` (ADR-0086). Ohne `state_dir` liegen sie neben der `config.yaml`, was nur für die Entwicklung taugt: das Konto des Dienstes kann `/etc/skirnir-router` nicht schreiben. |
 | `/etc/skirnir-router/secrets.env` | Secrets als Umgebung (root, 0640 für die Gruppe des Routers; [install-router.de.md](install-router.de.md#secrets)). |
 
 Rollen, Katalog und die meisten Laufzeit-Einstellungen sind in der UI editierbar; die UI schreibt sie in die `roles.yaml`.
@@ -105,6 +105,18 @@ roles:
   Passt-Prüfung: `VRAM-Bedarf = Gewichte + Kontext-Kosten × num_ctx/1000 + 0,8 GiB`. Gewichte und Kontext-Kosten je Modell
   stehen im Katalog (`models:`), gemessen per UI-Knopf **Messen** (lädt bei 8k und 32k, liest `/api/ps`) oder geschätzt.
   Anhaltspunkte: [operations.de.md](operations.de.md#messwerte-als-anhaltspunkt).
+- **Benchmark.** Der UI-Knopf **Benchmark** misst Erzeugungs- und Prompt-Tempo eines geladenen Modells (ein Aufwärmlauf, zwei
+  Läufe, 200 Tokens, Temperatur 0) mit `router.benchmark.prompt` (Router 0.37.0,
+  [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)). Vorgabe ist der deutsche Prompt aller
+  bisherigen Messungen, unverändert. Tokens pro Sekunde hängen von der Sprache von Prompt und Antwort ab (Tokenizer zerlegen
+  Sprachen in unterschiedlich viele Tokens); setze also einen Prompt in der Sprache deiner Clients und vergleiche nur
+  Ergebnisse mit derselben `prompt_id`, die jedes Ergebnis festhält.
+
+  ```yaml
+  router:
+    benchmark:
+      prompt: "Explain in about 200 words what a network router does and how it differs from a switch."
+  ```
 - **Busy.** Ein Knoten ist `busy`, wenn fremdes VRAM (belegt − Ollama − Desktop-Grundverbrauch) über der Schwelle liegt oder die
   GPU ohne Router-Anfragen ausgelastet ist. Dann laufen nur `busy_ok`-Stufen; nicht-`busy_ok`-Modelle werden alle 30 s entladen.
   Der Desktop-Grundverbrauch wird je Knoten gelernt (Median der Stundenmittel bei ruhiger GPU) und durch einen Policy-Wert gedeckelt.
@@ -177,10 +189,59 @@ roles:
   anstellen würde, auf die gewartet wird), und das Entscheidungslog hält `decision_observe` fest: Klasse, Sicherheit, die
   erste freie tiefere Stufe derselben Rolle und `would_fallback` für die Klassen in `observe_light`. Am Routing ändert sich
   nichts; es soll erst messen, wie oft ein freies kleineres Modell gereicht hätte, bevor der Router danach handelt.
+  Ohne `observe_light` setzt die Konfigurationsprüfung `[standard, assist]`, beschränkt auf die Namen unter `options` (Router
+  0.37.0, [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)); heißen die Rollen anders, nenne
+  die leichten Klassen selbst. Eine angegebene Liste gilt wie angegeben, `[]` heißt: keine Klasse gilt als leicht.
   `observe_all` geht weiter: Jede Anfrage an `/api/chat` oder `/api/generate` wird beim Start im Hintergrund eingeordnet, und
   an ihrem Ende hängt der Router eine Zeile an `requests.jsonl` neben der Konfiguration (`observe_path`): Klasse, Dauer,
   Wartezeit, Token, Denken, Zahl der Werkzeuge, Client, Rolle, Ergebnis - keine Prompt-Inhalte. Eigene Datei, damit das
   Entscheidungslog sein Fenster behält; sie rotiert bei 20 MB. Die Antwort wartet nie auf die Einordnung.
+
+## Knoten wecken
+
+Bleibt für eine Anfrage kein Kandidat übrig, darf der Router einen offline Knoten wecken, der das Modell kannte, und die
+Anfrage danach neu verteilen (Router 0.41.0, ADR-0117). Mit dabei ist ein Knoten, dessen Policy oder statischer Eintrag
+`wol: true` sagt (der Name stammt aus der Zeit, als es nur Wake-on-LAN gab); `waker` sagt, wie. Das Warten ist für jeden
+Wecker gleich: Der Router fragt den Knoten alle 2 s ab, höchstens `router.wol.wait_up_s` (90 s) lang, und versucht
+denselben Knoten erst nach `router.wol.cooldown_s` (300 s) wieder. Meldet ein Wecker *gesendet*, heisst das nur, dass das
+Signal den Router verlassen hat; ob der Knoten hochkommt, entscheidet die Abfrage.
+
+| Wecker | Was er tut | Braucht |
+|---|---|---|
+| `wol` (eingebaut, Standard) | UDP-Magic-Packet an jede Adresse in `router.wol.broadcast_addresses`, Port 9, während des Wartens alle `retry_interval_s` erneut | die MAC des Knotens (vom Agenten oder aus der Policy), Router in derselben Broadcast-Domäne |
+| `http_webhook` | je Versuch ein `POST` mit dem festen JSON-Körper `{"event": "wake", "node": "<name>", "mac": "<mac oder null>"}` | eine konfigurierte endgültige URL; optional ein Bearer-Token |
+
+```yaml
+router:
+  wakers:
+    plug:                                  # beliebiger Name ausser wol
+      kind: http_webhook
+      url: https://automation.example.net/api/webhook/skirnir-wake
+      token_env: SKIRNIR_WAKE_TOKEN        # optional; das Token kommt aus der Umgebung (secrets.env)
+      timeout_s: 10                        # ganzer Aufruf, 1-60 s
+      repeat: false                        # true = alle router.wol.retry_interval_s erneut senden
+nodes:
+  pc-example: { wol: true, waker: plug }   # ein registrierter Knoten nimmt das als Grundlage; der Policy-Schlüssel waker überschreibt es
+```
+
+- **Wohin der Webhook geht:** ein Home-Assistant-Webhook-Auslöser (`/api/webhook/<id>`), der einen Smart-Plug schaltet oder
+  `wake_on_lan.send_magic_packet` in einem anderen Subnetz aufruft, eine ioBroker- oder openHAB-Regel hinter einem
+  HTTP-Endpunkt oder eine eigene Steuerung. Der Körper nennt den Knoten, ein Endpunkt kann also mehrere Knoten bedienen.
+- **Transportregeln** (ADR-0124, dieselben wie für Cloud-Anbieter in ADR-0048): HTTPS, einfaches HTTP nur an das wörtliche
+  `127.0.0.1` oder `::1`; keine Zugangsdaten, keine Query und kein Fragment in der URL; eine Umleitung wird abgelehnt, nicht
+  befolgt (die endgültige URL eintragen); `timeout_s` begrenzt den ganzen Aufruf, und ein langsamer Empfänger verzögert nur die
+  Anfrage, die auf diesen Knoten wartet. Das Token geht als `Authorization: Bearer ...` mit; ist `token_env` gesetzt, die
+  Variable aber leer, wird nichts gesendet. Das Log nennt nur den Host des Empfängers, nie den URL-Pfad (eine
+  Home-Assistant-Webhook-ID ist ein Geheimnis).
+- **`repeat`** bleibt aus bei allem, was umschaltet: ein zweites „Einschaltknopf drücken“ würde den Rechner wieder
+  ausschalten. Für gleichbleibende Aufrufe („Steckdose ein“) einschalten, wenn der Empfänger den ersten verpassen kann.
+- **Wahl je Knoten:** `nodes.<name>.waker` in der Konfigurationsdatei oder der Policy-Schlüssel `waker` über die Admin-API
+  (`POST /admin/nodes/<fp>/policy {"waker": "plug"}`, `null` führt zurück zu `wol`). Die Policy nimmt nur `wol` oder einen
+  Namen aus `router.wakers` an; Ziele und Verweise auf Geheimnisse stehen nur in der Konfigurationsdatei. Ein unbekannter
+  Name in der Konfiguration wird beim Laden abgelehnt.
+- **Kein Befehls-Wecker:** Der Router läuft ohne Rechte und führt nichts aus, was die Konfiguration nennt (ADR-0118).
+  Einschalten über einen BMC (IPMI, Redfish) oder eine Cloud-API läuft über einen Webhook-Empfänger, der diese Zugangsdaten
+  hält; ein eigener `ipmi`-Wecker ist noch nicht umgesetzt.
 
 ## Auto-Rolle: die Decision Engine
 
@@ -234,7 +295,7 @@ E-Mail, IP, URL, lange Zahlen) und mit Gruppen-Hash; echte Rollenwahlen der Clie
 
 ## Cloud als Stufe in Rollen
 
-Cloud-Anbieter sind **Modelle im Katalog** (`"openai:gpt-5-mini": {cloud: openai, provider_model: gpt-5-mini, price_chf_per_m: {...}}`)
+Cloud-Anbieter sind **Modelle im Katalog** (`"openai:gpt-5-mini": {cloud: openai, provider_model: gpt-5-mini, price_per_m: {...}}`)
 und liegen als Stufe in genau den Rollen, die es dürfen. Konkrete Cloud-Modellnamen sind nicht direkt aufrufbar (404), nur über
 Rollen. Ein kaltes lokales Modell gewinnt vor der Cloud. Drei Fälle, in denen die Cloud zum Zug kommt: kein lokaler Knoten kann
 (alle spielen oder aus), eine Fähigkeit fehlt lokal, oder der Client verlangt es (`routing.execution: cloud`).
@@ -259,9 +320,9 @@ Schranken (`router.cloud`):
   den Text. Eine deklarierte `routing.data_class` wird nie übergangen.
 - **Credential-Scan** (`block`): Prompts mit erkennbaren Schlüsseln (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
   gehen nicht in die Cloud; lokal laufen sie normal.
-- **Budget** je Anbieter und Monat, in der Währung der Katalogpreise (der Router rechnet keine Währungen um; die Endung
-  `_chf` von Schlüsseln, Feldern und Metriken und die Einheit des HA-Kostensensors sind historisch); erschöpft =
-  Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem. Kosten je Anfrage in Usage und Metriken.
+- **Budget** je Anbieter und Monat (`budget_month`), in der Währung der Katalogpreise (`price_per_m`, je Million Tokens);
+  erschöpft = Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem. Kosten je Anfrage in Usage und Metriken.
+  Siehe [Währung](#währung-von-preisen-und-budgets).
 - **Egress-Allowlist** für `base_url` (+ `egress_allow`), Schlüssel nur aus `secrets.env`, nie im Log; Circuit Breaker wie bei
   Knoten; Schattenläufe gehen nie in die Cloud.
 - **Transport:** Anbieter benötigen den endgültigen HTTPS-Endpunkt. HTTP ist nur für explizit erlaubte, wörtliche
@@ -299,9 +360,38 @@ Modell noch und braucht `none`. Der Gedanke des Anbieters (`reasoning_content`, 
 kommt als Ollamas `thinking` an (`reasoning` in der OpenAI-Form, ein Thinking-Block in der Anthropic-Form), außer für
 einen Client, der `think: false` gesendet hat.
 
+### Währung von Preisen und Budgets
+
+Router 0.37.0, [ADR-0105](adr/0105-currency-neutral-cost-keys.md): Der Router rechnet nie Währungen um. Preise
+(`models.<m>.price_per_m`), Budgets (`router.cloud.providers.<p>.budget_month`), Ausgaben und Usage-Kosten stehen alle in der
+Währung, in der du die Preise schreibst. `router.cloud.currency` (Vorgabe `CHF`, drei Großbuchstaben, auch in der Web-UI)
+nennt sie für die Anzeige: Die Web-UI zeigt sie bei jedem Betrag, der Anbieter-Schnappschuss trägt `currency`, und
+`/metrics` hat `skirnir_cloud_currency_info`. Ändern rechnet nichts um; Preise und Budgets mit ändern.
+
+```yaml
+router:
+  cloud:
+    currency: EUR
+    providers:
+      openai: { kind: openai, base_url: https://api.openai.com/v1, api_key_env: OPENAI_API_KEY, budget_month: 20 }
+models:
+  "openai:gpt-5-mini": { cloud: openai, price_per_m: { input: 0.25, output: 2.0 } }
+```
+
+- **Alte Namen.** Bis Router 0.36 hießen die Schlüssel `budget_month_chf` und `price_chf_per_m`. Sie gelten weiter mit
+  derselben Bedeutung in `config.yaml`, in `roles.yaml` (Katalogeinträge und die Web-UI-Einstellung
+  `router.cloud.providers.<p>.budget_month_chf`) und in `PUT /admin/config`. Die Web-UI schreibt die neuen Namen, ein
+  gespeicherter alter Name wandert also beim nächsten Speichern mit.
+- **Beide Namen an einer Stelle:** Derselbe Wert ist erlaubt; verschiedene Werte werden abgelehnt, die Meldung nennt beide
+  Schlüssel. Über Dateien hinweg gibt es keinen Konflikt: Ein Wert in `roles.yaml` übersteuert `config.yaml`, gleich welchen
+  Namen jede Datei nutzt.
+- **Feld- und Metriknamen** behalten die Endung `_chf` (`spend_month_chf`, `budget_month_chf`, `cost_chf`,
+  `skirnir_cloud_*_chf*`), damit Dashboards, Alarme und Home-Assistant-Entitäten weiterlaufen; ihre Werte stehen in der
+  eingestellten Währung. Der Home-Assistant-Kostensensor hat weiterhin die Einheit `CHF`.
+
 ### Inhaltsprüfung: Länderpakete und Schwärzer
 
-Router 0.42.0 (ADR-0119, vorgeschlagen in PR #177; [ADR-0125](adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md)).
+Router 0.42.0 ([ADR-0119](adr/0119-privacy-redaction-per-tool-format-and-locale-pack.md), [ADR-0125](adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md)).
 Ohne die neuen Schlüssel verhält sich die Inhaltsprüfung genau wie bisher (Schweizer und deutsche Muster,
 Home-Assistant-Schwärzung, unerkannte Werkzeugergebnisse gehen durch). Alle stehen nur in `config.yaml`; die Web-UI kann
 sie nicht ändern.
@@ -355,7 +445,7 @@ router:
         base_url: https://llm.example.org/v1
         api_key_env: INSTITUTION_API_KEY
         secrets_file: /etc/skirnir-router/secrets.env
-        budget_month_chf: 0
+        budget_month: 0
 ```
 
 - Die eigene `max_data_class` **ersetzt** `max_cloud_data_class` für diesen Anbieter. Erlaubt ist jede Klasse unter der

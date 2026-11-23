@@ -133,7 +133,8 @@ async def run_shadow(role, s, body, primary_node, request_id):
     t0 = time.time()
     try:
         tier = {"model": s["model"], "num_ctx": s["num_ctx"], "busy_ok": s.get("busy_ok", False)}
-        ctx, need, cands = scheduler.candidates_for(tier, None, t0)
+        scheduler.probe_breakers([tier], t0)   # as before 0.37.1: a shadow run may start a breaker's probe (ADR-0108)
+        ctx, cands = scheduler.candidates_for(tier, None, t0)
         cands = [n for n in cands if not admission.saturated(n, s["model"])]
         if not cands:
             state.remember({"event": "shadow", "role": role["name"], "model": s["model"], "node": None, "status": "no_node",

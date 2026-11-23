@@ -23,6 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "router"))
 from skirnir_router import cloud, memory, privacy, proxy, state  # noqa: E402
 from skirnir_router import config as config_mod  # noqa: E402
+from skirnir_router.shape import OllamaShape  # noqa: E402
 
 CFG = privacy.parse_privacy_config({"enabled": True, "terms": ["Müller", "Lea"]})
 QUESTION = "Wann ist der Termin?"
@@ -104,7 +105,7 @@ class FinalPayloadTests(unittest.TestCase):
             relay.path, relay.out, relay.stream = "/api/chat", augmented("Der Wochenmarkt öffnet um acht Uhr."), False
             relay.model, relay.exposed = "openai:example-model", "assist:latest"
             relay.node = type("N", (), {"name": "cloud:openai", "is_cloud": True, "spec": {"kind": "openai", "trust": "cloud"}})()
-            relay.shape, relay.headers, relay.memory_capture, relay.info = None, {}, None, None
+            relay.shape, relay.headers, relay.memory_capture, relay.info = OllamaShape(), {}, None, None
             response = asyncio.run(proxy._Relay._via_cloud(relay))
             self.assertEqual(response.status, 200)
             self.assertEqual(len(sent), 1)

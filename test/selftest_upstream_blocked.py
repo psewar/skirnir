@@ -86,16 +86,16 @@ async def main():
 
     # 2) No candidate while blocked, the reason with its numbers
     n = standby_node(BLOCK)
-    _, _, cands = scheduler.candidates_for(TIER, None, time.time())
+    _, cands = scheduler.candidates_for(TIER, None, time.time())
     check("blocked: no release candidate", cands == [], str([c.name for c in cands]))
-    code, info = scheduler._node_block(n, TIER, 131072, time.time())
+    code, info = scheduler.assess(n, TIER, 131072, time.time())
     check("reason code memory_pressure from the agent", code == scheduler.MEMORY_PRESSURE and info.get("need_gib") == 42.0, f"{code} {info}")
     why = scheduler.unavailable([TIER], None, time.time())
     check("refusal names the numbers and that the agent holds it",
           why["code"] == scheduler.MEMORY_PRESSURE and "needs 42.0 GiB" in why["detail"] and "20.0 of 63.4" in why["detail"]
           and "agent keeps it held" in why["detail"] and why["retry_after_s"] == 60, why["detail"])
     push(n)
-    _, _, cands = scheduler.candidates_for(TIER, None, time.time())
+    _, cands = scheduler.candidates_for(TIER, None, time.time())
     check("block cleared: candidate again", cands == [n])
 
     # 3) A release order the agent refuses: the wait ends at once, not after 180 s

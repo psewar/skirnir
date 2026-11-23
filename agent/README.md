@@ -50,6 +50,9 @@ Schlüssel als 0600-Datei, `run` per systemd). `build.sh` baut Windows, `GOOS=li
 
 ## Tunnel (0.3.0, Normalweg)
 
+Das Protokoll ist in [docs/protocol.de.md](../docs/protocol.de.md) beschrieben (Schemas in `docs/protocol/`,
+Konformitaet prueft `protocol_conformance_test.go`).
+
 Ausgehende WebSocket-Verbindung zum Router (`/v1/tunnel`, Anmeldung mit der Ed25519-Identitaet per Challenge, kein Token),
 seit 0.9.1 der einzige Weg (der HTTP-Heartbeat mit `router.token` und `tunnel.enabled` sind entfernt); der
 Router ruft Ollama hindurch auf (`tunnel.upstream`, Standard `http://127.0.0.1:11434`). Keine eingehende Firewall-Regel, kein

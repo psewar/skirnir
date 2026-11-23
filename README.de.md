@@ -33,7 +33,8 @@ und [Anleitung für PR-Review/CI](design/continuous-security-review.md). Jeder P
 - **Rollen statt Modellnamen.** Eine Rolle ist eine Rangliste von Stufen (`Modell @ num_ctx`, optional `busy_ok`). Der Router
   nimmt die beste Stufe, die ein Knoten jetzt bedienen kann; ein schon geladenes Modell gewinnt („warm zuerst“).
 - **Mehrere GPU-Knoten**, Windows oder Linux, angebunden über einen kleinen **Agenten** (Go), der einen ausgehenden Tunnel zum
-  Router hält. Kein offener Port am Knoten, kein Zertifikat, keine feste IP. Wake-on-LAN für schlafende Knoten. Ein Rechner
+  Router hält. Kein offener Port am Knoten, kein Zertifikat, keine feste IP. Wake-on-LAN oder ein Webhook (Smart-Plug,
+  Hausautomation) für schlafende Knoten. Ein Rechner
   ohne NVIDIA-GPU kommt als CPU-Knoten dazu, bemessen nach seinem Hauptspeicher
   ([docs/install-agent.de.md](docs/install-agent.de.md#knoten-ohne-nvidia-gpu)).
 - **Busy-Erkennung.** Belegt ein Spiel die GPU (fremdes VRAM, Auslastung), laufen dort nur noch `busy_ok`-Stufen; große Modelle
@@ -105,6 +106,10 @@ eine sichere Konfiguration mit der Rolle `standard`. TLS-Zertifikat und -Schlüs
 `router.control_tls` legen (Standard `/etc/skirnir-router/certs/fullchain.pem` und `privkey.pem`), dann
 `sudo systemctl enable --now skirnir-router` und `https://<name>:11435/` öffnen (Benutzer `admin`). Einzelheiten,
 TLS-Varianten und Firewall: [docs/install-router.de.md](docs/install-router.de.md).
+
+**Oder als Container** (Docker, Podman, Unraid, TrueNAS): `docker build -t skirnir-router router/`, dasselbe `--init` in
+einem Wegwerf-Container, dann `docker compose up -d` mit [router/compose.yaml](router/compose.yaml). Das Image läuft ohne
+Rechte, per Digest festgelegt und hash-gesperrt; Schritte in [docs/install-router.de.md#container](docs/install-router.de.md#container).
 
 **3. GPU-Knoten hinzufügen.** Ollama installieren und an Loopback binden (`OLLAMA_HOST=127.0.0.1`), dann das Modell der Rolle
 laden: `ollama pull qwen3:8b`. Den Agenten aus dem [Release](https://github.com/psewar/skirnir/releases) laden:
@@ -187,13 +192,14 @@ Meldeweg für Sicherheitslücken: [SECURITY.md](SECURITY.md).
 
 | Dokument | Inhalt |
 |---|---|
-| [docs/install-router.de.md](docs/install-router.de.md) | Voraussetzungen, `install.sh`, erste Konfiguration, TLS, Firewall, Secrets, Befehle, Installation von Hand, LXC-Deploy |
+| [docs/install-router.de.md](docs/install-router.de.md) | Voraussetzungen, `install.sh`, erste Konfiguration, TLS, Firewall, Secrets, Befehle, Installation von Hand, Container (Docker, Podman), LXC-Deploy |
 | [docs/install-agent.de.md](docs/install-agent.de.md) | GPU-Knoten unter Windows und Linux, Ollama, Freigabe, Update-Schlüssel |
 | [docs/configuration.de.md](docs/configuration.de.md) | Client-Identitäten, Rollen und Stufen, Scheduler und Admission, Auto-Rolle, Cloud-Stufen |
 | [docs/clients.de.md](docs/clients.de.md) | Home Assistant, Node-RED, OpenAI- und Anthropic-Clients, Claude Code, der `routing`-Block |
 | [docs/operations.de.md](docs/operations.de.md) | Web-UI, Metriken, Home-Assistant-Entitäten, Agent- und Ollama-Updates, Schlüsselwechsel, Sichern und Zurückspielen, Namen, Messwerte |
 | [docs/troubleshooting.de.md](docs/troubleshooting.de.md) | Statuscodes, wartende Agenten, TLS-Fehler, Logs, Gedächtnis-Zustände |
 | [docs/reference.de.md](docs/reference.de.md) | Schnittstellen, GPU-Schutz, optionale Gedächtnis- und Sitzungsfunktionen, Rerank, OpenAI-kompatible Knoten, Grenzen, Repo-Layout |
+| [docs/protocol.de.md](docs/protocol.de.md) | Protokoll zwischen Router und Agent: Anmeldung, Rahmen, Nachrichten, JSON-Schemas, Konformitätstests (für einen eigenen Agenten) |
 | [docs/adr/](docs/adr/README.md) | Architecture Decision Records (englisch): warum Skirnir so gebaut ist |
 | [agent/README.md](agent/README.md) | Interna des Agenten |
 

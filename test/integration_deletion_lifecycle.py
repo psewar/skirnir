@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Real PostgreSQL tests of the deletion lifecycle (ADR-0076, TM-12) against a disposable database.
+"""The deletion lifecycle (ADR-0076, TM-12) on every session store engine (ADR-0114): SQLite always, PostgreSQL against a
+disposable database.
 
   * deleting a session with delete_memory_with_session marks the memory operations retained from it: never sent ->
     deleted without payload, possibly in Hindsight -> delete_pending, in flight -> taken over when the send finishes;
@@ -7,35 +8,36 @@
   * the retention cleanup does the same with the option;
   * a restore of an older database is simulated (session and pending send back): replaying the journal deletes the
     session again and marks the send, so it is never delivered;
-  * stuck deletions are counted; deleted documents are listed in pages for the Hindsight reconcile.
+  * stuck deletions are counted; deleted documents are listed in pages for the Hindsight reconcile;
+  * SQLite: a real file backup (the online backup API) restored over the store file is replayed the same way.
 
 SKIRNIR_TEST_SESSION_DSN=postgresql://... python test/integration_deletion_lifecycle.py
 Only synthetic, randomly scoped test owners are written. Never use production DBs.
 """
 import os
+import sqlite3
 import sys
 import unittest
 from uuid import UUID, uuid4
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "router"))
 from skirnir_router.session_config import SessionConfig  # noqa: E402
-from skirnir_router.session_store import PostgresSessionStore  # noqa: E402
 from skirnir_router.session_types import NOT_FOUND  # noqa: E402
+from store_engines import POSTGRES_ONLY, PostgresEngine, SqliteEngine, prepare  # noqa: E402
 
-DSN = os.environ.get("SKIRNIR_TEST_SESSION_DSN")
 BANK = "skirnir-test-" + "0" * 40
 
 
-@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
-class DeletionLifecycle(unittest.IsolatedAsyncioTestCase):
+class DeletionLifecycle:
     async def asyncSetUp(self):
-        self.store = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
+        prepare(self)
+        self.store = await self.engine.open(SessionConfig(enabled=True))
         self.owner = "test-" + uuid4().hex
         self.other = "test-" + uuid4().hex
 
     async def asyncTearDown(self):
         try:
-            async with self.store.pool.acquire() as conn:
+            async with self.store.connection() as conn:
                 await conn.execute("DELETE FROM skirnir_sessions.memory_outbox WHERE owner=ANY($1::text[])", [self.owner, self.other])
                 await conn.execute("DELETE FROM skirnir_sessions.sessions WHERE owner=ANY($1::text[])", [self.owner, self.other])
         finally:
@@ -53,13 +55,13 @@ class DeletionLifecycle(unittest.IsolatedAsyncioTestCase):
                                           session_id=session_id)
         self.assertEqual(row["state"], "pending")
         if state != "pending" or attempts:
-            async with self.store.pool.acquire() as conn:
+            async with self.store.connection() as conn:
                 await conn.execute("UPDATE skirnir_sessions.memory_outbox SET state=$2,attempts=$3 WHERE operation_id=$1",
                                    operation, state, attempts)
         return operation
 
     async def row(self, operation):
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             r = await conn.fetchrow("SELECT state,payload,delete_requested FROM skirnir_sessions.memory_outbox WHERE operation_id=$1", operation)
         return r["state"], r["payload"], r["delete_requested"]
 
@@ -101,7 +103,7 @@ class DeletionLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_retention_cleanup_with_memory(self):
         sid = await self.session()
         unsent = await self.op(sid)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.sessions SET updated_at=now()-interval '40 days' WHERE id=$1", sid)
         result = await self.store.cleanup(30, 0, 0, with_memory=True)
         self.assertGreaterEqual(result["memory_deletions"], 1)
@@ -111,12 +113,12 @@ class DeletionLifecycle(unittest.IsolatedAsyncioTestCase):
         sid = await self.session()
         unsent = await self.op(sid)
         sent = await self.op(None, state="accepted", attempts=1)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             snapshot = await conn.fetch("SELECT * FROM skirnir_sessions.memory_outbox WHERE owner=$1", self.owner)
             session_row = await conn.fetchrow("SELECT * FROM skirnir_sessions.sessions WHERE id=$1", sid)
         self.assertIsNone(await self.store.delete(self.owner, sid, with_memory=True))
         # "restore": the old database state comes back - the session and the pending send with its content
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             cols = list(session_row.keys())
             await conn.execute(f"INSERT INTO skirnir_sessions.sessions({','.join(cols)}) VALUES({','.join(f'${i + 1}' for i in range(len(cols)))})",
                                *[session_row[c] for c in cols])
@@ -135,7 +137,7 @@ class DeletionLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_stuck_and_reconcile_listing(self):
         before = await self.store.outbox_stuck_deletions()
         dead = await self.op(None, state="dead", attempts=3)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET delete_requested=true WHERE operation_id=$1", dead)
         self.assertEqual(await self.store.outbox_stuck_deletions(), before + 1)
         gone = sorted([await self.op(None, state="deleted", attempts=1) for _ in range(3)])
@@ -149,6 +151,36 @@ class DeletionLifecycle(unittest.IsolatedAsyncioTestCase):
                 break
             after = page[-1][0]
         self.assertEqual(sorted(seen), gone)   # sent and deleted only; a never-sent row has nothing in Hindsight
+
+
+@POSTGRES_ONLY
+class DeletionLifecyclePostgres(DeletionLifecycle, unittest.IsolatedAsyncioTestCase):
+    engine_class = PostgresEngine
+
+
+class DeletionLifecycleSqlite(DeletionLifecycle, unittest.IsolatedAsyncioTestCase):
+    engine_class = SqliteEngine
+
+    async def test_file_backup_restore_replays_deletions(self):
+        sid = await self.session()
+        unsent = await self.op(sid)
+        backup = os.path.join(self.engine.folder, "backup.db")
+        source, target = sqlite3.connect(self.engine.path), sqlite3.connect(backup)
+        source.backup(target)   # what `sqlite3 sessions.db ".backup backup.db"` does while the router runs
+        source.close()
+        target.close()
+        self.assertIsNone(await self.store.delete(self.owner, sid, with_memory=True))
+        await self.store.close()
+        for suffix in ("-wal", "-shm"):
+            if os.path.exists(self.engine.path + suffix):
+                os.remove(self.engine.path + suffix)
+        os.replace(backup, self.engine.path)   # the operator restores the backup with the router stopped
+        self.store = await self.engine.open(SessionConfig(enabled=True))
+        self.assertEqual((await self.row(unsent))[:2], ("pending", {"content": "synthetic"}))
+        result = await self.store.replay_deletions([(self.owner, sid)], [], True)   # what the start does from the journal
+        self.assertEqual(result, {"sessions": 1, "operations": 1})
+        self.assertEqual(await self.store.get(self.owner, sid), NOT_FOUND)
+        self.assertEqual((await self.row(unsent))[:2], ("deleted", None))
 
 
 if __name__ == "__main__":

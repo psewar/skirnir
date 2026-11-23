@@ -45,17 +45,26 @@ def nreq(node, method, path, **kw):
         return node.tunnel.request(method, path, **kw)
     if not node.url:
         # exception-ok: nreq stands in for SESSION.request; callers handle an unreachable node as a ClientError at their network boundary
-        raise NodeNotReady(f"{node.name}: kein Tunnel verbunden")
+        raise NodeNotReady(f"{node.name}: no tunnel connected")
     if node.tls:
         if node.ssl is None:
             # exception-ok: nreq stands in for SESSION.request; callers handle an unreachable node as a ClientError at their network boundary
-            raise NodeNotReady(f"{node.name}: TLS-Fingerprint unbekannt, warte auf Heartbeat")
+            raise NodeNotReady(f"{node.name}: TLS fingerprint unknown, waiting for a heartbeat")
         kw["ssl"] = node.ssl
         h = dict(kw.get("headers") or {})
         if state.CFG.heartbeat_token:   # Router token for the agent's TLS front-end (ollama_proxy, router.token)
             h["X-Router-Token"] = state.CFG.heartbeat_token
         kw["headers"] = h
     return state.SESSION.request(method, node.url + path, **kw)
+
+
+def empty_room_gib(node, reserve_for):
+    """What a model set may take on the empty node: its capacity (the card, or main memory on a node without a GPU,
+    ADR-0102) minus the reserve for state `reserve_for` (Node.reserve_gib). The base of every budget that does not start
+    from measured free memory: budget_gib without a fresh report, the residency room (poll.residency_check) and the
+    empty-node fit in scheduler.assess and scheduler.role_possible_when_free (ADR-0108). A function rather than a method, so
+    scheduler test doubles need only capacity_gib and reserve_gib."""
+    return node.capacity_gib() - node.reserve_gib(reserve_for)
 
 
 class Breaker:
@@ -70,12 +79,15 @@ class Breaker:
             return False
         return self.inflight == 0
 
-    def breaker_allows(self, now):
+    def breaker_probe(self, now):
+        """The breaker's only time-driven transition: once open_s is over, open -> half_open (one probe), with log and
+        journal entry. The selection itself is pure (scheduler.assess reads breaker_would_allow, which already lets an
+        expired open breaker through); the caller runs scheduler.probe_breakers before a selection, so the target is
+        ranked with its probe penalty as before (ADR-0108)."""
         if self.breaker == "open" and now >= self.breaker_until:
             self.breaker = "half_open"
             log.info("%s: breaker half_open - one probe", self.name)
             state.remember({"event": "breaker", "node": self.name, "state": "half_open"})
-        return self.breaker_would_allow(now)
 
     def breaker_fail(self, now, why):
         cfg = state.CFG.breaker
@@ -134,7 +146,8 @@ class Node(Breaker):
         # Missing = a GPU, as every agent before 0.36.0 had one.
         self.gpu_present = spec.get("gpu_present") is not False
         self.mac = spec.get("mac")
-        self.wol = bool(spec.get("wol", False))
+        self.wol = bool(spec.get("wol", False))   # may be woken on demand at all (name kept from the WOL-only days)
+        self.waker = spec.get("waker") or "wol"   # how: built-in wol or a name from router.wakers (ADR-0117)
         self.weight = int(spec.get("weight", 1))
         self.foreign_baseline_gib = float(spec.get("foreign_vram_baseline_gib", 0))
         self.fp = None      # Fingerprint of the agent key (registered nodes)
@@ -253,12 +266,20 @@ class Node(Breaker):
         that actually fit."""
         return self._loaded_real_gib()
 
-    def _loaded_real_gib(self):
+    def _real_gib(self, name, ps_gib):
+        """Measured occupancy of the loaded model `name`: the catalog's `real` figure at its loaded context, never less than
+        what /api/ps reports (`ps_gib`); /api/ps alone for a model the catalog has not measured."""
+        d = self.digest_of.get(name)
+        real = state.CFG.real_gib(name, self.loaded_ctx.get(d) if d is not None else None)
+        return max(ps_gib, real) if real is not None else ps_gib
+
+    def _loaded_real_gib(self, only=None):
+        """Measured occupancy summed over the loaded models, or over those for which `only(name)` holds. A plain loop on
+        purpose: sum() of floats rounds differently since Python 3.12, and budgets are compared at their edges."""
         total = 0.0
         for name, ps_gib in self.loaded.items():
-            d = self.digest_of.get(name)
-            real = state.CFG.real_gib(name, self.loaded_ctx.get(d) if d is not None else None)
-            total += max(ps_gib, real) if real is not None else ps_gib
+            if only is None or only(name):
+                total += self._real_gib(name, ps_gib)
         return total
 
     def ollama_vram_claimed_gib(self):
@@ -409,6 +430,7 @@ class Node(Breaker):
         if spec.get("mac"):
             self.mac = spec["mac"]
         self.wol = bool(spec.get("wol", self.wol))
+        self.waker = spec.get("waker", self.waker) or "wol"
         self.weight = int(spec.get("weight", self.weight))
         if spec.get("gpu"):
             self.gpu = spec["gpu"]
@@ -510,29 +532,21 @@ class Node(Breaker):
         """What Ollama may occupy on this node: free VRAM + everything Ollama itself holds (will be
         evicted or reused via Runner-Sharing as needed) - reserve. Foreign VRAM (desktop, game) does not count.
         Without a GPU (ADR-0102) the same in main memory: available RAM (agent fact memory.ram_available_gib) + what
-        Ollama holds (its loaded models' full size, apply_ollama_state) - reserve."""
+        Ollama holds (its loaded models' full size, apply_ollama_state) - reserve. Without a fresh report: the empty node."""
         reserve = self.reserve_gib()
         if not self.gpu_present:
             free = (self.memory or {}).get("ram_available_gib")
             if self.gpu_known(now) and isinstance(free, (int, float)) and not isinstance(free, bool):
                 return free + self.ollama_vram_gib() - reserve
-            return self.capacity_gib() - reserve
-        if self.gpu_known(now) and self.vram_free_gib is not None:
+        elif self.gpu_known(now) and self.vram_free_gib is not None:
             return self.vram_free_gib + self.ollama_vram_gib() - reserve
-        return self.vram_total_gib - reserve
+        return empty_room_gib(self, self.state)
 
     def answering_vram_gib(self):
         """VRAM of the loaded models that are answering a request right now (measured occupancy like ollama_vram_gib).
         budget_gib counts them as evictable; a load beside them that needs their memory makes Ollama evict them as soon
         as their request ends (0.32.1, ADR-0097)."""
-        total = 0.0
-        for name, ps_gib in self.loaded.items():
-            if not any(c > 0 and self.same_blob(m, name) for m, c in self.inflight_models.items()):
-                continue
-            d = self.digest_of.get(name)
-            real = state.CFG.real_gib(name, self.loaded_ctx.get(d) if d is not None else None)
-            total += max(ps_gib, real) if real is not None else ps_gib
-        return total
+        return self._loaded_real_gib(lambda name: any(c > 0 and self.same_blob(m, name) for m, c in self.inflight_models.items()))
 
     @property
     def speaks_openai(self):
@@ -576,10 +590,22 @@ class Node(Breaker):
         """The node can serve the model now or after switching to its standby Ollama."""
         return model in self.models or self.standby_switch(model)
 
+    def card_budget_gib(self, reserve_for):
+        """What Ollama may occupy on the card with nothing of its own counted: the card minus the VRAM reserve for state
+        `reserve_for`, the desktop baseline and foreign memory. One formula for the standby switch (standby_budget_gib) and
+        the prewarm plan of a node with a GPU (prewarm_budget_gib)."""
+        return self.vram_total_gib - state.CFG.reserve.get(reserve_for, 1.0) - self.baseline_gib() - self.foreign_vram_gib()
+
+    def prewarm_budget_gib(self, now):
+        """Memory the prewarm plan may fill (poll.prewarm): on a node with a GPU the card without baseline and foreign VRAM,
+        reserve of a free node (Ollama's own models are evictable); without a GPU (ADR-0102) available main memory plus what
+        Ollama holds, as for a request (budget_gib)."""
+        return self.card_budget_gib("free") if self.gpu_present else self.budget_gib(now, None)
+
     def standby_budget_gib(self):
         """VRAM one side gets once the other has stopped (standby after a hold, server after a release): the card minus
         reserve, desktop baseline and foreign memory."""
-        return self.vram_total_gib - state.CFG.reserve.get(self.state, 1.0) - self.baseline_gib() - self.foreign_vram_gib()
+        return self.card_budget_gib(self.state)
 
     def quiet(self, now):
         """Is the node quiet for a measurement (ADR-0061)? Then the router unloads and prewarms nothing here."""
@@ -611,7 +637,7 @@ class Node(Breaker):
             "gpu_util": self.gpu_util, "vram_free_gib": self.vram_free_gib,
             "vram_used_gib": self.vram_used_gib, "vram_total_gib": self.vram_total_gib, "foreign_vram_gib": round(self.foreign_vram_gib(), 2), "children_vram_gib": round(self.children_vram_gib, 2),
             "heartbeat_age_s": round(now - self.hb_ts, 1) if self.hb_ts else None,
-            "wol": self.wol, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,
+            "wol": self.wol, "waker": self.waker, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,
             "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
             "breaker": self.breaker, "max_inflight": self.effective_max_inflight(), "draining": now < self.draining_until, "ollama_source": "push" if self.ollama_push_active(now) else "poll",
             "game": self.game, "memory": self.memory, "memory_pressure": self.mem_pressure,   # Agent >= 0.17.0

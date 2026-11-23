@@ -6,7 +6,7 @@ decision-makers: maintainer (proposed by Claude)
 
 # Unrecognised tool results pass unless the operator keeps them local
 
-> Refines ADR-0119 (privacy redaction per tool format and locale pack, proposed in PR #177) on one point: when a tool
+> Refines [ADR-0119](0119-privacy-redaction-per-tool-format-and-locale-pack.md) (privacy redaction per tool format and locale pack) on one point: when a tool
 > result that no redactor recognises keeps the request local. Keeps
 > [ADR-0038](0038-content-check-before-a-cloud-tier-opt-in.md) (content check before a cloud tier, opt-in) and
 > [ADR-0043](0043-configured-client-data-class-is-a-floor.md) (a configured client class is a floor) unchanged.

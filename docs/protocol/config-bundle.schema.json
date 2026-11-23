@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Configuration bundle (inside status and config messages)",
+  "description": "What an approved agent needs besides the router URL. The agent stores it (DPAPI-protected on Windows) so it starts with it when the router is unreachable. Sent only to approved identities, over the tunnel's TLS.",
+  "type": "object",
+  "properties": {
+    "heartbeat_interval_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Interval between heartbeats in seconds (router setting hb_interval_s). 0 or absent: the agent keeps its current interval (3 s at start).",
+      "x-since-router": "baseline"
+    },
+    "node": {
+      "type": "string",
+      "description": "Name under which the router manages the node.",
+      "x-since-router": "baseline"
+    },
+    "mqtt": {
+      "type": "object",
+      "description": "MQTT access for the agent's own Home Assistant entities. Present only when the router has MQTT configured and the node policy allows it.",
+      "x-since-router": "baseline",
+      "properties": {
+        "host": {"type": "string", "description": "Broker host."},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "Broker port (8883 with TLS, else 1883, unless configured)."},
+        "tls": {"type": "boolean", "description": "Connect with TLS."},
+        "username": {"type": "string", "description": "Broker user."},
+        "password": {"type": "string", "description": "Broker password. A secret: agents must not log it."},
+        "device_id": {"type": "string", "description": "Home Assistant device id (node name with - and . replaced by _)."},
+        "device_name": {"type": "string", "description": "Home Assistant device name (facts.hostname, else the node name)."},
+        "manufacturer": {"type": "string", "description": "Home Assistant device manufacturer (from facts)."},
+        "model": {"type": "string", "description": "Home Assistant device model (facts.model, else facts.gpu)."}
+      },
+      "required": ["host", "port"],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {"heartbeat_interval_s": 3.0, "node": "gpu-desktop"},
+    {
+      "heartbeat_interval_s": 3.0,
+      "node": "gpu-desktop",
+      "mqtt": {"host": "broker.example.net", "port": 8883, "tls": true, "username": "skirnir", "password": "example-only",
+               "device_id": "gpu_desktop", "device_name": "GPU-DESKTOP", "manufacturer": "Example Systems", "model": "Tower 1"}
+    }
+  ]
+}

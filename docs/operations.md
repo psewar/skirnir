@@ -178,6 +178,31 @@ since agent 0.31.0 no older version: an order below the installed Ollama (or a p
 configuration sets `ollama_update.allow_downgrade: true` for a deliberate rollback (ADR-0073). Windows nodes only for now;
 Linux archives are tar.zst.
 
+**Release source** (router 0.41.0, ADR-0117): `modes.ollama_update.release_source` selects where the router learns the
+latest version. `github` (default) reads the GitHub API at `release_url` as before. `document` reads a neutral release
+document at `release_url`, for example from a mirror or an internal repository without GitHub access:
+
+```json
+{"version": "0.35.1",
+ "files": {"windows/amd64": {"url": "https://mirror.example.net/ollama/v0.35.1/ollama-windows-amd64.zip",
+                             "sha256": "<64 hex digits>", "size": 1900000000}}}
+```
+
+The rules are strict (ADR-0124): final HTTPS URL (plain HTTP only to `127.0.0.1`/`::1`), no redirect, at most 64 KiB,
+20 s, `version` in the agent's version grammar, `sha256` with 64 hex digits, `size` in bytes, and every `url` ends in the
+archive name the agent expects for that platform. Platforms without an agent archive are skipped; a malformed entry for a
+known platform discards the whole document and the router keeps the last known version (problem `ollama_version_check_failing`
+after three days without a successful check). The document names only the version and the expected hashes. The agent still downloads from
+its own source `ollama_update.source` in the layout `<source>v<version>/<archive>` and `<source>v<version>/sha256sum.txt`
+and refuses an order whose hash does not match that source's `sha256sum.txt`. For a mirror both sides therefore point at it:
+the router at the document, each agent with `ollama_update.source` at the directory. Nothing changes on the agent.
+
+**Waking in the log:** every wake attempt appears in the decision log as event `wol` with the field `waker` (`wol` or the
+name from `router.wakers`); the journal writes `WOL <node> (<mac>)` or `wake via <waker> <node> (<host> HTTP <status>)`. If a
+waker could not send anything, it writes `wake <node> via <waker>: ... (<kind>)` with a fixed kind: `wake_no_mac`,
+`wake_send_failed`, `wake_unknown_waker`, `wake_secret_missing`, `wake_unreachable`, `wake_redirect`, `wake_refused`; the
+router then does not wait but answers 503 at once. Configuration: [configuration.md](configuration.md#waking-nodes).
+
 ## Secrets renderer
 
 `render-env.sh` renders `secrets.env` before every router start (`skirnir-router-secrets.service`) and, with the optional
@@ -227,7 +252,7 @@ Skirnir has no backup function of its own; back up these files with the tool you
 | Configuration folder | `/etc/skirnir-router/` | `config.yaml` (written by root tools, never by the router), the certificates in `certs/` (or `tls/` on older installations) and the release folder `agent/` (`manifest.json` and the signed agent binaries; these can also be copied again from a release). |
 | Source of the secrets | your secret store, and `/etc/skirnir-router-secrets/render-env.conf` with its access (with `SECRET_SOURCE=file`: the file `SECRET_FILE` names instead of the store) | `secrets.env` is rendered from it and can be rendered again: back up the source, not the rendered file. If you maintain `secrets.env` by hand, it is the source. The access file holds a credential; keep its backup as protected as the file itself. |
 | State folder (`router.state_dir`) | `/var/lib/skirnir-router/` | Everything the router writes itself, see the next table. Without `state_dir` these files lie next to `config.yaml`. |
-| Session database (optional) | the PostgreSQL database that `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) points to | Managed sessions (turns, events, compactions) and the memory outbox. Back it up with PostgreSQL's own tools. |
+| Session database (optional) | the PostgreSQL database or the SQLite file that `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) names (ADR-0114) | Sessions (events, managed turns, compactions, handoff imports) and the memory outbox. PostgreSQL: back it up with its own tools. SQLite: see `sessions.db` below. |
 | Memory backend (optional) | outside Skirnir (Hindsight) | The long-term memory lives there; back it up as that service documents. |
 | Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), if you need the audit trail. |
 
@@ -238,6 +263,7 @@ Files in the state folder:
 | `nodes.json` | node registry: each agent's public key, approval state, policy and facts | every node shows up as pending and has to be approved again |
 | `roles.yaml` | what the web UI changed: roles, models, settings, clients added in the UI (token hashes) | the UI changes are gone; `config.yaml` applies alone |
 | `deletions.jsonl` | deletion journal, ids only (ADR-0076) | a restored database brings deleted sessions and memory back; see below |
+| `sessions.db` (with `sqlite:///sessions.db`; the name is yours) | the SQLite session store: session content and the memory outbox, owner-only (0600). While the router runs, copy it only with `sqlite3 sessions.db ".backup /backup/sessions.db"`; a plain copy can miss what is still in `sessions.db-wal`. Stopped, a plain copy of the file is enough | stored sessions and pending memory jobs are gone; the router creates an empty store |
 | `usage.json` | usage per client and month, including the cloud spend per provider | the monthly cloud budget starts again at zero |
 | `metrics.json`, `perf.json` | cumulative counters; measured speed per model and node for the catalog | counters and speed values start from scratch |
 | `events.jsonl` | the event and decision log the web UI shows | history only |
@@ -260,7 +286,8 @@ The opt-in decision capture writes to its own path (`decision_engine.capture.pat
 Deletions are recorded outside the database, ids only, in `deletions.jsonl` in the router's state folder
 (`router.state_dir`, otherwise next to `config.yaml`; ADR-0076):
 
-1. **PostgreSQL restored** (session store and memory outbox): start the router as usual. Before the memory outbox sends
+1. **Session database restored** (PostgreSQL, or the SQLite file copied back with the router stopped and its `-wal` and
+   `-shm` files removed): start the router as usual. Before the memory outbox sends
    anything it applies the journal again; the log says how many sessions and operations were back and are deleted again.
    Restore `deletions.jsonl` never older than the database - keep it out of the database restore.
 2. **Hindsight restored**: documents of deleted memory operations are back. Delete them again, page by page:

@@ -669,8 +669,8 @@ class MemoryHttpTests(MemoryHarness):
             self.assertEqual(retained["items"][0]["content"], "Synthetic cloud answer.")
 
     async def test_legacy_async_ack_is_rejected_without_unsafe_fallback(self):
-        with patch.object(self.service.client, "post", AsyncMock(return_value={"operation_id": "different-id"})):
-            result = await self.service.client.retain(self.service.bank(memory.scope_for_principal("client-a", PROJECT)), "Synthetic", "synthetic-id", confirmed=True)
+        with patch.object(self.service.backend.client, "post", AsyncMock(return_value={"operation_id": "different-id"})):
+            result = await self.service.backend.client.retain(self.service.bank(memory.scope_for_principal("client-a", PROJECT)), "Synthetic", "synthetic-id", confirmed=True)
         self.assertTrue(failed(result))
         self.assertEqual((result.status, result.kind), (503, "protocol"))
 
@@ -746,7 +746,7 @@ class MemoryHttpTests(MemoryHarness):
         self.assertEqual(len(self.upstream_bodies[-1]["messages"]), 2)
         # The limit is configurable: the same answer fits under a larger max_response_bytes.
         self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, max_response_bytes=524288)
-        self.service.client.cfg = self.service.cfg
+        self.service.backend.client.cfg = self.service.cfg
         value = await (await self.call()).json()
         self.assertEqual((value["memory_state"], value["items"], value["trimmed"]), ("available", [], 1))
 
@@ -765,7 +765,7 @@ class MemoryHttpTests(MemoryHarness):
     async def test_status_probes_hindsight_health_without_client_traffic(self):
         # 2026-10-23: the status stayed "unknown" for five hours after a router start because it was only inferred from client calls
         api = self.client.server.app
-        self.assertTrue(self.service.client.healthy)   # the startup pass already probed, before any client call
+        self.assertTrue(self.service.backend.client.healthy)   # the startup pass already probed, before any client call
         self.assertEqual(self.calls, [])
         await context_ops.poll(api)
         self.assertEqual(context_ops.snapshot()["hindsight"], "available")
@@ -865,7 +865,7 @@ class MemoryHttpTests(MemoryHarness):
         self.delay = 0.5
         await self.assert_recall_unavailable(await self.call(), "unavailable:timeout")
         self.assertEqual(len(self.calls), 2)
-        task = asyncio.create_task(self.service.client.recall(self.service.bank(memory.scope_for_principal("client-a", PROJECT, read=True)), "Synthetic"))
+        task = asyncio.create_task(self.service.backend.client.recall(self.service.bank(memory.scope_for_principal("client-a", PROJECT, read=True)), "Synthetic"))
         await asyncio.sleep(0.01)
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
@@ -899,7 +899,7 @@ class DisabledTests(unittest.IsolatedAsyncioTestCase):
         previous = state.CFG
         state.CFG = config.Config(BASE, use_overrides=False)
         try:
-            with patch.dict(os.environ, {}, clear=True), patch.object(memory, "HindsightClient") as opening:
+            with patch.dict(os.environ, {}, clear=True), patch.object(memory, "open_backend") as opening:
                 api, _ = app.build_apps()
                 async with TestClient(TestServer(api)) as client:
                     response = await client.post(memory.PREFIX + "/recall", json={"project": PROJECT, "query": "Synthetic"})

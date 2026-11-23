@@ -183,6 +183,33 @@ nie den Code, und seit Agent 0.31.0 keine ältere: Ein Auftrag unter dem install
 abgelehnt, ausser die Konfiguration des Knotens setzt `ollama_update.allow_downgrade: true` für ein bewusstes Zurückgehen
 (ADR-0073). Vorerst nur Windows-Knoten; die Linux-Archive sind tar.zst.
 
+**Release-Quelle** (Router 0.41.0, ADR-0117): `modes.ollama_update.release_source` wählt, woher der Router die neueste
+Version erfährt. `github` (Standard) liest wie bisher die GitHub-API unter `release_url`. `document` liest unter
+`release_url` ein neutrales Release-Dokument, etwa von einem Spiegel oder einem internen Verzeichnis ohne GitHub-Zugang:
+
+```json
+{"version": "0.35.1",
+ "files": {"windows/amd64": {"url": "https://mirror.example.net/ollama/v0.35.1/ollama-windows-amd64.zip",
+                             "sha256": "<64 Hex-Ziffern>", "size": 1900000000}}}
+```
+
+Die Regeln sind streng (ADR-0124): endgültige HTTPS-URL (einfaches HTTP nur an `127.0.0.1`/`::1`), keine Umleitung,
+höchstens 64 KiB, 20 s, `version` in der Versionsschreibweise des Agenten, `sha256` mit 64 Hex-Ziffern, `size` in Byte,
+und jede `url` endet auf den Archivnamen, den der Agent für diese Plattform erwartet. Plattformen ohne Agent-Archiv werden
+übersprungen; ein fehlerhafter Eintrag für eine bekannte Plattform verwirft das ganze Dokument, und der Router behält die
+zuletzt bekannte Version (Problem `ollama_version_check_failing` nach drei Tagen ohne erfolgreiche Prüfung). Das Dokument nennt nur die Version
+und die erwarteten Hashes. Der Agent lädt weiterhin von seiner eigenen Quelle `ollama_update.source` im Layout
+`<source>v<version>/<archiv>` und `<source>v<version>/sha256sum.txt` und lehnt einen Auftrag ab, dessen Hash nicht zur
+`sha256sum.txt` dieser Quelle passt. Für einen Spiegel zeigen also beide Seiten auf ihn: der Router auf das Dokument, jeder
+Agent mit `ollama_update.source` auf das Verzeichnis. Am Agenten ändert sich nichts.
+
+**Wecken im Protokoll:** Jeder Weckversuch erscheint im Entscheidungsprotokoll als Ereignis `wol` mit dem Feld `waker`
+(`wol` oder dem Namen aus `router.wakers`); das Journal schreibt `WOL <knoten> (<mac>)` oder `wake via <wecker> <knoten>
+(<host> HTTP <status>)`. Konnte ein Wecker nichts senden, steht dort `wake <knoten> via <wecker>: ... (<art>)` mit einer festen
+Art: `wake_no_mac`, `wake_send_failed`, `wake_unknown_waker`, `wake_secret_missing`, `wake_unreachable`, `wake_redirect`,
+`wake_refused`; dann wartet der Router nicht, sondern antwortet sofort mit 503. Konfiguration:
+[configuration.de.md](configuration.de.md#knoten-wecken).
+
 ## Secrets-Renderer
 
 `render-env.sh` rendert `secrets.env` vor jedem Start des Routers (`skirnir-router-secrets.service`) und mit dem optionalen
@@ -237,7 +264,7 @@ verschiebt sie.
 | Konfigurationsordner | `/etc/skirnir-router/` | `config.yaml` (schreiben nur Root-Werkzeuge, nie der Router), die Zertifikate in `certs/` (oder `tls/` bei älteren Installationen) und der Release-Ordner `agent/` (`manifest.json` und die signierten Agent-Binaries; lassen sich auch erneut aus einem Release kopieren). |
 | Quelle der Secrets | der eigene Secret-Store und `/etc/skirnir-router-secrets/render-env.conf` mit dem Zugang dazu (mit `SECRET_SOURCE=file`: statt des Stores die Datei, die `SECRET_FILE` nennt) | `secrets.env` wird daraus erzeugt und lässt sich neu erzeugen: die Quelle sichern, nicht die erzeugte Datei. Wer `secrets.env` von Hand pflegt, hat sie als Quelle. Die Zugangsdatei enthält ein Geheimnis; ihr Backup so geschützt halten wie die Datei selbst. |
 | Zustandsordner (`router.state_dir`) | `/var/lib/skirnir-router/` | Alles, was der Router selbst schreibt, siehe nächste Tabelle. Ohne `state_dir` liegen diese Dateien neben der `config.yaml`. |
-| Session-Datenbank (optional) | die PostgreSQL-Datenbank, auf die `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) zeigt | Verwaltete Sessions (Turns, Ereignisse, Verdichtungen) und die Memory-Outbox. Mit den Werkzeugen von PostgreSQL sichern. |
+| Session-Datenbank (optional) | die PostgreSQL-Datenbank oder die SQLite-Datei, die `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) nennt (ADR-0114) | Sessions (Ereignisse, verwaltete Turns, Verdichtungen, Übergabe-Importe) und die Memory-Outbox. PostgreSQL: mit dessen eigenen Werkzeugen sichern. SQLite: siehe `sessions.db` unten. |
 | Gedächtnis-Backend (optional) | ausserhalb von Skirnir (Hindsight) | Dort liegt das Langzeitgedächtnis; sichern, wie dieser Dienst es beschreibt. |
 | Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), falls der Audit-Verlauf gebraucht wird. |
 
@@ -248,6 +275,7 @@ Dateien im Zustandsordner:
 | `nodes.json` | Knotenregister: öffentlicher Schlüssel, Freigabezustand, Policy und Fakten je Agent | jeder Knoten erscheint als wartend und muss neu freigegeben werden |
 | `roles.yaml` | was die Web-UI geändert hat: Rollen, Modelle, Einstellungen, in der UI angelegte Clients (Token-Hashes) | die UI-Änderungen sind weg; es gilt nur die `config.yaml` |
 | `deletions.jsonl` | Löschjournal, nur IDs (ADR-0076) | eine zurückgespielte Datenbank bringt gelöschte Sessions und Gedächtnis zurück; siehe unten |
+| `sessions.db` (bei `sqlite:///sessions.db`; der Name ist frei) | der SQLite-Session-Store: Session-Inhalte und die Memory-Outbox, nur für den Besitzer lesbar (0600). Bei laufendem Router nur mit `sqlite3 sessions.db ".backup /backup/sessions.db"` kopieren; eine einfache Kopie kann verpassen, was noch in `sessions.db-wal` steht. Bei gestopptem Router genügt eine Kopie der Datei | gespeicherte Sessions und offene Memory-Aufträge sind weg; der Router legt einen leeren Store an |
 | `usage.json` | Nutzung je Client und Monat, auch die Cloud-Ausgaben je Anbieter | das monatliche Cloud-Budget beginnt wieder bei null |
 | `metrics.json`, `perf.json` | kumulierte Zähler; gemessene Geschwindigkeit je Modell und Knoten für den Katalog | Zähler und Geschwindigkeitswerte beginnen von vorn |
 | `events.jsonl` | das Ereignis- und Entscheidungsprotokoll, das die Web-UI zeigt | nur Verlauf |
@@ -270,7 +298,8 @@ Die optionale Entscheidungsaufzeichnung schreibt an ihren eigenen Pfad (`decisio
 Löschungen stehen ausserhalb der Datenbank, nur als IDs, in `deletions.jsonl` im Zustandsordner des Routers
 (`router.state_dir`, sonst neben der `config.yaml`; ADR-0076):
 
-1. **PostgreSQL zurückgespielt** (Session-Store und Memory-Outbox): den Router wie gewohnt starten. Bevor die Outbox etwas
+1. **Session-Datenbank zurückgespielt** (PostgreSQL, oder die SQLite-Datei bei gestopptem Router zurückkopiert und ihre
+   `-wal`- und `-shm`-Dateien entfernt): den Router wie gewohnt starten. Bevor die Outbox etwas
    sendet, wendet er das Journal erneut an; das Log nennt, wie viele Sessions und Operationen wieder da waren und erneut
    gelöscht sind. `deletions.jsonl` nie älter als die Datenbank zurückspielen - aus dem Datenbank-Restore heraushalten.
 2. **Hindsight zurückgespielt**: Dokumente gelöschter Operationen sind wieder da. Seitenweise erneut löschen:

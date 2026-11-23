@@ -42,7 +42,7 @@ class LiveMemoryTests(fixture.MemoryHarness):
         self.service.worker.cancel()
         await asyncio.gather(self.service.worker, return_exceptions=True)
         self.service.worker = None
-        await self.service.client.close()
+        await self.service.backend.close()
         cfg = replace(self.service.cfg, outbox_enabled=True, endpoint_env='SKIRNIR_TEST_HINDSIGHT_URL',
                       allow_http_loopback=True, timeout_s=30, recall_max_tokens=4096, sync_wait_s=60)
         endpoint = hindsight.endpoint_from_env(cfg)
@@ -50,7 +50,7 @@ class LiveMemoryTests(fixture.MemoryHarness):
             self.fail('live tests accept loopback backends only')
         self.service.cfg = state.CFG.hindsight = cfg
         self.service.key = uuid4().hex.encode()
-        self.service.client = hindsight.HindsightClient(endpoint, os.environ.get('SKIRNIR_TEST_HINDSIGHT_TOKEN', ''), cfg)
+        self.service.backend = hindsight.HindsightBackend(hindsight.HindsightClient(endpoint, os.environ.get('SKIRNIR_TEST_HINDSIGHT_TOKEN', ''), cfg))
         self.real = await PostgresSessionStore.open(dsn, SessionConfig(enabled=True))
         if failed(self.real):
             self.fail('live test database unavailable')
@@ -72,7 +72,7 @@ class LiveMemoryTests(fixture.MemoryHarness):
             except (AssertionError, TimeoutError):   # test harness: a failed wait is counted, cleanup continues
                 failures += 1
                 continue
-            deleted = await self.service.client.delete_document(self.service.bank(memory.scope_for_principal(owner, shared.SHARED)), operation)
+            deleted = await self.service.backend.delete_document(self.service.bank(memory.scope_for_principal(owner, shared.SHARED)), operation)
             failures += failed(deleted)
         await self.sdk.aclose()
         async with self.real.pool.acquire() as conn:
@@ -125,7 +125,7 @@ class LiveMemoryTests(fixture.MemoryHarness):
         self.assertEqual(row['state'], 'deleted')
         self.operations_to_delete.pop(operation)
         bank = self.service.bank(memory.scope_for_principal('client-a', shared.SHARED))
-        document = await self.service.client.control(bank, '/documents/' + operation)
+        document = await self.service.backend.client.control(bank, '/documents/' + operation)
         self.assertEqual(document.get('status'), 'not_found')
 
     async def test_actual_installed_hermes_provider_tools(self):
