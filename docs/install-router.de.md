@@ -3,14 +3,15 @@
 **Deutsch** · [English](install-router.md) · [README](../README.de.md)
 
 Der Router ist ein Python-Prozess mit einer systemd-Unit. Diese Seite beschreibt eine Neuinstallation unter Debian oder
-Ubuntu, das TLS-Zertifikat, die Firewall, Secrets, die optionale Decision Engine und die Kommandozeilenwerkzeuge.
-GPU-Knoten stehen in [install-agent.de.md](install-agent.de.md), die Konfiguration in [configuration.de.md](configuration.de.md).
+Ubuntu, das TLS-Zertifikat, die Firewall, Secrets, die optionale Decision Engine und die Kommandozeilenwerkzeuge. Docker,
+Podman, Unraid, TrueNAS oder Synology: siehe [Container](#container). GPU-Knoten stehen in
+[install-agent.de.md](install-agent.de.md), die Konfiguration in [configuration.de.md](configuration.de.md).
 
 ## Voraussetzungen
 
 | Was | Einzelheiten |
 |---|---|
-| Betriebssystem | Debian 12 oder Ubuntu (oder vergleichbar; `install.sh` unterstützt Debian und Ubuntu, sonst [Installation von Hand](#installation-von-hand)). Ein Container genügt. Unter Windows läuft der Router mit dem Standard-Event-Loop (Entwicklung). |
+| Betriebssystem | Debian 12 oder Ubuntu (oder vergleichbar; `install.sh` unterstützt Debian und Ubuntu, sonst [Installation von Hand](#installation-von-hand)). Ein Systemcontainer (LXC) genügt; für Docker oder Podman das Router-Image ([Container](#container)). Unter Windows läuft der Router mit dem Standard-Event-Loop (Entwicklung). |
 | Python | 3.11 oder neuer |
 | Pakete | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installiert fehlende). Was die Distribution nicht oder zu alt mitbringt (unter Debian 12: `asyncpg` für den Session-Store), kommt nur aus der hash-gesperrten `router/requirements-lock.txt` ins venv (ADR-0074). |
 | Ports | **11434** für Clients (Ollama-, OpenAI- und Anthropic-API), **11435** für den Tunnel der Agenten, die Web-UI, `/admin/*` und `/metrics` |
@@ -195,6 +196,81 @@ Ohne `install.sh` (andere Distribution, oder um jeden Schritt zu sehen):
    `systemctl enable --now skirnir-router`.
 5. Secrets und, falls gewünscht, die Decision Engine wie oben.
 6. Agenten installieren und in der UI freigeben ([install-agent.de.md](install-agent.de.md)).
+
+## Container
+
+Das Router-Image führt dasselbe Programm mit derselben `config.yaml` und denselben Pfaden aus wie `install.sh`
+([ADR-0116](adr/0116-an-official-container-image-for-the-router.md),
+[ADR-0121](adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md); wie es
+funktioniert: [design/router-container.md](../design/router-container.md)). `router/Dockerfile` baut auf dem per Digest
+festgelegten `python:3.14-slim-trixie` auf und installiert Python-Pakete nur aus der hash-gesperrten
+`router/requirements-container-lock.txt` (nur Wheels, amd64 und arm64). Der Router läuft als uid/gid 10001
+(`skirnir-router`) ohne Capabilities; im Image steckt kein Secret. Ein Image in einer Registry gibt es noch nicht: aus
+einem Release oder Klon bauen.
+
+```bash
+docker build -t skirnir-router router/                  # Podman: podman build --format docker -t skirnir-router router/
+```
+
+(`--format docker` behält den Health-Check des Images, den Podmans Standard-Image-Format verwirft; `compose.yaml`
+wiederholt ihn.)
+
+| Im Container | Von | Inhalt |
+|---|---|---|
+| `/etc/skirnir-router` | eigener Ordner `config/`, **nur lesbar** | `config.yaml`, `certs/fullchain.pem`, `certs/privkey.pem` |
+| `/var/lib/skirnir-router` | Volume `state` | `router.state_dir`: in der Web-UI geänderte Rollen, Knotenregister, Journale |
+| `/var/log/skirnir-router` | Volume `logs` | `client_auth.audit_log` |
+| Umgebung | `secrets.env` | die Variablen, die die `*_env`-Schlüssel nennen: `MQTT_PASSWORD`, `OPENAI_API_KEY`, `SKIRNIR_SESSION_DSN` … |
+| stdout | `docker compose logs router` | das Log des Routers, mit dem Posture-Bericht beim Start |
+
+**Erster Start.**
+
+1. `router/compose.yaml` in einen eigenen Ordner kopieren (außerhalb des Klons: er wird die Secrets enthalten) und dort
+   arbeiten.
+2. Erste Konfiguration, von `--init` als root in einem Wegwerf-Container geschrieben, damit `config.yaml` root gehört
+   und für die Gruppe des Routers lesbar ist, wie auf einem Host:
+
+   ```bash
+   mkdir config
+   docker run --rm -it --user 0:0 -v "$PWD/config:/etc/skirnir-router" skirnir-router \
+     --init /etc/skirnir-router --public-url https://<name>:11435
+   ```
+
+   Es fragt das Passwort der Web-UI, zeigt das Client-Token **einmal** und gibt den Posture-Bericht aus.
+3. Zertifikat und Schlüssel für `<name>` nach `config/certs/` legen (`fullchain.pem`, `privkey.pem`) und den Ordner der
+   Gruppe 10001 geben, für sie lesbar, nicht schreibbar:
+   `sudo chown -R root:10001 config && sudo chmod -R g+rX,g-w,o-rwx config`. Mit rootless Podman ist die Gruppe 10001
+   des Containers eine untergeordnete Gruppe des eigenen Benutzers: stattdessen `podman unshare chown -R 0:10001 config`.
+4. Secrets: `secrets.env` neben `compose.yaml`, je Zeile ein `KEY=value` für die `*_env`-Schlüssel der Konfiguration;
+   die Datei darf leer sein (`touch secrets.env && chmod 600 secrets.env`).
+5. `docker compose up -d`, dann `docker compose ps` (Zustand `healthy`) und `docker compose logs router`.
+
+`compose.yaml` startet den Router als uid 10001 auf einem nur lesbaren Root-Dateisystem, ohne Capabilities und ohne
+Rechteerweiterung; schreibbar sind nur die beiden Volumes und ein kleines `/tmp`. Beide Ports werden auf allen
+Host-Adressen veröffentlicht: per Firewall einschränken wie unter [Firewall](#firewall), oder hinter einem Reverse
+Proxy `127.0.0.1:11434:11434` schreiben. Docker leitet veröffentlichte Ports weiter, bevor die üblichen Regeln von ufw
+und firewalld sie sehen; in Dockers Kette `DOCKER-USER` einschränken oder auf einer Host-Adresse veröffentlichen
+(`192.0.2.10:11435:11435`). Ein Bind-Mount statt eines Volumes für Zustand oder Logs muss uid 10001
+gehören (`sudo chown 10001:10001 <ordner>`, Modus 0700). Unraid, TrueNAS und Synology: dieselben Mounts, dieselbe
+Umgebung, Benutzer 10001:10001 und die Nur-lesen-Option in deren Container-Einstellungen.
+
+**Befehle** laufen in einem Wegwerf-Container mit den Mounts und dem Konto des Dienstes, z. B.
+`docker compose run --rm router --check /etc/skirnir-router/config.yaml --files`, `... --posture
+/etc/skirnir-router/config.yaml`, `... --hash`. **Aktualisieren:** das Image des neuen Releases unter demselben Namen
+bauen und `docker compose up -d` ausführen; der Zustand bleibt im Volume.
+
+**Was die systemd-Installation erledigt und hier selbst bereitzustellen ist:** Im Image gibt es keinen
+Secret-Renderer (`render-env.sh` und sein Timer): `secrets.env` selbst pflegen oder die Secrets des Orchestrators
+nutzen, nach einer Änderung `docker compose up -d`. Es gibt keine Zertifikats-Unit (`skirnir-router-cert.path`): auf dem
+Host nach `config/certs/` erneuern, dann `docker compose restart router`. `router-layout.sh` läuft nicht: Der nur lesbare
+Mount hält den Router davon ab, Konfiguration und Zertifikate zu ändern, deshalb führt der Posture-Bericht sie nicht als
+änderbar.
+
+**Optionale Dienste** bleiben aus, solange ihr Profil nicht genannt wird: `docker compose --profile sessions up -d`
+fügt PostgreSQL für `router.session_store` hinzu (Passwort in einer eigenen `postgres.env`; der Posture-Bericht behält
+`session_store_unverified_tls`, bis PostgreSQL TLS hat), `--profile decision` den Embedding-Entscheidungsdienst (vorher
+`docker build -t skirnir-embed decision-embed/`, Endpunkt `http://embed:8082`). Agenten bleiben native Programme auf den
+GPU-Knoten und verbinden sich wie bei jedem Router mit `https://<name>:11435`.
 
 ## Sicherheits-Checkliste
 

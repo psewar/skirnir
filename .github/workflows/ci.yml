@@ -42,6 +42,8 @@ jobs:
       - run: python test/selftest_process_view.py
       - run: python test/selftest_init.py
       - run: python test/selftest_install.py
+      - name: Router container image files (ADR-0116)
+        run: python test/selftest_container_image.py
       - run: pwsh -NoProfile -File test/selftest_ollama_loopback.ps1
       - run: pwsh -NoProfile -File test/selftest_ollama_protected.ps1
       - run: python test/selftest_privilege_paths.py
@@ -140,6 +142,22 @@ jobs:
       - run: python test/integration_context.py
       - run: python test/integration_deletion_lifecycle.py
       - run: python test/integration_interoperability.py
+
+  container:
+    # ADR-0116: the router image builds from the pinned base and the container lock, passes --check, writes a first
+    # configuration with --init, starts unprivileged with a read-only configuration and answers its health probe.
+    # Nothing is pushed: publishing an image to a registry is the maintainer's release decision.
+    name: Router container image (build, check, start, health)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build, first configuration, start, health, hardening
+        run: bash test/smoke_container.sh --engine docker --image skirnir-router-ci
+      - name: Router self-tests on the image's Python and packages
+        run: bash test/smoke_container.sh --engine docker --image skirnir-router-ci --no-build --selftests
 
   go:
     name: Agent vet, test, Windows cross-build
