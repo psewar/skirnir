@@ -9,7 +9,7 @@ no certificate, no token and no fixed IP. Agent internals (German): [agent/READM
 
 | What | Details |
 |---|---|
-| GPU | NVIDIA with a working driver (`nvidia-smi`) |
+| GPU | NVIDIA with a working driver (`nvidia-smi`); without one the node runs as a CPU node ([below](#nodes-without-an-nvidia-gpu)) |
 | Ollama | Installed, bound to loopback (`OLLAMA_HOST=127.0.0.1`), with the models of your roles pulled |
 | Agent | Release asset `skirnir-agent-<version>-windows-amd64.exe` or `skirnir-agent-<version>-linux-amd64` from the [releases](https://github.com/psewar/skirnir/releases) |
 | Network | Outbound HTTPS to `https://<name>:11435`; the router's certificate must be trusted (public, or a private CA in `router.ca_file`) |
@@ -208,6 +208,28 @@ needs no secrets of its own. No token, no firewall rule, no IP by hand.
 - Optionally provides a TLS proxy in front of Ollama (`ollama_proxy`, port 11443, certificate pinned by fingerprint) for
   routers that should access it directly without the tunnel.
 - **Guards the GPU** with a power limit, on by default ([reference.md](reference.md#gpu-guard)).
+
+## Nodes without an NVIDIA GPU
+
+Since agent and router 0.36.0 (ADR-0102) a machine without an NVIDIA GPU can be a node: a CPU inference box, or a machine
+with an AMD, Intel or Apple GPU (these run as CPU nodes until the agent can measure them). `gpu.probe` in the agent
+configuration decides:
+
+| `gpu.probe` | Behaviour |
+|---|---|
+| `auto` (default) | Looks for an NVIDIA GPU as before (NVML, then `nvidia-smi`). Only where the agent used to refuse to start (neither found) it runs without a GPU |
+| `nvidia` | Refuses to start without an NVIDIA GPU, as up to agent 0.35 |
+| `none` | Does not look; the node is a CPU node |
+
+Without a GPU the agent reports `gpu_present: false` at registration and in every heartbeat, sends no GPU values, and the
+GPU guard reports `not_applicable` (no problem). The router then sizes models by the node's main memory: available RAM
+plus what Ollama holds, minus the reserve (at least `modes.memory_pressure.min_free_gib`), and a model larger than the
+total RAM is `model_too_large`. There is no GPU busy detection for such a node. `skirnir-agent status` shows
+`GPU: none (gpu.probe ...)`.
+
+Game detection (Windows) can be switched off with `game.enabled: false` on a machine that never plays (ADR-0103); it is off
+on Linux anyway. The names of the node's Home Assistant entities are German by default; `mqtt.entity_language: en` makes
+them English without changing their entity IDs.
 
 ## Updates and the update key
 

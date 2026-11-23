@@ -255,6 +255,8 @@ class _Acquire:
         """(tier_idx, tier, ctx, node) of the next candidate, or a Refusal (503 with reason), if none remain."""
         while True:
             now = time.time()
+            # The selection is pure; moving expired breakers to half_open (one probe) is this caller's step (ADR-0108)
+            scheduler.probe_breakers(self.tiers, now, self.tried, self.req)
             pick = scheduler.choose(self.role, self.tiers, self.client_ctx, now, self.tried, self.req)
             if pick is None:
                 if await self._wait_for_load(now, scheduler.loading_for(self.tiers, now, self.tried)):
@@ -536,7 +538,7 @@ class _Relay:
             perf.perf_outcome(model, node.name, self.outcome)
             if self.outcome == "ok":
                 node.breaker_ok()
-        cost = cloud.cost_chf(model, self.ptoks, self.ctoks) if self.is_cloud and self.outcome == "ok" else 0.0
+        cost = cloud.request_cost(model, self.ptoks, self.ctoks) if self.is_cloud and self.outcome == "ok" else 0.0
         if cost:
             cloud.add_spend(node.provider, cost)
         elapsed = time.time() - self.t0
@@ -1081,7 +1083,7 @@ async def handle_availability(request):
     if denied:
         return ollama_error(403, denied)
     now = time.time()
-    pick = scheduler.choose(role, tiers, None, now, mutate=False)
+    pick = scheduler.choose(role, tiers, None, now)   # View: no probe_breakers
     if pick is not None:
         _i, tier, ctx, node = pick
         return web.json_response({"model": name, "available": True, "node": node.name, "served_by": tier["model"],

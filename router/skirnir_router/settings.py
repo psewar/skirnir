@@ -16,6 +16,7 @@ import re
 from . import values
 from .common import DATA_CLASSES_DEFAULT, PRIORITIES, THINK_MODES  # noqa: E402
 from .outcome import failed, invalid  # noqa: E402
+from .problems import LANGUAGES as PROBLEM_LANGUAGES  # noqa: E402
 SCORE_KEYS = ("warm", "inflight", "saturated", "vram_free", "weight", "speed", "errors", "half_open", "switch")
 
 # typ: int | float | bool | str | choice | list | iplist | keep_alive | tristate
@@ -38,11 +39,14 @@ _e("router.cloud.max_cloud_data_class", "choice", "Cloud bis Datenklasse", "hoec
    label_en="Cloud up to data class", help_en="highest class still allowed to go to the cloud")
 _e("router.cloud.credential_scan", "choice", "Credential-Scan", "block = Prompts mit erkennbaren Schluesseln/Passwoertern gehen nicht in die Cloud", G, "block", choices=["block", "off"],
    label_en="Credential scan", help_en="block = prompts with recognisable keys/passwords never go to the cloud")
+_e("router.cloud.currency", "str", "Waehrung", "Einheit der Katalogpreise und Budgets (drei Grossbuchstaben, z. B. CHF, EUR, USD); nur Anzeige, der Router rechnet nicht um", G, "CHF", maxlen=3,
+   label_en="Currency", help_en="unit of the catalogue prices and budgets (three capital letters, e.g. CHF, EUR, USD); display only, the router does not convert")
 P = "router.cloud.providers.*."
 _e(P + "enabled", "bool", "aktiv", "deaktiviert = Anbieter faellt als Stufe weg", "Cloud-Anbieter", True,
    label_en="enabled", help_en="disabled = provider drops out as a tier")
-_e(P + "budget_month_chf", "float", "Budget je Monat", "0 = kein Budget; erschoepft = Anbieter faellt als Stufe weg", "Cloud-Anbieter", 0, min=0, max=100000, step=0.5,
-   label_en="Budget per month", help_en="0 = no budget; exhausted = provider drops out as a tier")
+# ADR-0105: budget_month; the old path ...budget_month_chf is accepted as an alias (cost_keys.normalize_settings)
+_e(P + "budget_month", "float", "Budget je Monat", "in der Waehrung der Katalogpreise; 0 = kein Budget; erschoepft = Anbieter faellt als Stufe weg", "Cloud-Anbieter", 0, min=0, max=100000, step=0.5,
+   label_en="Budget per month", help_en="in the currency of the catalogue prices; 0 = no budget; exhausted = provider drops out as a tier")
 _e(P + "warn_at_percent", "int", "Warnung ab %", "HA-Problem 'Cloud <anbieter>: x % des Monatsbudgets'", "Cloud-Anbieter", 80, min=1, max=100,
    label_en="Warn from %", help_en="HA problem 'Cloud <provider>: x % of the monthly budget'")
 _e(P + "max_data_class", "choice", "Datenklasse max.", "eigene Obergrenze dieses Anbieters (leer = globale Grenze); hoeher als die globale Grenze nur mit trust: institutional in config.yaml", "Cloud-Anbieter", None, choices="data_classes", nullable=True,
@@ -239,6 +243,10 @@ _e("router.ram_spill_problem_gib", "float", "HA-Problem ab Modell im RAM GiB",
    "ein geladenes Modell, das Ollama teilweise in den Arbeitsspeicher legen musste, rechnet dort auf der CPU (vielfach langsamer); 0 = aus",
    G, 0.5, min=0, max=256, label_en="HA problem from model in RAM GiB",
    help_en="a loaded model that Ollama had to place partly in system RAM runs there on the CPU (many times slower); 0 = off")
+_e("router.problem_language", "choice", "Sprache der Problemtexte",
+   "Texte im HA-Attribut problems und in /admin/problems; de = die Saetze, auf die bestehende HA-Automationen pruefen. Codes und /metrics bleiben gleich (ADR-0101)",
+   G, "de", choices=list(PROBLEM_LANGUAGES), label_en="Language of problem texts",
+   help_en="texts in the HA attribute problems and in /admin/problems; de = the sentences existing HA automations match. Codes and /metrics stay the same (ADR-0101)")
 
 G = "Wake-on-LAN"
 _e("router.wol.wait_up_s", "float", "warten bis wach s", "", G, 90, min=5, max=900, label_en="wait until awake s")

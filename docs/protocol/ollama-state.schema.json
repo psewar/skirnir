@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Upstream state (agent to router, binary frame OLLAMA, stream 0)",
+  "description": "The agent's own observation of its upstream: installed models, loaded models, reachable or not. Sent at the start of each session, on every change, after approval and at least every 30 s. While a report is fresh (45 s) the router does not poll the node. A report without a boolean up, or with up true and tags or ps that are not lists, is dropped and the router polls again. Dropped before approval.",
+  "type": "object",
+  "properties": {
+    "up": {"type": "boolean", "description": "false: the upstream does not answer; the router takes the node offline at once.", "x-since-agent": "0.14.0"},
+    "error": {"type": "string", "description": "Why the upstream counts as down (with up false), for display only.", "x-since-agent": "0.14.0"},
+    "rev": {"type": "integer", "minimum": 0, "description": "Revision counter, increases with every change; the router logs it.", "x-since-agent": "0.14.0"},
+    "ts": {"type": "integer", "description": "Unix seconds when the frame was sent. Informational; the router uses its receive time.", "x-since-agent": "0.14.0", "x-ignored-by-receiver": true},
+    "tags": {"type": ["array", "null"], "items": {"$ref": "#/$defs/model"}, "description": "Installed models: the entries of Ollama's /api/tags, unchanged. null counts as an empty list (agent 0.14.0 sent null).", "x-since-agent": "0.14.0"},
+    "ps": {"type": ["array", "null"], "items": {"$ref": "#/$defs/model"}, "description": "Loaded models: the entries of Ollama's /api/ps, unchanged. null counts as an empty list.", "x-since-agent": "0.14.0"},
+    "upstream_state": {"type": "string", "enum": ["held", "starting"], "description": "OpenAI-compatible upstream only: held (stopped on upstream-hold) or starting (not answering yet). Absent when it answers normally.", "x-since-agent": "0.22.0"},
+    "serving": {"type": "string", "enum": ["ollama"], "description": "ollama while the upstream is held and the standby Ollama answers in its place. Absent otherwise.", "x-since-agent": "0.23.0"},
+    "upstream_blocked": {"$ref": "#/$defs/upstream_blocked", "x-since-agent": "0.26.0"}
+  },
+  "required": ["up"],
+  "additionalProperties": true,
+  "$defs": {
+    "model": {
+      "type": "object",
+      "description": "An entry as the upstream reports it. The router uses entries with a string name and ignores the rest. An OpenAI-compatible upstream's models are reported in this shape (name, size 0).",
+      "properties": {
+        "name": {"type": "string", "description": "Model name with tag."}
+      },
+      "required": ["name"],
+      "additionalProperties": true,
+      "x-open": true
+    },
+    "upstream_blocked": {
+      "type": "object",
+      "description": "The agent did not start the held upstream on a release order and keeps it held. Cleared (absent) once the reason is gone.",
+      "properties": {
+        "reason": {"type": "string", "description": "Fixed reason code; memory: RAM in use plus the upstream's need would exceed limit_percent."},
+        "ram_available_gib": {"type": "number", "description": "Available RAM in GiB."},
+        "ram_total_gib": {"type": "number", "description": "Total RAM in GiB."},
+        "need_gib": {"type": "number", "description": "Remembered RAM need of the upstream in GiB."},
+        "limit_percent": {"type": "integer", "description": "Configured limit in percent of the RAM."}
+      },
+      "additionalProperties": true
+    }
+  },
+  "examples": [
+    {"up": true, "rev": 7, "ts": 1790000000, "tags": [{"name": "example-model:8b", "size": 5000000000}], "ps": []},
+    {"up": false, "error": "connection refused", "rev": 8, "ts": 1790000030, "tags": [], "ps": []},
+    {"up": true, "rev": 3, "ts": 1790000000, "tags": [{"name": "example-moe", "size": 0}], "ps": [], "upstream_state": "held"},
+    {"up": true, "rev": 4, "ts": 1790000000, "tags": [], "ps": [], "upstream_state": "held",
+     "upstream_blocked": {"reason": "memory", "ram_available_gib": 20.5, "ram_total_gib": 63.7, "need_gib": 48.0, "limit_percent": 90}}
+  ]
+}

@@ -30,7 +30,7 @@ class Cfg:
 
 
 class FakeNode:
-    """Only what _node_block reads. budget_gib like Node.budget_gib: free VRAM + Ollama's own - reserve."""
+    """Only what scheduler.assess reads. budget_gib like Node.budget_gib: free VRAM + Ollama's own - reserve."""
 
     def __init__(self, name, models, st="free", free=30.0, total=31.8, foreign=0.0, loaded=(), breaker="closed",
                  draining_until=0.0, busy_reason="", gpu_util=0, game=None, memory=None, mem_pressure=False):
@@ -63,6 +63,12 @@ class FakeNode:
 
     def budget_gib(self, now, model):
         return self.vram_free_gib + sum(self.loaded.values()) - state.CFG.reserve.get(self.state, 1.0)
+
+    def capacity_gib(self):   # router 0.36.0: a GPU node's capacity is its card (Node.capacity_gib)
+        return self.vram_total_gib
+
+    def reserve_gib(self, st=None):   # router 0.36.0: a GPU node's reserve per state (Node.reserve_gib)
+        return state.CFG.reserve.get(st or self.state, 1.0)
 
 
 def add_node(*ns):

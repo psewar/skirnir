@@ -2,7 +2,7 @@
 """Fake agent for tests: registers with the router using an Ed25519 key like agent/tunnel.go (Challenge ->
 signed Hello -> Status), maintains the tunnel, and forwards router requests to a (fake) Ollama.
 The key is persisted in <keyfile> so a restart retains the same identity (like the real agent).
-Usage: fake_agent.py <router-ws> <node> <upstream> <keyfile> [upstream-token]
+Usage: fake_agent.py <router-ws> <node> <upstream> <keyfile> [upstream-token]   (env FAKE_GPU=0: a node without a GPU)
   e.g. fake_agent.py wss://127.0.0.1:21435 big https://127.0.0.1:21001 fake-agent-big.key testtoken"""
 import asyncio
 import base64
@@ -25,6 +25,16 @@ FACTS = {"hostname": NODE.upper(), "os": "windows", "arch": "amd64", "manufactur
          "ollama_managed": os.environ.get("FAKE_OLLAMA_MANAGED", "1") == "1",   # like Agent 0.12.1: Ollama is a child of the agent
          "ollama_push": os.environ.get("FAKE_OLLAMA_PUSH", "1") == "1",         # like Agent 0.14.0: reports Ollama status itself
          "ollama_swap_gate": os.environ.get("FAKE_OLLAMA_SWAP_GATE", "1") == "1"}   # like Agent 0.15.0: swap only after release
+# FAKE_GPU=0: like agent 0.36.0 without a GPU (gpu.probe, ADR-0102): facts say gpu_present false, heartbeats carry no GPU
+# values but main memory and the guard state not_applicable.
+NO_GPU = os.environ.get("FAKE_GPU", "1") == "0"
+if NO_GPU:
+    FACTS = {k: v for k, v in FACTS.items() if k not in ("gpu", "vram_total_mib")}
+    FACTS["gpu_present"] = False
+GPU_HB = ({"gpu_present": False, "memory": {"ram_available_gib": 24.0, "ram_total_gib": 32.0},
+           "gpu_guard": {"state": "not_applicable", "source": "-", "problem": False, "reason": "no_gpu", "high_load_s": 0},
+           "game": {"supported": False, "enabled": False, "running": False, "folders": 0}}
+          if NO_GPU else {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363})
 SWAP_GO = {}   # Version -> asyncio.Event, gesetzt von {"t":"ollama-swap"}
 
 
@@ -48,7 +58,7 @@ async def do_update(ws, session, lock, m, sslctx):
     """Like updater.go: signature with the operator key, file in manifest, download with token, SHA-256, report in
     heartbeat, then re-register with the new version (swap and restart are only simulated)."""
     import hashlib
-    hb = {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}
+    hb = dict(GPU_HB)
     async def report(state, msg=""):   # child like Agent >= 0.19.1: always present, never app_control here
         await send(ws, lock, HB, 0, json.dumps({**hb, "update": {"version": m.get("version"), "state": state, "message": msg, "kind": ""}}).encode())
         out(update=state, msg=msg)
@@ -78,7 +88,7 @@ async def do_ollama_update(ws, session, lock, m):
     """Like ollamaupdate.go (simplified): load archive, SHA-256 against the task, status in heartbeat; then the
     heartbeat carries the new Ollama version (stopping, swapping, and restarting the child are only simulated)."""
     import hashlib
-    hb = {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}
+    hb = dict(GPU_HB)
     async def report(state, msg=""):
         await send(ws, lock, HB, 0, json.dumps({**hb, "ollama_version": FACTS["ollama_version"],
                                                 "ollama_update": {"version": m.get("version"), "state": state, "message": msg}}).encode())
@@ -192,14 +202,14 @@ async def main():
                     watch = {"force": True}
                     wtask = asyncio.create_task(ollama_watch(ws, session, lock, watch)) if FACTS["ollama_push"] else None
                     if st.get("state") == "approved":   # one heartbeat through the tunnel (idle values, 7 GiB = baseline)
-                        await send(ws, lock, HB, 0, json.dumps({"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}).encode())
+                        await send(ws, lock, HB, 0, json.dumps(GPU_HB).encode())
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             m = json.loads(msg.data)
                             out(ctl=m.get("t"), status=m.get("state"), node=m.get("node"), config=m.get("config"))
                             if m.get("state") == "approved":
                                 watch["force"] = True   # before release, the router discards the frame
-                                await send(ws, lock, HB, 0, json.dumps({"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363}).encode())
+                                await send(ws, lock, HB, 0, json.dumps(GPU_HB).encode())
                             if m.get("t") == "update":
                                 asyncio.create_task(do_update(ws, session, lock, m, sslctx))  # noqa: RUF006
                             if m.get("t") == "ollama-update":

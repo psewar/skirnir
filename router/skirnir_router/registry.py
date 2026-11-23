@@ -175,6 +175,8 @@ def node_spec_from_entry(e):
         spec["gpu_guard"] = bool(pol["gpu_guard"])
     if facts.get("gpu"):
         spec["gpu"] = facts["gpu"]
+    if facts.get("gpu_present") is False:   # Agent >= 0.36.0 without a GPU (ADR-0102): models sized by main memory
+        spec["gpu_present"] = False
     if facts.get("upstream_api") == "openai":   # Agent fronts an OpenAI-compatible server (openai_node.py); else Ollama
         spec["upstream_api"] = "openai"
         if facts.get("upstream_release") is True:   # ... and can stop/start it on order (agent >= 0.22.0)

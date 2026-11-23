@@ -7,7 +7,8 @@ decision-makers: maintainer
 # Response shapes share a base class with default methods
 
 > Builds on [ADR-0022](0022-components-report-state-as-facts.md) (components report state as facts). First seam of the
-> router's portability work; the planned backend protocol for nodes and providers is a separate decision.
+> router's portability work; the planned backend protocol for nodes and providers is a separate decision
+> ([ADR-0110](0110-a-backend-protocol-for-ollama-nodes-openai-compatible-servers-and-cloud-providers.md)).
 
 ## Context and Problem Statement
 

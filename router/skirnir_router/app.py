@@ -93,6 +93,7 @@ def build_apps():
     ctl.router.add_post("/admin/decide", admin.handle_decide)            # Decision Engine direkt fragen (UI, Auswertung)
     ctl.router.add_get("/admin/decision", admin.handle_decision_status)   # Load test with priority probes (UI, Try it)
     ctl.router.add_get("/admin/ha", ha.handle_ha)
+    ctl.router.add_get("/admin/problems", admin.handle_problems)   # 0.35.0: structured problems (ADR-0101)
     ctl.router.add_get("/admin/usage", admin.handle_usage)   # Stage 4
     ctl.router.add_get("/metrics", admin.handle_metrics)     # Stage 4: Prometheus (Basic Auth like /admin)
     ctl.router.add_post("/admin/measure", perf.handle_measure)
