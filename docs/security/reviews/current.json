@@ -1,125 +1,92 @@
 {
-  "schema_version": 1,
-  "status": "completed",
-  "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "4a614341aecd17f58aa55ca5e88476373442af61",
-  "change_digest": "481a506bac6351fe5d07039f58aebaff3a8b4d9656ff9de647002f761ef9b8aa",
-  "reviewed_paths": [
-    ".github/workflows/ci.yml",
-    "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "agent/README.md",
-    "agent/app.go",
-    "agent/config.example.yaml",
-    "agent/config.go",
-    "agent/facts.go",
-    "agent/game.go",
-    "agent/game_test.go",
-    "agent/gpu.go",
-    "agent/guard.go",
-    "agent/health.go",
-    "agent/heartbeat.go",
-    "agent/install_windows.go",
-    "agent/install_windows_test.go",
-    "agent/main.go",
-    "agent/mqtt.go",
-    "agent/nogpu_test.go",
-    "design/english-names.md",
-    "design/gpu-guard.md",
-    "design/routing-algorithm.md",
-    "docs/adr/0102-the-agent-starts-without-a-gpu.md",
-    "docs/adr/0103-game-detection-is-a-module-that-can-be-switched-off.md",
-    "docs/adr/README.md",
-    "docs/configuration.de.md",
-    "docs/configuration.md",
-    "docs/install-agent.de.md",
-    "docs/install-agent.md",
-    "docs/operations.de.md",
-    "docs/operations.md",
-    "docs/reference.de.md",
-    "docs/reference.md",
-    "docs/security/reviews/current.json",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/nodes.py",
-    "router/skirnir_router/poll.py",
-    "router/skirnir_router/problems.py",
-    "router/skirnir_router/registry.py",
-    "router/skirnir_router/scheduler.py",
-    "test/fake_agent.py",
-    "test/run_tests.py",
-    "test/selftest_availability.py",
-    "test/selftest_cpu_node.py"
-  ],
-  "risk_ids": [
-    "TM-07",
-    "TM-14",
-    "TM-15"
-  ],
-  "boundaries": [
-    "B3",
-    "B8",
-    "B9"
-  ],
-  "summary": "Agent 0.36.0 / router 0.36.0: the agent runs without an NVIDIA GPU (gpu.probe auto|nvidia|none, default auto, ADR-0102), game detection can be switched off (game.enabled, ADR-0103), the game fact's via is 'path' (router maps the old 'pfad'), Home Assistant display names can be English (mqtt.entity_language, unique_id and entity ID unchanged), and the Windows install checks the event-log source in the registry instead of matching error text. B3 (router <-> agent): new fact/heartbeat field gpu_present and the guard state not_applicable from an approved agent. The router takes gpu_present only as a real boolean (heartbeat) or literal false (facts), and memory values only as non-boolean numbers; otherwise the node stays a GPU node or nothing fits. A compromised approved agent could already misreport VRAM, utilisation and guard state (TM-07: telemetry is an assertion of that host); claiming no GPU or not_applicable gives it no capability beyond that: it can attract or repel models for its own node and avoid the require_fresh_status cap, as reporting 'normal' already did. No new route, frame, authentication path or egress. B8 (agent host): install_windows reads HKLM SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\<service> read-only in the existing admin install step; service account, ACLs, update and signing paths are unchanged. With gpu.probe auto and no NVIDIA driver at all the GPU guard does not run; without a driver no workload can use the card, so the power-limit protection loses nothing; gpu.probe nvidia keeps the refusal. POST /gpuz stays loopback-only and now answers 409 without a GPU. B9: /health (loopback) gains gpu_probe and gpu_present, MQTT discovery gains constant English names; no secret, host or user data. The fake agent and E2E use loopback and synthetic values only. Re-reviewed after merging origin/main (PR 178 structured problems / router 0.35.0 / ADR-0101, PR 176 docs) into the branch: conflicts only in CHANGELOG (both rows kept, v0.41.0 above v0.40.0), VERSION (0.36.0 kept), ADR index (regenerated, 0101-0103) and this record. Semantic overlap with router/skirnir_router/problems.py: ram_spill is already empty for a node without a GPU; the gpu_guard problem now also requires gpu_present, so a node without a GPU never raises it even if its agent claims a guard problem (an approved agent cannot plant a GPU-guard alarm for a node that has no GPU); docs/operations(.de).md say so. No other change to #178's codes, metrics or config.",
-  "findings": [],
-  "tests": [
-    {
-      "command": "python test/selftest_cpu_node.py",
-      "result": "passed",
-      "evidence": "router: facts/heartbeat without GPU values, full-size holdings, no ram_spill, RAM budget and capacity, model_too_large/vram_full, guard not_applicable not capping, older agents unchanged, pfad->path, enabled false; rejected cases: non-numeric memory, non-boolean gpu_present, facts other than false; after the merge also: no gpu_guard/ram_spill problem for nodes without a GPU (including one whose agent claims a guard problem; this check fails without the problems.py change), a GPU node still raises it."
-    },
-    {
-      "command": "python test/selftest_problems.py",
-      "result": "passed",
-      "evidence": "all passed (after the merge)."
-    },
-    {
-      "command": "python test/check_adr_index.py",
-      "result": "passed",
-      "evidence": "ADR index ok: 103 ADRs (after the merge)."
-    },
-    {
-      "command": "python test/run_tests.py (through a local lock wrapper that serialises the fixed loopback ports)",
-      "result": "passed",
-      "evidence": "0 failures, STATE passed; includes the new fake agent with FAKE_GPU=0 (online, gpu_present false, guard not_applicable, no HA problem)."
-    },
-    {
-      "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml (Windows, Python 3.12)",
-      "result": "passed",
-      "evidence": "74 self-tests after the merge; selftest_availability needed its fake node to gain capacity_gib/reserve_gib."
-    },
-    {
-      "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./...",
-      "result": "passed",
-      "evidence": "gofmt empty, vet clean on both GOOS, go test ok on Windows (incl. install_windows_test.go)."
-    },
-    {
-      "command": "GOOS=linux go test -c, test binary run under WSL Ubuntu",
-      "result": "passed",
-      "evidence": "PASS (nogpu_test.go, config, mqtt and the other Linux tests)."
-    },
-    {
-      "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_control_flow.py ; python test/selftest_control_flow.py ; python test/check_pinned_references.py ; python tools/security/lock_requirements.py check",
-      "result": "passed",
-      "evidence": "all clean."
-    },
-    {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
-      "result": "passed",
-      "evidence": "run after staging this record."
-    },
-    {
-      "command": "python test/check_public_changes.py",
-      "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s)."
-    }
-  ],
-  "limitations": [
-    "The end-to-end suite uses a fake agent; the real agent without a GPU was exercised by Go unit tests (probe none), not on a physical CPU-only machine.",
-    "gpu.probe auto on a machine whose NVIDIA driver is missing entirely now starts as a CPU node instead of refusing (documented in ADR-0102).",
-    "The router's RAM budget trusts the agent's memory fact like the VRAM fact before (TM-07); on Linux MemAvailable can include page cache of a mapped model, so the budget is an estimate; Ollama's own memory check and memory pressure remain the guard.",
-    "The catalog's VRAM measurement (/admin/measure) still needs a GPU; not changed here.",
-    "PostgreSQL integrations were not run: no session, memory or storage code changed."
-  ]
+ "schema_version": 1,
+ "status": "completed",
+ "reviewer": "Claude Code (Opus 5.5) repository security review",
+ "base_sha": "d29ece8e1281e889f75577a2480d49df3871ae63",
+ "change_digest": "ec3177b3dd66434ba2fed69c3e2a1d6ee301aa3d7ba9ae102e9bf31f66256164",
+ "reviewed_paths": [
+  ".github/workflows/ci.yml",
+  "CHANGELOG.md",
+  "design/hindsight-memory.md",
+  "design/memory-reliability.de.md",
+  "design/memory-reliability.md",
+  "docs/adr/0123-the-memory-backend-is-chosen-in-the-existing-hindsight-section.md",
+  "docs/adr/README.md",
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "docs/security/reviews/current.json",
+  "router/config.example.yaml",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/context_ops.py",
+  "router/skirnir_router/hindsight.py",
+  "router/skirnir_router/memory.py",
+  "router/skirnir_router/memory_backend.py",
+  "router/skirnir_router/memory_config.py",
+  "router/skirnir_router/memory_gateway.py",
+  "router/skirnir_router/memory_outbox.py",
+  "test/integration_live_memory.py",
+  "test/selftest_deletion_lifecycle.py",
+  "test/selftest_interoperability.py",
+  "test/selftest_memory.py",
+  "test/selftest_memory_backend.py",
+  "test/selftest_reliability.py",
+  "test/selftest_verified_delivery.py"
+ ],
+ "risk_ids": [
+  "TM-05",
+  "TM-09",
+  "TM-10",
+  "TM-11",
+  "TM-12"
+ ],
+ "boundaries": [
+  "B4",
+  "B5",
+  "B9"
+ ],
+ "summary": "Behaviour-preserving refactor (router 0.40.0, implements proposed ADR-0115; ADR-0123 proposed): long-term memory is reached through a MemoryBackend Protocol with typed values (Fact, FactList, MemoryPage, OpState). B5 (router <-> Hindsight): the REST transport HindsightClient is unchanged - HTTPS or opt-in loopback HTTP only, no redirects, no ambient proxy or cookies, no forwarded client credential, bounded response size, bank ids matched against skirnir-<64 hex> before any request, and the authorize callback re-checks the live grant inside the concurrency slot right before sending. The new HindsightBackend only maps answers: it drops malformed results exactly as memory.py did before (non-object, non-text id or text, non-numeric score, a source list with non-text ids), keeps the first 100 recall results as before, and turns a non-text operation state or fact type into unknown/null (before: reflected to the client as received). B4/B5 policy is unchanged and still in the router for every backend: scope_for_principal/current grant checks (also after the backend call), the content filter on query, fact text, fact id and cleaned provenance, the recall_metadata provenance allow-list, recall_min_score, byte/fact/client budgets, single-source duplicates, the outbox states, revocation on 403 and bank change, the curator listing filter and the deletion lifecycle (delete only after completed/failed, reconcile by operation id). memory.py additionally bounds an answer to 100 facts for any backend. Indirect prompt injection paths are unchanged: recalled facts still reach a model only as the packed untrusted user-role data block (notice, escaped delimiters), prepare() and the ADR-0059 tools gate are untouched, and the gateway output is byte-identical (recorded answers). TM-05: memory is still inserted before the cloud checks; prepare() and the cloud path are not touched. Grants, data classes, memory_scopes writers (ADR-0060) and routes are unchanged; no new endpoint, log line, dependency or persisted field. Configuration: new key hindsight.backend with a closed list (only hindsight); any other value, including an import path, is refused by the parser and by open_backend, so configuration cannot select code to load (ADR-0118). B9: ci.yml only gains one self-test step; no permission, action or secret change. The added text names no organisation, host, address or person; test data are synthetic (example.com addresses, fake ids).",
+ "findings": [],
+ "tests": [
+  {
+   "command": "python test/selftest_memory_backend.py",
+   "result": "passed",
+   "evidence": "20 tests OK: adapter contract against the synthetic loopback Hindsight (authorize false sends nothing; foreign bank ids refused without a request; failures are Problems with a fixed kind), policy on typed facts with a fake backend (min score, budgets, duplicates, filtered ids/texts/provenance, a revoked grant reaches no backend), backend selection (unknown names and an import path refused), gateway/REST byte compatibility. Mutations of the gateway status and of the adapter score each made it fail."
+  },
+  {
+   "command": "python test/selftest_memory.py; selftest_interoperability.py; selftest_reliability.py; selftest_verified_delivery.py; selftest_deletion_lifecycle.py; selftest_isolation_rotation.py; selftest_context.py; selftest_sessions.py; selftest_posture.py; selftest_problems.py",
+   "result": "passed",
+   "evidence": "Windows Python 3.12 after rebasing on d29ece8: 47, 41 (1 skipped: official SDK not installed on Windows), 7, 11, all, 3, 23, 22, 6 tests OK; selftest_problems all passed."
+  },
+  {
+   "command": "WSL: all run steps of the ci.yml python and sessions-postgres jobs (Python 3.11, disposable PostgreSQL 16)",
+   "result": "passed",
+   "evidence": "81 steps ok, including selftest_interoperability with the official hindsight-client SDK contract test (41 tests, none skipped), integration_sessions (11), integration_context (12), integration_deletion_lifecycle (6) and integration_interoperability (28). 6 red steps are environmental or expected: check_adr_index (numbering gap before ADR-0123 until ADRs 0104-0122 are merged), pinned references, pydeps and sbom (WSL cannot read the worktree's git metadata or lacks packaging) and two pwsh self-tests (no pwsh in WSL); all of them except check_adr_index passed on Windows."
+  },
+  {
+   "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/selftest_control_flow.py && python test/check_control_flow.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check; python test/check_training_data.py",
+   "result": "passed",
+   "evidence": "All checks passed; configuration ok; control flow 0 findings; pinned 0; locks 0; training data 0."
+  },
+  {
+   "command": "end-to-end suite through the lock wrapper (test/run_tests.py)",
+   "result": "passed",
+   "evidence": "Clean run on the final rebased tree: 334 PASS, 0 failures, STATE: passed (an earlier run before the rebase also passed)."
+  },
+  {
+   "command": "python test/check_public_changes.py --base <merge-base>",
+   "result": "passed",
+   "evidence": "Public-change scan: 0 finding(s)."
+  },
+  {
+   "command": "python tools/security/review.py check --base origin/main --head INDEX",
+   "result": "passed",
+   "evidence": "run after staging this record."
+  }
+ ],
+ "limitations": [
+  "The real-Hindsight smoke test (integration_live_memory.py, live-memory.yml) needs a Hindsight deployment and an extraction model key; it was not run, only its skip path. Its code was adapted to build HindsightBackend.",
+  "Equivalence of the Hindsight adapter with the former inline parsing rests on code reading, the unchanged existing self-tests (which feed raw Hindsight shapes through the adapter) and recorded gateway/REST answers; it was not checked against every answer shape a real Hindsight version can produce.",
+  "check_adr_index.py fails on this branch until ADRs 0104-0122 from the other portability PRs are on main; ADR-0115 links resolve once #177 is merged.",
+  "Pre-existing residual risks are unchanged and not addressed here: TM-10 (a listed writer can plant false facts), TM-11 (direct access to Hindsight and its own model egress), TM-12 backup-order policy."
+ ]
 }
