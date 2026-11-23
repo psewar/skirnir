@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Status and configuration (router to agent, text frame)",
+  "description": "t status answers the hello (the agent waits for it and ends the session on any other first answer) and later reports approval or revocation. t config pushes a changed configuration bundle to an approved agent. The agent keeps the session open while pending (heartbeats are answered with state pending, OLLAMA and POWER frames are dropped until approval) and ends it on revoked; it then retries every 5 minutes. When the router refuses a new identity (enrollment limits) it sends status pending with a message and closes the connection with code 1008.",
+  "type": "object",
+  "properties": {
+    "t": {
+      "type": "string",
+      "enum": ["status", "config"],
+      "description": "Message type."
+    },
+    "state": {
+      "type": "string",
+      "enum": ["pending", "approved", "revoked"],
+      "description": "Registration state of this identity. Present in every t status message, absent in t config.",
+      "x-since-router": "baseline"
+    },
+    "node": {
+      "type": "string",
+      "description": "Name under which the router manages the node (may differ from hello.node). Absent when an enrollment is refused.",
+      "x-since-router": "baseline"
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable reason for pending or revoked, for logs only. Not a control signal.",
+      "x-since-router": "baseline"
+    },
+    "config": {
+      "$ref": "config-bundle.schema.json",
+      "description": "Configuration bundle for an approved node (config-bundle.schema.json). Present with state approved and in t config.",
+      "x-since-router": "baseline"
+    }
+  },
+  "required": ["t"],
+  "additionalProperties": true,
+  "examples": [
+    {"t": "status", "state": "pending", "node": "gpu-desktop", "message": "awaiting approval in the router UI"},
+    {"t": "status", "state": "approved", "node": "gpu-desktop", "config": {"heartbeat_interval_s": 3.0, "node": "gpu-desktop"}},
+    {"t": "status", "state": "revoked", "node": "gpu-desktop", "message": "revoked in the router UI"},
+    {"t": "status", "state": "pending", "message": "enrollment rate limited"},
+    {"t": "config", "config": {"heartbeat_interval_s": 5.0, "node": "gpu-desktop"}}
+  ]
+}

@@ -93,7 +93,7 @@ func main() {
 		return
 	}
 	if verb == "gpu" { // Check measurement source: NVML or nvidia-smi, values and duration per measurement
-		g, err := newGPU()
+		g, err := newGPU(gpuProbeNvidia) // diagnostic: says plainly when there is no NVIDIA GPU
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "gpu: %v\n", err)
 			os.Exit(1)
@@ -267,6 +267,8 @@ func printHealth(listen string) {
 	fmt.Printf("version %s, node %s, running for %s, identity %s\n", s.Version, s.Node, s.Uptime, s.Identity)
 	if s.GPU != nil {
 		fmt.Printf("GPU %s: %d %%, VRAM %d/%d MiB used\n", s.GPU.Name, s.GPU.UtilPct, s.GPU.UsedMiB, s.GPU.TotalMiB)
+	} else if s.GPUProbe != "" && !s.GPUFound { // agent >= 0.36.0 without a GPU (ADR-0102)
+		fmt.Printf("GPU: none (gpu.probe %s) - runs without one, GPU guard not applicable\n", s.GPUProbe)
 	}
 	fmt.Printf("heartbeat: ok=%v router says '%s' %s (sent %d, failures %d) %s\n", s.Heartbeat.OK, s.Heartbeat.State, s.Heartbeat.BusyReason, s.Heartbeat.Sent, s.Heartbeat.Failures, s.Heartbeat.LastError)
 	if s.Tunnel != nil {

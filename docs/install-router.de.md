@@ -12,7 +12,7 @@ GPU-Knoten stehen in [install-agent.de.md](install-agent.de.md), die Konfigurati
 |---|---|
 | Betriebssystem | Debian 12 oder Ubuntu (oder vergleichbar; `install.sh` unterstützt Debian und Ubuntu, sonst [Installation von Hand](#installation-von-hand)). Ein Container genügt. Unter Windows läuft der Router mit dem Standard-Event-Loop (Entwicklung). |
 | Python | 3.11 oder neuer |
-| Pakete | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installiert fehlende). Was die Distribution nicht oder zu alt mitbringt (unter Debian 12: `asyncpg` für den Session-Store), kommt nur aus der hash-gesperrten `router/requirements-lock.txt` ins venv (ADR-0074). |
+| Pakete | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installiert fehlende). `python3-paho-mqtt` braucht es nur für Home Assistant über MQTT (`install.sh --without-mqtt` lässt es weg). Was die Distribution nicht oder zu alt mitbringt (unter Debian 12: `asyncpg` für den Session-Store), kommt nur aus der hash-gesperrten `router/requirements-lock.txt` ins venv (ADR-0074). |
 | Ports | **11434** für Clients (Ollama-, OpenAI- und Anthropic-API), **11435** für den Tunnel der Agenten, die Web-UI, `/admin/*` und `/metrics` |
 | Name und Zertifikat | Ein DNS-Name, den Clients und Knoten verwenden (`<name>`, z. B. `router.example.net`), und ein TLS-Zertifikat dafür, siehe [TLS-Zertifikat](#tls-zertifikat) |
 
@@ -41,8 +41,11 @@ Bevor es etwas ändert, prüft das Skript: root, Debian/Ubuntu, Python 3.11 oder
 
 Die letzte Zeile ist immer `STATE: installed`, `STATE: checked` oder `STATE: refused` (mit dem Grund darüber).
 **Aktualisieren** = das Skript aus dem neuen Release erneut ausführen, danach `systemctl restart skirnir-router`. Optionen:
-`--prefix DIR` (Standard `/opt/skirnir-router`), `--config-dir DIR` (Standard `/etc/skirnir-router`); `--root DIR`, `--no-venv`
-und `--os-release FILE` sind für Paketbau und Tests (`--help` listet sie).
+`--prefix DIR` (Standard `/opt/skirnir-router`), `--config-dir DIR` (Standard `/etc/skirnir-router`); `--without-mqtt` für
+einen Router ohne Home Assistant: Die MQTT-Bibliothek (`python3-paho-mqtt`, `paho-mqtt` aus der Sperrdatei) wird nicht
+installiert, und das Skript lehnt ab, solange `config.yaml` einen MQTT-Broker nennt (`mqtt.host`); ohne die Option wird sie
+wie bisher installiert (ADR-0104). `--root DIR`, `--no-venv` und `--os-release FILE` sind für Paketbau und Tests (`--help`
+listet sie).
 
 ## Erste Konfiguration
 
@@ -126,7 +129,7 @@ Das Startlog listet die Befunde der Posture-Prüfung (Zeilen `posture …`). Dan
 |---|---|
 | `skirnir-router.service` | Der Router. Startet `/opt/skirnir-router/venv/bin/python router.py /etc/skirnir-router/config.yaml` unter eigenem Konto `skirnir-router` ohne Capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=tmpfs`, `PrivateTmp`, `UMask=0077` (ADR-0086). Schreibt nur seinen Zustandsordner `/var/lib/skirnir-router` (`router.state_dir`) und seinen Log-Ordner `/var/log/skirnir-router`; `/etc/skirnir-router` bleibt root und wird über die Gruppe gelesen. Liest `secrets.env` als Umgebung. `install.sh` und `deploy.py` legen das Konto an und setzen Besitzer und Modi mit `router-layout.sh`. |
 | `skirnir-router-cert.path` + `.service` | Optional: Neustart bei erneuertem Zertifikat (siehe oben). |
-| `skirnir-router-secrets.service` | Rendert `secrets.env`, bevor der Router startet (`render-env.sh`); ohne `render-env.conf` tut es nichts. |
+| `skirnir-router-secrets.service` | Rendert `secrets.env`, bevor der Router startet (`render-env.sh`, aus einem Secret-Store oder einer Datei nur für root); ohne `render-env.conf` tut es nichts. |
 | `skirnir-router-secrets.timer` + `-secrets-refresh.service` | Optional: rendert täglich und startet den Router bei geändertem Secret neu. |
 
 ## Firewall
@@ -141,16 +144,40 @@ Das Startlog listet die Befunde der Posture-Prüfung (Zeilen `posture …`). Dan
 
 Der Router liest `/etc/skirnir-router/secrets.env` (root, 0640 für seine Gruppe `skirnir-router`) als Umgebung: `MQTT_PASSWORD`, `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, die in `EXTRA_SECRET_KEYS` genannten Schlüssel (weitere Cloud-Anbieter, ADR-0080) und für die optionalen
-Gedächtnisschichten die Variablen, die deren Konfiguration nennt. Die Datei von Hand
-pflegen oder von `render-env.sh` aus einem Secret-Store mit Universal-Auth-API rendern lassen: Die Zugangsdaten kommen nach
-`/etc/skirnir-router-secrets/render-env.conf` (Ordner 0700 root, Datei 0600; Vorlage
-[router/render-env.conf.example](../router/render-env.conf.example)); der tägliche Timer startet den Router bei geändertem
-Secret neu. Ist der Secret-Store nicht erreichbar, bleibt die letzte Datei stehen. Die Zugangsdatei liest root, sie darf
-also nicht in einem Ordner liegen, den der Router schreiben darf: `render-env.sh` lehnt eine Datei (oder
-`SECRET_STORE_AUTH_FILE`) unter `/etc/skirnir-router`, `/var/lib/skirnir-router` oder `/var/log/skirnir-router` ab, ebenso
-eine, die nicht root gehört oder für Gruppe oder andere schreibbar ist, und die Router-Unit sieht
-`/etc/skirnir-router-secrets` gar nicht. `install.sh` und `deploy.py` verschieben eine alte
-`/etc/skirnir-router/render-env.conf` dorthin (ADR-0073).
+Gedächtnisschichten die Variablen, die deren Konfiguration nennt. Jede davon ist optional: `MQTT_PASSWORD` zählt nur mit
+einem `mqtt:`-Abschnitt. Es gibt drei Wege, sie bereitzustellen:
+
+1. **Von Hand**: `secrets.env` selbst schreiben (`KEY=value` je Zeile, root:skirnir-router 0640) und keine
+   `render-env.conf` anlegen; `render-env.sh` rendert dann nichts (`STATE: not-configured`).
+2. **`render-env.sh` aus einer Datei nur für root** (`SECRET_SOURCE=file`, `SECRET_FILE=...` in `render-env.conf`): Der
+   Renderer kopiert die Datei mit denselben Prüfungen wie bei einem Store - nur eingebaute und in `EXTRA_SECRET_KEYS`
+   genannte Namen, kein Wert mit Zeilenumbruch, ein doppelt genannter Name wird übersprungen. Die Datei muss root gehören,
+   nur für root lesbar sein (0600) und ausserhalb der Pfade des Routers liegen, z. B.
+   `/etc/skirnir-router-secrets/secrets.source.env`. Sie wird Zeile für Zeile gelesen, nie per `.` eingelesen.
+3. **`render-env.sh` aus einem Secret-Store** mit Universal-Auth-API (`SECRET_SOURCE=store`, der Standard): Die
+   Zugangsdaten kommen in `render-env.conf` (`SECRET_STORE_DOMAIN`, `SECRET_STORE_CLIENT_ID`, `SECRET_STORE_CLIENT_SECRET`
+   oder `SECRET_STORE_AUTH_FILE`, `PROJECT_ID`, `ENVIRONMENT`).
+
+`render-env.conf` liegt in `/etc/skirnir-router-secrets/` (Ordner 0700 root, Datei 0600; Vorlage
+[router/render-env.conf.example](../router/render-env.conf.example)). Der Renderer arbeitet in drei Schritten (ADR-0104):
+Er prüft, ob seine Quelle bereit ist, und sagt es (Store: nicht erreichbar, Anmeldung abgelehnt oder bereit; Datei: fehlt,
+abgelehnt oder bereit), holt dann jeden Namen einzeln (vorhanden, fehlt oder Abruf fehlgeschlagen) und schreibt danach jeden
+vorhandenen Namen. Die bestehende Datei bleibt, wenn die Quelle nicht bereit ist, wenn ein Abruf fehlschlug (ein
+vorübergehender Fehler lässt kein Secret wegfallen) und wenn die Quelle keinen der Namen enthält. Die letzte Zeile ist
+`STATE: written`, `unchanged`, `kept`, `not-configured` oder `refused` ([operations.de.md](operations.de.md#secrets-renderer)).
+Der tägliche Timer startet den Router neu, wenn sich die Datei geändert hat.
+
+systemd `LoadCredential=` ist eine Alternative für die Werte, die der Router aus einer Datei liest: `mqtt.password_file` oder
+das `secrets_file` eines Cloud-Anbieters auf das Credential zeigen lassen (`/run/credentials/skirnir-router.service/<name>`,
+eine `KEY=value`-Datei). Die Variablen von Session-Store und Gedächtnis kommen nur aus der Umgebung und brauchen
+`secrets.env` (oder ein anderes `EnvironmentFile`). Ein Client für einen weiteren Store (z. B. Vault) ist nicht eingebaut; er
+wäre eine weitere Quelle in `render-env.sh`.
+
+`render-env.conf` und `SECRET_STORE_AUTH_FILE` liest root per `.` ein, sie dürfen also nicht in einem Ordner liegen, den der
+Router schreiben darf: `render-env.sh` lehnt eine solche Datei (und `SECRET_FILE`) unter `/etc/skirnir-router`,
+`/var/lib/skirnir-router` oder `/var/log/skirnir-router` ab, ebenso eine, die nicht root gehört oder für Gruppe oder andere
+schreibbar ist, und die Router-Unit sieht `/etc/skirnir-router-secrets` gar nicht. `install.sh` und `deploy.py` verschieben
+eine alte `/etc/skirnir-router/render-env.conf` dorthin (ADR-0073).
 
 ## Optional: Decision Engine für die Auto-Rolle
 

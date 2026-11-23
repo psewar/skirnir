@@ -69,11 +69,11 @@ check("snapshot lists the switchable models", n.snapshot(time.time())["standby_m
 
 # 2) Scheduler: a cold candidate, budget = card once the server stopped, penalty against a node that has the model
 check("node offers the standby model while the server answers", n.standby_switch(OLLAMA_MODEL) and n.offers(OLLAMA_MODEL))
-_, _, cands = scheduler.candidates_for(TIER, None, time.time())
+_, cands = scheduler.candidates_for(TIER, None, time.time())
 check("candidates_for: the switchable node is a candidate although only 5.8 GiB are free now", n in cands, str([c.name for c in cands]))
 laptop = ollama_node(OLLAMA_MODEL)
 state.NODES = {n.name: n, laptop.name: laptop}
-_, _, cands = scheduler.candidates_for(TIER, None, time.time())
+_, cands = scheduler.candidates_for(TIER, None, time.time())
 best = scheduler.rank(cands, OLLAMA_MODEL)[0]
 check("a node that has the model ranks before one that would have to switch", best is laptop,
       f"{[(c.name, scheduler.score(c, OLLAMA_MODEL)) for c in cands]}")
@@ -96,7 +96,7 @@ check("api/tags: role with a standby-only first model is listed with placeholder
 
 # 3) When no switch applies
 n.state = "busy"
-_, _, cands = scheduler.candidates_for(TIER, None, time.time())
+_, cands = scheduler.candidates_for(TIER, None, time.time())
 check("busy node (game) is no candidate for a non-busy_ok tier", n not in cands)
 n.state = "free"
 n.upstream_serving = openai_node.SERVING_OLLAMA
@@ -106,7 +106,7 @@ n.upstream_fallback = False
 check("agent without upstream_fallback: no switch", not n.standby_switch(OLLAMA_MODEL))
 n.upstream_fallback = True
 state.CFG.models[OLLAMA_MODEL]["weights_gib"] = 40.0
-_, _, cands = scheduler.candidates_for(TIER, None, time.time())
+_, cands = scheduler.candidates_for(TIER, None, time.time())
 check("model larger than the card: no candidate", n not in cands)
 state.CFG.models[OLLAMA_MODEL]["weights_gib"] = 17.0
 

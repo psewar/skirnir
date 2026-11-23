@@ -2,77 +2,94 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
- "change_digest": "913de3d87b1a2c0440881e6bfd9bc10821b1971618f0cb2a1567169dead667bd",
+ "base_sha": "a153f9045c180acbc85b90e571b27d548d662858",
+ "change_digest": "c6c09c504bb457205a4aa900ad6522f9493c32f607d916409c9be1524835a7da",
  "reviewed_paths": [
-  "design/portability.md",
-  "docs/adr/0109-status-sinks-instead-of-a-fixed-home-assistant-publisher.md",
-  "docs/adr/0110-a-backend-protocol-for-ollama-nodes-openai-compatible-servers-and-cloud-providers.md",
-  "docs/adr/0111-the-agent-talks-to-its-inference-server-through-a-runtime-interface.md",
-  "docs/adr/0112-the-agent-probes-gpus-through-an-interface-and-reports-a-list-of-devices.md",
-  "docs/adr/0113-busy-detection-is-a-set-of-signal-sources-that-can-be-switched-off.md",
-  "docs/adr/0114-the-session-store-is-chosen-by-its-connection-url.md",
-  "docs/adr/0115-long-term-memory-goes-through-a-memory-backend-interface.md",
-  "docs/adr/0116-an-official-container-image-for-the-router.md",
-  "docs/adr/0117-waking-nodes-and-fetching-ollama-releases-go-through-replaceable-sources.md",
-  "docs/adr/0118-adapters-live-in-the-repository-and-are-chosen-by-configuration.md",
-  "docs/adr/0119-privacy-redaction-per-tool-format-and-locale-pack.md",
+  ".github/workflows/ci.yml",
+  "CHANGELOG.md",
+  "design/routing-algorithm.md",
+  "docs/adr/0108-one-pure-node-assessment-for-selection-and-explanation.md",
   "docs/adr/README.md",
-  "docs/security/reviews/current.json"
+  "docs/security/reviews/current.json",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/fallback_observation.py",
+  "router/skirnir_router/ha.py",
+  "router/skirnir_router/metrics.py",
+  "router/skirnir_router/nodes.py",
+  "router/skirnir_router/ops.py",
+  "router/skirnir_router/poll.py",
+  "router/skirnir_router/problems.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/scheduler.py",
+  "test/selftest_availability.py",
+  "test/selftest_cloud_wait_for_load.py",
+  "test/selftest_fallback_keeps_busy_model.py",
+  "test/selftest_node_assessment.py",
+  "test/selftest_openai_node_standby.py",
+  "test/selftest_server_while_standby.py",
+  "test/selftest_standby_switch.py",
+  "test/selftest_upstream_blocked.py"
  ],
  "risk_ids": [
   "TM-05",
-  "TM-07",
   "TM-08",
-  "TM-09",
-  "TM-11",
-  "TM-12",
-  "TM-13",
-  "TM-14",
   "TM-15",
   "TM-16"
  ],
  "boundaries": [
+  "B1",
   "B3",
-  "B4",
-  "B5",
   "B6",
-  "B7",
-  "B8",
   "B9"
  ],
- "summary": "Documentation only: design/portability.md (portability roadmap phases 1-3) and eleven ADRs with status proposed (0109-0119; the status-sinks ADR renumbered from 0107 to 0109, with ADR-0107/0108 now owned by the protocol-spec and node-assessment PRs), plus the regenerated ADR index. No code, configuration, version, workflow, checker or review-policy change; nothing proposed here is built. Each ADR's code references were checked against origin/main (fb19cb6). The review looked at whether the proposals, if later built as written, would weaken a trust boundary, and whether each names the security constraints it must keep: ADR-0118 keeps every adapter in the repository and forbids loading code named by configuration (preserves ADR-0055/0074/0075, TM-16); ADR-0109 names the webhook sink as new egress with timeout and retry bounds (B9, TM-08) and proposes removing the router's MQTT credential from every node's bundle (pre-existing, see findings); ADR-0110 keeps the cloud data-class, privacy, credential-scan, egress and budget checks before the backend call (B6/B7, TM-05); ADR-0111 keeps the node-side path allowlist as a per-runtime constant in the signed binary and requires a TM-11 review for each new runtime; ADR-0112 requires a vendor library to be loaded only from the system path and to fail closed (B8, TM-14); ADR-0114 and ADR-0115 keep owner isolation, deletion-journal replay and the memory safeguards for every engine/backend (B4/B5, TM-09, TM-12); ADR-0116 keeps pinning, hash locks, non-root, read-only configuration and provenance for the image (TM-14, TM-16); ADR-0117 keeps the rule that the router chooses only the Ollama version and the agent verifies against its node-local source (B8, TM-13) and names webhook/IPMI wakers as new egress with credentials (B9); ADR-0119 makes an unrecognised tool format fail closed for clients with redaction configured (B6, TM-05). The texts name no host, address, person or deployment path.",
- "findings": [
-  {
-   "id": "TM-07",
-   "disposition": "baseline",
-   "severity": "low",
-   "boundary": "B3/B9 (also touches TM-15)",
-   "evidence": "Pre-existing, read in code: router/skirnir_router/registry.py provision_bundle (lines 142-154) puts the router's own MQTT username and password (read_mqtt_password, line 135) into the provisioning bundle of every approved node with MQTT enabled. Attacker prerequisite: control of an approved node. Impact: publish or subscribe on the broker with the router's identity, e.g. forge router state topics read by home automation. Controls today: operator approval of nodes (ADR-0009), the per-node policy switch policy.mqtt, broker-side ACLs if the operator configures them. Confidence high.",
-   "resolution": "Not introduced by this change (documentation only, no code touched). ADR-0109 proposes a per-node MQTT login or none in the bundle, with a negative test that the bundle carries the router's password only when no per-node login is configured; the fix belongs to the PR that implements ADR-0109."
-  }
- ],
+ "summary": "Re-reviewed after merging main (merge-base a153f90: structured problems, nodes without a GPU, secrets renderer, locale-neutral defaults, protocol spec). Behaviour-preserving refactor of node selection (router 0.37.1, ADR-0108 proposed). scheduler.assess replaces the mirrored candidates_for/_node_block judgement; candidates_for and choose no longer change state; the expired-open -> half_open breaker transition moved to scheduler.probe_breakers, called by the two request paths (proxy._Acquire before every choose, ops.run_shadow before its candidates_for); views never mutated and still do not. Budget arithmetic shares nodes.card_gib/Node.card_budget_gib, the measured-occupancy sum shares Node._real_gib (same float summation order), loading_for/tier_loading share one loop. Traced: B6/TM-05 - the cloud data-class and provider gate (Routing.tier_blocked, cloud.provider_block_reason) is unchanged and still applied in choose before any tier is judged; probe_breakers calls the same pure tier_blocked and only moves a breaker, it selects nothing and sends nothing; a cloud tier still yields a candidate only through candidates_for with the same breaker test. TM-08 (stage 3 breaker, admission): the probe reaches exactly the targets the old mutating selection reached (tiers not blocked by the request, not excluded, nodes offering the model and passing offline/draining/busy), so a failing node is probed once and re-opens on one failure as before; admission and deadlines untouched. B3: agent-reported facts (mem_pressure, upstream_blocked, standby_models, VRAM) are read as before and remain assertions of that host; no new trust in them. B1: the availability endpoint keeps its auth check and response fields; 503 blocker fields are unchanged except one corner the agent does not report (held server's model loaded while the standby serves, under memory pressure or the agent's RAM block), which now reports memory_pressure with the same RAM fields used elsewhere instead of no reason - no new data exposed. B9/TM-15: journal entries (breaker half_open, no_node blockers) keep their shape and content; no new logging. TM-16: ci.yml only gains one self-test line; no action, permission or review-policy change. No configuration, dependency, endpoint, agent or deployment change. Added text names no organisation, host, address or person. Merge with router 0.36.0 (ADR-0102, nodes without a GPU): the CPU-node sizing lives in the shared helpers, not in a second path - nodes.empty_room_gib = capacity_gib - reserve_gib (card, or main memory with the larger of reserve and memory_pressure.min_free_gib), Node.budget_gib keeps main's RAM branch (available RAM only when it is a number and the report is fresh, bool rejected) and falls back to the empty node, Node.prewarm_budget_gib holds main's GPU/CPU prewarm choice; assess and role_possible_when_free use the same too-large test. The agent's RAM figures stay assertions of that host (B3), used exactly as on main. problems.py (new on main) calls choose as a view without probe_breakers, as it passed mutate=False before; scheduler._node_block remains an alias of assess so tests written against it (selftest_cpu_node.py) run unchanged.",
+ "findings": [],
  "tests": [
   {
-   "command": "python tools/security/review.py snapshot --base origin/main --head INDEX",
+   "command": "python test/selftest_node_assessment.py",
    "result": "passed",
-   "evidence": "security_relevant false; 13 changed paths (design/portability.md, eleven ADRs, docs/adr/README.md)."
+   "evidence": "4224-state matrix (each state with and without a GPU): candidates_for, assess, blockers and choose agree; selection pure; probe_breakers moves exactly the due breakers past the state gate, nodes and a cloud provider. Earlier instrument check: four drifted schedulers each make it fail."
   },
   {
-   "command": "python test/check_public_changes.py --base <merge-base>",
+   "command": "python test/selftest_cpu_node.py (from main, unchanged)",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s); manual review of the added lines found no host, address, person or ops path."
+   "evidence": "ALLE GRUEN."
+  },
+  {
+   "command": "differential comparison against the current origin/main scheduler/nodes (outside the repository, 20,000 random states)",
+   "result": "passed",
+   "evidence": "14,011 of the generated nodes without a GPU (malformed RAM figures included); 0 mismatches in codes and facts, candidates, blockers/unavailable, loading waits, role_possible_when_free, choose on the request path (pick, breaker states, journal, routing record), shadow path, budget_gib, prewarm budget and residency room; only the documented release-and-loaded corner differs in its explanation. Injected divergences detected, including GPU-only room/prewarm on CPU nodes (2,900 mismatches)."
+  },
+  {
+   "command": "all python commands of the CI python job (Windows, Python 3.12) and the pwsh self-tests",
+   "result": "passed",
+   "evidence": "80 commands, 0 failed (check_adr_index green with ADR-0101..0108); selftest_ollama_loopback and selftest_ollama_protected all passed."
+  },
+  {
+   "command": "python test/run_tests.py (end-to-end suite through the lock wrapper)",
+   "result": "passed",
+   "evidence": "334 PASS, 0 FAIL, STATE: passed (after the merge)."
+  },
+  {
+   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "All checks passed; configuration ok; control flow 0 findings."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
    "result": "passed",
    "evidence": "run after staging this record."
+  },
+  {
+   "command": "python test/check_public_changes.py",
+   "result": "passed",
+   "evidence": "Public-change scan: 0 finding(s); added lines reviewed manually."
   }
  ],
  "limitations": [
-  "Documentation only; the proposals are reviewed as designs, not as code. Each implementing PR needs its own review against the then-current code.",
-  "Line references in the ADRs are for origin/main at fb19cb6; parallel PRs (structured problems, agent without NVIDIA, secrets renderer, locale-neutral router) change some of the cited code.",
-  "The pre-existing shared MQTT credential is recorded here but not added to the risk register; that is the maintainer's call.",
-  "python test/check_adr_index.py FAILS on this branch alone, and CI will show it: the index table matches the files (regenerated with --write, 111 ADRs), but the check also requires consecutive numbers and reports 'numbers not consecutive from 0001: [... 100, 109, 110, ...]', because ADR-0101..0108 are owned by parallel PRs that are not yet on main. After the renumbering this PR comes after all of them in the merge order (rebased after the previous merge), so the check is green once ADR-0101..0108 are on main."
+  "A future request path that selects without calling probe_breakers would let an expired breaker through with the same verdict but without marking it half_open; both existing request paths call it, the self-test guards purity, not the callers.",
+  "The differential comparison ran on random synthetic states with stub catalog figures; it does not cover the proxy's wait/retry loop beyond the end-to-end suite.",
+  "The standby budget stays card-based on a node without a GPU, exactly as on main; a held OpenAI-compatible server with a standby Ollama on such a node is not a known setup and was not reviewed as one.",
+  "In WSL (Python 3.11 + PostgreSQL 16, after the merge) all self-tests and the four PostgreSQL integrations passed; red only were environment steps (git cannot read the Windows worktree, packaging missing in that venv, no pwsh), which pass on Windows."
  ]
 }

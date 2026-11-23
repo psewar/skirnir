@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ollama swap release (router to agent, text frame)",
+  "description": "Releases the swap of a downloaded Ollama update (facts.ollama_swap_gate true): the agent reported ollama_update state ready, and the router sends this once the node is idle. The agent ignores a release for another version.",
+  "type": "object",
+  "properties": {
+    "t": {"const": "ollama-swap", "description": "Message type."},
+    "version": {"type": "string", "description": "Version whose swap is released.", "x-since-agent": "0.15.0"}
+  },
+  "required": ["t", "version"],
+  "additionalProperties": true,
+  "examples": [
+    {"t": "ollama-swap", "version": "0.13.1"}
+  ]
+}

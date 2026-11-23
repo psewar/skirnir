@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ollama update order (router to agent, text frame)",
+  "description": "Orders an update of the Ollama that runs as the agent's child (facts.ollama_managed true, ADR-0021). The router chooses only the version: the agent downloads the archive from its own configured source, compares the source's checksum with sha256, refuses a downgrade and reports progress in the heartbeat field ollama_update. With facts.ollama_swap_gate it stops at state ready and swaps only on ollama-swap.",
+  "type": "object",
+  "properties": {
+    "t": {"const": "ollama-update", "description": "Message type."},
+    "version": {"type": "string", "description": "Ollama version without a leading v.", "x-since-agent": "0.12.0"},
+    "file": {"type": "string", "description": "Archive name; must be the one that fits the agent's os and arch, else the agent refuses.", "x-since-agent": "0.12.0"},
+    "url": {"type": "string", "description": "Where the router saw the archive. The Go agent ignores it and downloads from its own configured source; the test fake agent downloads from it.", "x-since-agent": "0.12.0", "x-ignored-by-receiver": true},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the archive, hex.", "x-since-agent": "0.12.0"},
+    "size": {"type": "integer", "minimum": 0, "description": "Size of the archive in bytes (0 when unknown).", "x-since-agent": "0.12.0"}
+  },
+  "required": ["t", "version", "file", "sha256"],
+  "additionalProperties": true,
+  "examples": [
+    {
+      "t": "ollama-update",
+      "version": "0.13.1",
+      "file": "ollama-windows-amd64.zip",
+      "url": "https://downloads.example.net/ollama/v0.13.1/ollama-windows-amd64.zip",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "size": 987654321
+    }
+  ]
+}

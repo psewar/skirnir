@@ -14,7 +14,7 @@ if importlib.util.find_spec("paho") is not None:   # Debian: python3-paho-mqtt (
 else:  # pragma: no cover
     mqtt = None
 
-from . import scheduler, state
+from . import problems as problems_mod, scheduler, state
 from .common import VERSION, log, read_env_value
 
 NODE_ID = "skirnir_router"          # Discovery-Node-Id (homeassistant/<component>/<node_id>/<object_id>/config)
@@ -46,7 +46,7 @@ def ha_snapshot(now=None):
         models |= n.models
     roles = {}
     for _exposed, role in state.CFG.roles.items():
-        pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # View: no breaker switching from the HA view
+        pick = scheduler.choose(role, role["tiers"], None, now)   # View: no probe_breakers, no breaker switching from the HA view
         if pick:
             i, tier, ctx, node = pick
             roles[role["name"]] = {"ready": True, "node": node.name, "model": tier["model"], "tier": i, "num_ctx": ctx,
@@ -77,13 +77,10 @@ def ha_snapshot(now=None):
                          "gen_tps": (n.last_gen or {}).get("tps"), "gen_tps_model": (n.last_gen or {}).get("model"),
                          "prompt_tps": (n.last_prompt or {}).get("tps"), "prompt_tps_model": (n.last_prompt or {}).get("model")}
     pending = [e["name"] for e in (state.REG.nodes.values() if state.REG else []) if e.get("state") == "pending"]
-    problems = []
-    if not online:
-        problems.append("kein Knoten online")
     # A role that is not servable only because its nodes are currently busy (game) is not a
     # router problem, but intended (a game would otherwise trigger the "role large not servable" alarm).
     # It remains a problem if no online node could serve the role at all (model missing, VRAM too small).
-    limited = []
+    limited, unservable = [], []
     for _exposed, role in state.CFG.roles.items():
         r = roles[role["name"]]
         if r["ready"]:
@@ -92,33 +89,13 @@ def ha_snapshot(now=None):
             r["limited_by_busy"] = True
             limited.append(role["name"])
         else:
-            problems.append(f"Rolle {role['name']} nicht bedienbar")
-    # Agent failure: node reachable, but the heartbeat agent, which has reported before, is silent.
-    # Without an agent, there is no busy detection -> a game would no longer evict the large model.
-    for n in online:
-        if n.hb_ts and now - n.hb_ts > state.CFG.agent_missing_s:
-            problems.append(f"Knoten {n.name}: kein Agent-Heartbeat seit {int((now - n.hb_ts) // 60)} min")
-    # Router 0.9.2: a loaded model that Ollama had to place partly in system RAM runs there on the CPU, every request is many
-    # times slower. Nothing fails, so without this fact it only shows as slow answers (2026-10-22: a day unnoticed).
-    if state.CFG.ram_spill_problem_gib > 0:
-        for n in online:
-            for m, g in sorted(n.ram_spill.items()):
-                if g >= state.CFG.ram_spill_problem_gib:
-                    problems.append(f"Knoten {n.name}: {m} liegt zu {g:.1f} GiB im Arbeitsspeicher (rechnet langsam auf der CPU)")
-    # GPU guard (Agent >= 0.7.0): unavailable (limit not settable), deselected (operator decision: counts as a problem),
-    # voltage/temperature/hardware warning. Only if the router should consider this node's status.
-    if state.CFG.gpu_guard["enabled"]:
-        for n in online:
-            g = n.guard or {}
-            if n.guard_policy and g.get("problem") and n.guard_state(now) is not None:
-                reason = g.get("reason") or ", ".join(g.get("warnings") or []) or "?"
-                problems.append(f"Knoten {n.name}: GPU-Schutz {g.get('state')} ({reason})")
-    from . import agentupdate, ollamaupdate
-    problems += agentupdate.problems(now)   # failed or hanging agent updates
-    problems += ollamaupdate.problems(now)  # failed or hanging Ollama updates, persistently failing version check
+            unservable.append(role["name"])
+    # Router 0.35.0 (ADR-0101): the problems themselves come from problems.py, independent of MQTT; HA gets their texts
+    # in router.problem_language (default de = the sentences HA automations have matched since router 0.1).
+    problems = [p["message"] for p in problems_mod.compute(now, unservable=unservable)]
+    from . import ollamaupdate
     ollama_pending = ollamaupdate.pending_nodes(now)
     from . import cloud
-    problems += cloud.budget_problems()   # Stage 5: budget warning/exhaustion as HA problem
     cloud_view = cloud.budget_view()
     return {
         "cloud": cloud_view, "cloud_spend_month_chf": round(sum(v["spend_month_chf"] for v in cloud_view.values()), 4),

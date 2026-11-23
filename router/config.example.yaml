@@ -101,9 +101,14 @@ router:
                                   # POST /v1/heartbeat/<node> (Tests, Diagnose); registrierte Agenten brauchen keinen Token
   agent_missing_problem_s: 300  # Agent hat schon gemeldet und schweigt seit 5 min -> HA-Problem (Alarm-Automation)
   ram_spill_problem_gib: 0.5    # a loaded model with at least this much in system RAM (runs partly on the CPU) -> HA problem; 0 = off
+  problem_language: de          # language of the problem texts (HA attribute problems, /admin/problems): de (default, the texts
+                                # before router 0.35) or en; codes and the /metrics gauge skirnir_problem do not change (ADR-0101)
   expose_concrete_models: true   # konkrete Modellnamen werden 1:1 geroutet (404 wenn kein Knoten sie hat); Rollen = nach Zweck
   request_timeout_s: 600
-  limits:                        # Stufe 1: grobe Request-Groessenlimits, 413 vor dem Backend (Body-Limit bleibt 64 MiB)
+  # benchmark:                   # warm benchmark in the model catalogue (Router 0.37.0); tok/s depends on the language of
+  #   prompt: "Explain in about 200 words what a network router does."   # prompt and answer, so compare runs only with
+  #                              # the same prompt. Default: the German prompt of all earlier measurements (unchanged).
+  limits:                     # Stufe 1: grobe Request-Groessenlimits, 413 vor dem Backend (Body-Limit bleibt 64 MiB)
     max_images: 16
     max_tools: 128
     max_messages: 1000
@@ -115,6 +120,7 @@ router:
                                  #   default). Cloud nur bis einschließlich dieser Klasse: mit den Vorgaben also nur, wenn der
                                  #   Client 'internal' oder 'public' deklariert (siehe README).
     credential_scan: block       # Prompts mit erkennbaren Schluesseln/Passwoertern gehen nie in die Cloud
+    currency: CHF                # unit of catalogue prices and budgets (ADR-0105), display only: the router never converts
     privacy_check:               # Router 0.13.0 (privacy.py): Inhaltspruefung fuer Clients mit privacy_check: true
       enabled: false             #   (deren Klasse sonst 'personal' ist). Regeln + Klassifikator (decision-embed POST /privacy),
       endpoint: http://127.0.0.1:8082   # fail closed; erlaubt -> Werkzeugergebnisse geschwaerzt, sonst lokal + refusal als Antwort
@@ -129,7 +135,7 @@ router:
         base_url: https://api.openai.com/v1
         api_key_env: OPENAI_API_KEY
         secrets_file: /etc/skirnir-router/secrets.env
-        budget_month_chf: 10     # erschoepft = Anbieter faellt als Stufe weg; Warnung als HA-Problem ab warn_at_percent
+        budget_month: 10         # erschoepft = Anbieter faellt als Stufe weg; Warnung als HA-Problem ab warn_at_percent
         warn_at_percent: 80
         region: us               # OpenAI ohne EU-Datenresidenz in diesem Tarif
         timeout_s: 120
@@ -139,16 +145,16 @@ router:
         base_url: https://api.anthropic.com
         api_key_env: ANTHROPIC_API_KEY
         secrets_file: /etc/skirnir-router/secrets.env
-        budget_month_chf: 10
+        budget_month: 10
         warn_at_percent: 80
         region: us
       mistral:                   # OpenAI-kompatibel (kind: openai), EU-Endpunkt; enabled: false, bis ein Schluessel vorliegt.
         kind: openai             #   Schluessel als MISTRAL_API_KEY in secrets.env - mit render-env.sh ueber
         enabled: false           #   EXTRA_SECRET_KEYS="MISTRAL_API_KEY" in render-env.conf (ADR-0080). Katalog z. B.
-        base_url: https://api.eu.mistral.ai/v1   #   "mistral:mistral-medium-latest": {cloud: mistral, price_chf_per_m: {...}}
+        base_url: https://api.eu.mistral.ai/v1   #   "mistral:mistral-medium-latest": {cloud: mistral, price_per_m: {...}}
         api_key_env: MISTRAL_API_KEY
         secrets_file: /etc/skirnir-router/secrets.env
-        budget_month_chf: 10
+        budget_month: 10
         warn_at_percent: 80
         region: eu
       institution:               # ADR-0099: a model server run by the operator's own organisation (university or company
@@ -159,7 +165,7 @@ router:
         base_url: https://llm.example.org/v1   # provider. trust is set only here, not in the web UI. Put it in its own role
         api_key_env: INSTITUTION_API_KEY        #   granted to the clients whose data the organisation may process. Catalog e.g.
         secrets_file: /etc/skirnir-router/secrets.env   # "institution:example-model": {cloud: institution,
-        budget_month_chf: 0      # 0 = no budget  #   provider_model: example-org/example-model, price_chf_per_m: {input: 0, output: 0}}
+        budget_month: 0          # 0 = no budget  #   provider_model: example-org/example-model, price_per_m: {input: 0, output: 0}}
         region: eu
   control_auth:                 # Basic Auth fuer UI + /admin/*; Klartext im Secret-Store
     # allow_unauthenticated_loopback: true   # NUR Entwicklung ohne users: Loopback ohne Anmeldung (ADR-0053); sonst 503
@@ -354,20 +360,21 @@ models:
   # big-moe-q2:
   #   weights_gib: 31
   #   capabilities: { tools: true, vision: false, structured: false, thinking: true }
-  # Stufe 5: Cloud-Modelle (kein VRAM, Preise je 1 Mio. Tokens fuer Budget/Usage, in der Waehrung der Budgets; der Router
-  # rechnet nicht um, die Endung _chf der Schluessel ist historisch. Beispielpreise: Listenpreise in USD, Stand 2026-09).
+  # Stufe 5: Cloud-Modelle (kein VRAM, price_per_m = Preise je 1 Mio. Tokens fuer Budget/Usage, in router.cloud.currency;
+  # der Router rechnet nicht um. Bis Router 0.36 hiess der Schluessel price_chf_per_m, der alte Name gilt weiter (ADR-0105).
+  # Beispielpreise: Listenpreise in USD, Stand 2026-09).
   # Nur ueber Rollen erreichbar, nicht als konkreter Modellname.
   "openai:gpt-5-mini":
     cloud: openai
     capabilities: { tools: true, vision: true, structured: true, thinking: false }
     reasoning: true          # think: false -> reasoning_effort minimal (sonst ~130 Denk-Token fuer ein 'OK')
-    price_chf_per_m: { input: 0.25, output: 2.0 }
+    price_per_m: { input: 0.25, output: 2.0 }
     context_tokens: 400000
   "openai:gpt-5":
     cloud: openai
     capabilities: { tools: true, vision: true, structured: true, thinking: false }
     reasoning: true          # think: false -> reasoning_effort minimal (sonst ~130 Denk-Token fuer ein 'OK')
-    price_chf_per_m: { input: 1.25, output: 10.0 }
+    price_per_m: { input: 1.25, output: 10.0 }
     context_tokens: 400000
   # Denkendes Modell hinter einem OpenAI-kompatiblen Server (z. B. vLLM; Anbieter wie mistral oben, kind: openai,
   # base_url https://llm.example.org/v1): es ignoriert reasoning_effort minimal und denkt weiter, none schaltet es ab.
@@ -378,12 +385,12 @@ models:
   #   capabilities: { tools: true, vision: false, structured: true, thinking: true }
   #   reasoning: true
   #   reasoning_off: none
-  #   price_chf_per_m: { input: 0, output: 0 }
+  #   price_per_m: { input: 0, output: 0 }
   "anthropic:claude-sonnet-4-5":
     cloud: anthropic
     provider_model: claude-sonnet-4-5
     capabilities: { tools: true, vision: true, structured: false, thinking: false }
-    price_chf_per_m: { input: 3.0, output: 15.0 }
+    price_per_m: { input: 3.0, output: 15.0 }
     context_tokens: 200000
 
 nodes: {}   # Knoten kommen ueber die Registrierung (Agent-Schluessel, Freigabe in der UI -> /etc/skirnir-router/nodes.json).
@@ -448,3 +455,6 @@ decision_engine:                 # Decision Engine (design/decision-engine.md): 
       assist: "Smart-Home-Sprachbefehle und Hausfragen: Licht, Heizung, Timer, Einkaufsliste, Wetter"
       code: "Programmieren: Code schreiben, Fehler suchen, Skripte, SQL, YAML-Automationen"
   capture: { enabled: false, path: /var/lib/skirnir-router/decisions.jsonl, clients: [], anonymize: true, max_context_chars: 2000 }   # Trainingsdaten nur fuer Clients im Opt-in, anonymisiert
+  # observe_blocked: true          # observation mode: classify a waiting request in the background, nothing changes
+  # observe_light: [standard, assist]   # classes for which a free lower tier might do; absent = [standard, assist] (those
+  #                                #   of them among options), [] = none

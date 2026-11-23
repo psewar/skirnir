@@ -56,21 +56,22 @@ func (h *Heartbeat) SetInterval(d time.Duration) {
 	}
 }
 
-// payload collects GPU facts for a heartbeat.
+// payload collects the node's facts for a heartbeat. gpu_present (0.36.0, ADR-0102) says whether GPU values follow;
+// without a GPU the heartbeat carries memory, game, guard and the rest, and the router sizes models by main memory.
 func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
-	s, err := h.gpu.Sample(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("nvidia-smi: %w", err)
-	}
-	p := map[string]any{
-		"gpu_util_pct": s.UtilPct, "vram_total_mib": s.TotalMiB, "vram_used_mib": s.UsedMiB,
-		"vram_free_mib": s.FreeMiB, "ts": time.Now().Unix(),
+	p := map[string]any{"ts": time.Now().Unix(), "gpu_present": h.gpu.Present()}
+	if h.gpu.Present() {
+		s, err := h.gpu.Sample(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("nvidia-smi: %w", err)
+		}
+		p["gpu_util_pct"], p["vram_total_mib"], p["vram_used_mib"], p["vram_free_mib"] = s.UtilPct, s.TotalMiB, s.UsedMiB, s.FreeMiB
+		if s.Sensors != nil { // 0.6.0: temperature, power, throttling, GPU-Z - the router stores the block in node state
+			p["sensors"] = s.Sensors
+		}
 	}
 	if h.tlsFP != "" {
 		p["ollama_tls_sha256"] = h.tlsFP
-	}
-	if s.Sensors != nil { // 0.6.0: temperature, power, throttling, GPU-Z - the router stores the block in node state
-		p["sensors"] = s.Sensors
 	}
 	if h.guard != nil { // 0.7.0: GPU guard status
 		p["gpu_guard"] = h.guard.Status()
