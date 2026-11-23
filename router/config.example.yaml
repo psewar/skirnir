@@ -234,11 +234,19 @@ router:
     enabled: true                #   ANTHROPIC_BASE_URL=https://router.example.net:11434, Modell = Rolle wie code:latest)
     keepalive_s: 15              # SSE-Ping, solange der Knoten noch am Prompt rechnet (Prefill bei großem Kontext bis Minuten)
     think: auto                  # auto = wie der Client es verlangt (Claude Code: jeder Zug adaptiv), on/off = fest
-  wol:
+  wol:                           # Wecken auf Anfrage (Knoten mit wol: true); Warten/Abkuehlen gilt fuer jeden Wecker,
+                                 # broadcast_addresses nur fuer den eingebauten Wecker wol (Magic Packet)
     wait_up_s: 90
     retry_interval_s: 20
     cooldown_s: 300
     broadcast_addresses: ["255.255.255.255", "192.0.2.255"]
+  # wakers:                      # seit 0.41.0 (ADR-0117): weitere Wecker neben wol, je Knoten mit nodes.<name>.waker gewaehlt
+  #   steckdose:
+  #     kind: http_webhook       # POST {"event": "wake", "node": ..., "mac": ...} an die endgueltige URL
+  #     url: https://automation.example.net/api/webhook/skirnir-wake   # HTTPS; http nur an 127.0.0.1/::1; keine Umleitung
+  #     token_env: SKIRNIR_WAKE_TOKEN   # optional: Bearer-Token aus der Umgebung (secrets.env), nie in dieser Datei
+  #     timeout_s: 10            # ganzer Aufruf, 1-60 s
+  #     repeat: false            # true = alle retry_interval_s erneut senden (nie bei einem Umschalter)
 
 # Home Assistant: Router als Geraet "Ollama Router" per MQTT-Discovery (MQTT-Broker auf ha-host).
 # Passwort kommt aus /etc/skirnir-router/secrets.env (MQTT_PASSWORD, von Hand oder per render-env.sh).
@@ -326,7 +334,8 @@ modes:
     canary: ""                # leer = der Kanarienvogel des Agent-Updates
     canary_clean_h: 24
     check_interval_h: 6
-    release_url: https://api.github.com/repos/ollama/ollama/releases/latest
+    release_source: github    # github = GitHub-API (wie bisher); document = Release-Dokument {version, files} (ADR-0117)
+    release_url: https://api.github.com/repos/ollama/ollama/releases/latest   # bei document: endgueltige HTTPS-URL des Dokuments
   gpu_guard:                  # Router-Seite des GPU-Schutzes (Agent >= 0.7.0 setzt das Power-Limit selbst)
     enabled: true             # Status beachten: Deckel in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA
     throttled_max_inflight: 1
@@ -397,6 +406,7 @@ models:
 
 nodes: {}   # Knoten kommen ueber die Registrierung (Agent-Schluessel, Freigabe in der UI -> /etc/skirnir-router/nodes.json).
             # Hier nur noch Knoten OHNE Agent (ollama: http://... URL) oder Policy-Vorgaben fuer einen Namen.
+            # Wecker je Knoten (ADR-0117): z. B. `pc-example: { wol: true, waker: steckdose }`; ohne waker = wol (Magic Packet).
 # Rollen = stabile Modellnamen für HA. busy_ok = darf auf einem Knoten im Spielmodus laufen.
 # granite4.2:8b statt gpt-oss:20b als Kleinmodell: kann HA-"structure" (gpt-oss antwortet darauf HTTP 500) und ist kleiner.
 roles:

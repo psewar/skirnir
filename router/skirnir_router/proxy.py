@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import admission, auth, fallback_observation, cloud, decision, context_check, metrics, memory, managed, nodes, openai_node, ops, perf, poll, privacy, scheduler, state, toolcall_rescue, wol
+from . import admission, auth, fallback_observation, cloud, decision, context_check, metrics, memory, managed, nodes, openai_node, ops, perf, poll, privacy, scheduler, state, toolcall_rescue, wakers
 from . import request as request_mod
 from .common import VERSION, GIB, log, ollama_error, read_json
 from .outcome import Problem, bad_gateway, failed
@@ -322,7 +322,7 @@ class _Acquire:
                             "code": why["code"], "detail": why["detail"], "blockers": why["blockers"]})
             return Refusal(503, f"no node available for model '{self.name}': {why['detail']}", why=why)
         self.woke = True
-        if not await wol.wake(node):
+        if not await wakers.wake(node):
             return Refusal(503, f"no node available for model '{self.name}' (wake of {node.name} failed)")
         return None
 
