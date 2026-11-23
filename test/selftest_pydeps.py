@@ -99,6 +99,21 @@ lines, problems = pydeps.plan(router_reqs, shipped, env=LINUX, have={"aiohttp": 
 check(not problems and sorted(x.split("==")[0] for x in lines) == ["asyncpg", "paho-mqtt", "uvloop"],
       "shipped lock without paho-mqtt and uvloop from apt: all three come from the lock")
 
+# --without (install.sh --without-mqtt, ADR-0104): a declined optional requirement is neither planned nor verified
+no_paho_have = {"aiohttp": ("3.8.4", False), "pyyaml": ("6.0", False), "cryptography": ("38.0.4", False),
+                "uvloop": ("0.17.0", False)}
+lines, problems = pydeps.plan(router_reqs, shipped, env=LINUX, have=no_paho_have, without=["paho_mqtt"])
+check(not problems and [x.split("==")[0] for x in lines] == ["asyncpg"],
+      f"--without paho-mqtt (any spelling): paho-mqtt is not installed from the lock ({[x.split('==')[0] for x in lines]})")
+check(pydeps.verify(router_reqs, dict(no_paho_have, asyncpg=("0.32.0", True)), env=LINUX, without=["paho-mqtt"]) == [],
+      "--without paho-mqtt: verify passes without it")
+check(pydeps.verify(router_reqs, dict(no_paho_have, asyncpg=("0.32.0", True)), env=LINUX) == ["paho-mqtt>=1.6.1: missing"],
+      "without --without, a missing paho-mqtt is still unmet (the default is unchanged)")
+check(pydeps.unknown_names(router_reqs, ["paho-mqtt", "paho-mqt"]) == ["paho-mqt"], "a misspelt --without name is reported")
+req_file = os.path.join(ROOT, "router", "requirements-session.txt")
+check(pydeps.main(["verify", "--requirements", req_file, "--without", "no-such-package"]) == 2,
+      "--without with a name that is no requirement: refused (exit 2)")
+
 if FAILS:
     print(f"{len(FAILS)} failure(s)")
     sys.exit(1)
