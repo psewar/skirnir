@@ -14,7 +14,7 @@ Prometheus scraping /metrics remains the right place - the router is not a time-
 import os
 import time
 
-from . import admission, perf, scheduler, state
+from . import admission, perf, problems, scheduler, state
 from . import nodes as nodes_mod
 from .common import VERSION, load_json_file, save_json_file, state_dir
 
@@ -27,7 +27,10 @@ METRICS_SAVE_S = 60
 
 
 def _labels(d):
-    return "{" + ",".join(f'{k}="{str(v).replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34))}"' for k, v in d.items()) + "}"
+    """Label set in Prometheus text format: backslash, double quote and line feed escaped (router 0.35.0 adds the line
+    feed: a model name a node reports must not start a new sample line)."""
+    return "{" + ",".join(f'{k}="{str(v).replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34)).replace(chr(10), chr(92) + "n")}"'
+                          for k, v in d.items()) + "}"
 
 
 def _dirty():
@@ -267,6 +270,11 @@ def render():
         pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # View: /metrics does not toggle any breaker
         rows.append(({"role": role["name"]}, 1 if pick else 0))
     gauge("skirnir_role_ready", "1 = role could be served right now", rows)
+    # Router 0.35.0 (ADR-0101): the problems Home Assistant gets, as a gauge, so Prometheus/Alertmanager can alert without
+    # MQTT. Fixed codes; node and subject come from configuration, agent registry or the models a node reports.
+    active = problems.compute(now, lang="en")
+    gauge("skirnir_problem", "active problem (number with this label set, normally 1); codes in ADR-0101", problems.metric_rows(active))
+    gauge("skirnir_problems_active", "number of active problems", [({}, len(active))])
     gauge("skirnir_perf_gen_tps", "EWMA generation speed tok/s per model@node",
           [({"model": e["model"], "node": e["node"]}, (e.get("ewma") or {}).get("gen_tps")) for e in state.PERF.values() if isinstance(e, dict) and e.get("model")])
     gauge("skirnir_perf_error_rate", "share of non-ok outcomes in the last 20 results",

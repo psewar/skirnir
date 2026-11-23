@@ -9,6 +9,7 @@ from . import agentupdate, nodes, ollamaupdate, openai_node, perf, quiet, state
 from .common import GIB, log, read_json
 
 NODE_FAULTS = (ClientError, asyncio.TimeoutError, OSError, ValueError)   # Netz, Tunnel, Ollamas JSON (ValueError)
+GAME_VIA_BEFORE_0_36 = "pfad"   # agents before 0.36.0 report a game found by its path as "pfad" (ADR-0103); remove once all are newer
 
 
 def push_since(node, started):
@@ -95,8 +96,12 @@ def apply_ollama_state(node, tag_models, ps_models, now, source="poll"):
             node.reg["models"] = sorted(node.models)
             state.REG.dirty = True
     node.digest_of = {m["name"]: m.get("digest") for m in tag_models}
-    node.loaded = {m["name"]: m.get("size_vram", 0) / GIB for m in ps_models}
-    spill = {m["name"]: g for m in ps_models if (g := ram_spill_gib(m)) >= nodes.RAM_SPILL_MIN_GIB}
+    # Router 0.36.0 (ADR-0102): a node without a GPU computes in main memory, so what a model occupies there is its whole
+    # size, and "in system RAM instead of VRAM" (ram_spill) is how it always runs, not a slowdown to report.
+    held = "size_vram" if node.gpu_present else "size"
+    node.loaded = {m["name"]: m.get(held, 0) / GIB for m in ps_models}
+    spill = ({m["name"]: g for m in ps_models if (g := ram_spill_gib(m)) >= nodes.RAM_SPILL_MIN_GIB}
+             if node.gpu_present else {})
     if spill.keys() != node.ram_spill.keys():
         state.MQTT_DIRTY.append(True)   # HA should see a model moving into or out of system RAM right away
     node.ram_spill = spill
@@ -105,7 +110,7 @@ def apply_ollama_state(node, tag_models, ps_models, now, source="poll"):
     for m in ps_models:
         d = m.get("digest") or node.digest_of.get(m["name"])
         if d:
-            node.loaded_digest[d] = m.get("size_vram", 0) / GIB
+            node.loaded_digest[d] = m.get(held, 0) / GIB
             if m.get("context_length"):
                 node.loaded_ctx[d] = int(m["context_length"])
     if node.state == "offline":
@@ -363,7 +368,9 @@ async def prewarm(node, delay, reason, since=None):
     # Budget = card minus reserve minus what is truly foreign (desktop baseline + foreign VRAM); Ollama's own
     # models are evictable and don't count. Previously this was the full card - on gpu-laptop (16 GiB) gemma4 was loaded next to
     # a running game.
-    budget = node.vram_total_gib - state.CFG.reserve.get("free", 1.0) - node.baseline_gib() - node.foreign_vram_gib()
+    # Without a GPU (0.36.0, ADR-0102): available main memory plus what Ollama holds, as for a request (Node.budget_gib).
+    budget = (node.vram_total_gib - state.CFG.reserve.get("free", 1.0) - node.baseline_gib() - node.foreign_vram_gib()
+              if node.gpu_present else node.budget_gib(now, None))
     planned, used = [], 0.0
     for role in state.CFG.roles.values():
         t = role["tiers"][0]
@@ -524,7 +531,7 @@ def residency_check(node, now):
         return
     # Only if a missing rank-1 model would actually fit next to the loaded rank-1 models; otherwise
     # prewarm would load nothing anyway and we would report the same thing every minute.
-    room = node.vram_total_gib - cfg.reserve.get("free", 1.0) - sum(node.loaded_size(m) for m, _ in rank1 if node.is_loaded(m))
+    room = node.capacity_gib() - node.reserve_gib("free") - sum(node.loaded_size(m) for m, _ in rank1 if node.is_loaded(m))
     if not any(cfg.need_gib(m, ctx, node) <= room for m, ctx in missing):
         return
     if node.quiet(now):
@@ -638,10 +645,14 @@ def note_game_memory(node, b, now):
     Faults/s; the node stayed free because Diablo got little VRAM (no foreign VRAM) and the router didn't know RAM.
     If a block is missing, the agent doesn't report it (older, Linux without game detection): then old behavior remains."""
     g = b.get("game")
-    if isinstance(g, dict) and g.get("supported", True):
+    # Agent >= 0.36.0 reports enabled: false when game detection is switched off (game.enabled, ADR-0103): like a platform
+    # without detection, nothing is known about games there.
+    if isinstance(g, dict) and g.get("supported", True) and g.get("enabled", True) is not False:
         was = bool((node.game or {}).get("running"))
         node.game = {k: g.get(k) for k in ("running", "name", "via", "since", "procs", "gpu_dedicated_mib", "gpu_shared_mib", "gpu_pct")
                      if g.get(k) is not None}
+        if node.game.get("via") == GAME_VIA_BEFORE_0_36:   # agents before 0.36.0 send the German "pfad" (ADR-0103)
+            node.game["via"] = "path"
         running = bool(g.get("running"))
         if running and node.game_since is None:
             node.game_since = now
@@ -652,7 +663,7 @@ def note_game_memory(node, b, now):
             log.info("node %s: game %s%s", node.name, "running" if running else "ended", f" ({g.get('name')})" if running else "")
             state.remember({"event": "game", "node": node.name, "running": running, "name": g.get("name") if running else None})
             state.MQTT_DIRTY.append(True)
-    elif g is None:
+    elif g is None or (isinstance(g, dict) and g.get("enabled", True) is False):
         node.game, node.game_since = None, None
         node.game_heavy, node.game_heavy_why = False, ""
     m = b.get("memory")
@@ -700,6 +711,8 @@ def hb_ack(node):
 def apply_heartbeat(node, b, now):
     """Adopt GPU facts from a heartbeat, run state machine, learn baseline."""
     node.hb_ts = now
+    if isinstance(b.get("gpu_present"), bool):   # Agent >= 0.36.0 (ADR-0102): the fresher word than the registration facts
+        node.gpu_present = b["gpu_present"]
     if node.power == "asleep":   # a heartbeat is the agent running again, even if its resume notice was lost
         note_power(node, "awake", now, "heartbeat")
     sm = b.get("standby_models")   # Agent >= 0.25.0 with tunnel.upstream_fallback: the standby Ollama's model store

@@ -6,6 +6,10 @@
 > `recovery`, `unavailable`, `off`; `source`, `reason`, `warnings`, `high_load_s`; Tabelle in design/english-names.md).
 > Dieser Entwurf und die Messprotokolle unten nennen die bis dahin gueltigen deutschen Namen.
 
+> **Agent/Router 0.36.0 ([ADR-0102](../docs/adr/0102-the-agent-starts-without-a-gpu.md)):** Laeuft der Agent ohne GPU
+> (`gpu.probe`), meldet der Schutz den Zustand `not_applicable` mit Grund `no_gpu`, `problem: false`, und laeuft nicht -
+> auch bei `gpu_guard.enabled: false`. Der Router kennt den Zustand und deckelt den Knoten nicht.
+
 > **Stand 2026-09-24, abends: umgesetzt** in Agent 0.7.0 (`agent/guard.go`, Tests `guard_test.go`) und Router 0.1.2
 > (`modes.gpu_guard`, Policy `gpu_guard` je Knoten, HA-Probleme, Metriken, UI-Badge). Entscheide des Betreibers: Default
 > 80 %, die Abwahl zählt als HA-Problem (abweichend von Abschnitt 4), `require_fresh_status` Standard aus. Konfigschlüssel

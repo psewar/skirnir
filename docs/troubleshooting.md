@@ -13,6 +13,9 @@ python3 /opt/skirnir-router/router.py --posture /etc/skirnir-router/config.yaml
 Every response carries `X-Skirnir-Request-Id`; the same id is in the decision log (`/admin/state`, web UI *Overview*) and,
 for refusals, in the audit log (`client_auth.audit_log`, e.g. `/var/log/skirnir-router/audit.jsonl`).
 
+What the router itself considers wrong is listed in the web UI *Overview* under *Problems*, in `GET /admin/problems` and as
+`skirnir_problem` in `/metrics`, with a fixed code per case ([operations.md](operations.md#problems)).
+
 ## Control port (11435)
 
 | Symptom | Cause and fix |
@@ -50,7 +53,7 @@ In observe mode unknown callers are served and logged as `auth_missing`; switch 
 | Update refused, "invalid manifest signature" | The node does not trust the signing key; add it with `Set-UpdateKey.cmd` or `update.public_keys` ([operations.md](operations.md#key-rotation)). Kind `downgrade`: the release is older than the running agent. |
 | Node shows no models / role not servable | Ollama not reachable on `127.0.0.1:11434` or the role's models not pulled on that node. |
 | Node stays `busy` | A game or foreign GPU load; `skirnir-agent game` shows game detection, `skirnir-agent gpu` the sensors, `/admin/state` `game_heavy` and its reason. |
-| Model slow | Part of it is in system RAM: Home Assistant `binary_sensor.skirnir_node_<node>_ram_spill` ([operations.md](operations.md#home-assistant-entities)). |
+| Model slow | Part of it is in system RAM: problem `ram_spill`, Home Assistant `binary_sensor.skirnir_node_<node>_ram_spill` ([operations.md](operations.md#home-assistant-entities)). |
 
 Agent commands for diagnosis: `skirnir-agent check-config` (configuration), `status` (service and `/health`), `gpu`
 (measurement source and sensors), `identity` (fingerprint), `game` (game detection and memory).
