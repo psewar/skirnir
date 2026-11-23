@@ -18,15 +18,18 @@ import (
 // only lowers, never raises above the standard limit, and clamps every target to [Min-Limit, Standard-Limit].
 //
 // States: off | unavailable | normal | high_load | throttled | recovery (English since 0.20.0, design/english-names.md). Disabling (enabled: false) counts as a
-// Problem (HA) at the operator's request, so a forgotten disable is noticed.
+// Problem (HA) at the operator's request, so a forgotten disable is noticed. not_applicable (0.36.0, ADR-0102): the agent
+// runs without a GPU, so there is nothing to guard; that is no problem.
 
 const (
-	guardOff         = "off"
-	guardUnavailable = "unavailable"
-	guardNormal      = "normal"
-	guardHighLoad    = "high_load"
-	guardThrottled   = "throttled"
-	guardRecovery    = "recovery"
+	guardOff           = "off"
+	guardUnavailable   = "unavailable"
+	guardNotApplicable = "not_applicable"
+	guardReasonNoGPU   = "no_gpu"
+	guardNormal        = "normal"
+	guardHighLoad      = "high_load"
+	guardThrottled     = "throttled"
+	guardRecovery      = "recovery"
 
 	guardEvLimitSet        = "limit_set"
 	guardEvLimitRefused    = "limit_refused"
@@ -447,6 +450,9 @@ func newGuard(cfg GuardCfg, gpu *GPU, log *Logger) *Guard {
 	if !cfg.on() {
 		g.status = GuardStatus{State: guardOff, Source: "-", Problem: true, Reason: guardEvDeselected}
 	}
+	if !gpu.Present() { // ADR-0102: nothing to guard, and that is no problem (also not when gpu_guard.enabled is false)
+		g.status = GuardStatus{State: guardNotApplicable, Source: "-", Reason: guardReasonNoGPU}
+	}
 	return g
 }
 
@@ -462,6 +468,10 @@ func inputFrom(now time.Time, s *GPUSample, lim guardLimits) guardInput {
 }
 
 func (g *Guard) Run(ctx context.Context) {
+	if !g.gpu.Present() {
+		g.log.Infof("gpu-guard: not applicable - no GPU (gpu.probe)")
+		return
+	}
 	p := g.cfg.resolved()
 	if !p.enabled {
 		g.log.Warnf("gpu-guard: DESELECTED by configuration (gpu_guard.enabled: false) - no power limit, reported as a problem")

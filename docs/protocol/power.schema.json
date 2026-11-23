@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Power notice (agent to router, binary frame POWER, stream 0)",
+  "description": "The machine is going to sleep or woke up. On suspending the router takes the node out of routing at once; after resumed it waits for the next heartbeat. The agent repeats its latest notice at the start of each session, before the first heartbeat. A notice without a known state is dropped; so is any notice before approval. Routers before 0.14.0 ignore the frame.",
+  "type": "object",
+  "properties": {
+    "state": {"type": "string", "enum": ["suspending", "resumed"], "description": "What happens to the machine.", "x-since-agent": "0.24.0"},
+    "at": {"type": "string", "description": "RFC 3339 time of the event on the agent. Informational; the router uses its receive time.", "x-since-agent": "0.24.0", "x-ignored-by-receiver": true},
+    "via": {"type": "string", "description": "Source of the event (for example the Windows power broadcast name); the router keeps up to 40 characters for its journal.", "x-since-agent": "0.24.0"}
+  },
+  "required": ["state"],
+  "additionalProperties": true,
+  "examples": [
+    {"state": "suspending", "at": "2026-11-23T01:00:00.123+01:00", "via": "PBT_APMSUSPEND"},
+    {"state": "resumed", "at": "2026-11-23T06:30:00Z", "via": "PBT_APMRESUMEAUTOMATIC"}
+  ]
+}

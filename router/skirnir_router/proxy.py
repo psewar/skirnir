@@ -538,7 +538,7 @@ class _Relay:
             perf.perf_outcome(model, node.name, self.outcome)
             if self.outcome == "ok":
                 node.breaker_ok()
-        cost = cloud.cost_chf(model, self.ptoks, self.ctoks) if self.is_cloud and self.outcome == "ok" else 0.0
+        cost = cloud.request_cost(model, self.ptoks, self.ctoks) if self.is_cloud and self.outcome == "ok" else 0.0
         if cost:
             cloud.add_spend(node.provider, cost)
         elapsed = time.time() - self.t0

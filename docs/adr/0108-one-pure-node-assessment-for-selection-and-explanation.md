@@ -62,12 +62,17 @@ Chosen option: one pure assessment.
   availability, fallback observation) do not call it, as they passed `mutate=False` before. `Breaker.breaker_allows` became
   `Breaker.breaker_probe`; `breaker_would_allow` already let an expired open breaker through, so the verdict is the same
   with or without the probe.
-* `role_possible_when_free` shares the empty-card test with `assess` (`model_too_large`); the rest of `assess` does not
+* `role_possible_when_free` shares the empty-node test with `assess` (`model_too_large`); the rest of `assess` does not
   apply there, since busy, draining and the breaker are what that question looks past.
-* Budgets: `nodes.card_gib(node, reserve_for)` is the empty card minus a state's reserve (used by `budget_gib` without a
-  fresh heartbeat, the residency room and the too-large test); `Node.card_budget_gib(reserve_for)` subtracts baseline and
-  foreign VRAM (standby budget with the node's own reserve, prewarm plan with the free reserve). The residency room keeps
-  its coarser formula without baseline and foreign VRAM, as before. `Node._real_gib` is the measured occupancy of one
+* Budgets: `nodes.empty_room_gib(node, reserve_for)` is the empty node minus a state's reserve, from `Node.capacity_gib`
+  and `Node.reserve_gib` (the card, or main memory with the larger reserve on a node without a GPU, ADR-0102). It is used
+  by `budget_gib` without a fresh report, the residency room and the too-large test. `Node.card_budget_gib(reserve_for)`
+  is the card minus reserve, baseline and foreign VRAM (standby budget with the node's own reserve);
+  `Node.prewarm_budget_gib(now)` is that with the free reserve on a GPU node and the request budget from available RAM on
+  a node without one. The CPU-node rules of ADR-0102 live in these helpers and in `budget_gib`, so `assess` has no second
+  path for them. The residency room keeps its coarser formula without baseline and foreign VRAM, as before; the standby
+  budget stays card-based on a node without a GPU, as on main (a held OpenAI-compatible server with a standby Ollama on
+  such a node is not a known setup). `Node._real_gib` is the measured occupancy of one
   loaded model, summed by `ollama_vram_gib` and `answering_vram_gib` in the same order as before (a plain loop: `sum()`
   of floats rounds differently since Python 3.12). `loading_for` and `tier_loading` share one loop.
 
@@ -84,12 +89,13 @@ Chosen option: one pure assessment.
 
 ### Confirmation
 
-* `test/selftest_node_assessment.py` walks 2112 node states (offline, free, busy with a game or GPU load, draining, six
+* `test/selftest_node_assessment.py` walks 4224 node states, each with and without a GPU (offline, free, busy with a game or GPU load, draining, six
   breaker states, VRAM fit, no fit, foreign VRAM, too large, warm, warm with too small a context, standby switch with and
   without room, release with and without the agent's RAM block, the corner, memory pressure) and asserts that
   `candidates_for`, `assess`, `blockers` and `choose` agree, that the selection changes no breaker and writes no journal,
   and that `probe_breakers` moves exactly the due breakers past the state gate, for nodes and a cloud provider.
-* Before the merge, the refactor was compared with the previous code on 20,000 random node states (judgement, candidates,
+* Before the merge, the refactor was compared with the previous code on 20,000 random node states, nodes with and
+  without a GPU, (judgement, candidates,
   blockers, loading waits, `choose` on the request path with breaker states, journal and routing record, the shadow path,
   all budgets): identical except the corner above, where only the explanation changed. All self-tests in CI and the
   end-to-end suite (breaker open, half-open probe, closed) pass unchanged in substance; the existing tests only follow the

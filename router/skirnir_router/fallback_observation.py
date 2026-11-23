@@ -15,7 +15,6 @@ import time
 from . import admission, decision, scheduler, state
 from .common import log, open_private, state_dir
 
-LIGHT_DEFAULT = ("standard", "assist")   # Classes for which a deeper tier might be an option (not Programming, not Analysis)
 CLASSIFY_PATHS = ("/api/chat", "/api/generate")
 FILE_MAX_BYTES = 20 * 2 ** 20            # requests.jsonl: this large, then rotate to .1 (~400 B per line, ~50,000 requests)
 LATE_WAIT_S = 5.0                        # Classification not finished when the request ends: wait for it
@@ -142,7 +141,9 @@ async def _observe(body, path, role, tiers, req, node, model, reason, client):
     if d is None:
         return
     result = await d.classify_body(body, path)
-    light = set((state.CFG.decision or {}).get("observe_light") or LIGHT_DEFAULT)
+    # classes for which a free lower tier might do: decision_engine.observe_light as config.py resolved it (its default
+    # OBSERVE_LIGHT_DEFAULT when the key is absent; an empty list means none)
+    light = set((state.CFG.decision or {}).get("observe_light") or ())
     confident = not result.uncertainty.get("reasons") and not result.uncertainty.get("forced")
     alt = alternative(tiers, model, req)
     state.remember({"event": "decision_observe", "request_id": req.request_id, "client": client, "role": role["name"],

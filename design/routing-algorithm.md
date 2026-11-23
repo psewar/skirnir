@@ -65,6 +65,19 @@ nach dem Ende                          free -> einmal prewarm (Grund quiet_end);
 Der Zustand steht in `/admin/state` (`nodes.<name>.quiet`) und im Journal (`quiet`, `quiet_end`); er lebt nur im
 Speicher, ein Router-Neustart beendet ihn.
 
+Knoten ohne GPU (Router/Agent 0.36.0, [ADR-0102](../docs/adr/0102-the-agent-starts-without-a-gpu.md)): Der Agent meldet
+`gpu_present: false` in den Fakten und jedem Heartbeat (fehlt das Feld, gilt der Knoten als GPU-Knoten) und schickt keine
+GPU-Werte. Der Knoten rechnet im Hauptspeicher:
+```
+ollama_held   = sum(size über /api/ps)            # statt size_vram, das dort 0 ist; kein ram_spill
+reserve       = max(vram_reserve_gib[state], memory_pressure.min_free_gib)
+budget        = memory.ram_available_gib + ollama_held - reserve      # ohne frischen Heartbeat: nichts passt
+capacity      = memory.ram_total_gib              # fuer model_too_large und "Rolle frei moeglich"
+busy          nur ueber ein gemeldetes Spiel; keine Auslastung, kein fremdes VRAM
+GPU-Schutz    Zustand not_applicable: kein Problem, keine Deckelung
+```
+Prewarm nimmt dasselbe Budget. Die VRAM-Messung des Katalogs braucht weiter eine GPU.
+
 ## 2. Auswahl pro Anfrage
 
 Eingang: `POST /api/chat | /api/generate | /api/embed`, Body mit `model`, optional
@@ -154,11 +167,12 @@ assess(node, tier, ctx, now):
         else fit against card_budget_gib(node.state)
     loaded with enough context                -> ok, no budget
     memory pressure                           -> memory_pressure
-    fit against budget_gib (free VRAM + Ollama's own - reserve)
+    fit against budget_gib (free VRAM + Ollama's own - reserve; without a GPU, ADR-0102: available RAM + Ollama's
+                            own - the larger of reserve and memory_pressure.min_free_gib)
 
 fit(need, budget):
     need <= budget                            -> ok
-    need > card_gib(free)                     -> model_too_large (waiting does not help)
+    need > empty_room_gib(free)               -> model_too_large (waiting does not help)
     foreign VRAM > 0 and need <= budget + foreign
                                               -> gpu_busy (busy_reason foreign_vram)
     else                                      -> vram_full
@@ -170,10 +184,11 @@ with a journal entry, is a separate step, `probe_breakers(tiers, now, exclude, r
 (tiers the request does not block, targets not excluded, nodes past the state gate). Views (Home Assistant, `/metrics`,
 availability, fallback observation) never call it.
 
-Budgets share two helpers: `nodes.card_gib(node, state)` is the empty card minus that state's reserve (`budget_gib`
-without a fresh heartbeat, the residency room, the too-large test), and `Node.card_budget_gib(state)` additionally
-subtracts desktop baseline and foreign VRAM (standby switch with the node's own reserve, prewarm plan with the free
-reserve). `role_possible_when_free` uses only the too-large test, since it asks past busy, draining and the breaker.
+Budgets share helpers: `nodes.empty_room_gib(node, state)` is the empty node minus that state's reserve, the card or,
+on a node without a GPU, its main memory (`budget_gib` without a fresh report, the residency room, the too-large test);
+`Node.card_budget_gib(state)` is the card minus reserve, desktop baseline and foreign VRAM (standby switch with the
+node's own reserve); `Node.prewarm_budget_gib(now)` is that with the free reserve on a GPU node, and the request budget
+from available RAM on a node without one. `role_possible_when_free` uses only the too-large test, since it asks past busy, draining and the breaker.
 `test/selftest_node_assessment.py` asserts over a matrix of node states that selection, explanation, blockers and probe
 agree.
 

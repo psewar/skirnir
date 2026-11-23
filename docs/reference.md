@@ -11,8 +11,8 @@
 | **11434 `/v1/messages`** | Anthropic Messages API: `POST /v1/messages` (streaming and not), `POST /v1/messages/count_tokens`; `GET /v1/models` answers in Anthropic form when the request carries `anthropic-version`. Translated to `/api/chat` like `/v1`, see [Anthropic clients](clients.md#anthropic-clients-claude-code). | Claude Code, Anthropic SDKs |
 | **11434 `/rerank`, `/info`** | Optional TEI-compatible reranking on a GPU node through the agent tunnel (off by default, client right `rerank`), see [rerank endpoint](#optional-rerank-endpoint). | Memory services |
 | **11434 `/v1/skirnir/…`** | Optional session and memory APIs, off by default ([below](#optional-persistent-session-api)). | Agent frameworks |
-| **11435** | Web UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/nodes` (`POST`/`DELETE /admin/nodes/{fp}/quiet`: quiet one node for a measurement, no unloading or prewarming until a given time, [ADR-0061](adr/0061-quiet-a-single-node-for-a-measurement.md)), `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2 hashes in the configuration, a verified pair is cached for 10 min). Every non-GET request to `/admin/*` also needs the header `X-Skirnir-UI: 1` (CSRF protection, [ADR-0042](adr/0042-admin-writes-require-a-custom-header.md); the web UI sends it). Default listener `127.0.0.1:11435`; set `control_listen` for remote agents and browsers ([ADR-0040](adr/0040-authentication-fails-closed-control-port-on-loopback-by-default.md)). Without `control_auth.users` the port answers 503, also on loopback; unauthenticated loopback access only with `control_auth.allow_unauthenticated_loopback: true` for development ([ADR-0053](adr/0053-control-port-requires-users-even-on-loopback.md)). TLS with `control_tls`. | Browser, scripts, Prometheus |
-| **11435 `/v1/tunnel`** | WebSocket from the agent: login with an Ed25519 signature over a challenge, heartbeat, configuration package, all Ollama calls as multiplexed streams (REQ/RESP/DATA/END/ERR/CANCEL). | Agent → router |
+| **11435** | Web UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/problems` (active problems as records, [operations.md](operations.md#problems)), `/admin/nodes` (`POST`/`DELETE /admin/nodes/{fp}/quiet`: quiet one node for a measurement, no unloading or prewarming until a given time, [ADR-0061](adr/0061-quiet-a-single-node-for-a-measurement.md)), `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2 hashes in the configuration, a verified pair is cached for 10 min). Every non-GET request to `/admin/*` also needs the header `X-Skirnir-UI: 1` (CSRF protection, [ADR-0042](adr/0042-admin-writes-require-a-custom-header.md); the web UI sends it). Default listener `127.0.0.1:11435`; set `control_listen` for remote agents and browsers ([ADR-0040](adr/0040-authentication-fails-closed-control-port-on-loopback-by-default.md)). Without `control_auth.users` the port answers 503, also on loopback; unauthenticated loopback access only with `control_auth.allow_unauthenticated_loopback: true` for development ([ADR-0053](adr/0053-control-port-requires-users-even-on-loopback.md)). TLS with `control_tls`. | Browser, scripts, Prometheus |
+| **11435 `/v1/tunnel`** | WebSocket from the agent: login with an Ed25519 signature over a challenge, heartbeat, configuration package, all Ollama calls as multiplexed streams (REQ/RESP/DATA/END/ERR/CANCEL). Specified in [protocol.md](protocol.md) with JSON Schemas in `docs/protocol/`. | Agent → router |
 | MQTT 8883 | Discovery and states for Home Assistant (TLS, password from `secrets.env`). | Router → broker |
 
 Requests may take up to 600 s (`request_timeout_s`). If the client disconnects, the router closes the upstream response, the tunnel
@@ -20,12 +20,27 @@ sends CANCEL and the agent terminates the Ollama request. The inference port use
 silence, then every 15 s, dead after 4): a non-streaming request can run for minutes without a single byte, and connection state
 somewhere on the way to the client may expire silently; the probes keep it fresh and make a dead connection show up as an error.
 
+**Cost fields** (router 0.37.0, [ADR-0105](adr/0105-currency-neutral-cost-keys.md)): amounts are in the currency of the
+catalogue prices, named by `router.cloud.currency`; the router never converts. The field and metric names keep their
+historical `_chf` suffix: `spend_month_chf`, `budget_month_chf` and `currency` per provider in `/admin/state` (`cloud`),
+`cost_chf` in `/admin/usage`, `skirnir_cloud_spend_month_chf`, `skirnir_cloud_budget_month_chf` and
+`skirnir_cloud_cost_chf_total` in `/metrics`, plus `skirnir_cloud_currency_info{currency="CHF"} 1`. Catalogue entries in
+`GET /admin/config` (`models`) and `/admin/state` (`catalog_effective`) carry the price as `price_per_m` and, with the same
+value, `price_chf_per_m`. `PUT /admin/config` accepts both price names and both budget setting paths.
+
+**Benchmark** (`POST /admin/bench`, [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)): one
+warm-up and two measured runs with `router.benchmark.prompt`, 200 tokens, temperature 0. Each result in `/admin/state`
+(`perf.<model>@<node>.bench`) records `prompt_id`, the first 12 hex digits of the prompt's SHA-256; a result without it used
+the default prompt. Tokens per second depend on the language of prompt and answer, so compare only results with the same
+`prompt_id`.
+
 ## GPU guard
 
 Agent 0.7.0, [design/gpu-guard.md](../design/gpu-guard.md) (German). The agent sets a power limit of 80 % of the card's default
 (460 W for a 575 W card), drops to 70 % for 5 minutes after 10 minutes of sustained full load, re-applies after driver resets,
 never raises above the default, and warns on 16-pin voltage sag, memory temperature and hardware throttling. On by default;
-opting out (`gpu_guard.enabled: false`) is deliberate and therefore reported as a problem. Setting the limit needs the
+opting out (`gpu_guard.enabled: false`) is deliberate and therefore reported as a problem. On a node without a GPU
+(agent 0.36.0, `gpu.probe`, ADR-0102) the guard reports `not_applicable`, which is no problem and does not cap the node. Setting the limit needs the
 LocalSystem account on Windows. The router caps a throttled node to one request, penalises it in the score and forwards
 problems to Home Assistant (`modes.gpu_guard`, per-node policy in the agent registry).
 
@@ -241,7 +256,7 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 | `rerank-server/` | Optional cross-encoder reranker with the TEI `/rerank` protocol on OpenVINO (Intel iGPU, CPU, NPU), run as an agent child for a memory service such as Hindsight; own README |
 | `deploy/` | `agent_keys.py` (signing keys and signed agent releases, standalone), `deploy.py` and `ops_env.py` (the maintainer's LXC deploy) |
 | `design/` | Design notes: `routing-algorithm.md`, `roadmap.md` (stages and decisions), `decision-engine.md`, `gpu-guard.md`, memory and session designs; logos (generated with an image model, metadata removed) |
-| `docs/` | User documentation (this folder, English and German), `docs/adr/` (Architecture Decision Records, MADR 4.0, index in `docs/adr/README.md`), `docs/security/` (threat model, risk register, reviews) |
+| `docs/` | User documentation (this folder, English and German), `docs/adr/` (Architecture Decision Records, MADR 4.0, index in `docs/adr/README.md`), `docs/protocol/` (router–agent protocol schemas), `docs/security/` (threat model, risk register, reviews) |
 | `test/` | Test suite, fakes, dev environment, test bench |
 | `tools/` | measurement scripts for the GPU guard (load test, stage-2 night run) |
 | `monitoring/` | Prometheus + Grafana next to the router (compose, scrape config, provisioned dashboard, secret renderer, `deploy_ct.py`), own README |

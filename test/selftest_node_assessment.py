@@ -6,9 +6,10 @@ Until router 0.37.1 the scheduler judged a node twice: candidates_for decided wh
 (the held server's model loaded while the standby serves: the selection refused under memory pressure, the explanation
 said the node could serve). Both now ask scheduler.assess. This test walks a matrix of node states (offline, free, busy
 with a game or GPU load, draining, breaker closed, open, due, half-open, VRAM fit and no fit, foreign VRAM, model too large,
-warm, standby switch, release of the held server with and without the agent's RAM block, memory pressure) and asserts that
-the selection, the explanation and the blockers agree, that the selection changes no node, and that probe_breakers moves
-exactly the breakers the selection reaches. Runs without router process, network or agent."""
+warm, standby switch, release of the held server with and without the agent's RAM block, memory pressure), each on a node
+with a GPU and on one without (ADR-0102: sized by main memory, no foreign VRAM), and asserts that the selection, the
+explanation and the blockers agree, that the selection changes no node, and that probe_breakers moves exactly the
+breakers the selection reaches. Runs without router process, network or agent."""
 import itertools
 import os
 import sys
@@ -37,15 +38,19 @@ state.CFG.need_gib = lambda model, ctx, node=None: NEED[model]
 JOURNAL = []
 state.remember = JOURNAL.append
 CARD = 31.8
+RAM_TOTAL = 48.0   # main memory of the node without a GPU: giant:1t (60 GiB) is too large there as well
 CTX = 32768
+CPU_RESERVE = max(state.CFG.reserve["free"], state.CFG.memory_pressure["min_free_gib"])
 
 
 class FakeTunnel:
     pass
 
 
-def node(way, st, busy_reason, draining, breaker, mem_pressure, now):
-    """A synthetic node reaching the tier's model in the given way. Baseline 1 GiB unless stated."""
+def node(way, st, busy_reason, draining, breaker, mem_pressure, now, gpu=True):
+    """A synthetic node reaching the tier's model in the given way. Baseline 1 GiB unless stated. gpu=False: the same node
+    without a GPU (agent fact gpu_present false): no VRAM figures, main memory as the agent reports it, with the head room
+    the card would have had as available RAM."""
     openai = way.startswith(("standby", "release"))
     spec = {"vram_total_gib": CARD}
     if openai:
@@ -106,6 +111,11 @@ def node(way, st, busy_reason, draining, breaker, mem_pressure, now):
     n.breaker_until = now + 100 if kind == "open" else (now - 1 if kind == "open_due" else 0.0)
     n.mem_pressure = mem_pressure
     n.memory = {"ram_available_gib": 2.5, "commit_free_gib": 1.8, "ram_total_gib": 64.0} if mem_pressure else None
+    if not gpu:
+        n.gpu_present, n.vram_total_gib = False, 0.0
+        n.memory = {"ram_available_gib": 2.5 if mem_pressure else n.vram_free_gib, "commit_free_gib": 1.8 if mem_pressure else 20.0,
+                    "ram_total_gib": RAM_TOTAL}
+        n.vram_used_gib = n.vram_free_gib = None
     return n
 
 
@@ -164,16 +174,28 @@ for way, want in (("cold_fit", scheduler.MEMORY_PRESSURE), ("warm", None), ("sta
                                {"model": TIER_MODEL[way], "num_ctx": CTX, "busy_ok": False}, CTX, now)
     check(f"memory pressure, {way}: code {want}", code == want, str(code))
 
+# --- Without a GPU (ADR-0102): sized by main memory, foreign memory never makes it gpu_busy ---
+CPU_EXPECT = {"cold_fit": None, "cold_full": scheduler.VRAM_FULL, "cold_foreign": scheduler.VRAM_FULL,
+              "too_large": scheduler.MODEL_TOO_LARGE, "warm": None}
+for way, want in CPU_EXPECT.items():
+    n = node(way, "free", "", False, ("closed", 0), False, now, gpu=False)
+    code, info = scheduler.assess(n, {"model": TIER_MODEL[way], "num_ctx": CTX, "busy_ok": False}, CTX, now)
+    check(f"no GPU, {way}: code {want}", code == want, f"{code} {info}")
+n = node("cold_full", "free", "", False, ("closed", 0), False, now, gpu=False)
+code, info = scheduler.assess(n, {"model": "big:35b", "num_ctx": CTX, "busy_ok": False}, CTX, now)
+check("no GPU: the budget is available RAM minus the larger reserve", info.get("budget_gib") == round(n.memory["ram_available_gib"] - CPU_RESERVE, 2)
+      and info.get("foreign_vram_gib") == 0.0, f"{info} reserve {CPU_RESERVE}")
+
 # --- The matrix: selection, explanation and blockers agree; the selection is pure; the probe moves what it reaches ---
 combos = 0
-for way, (st, reason), busy_ok, draining, breaker, mem_pressure in itertools.product(
-        TIER_MODEL, STATES, (False, True), (False, True), BREAKERS, (False, True)):
+for gpu, way, (st, reason), busy_ok, draining, breaker, mem_pressure in itertools.product(
+        (True, False), TIER_MODEL, STATES, (False, True), (False, True), BREAKERS, (False, True)):
     combos += 1
     now = time.time()
-    n = node(way, st, reason, draining, breaker, mem_pressure, now)
+    n = node(way, st, reason, draining, breaker, mem_pressure, now, gpu)
     state.NODES = {n.name: n}
     t = {"model": TIER_MODEL[way], "num_ctx": CTX, "busy_ok": busy_ok}
-    label = f"{way}/{st}:{reason}/busy_ok={busy_ok}/draining={draining}/breaker={breaker}/mem={mem_pressure}"
+    label = f"{'gpu' if gpu else 'cpu'}/{way}/{st}:{reason}/busy_ok={busy_ok}/draining={draining}/breaker={breaker}/mem={mem_pressure}"
     before, JOURNAL[:] = breaker_view(n), []
     code, info = scheduler.assess(n, t, CTX, now)
     _ctx, cands = scheduler.candidates_for(t, None, now)
@@ -233,14 +255,22 @@ check("cloud: otherwise the due provider moves to half_open", target.breaker == 
 # --- Budgets: one formula for prewarm and standby, the empty card for residency and the too-large test ---
 now = time.time()
 n = node("cold_foreign", "free", "", False, ("closed", 0), False, now)
-check("card_gib: card minus the reserve of the given state", nodes.card_gib(n, "free") == CARD - state.CFG.reserve["free"]
-      and nodes.card_gib(n, "busy") == CARD - state.CFG.reserve["busy"])
+check("empty_room_gib: card minus the reserve of the given state", nodes.empty_room_gib(n, "free") == CARD - state.CFG.reserve["free"]
+      and nodes.empty_room_gib(n, "busy") == CARD - state.CFG.reserve["busy"])
+check("prewarm_budget_gib with a GPU: card_budget_gib with the free reserve", n.prewarm_budget_gib(now) == n.card_budget_gib("free"))
 check("card_budget_gib: card minus reserve, baseline and foreign VRAM",
       abs(n.card_budget_gib("free") - (CARD - state.CFG.reserve["free"] - 1.0 - 6.0)) < 1e-9, str(n.card_budget_gib("free")))
 check("standby_budget_gib is card_budget_gib with the node's own reserve",
       n.standby_budget_gib() == n.card_budget_gib("free") and (setattr(n, "state", "busy") or n.standby_budget_gib() == n.card_budget_gib("busy")))
 n = node("warm", "free", "", False, ("closed", 0), False, now)
 n.inflight_models["mid:27b"] = 1
+c = node("cold_fit", "free", "", False, ("closed", 0), False, now, gpu=False)
+check("empty_room_gib without a GPU: main memory minus the larger reserve", nodes.empty_room_gib(c, "free") == RAM_TOTAL - CPU_RESERVE,
+      str(nodes.empty_room_gib(c, "free")))
+check("prewarm_budget_gib without a GPU: the request budget from available RAM", c.prewarm_budget_gib(now) == c.budget_gib(now, None)
+      == c.memory["ram_available_gib"] - CPU_RESERVE, str(c.prewarm_budget_gib(now)))
+c.hb_ts = 0.0
+check("without a fresh report: the empty node's room", c.budget_gib(now, None) == RAM_TOTAL - CPU_RESERVE, str(c.budget_gib(now, None)))
 check("answering_vram_gib and ollama_vram_gib share the measured-occupancy sum", n.answering_vram_gib() == n.ollama_vram_gib() == 20.0,
       f"{n.answering_vram_gib()} {n.ollama_vram_gib()}")
 n.inflight_models["mid:27b"] = 0

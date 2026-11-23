@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -27,11 +28,14 @@ type GPUSample struct {
 }
 
 type GPU struct {
-	smi    string      // Path to nvidia-smi.exe (fallback) or "nvml"
-	nvml   *nvmlDev    // NVML direkt (Windows), nil = nvidia-smi
-	source string      // "nvml" | "nvidia-smi"
-	gpuz   *gpuzReader // GPU-Z shared memory (Windows, optional), nil = off
-	gpuzOn bool        // Config gpuz.enabled (default on); also applies to the relay
+	// present: an NVIDIA GPU was found at start (gpu.probe, ADR-0102). Fixed after newGPU; false = the agent runs without
+	// a GPU, reports gpu_present: false and skips everything that measures or controls one.
+	present bool
+	smi     string      // Path to nvidia-smi.exe (fallback) or "nvml"
+	nvml    *nvmlDev    // NVML direkt (Windows), nil = nvidia-smi
+	source  string      // "nvml" | "nvidia-smi" | "none"
+	gpuz    *gpuzReader // GPU-Z shared memory (Windows, optional), nil = off
+	gpuzOn  bool        // Config gpuz.enabled (default on); also applies to the relay
 	// Relay: GPU-Z values sent by `gpuz-relay` from the login session via POST /gpuz when the service cannot open the object
 	// itself (virtual service account). Valid for 15 s.
 	relayMu    sync.Mutex
@@ -43,23 +47,41 @@ type GPU struct {
 	failStreak int // NVML error counter -> after 3 consecutive, permanently fall back to nvidia-smi
 }
 
-// newGPU: NVML first (microseconds per measurement, no process start), otherwise nvidia-smi.exe as before.
-func newGPU() (*GPU, error) {
-	g := &GPU{}
+// gpuSourceNone: measurement source of an agent without a GPU (log, /health).
+const gpuSourceNone = "none"
+
+// errNoGPU: what Sample and the power-limit calls return on an agent without a GPU. Callers check Present() first; this
+// only keeps a mistaken call from measuring nothing silently.
+var errNoGPU = errors.New("no GPU (gpu.probe)")
+
+// newGPU probes per gpu.probe (ADR-0102): NVML first (microseconds per measurement, no process start), otherwise
+// nvidia-smi as before. Without either, "nvidia" refuses to start (the behaviour before agent 0.36.0) and "auto" runs
+// without a GPU; "none" does not look.
+func newGPU(probe string) (*GPU, error) {
+	if probe == gpuProbeNone {
+		return &GPU{source: gpuSourceNone}, nil
+	}
+	g := &GPU{present: true}
+	smi, smiFound := findNvidiaSmi()
 	if d, err := openNVML(); err == nil {
 		g.nvml, g.source, g.smi = d, "nvml", "nvml"
-		if p, err := findNvidiaSmi(); err == nil {
-			g.smi = p // Rueckfallweg merken
+		if smiFound {
+			g.smi = smi // Rueckfallweg merken
 		}
 		return g, nil
 	}
-	p, err := findNvidiaSmi()
-	if err != nil {
-		return nil, err
+	if !smiFound {
+		if probe == gpuProbeAuto {
+			return &GPU{source: gpuSourceNone}, nil
+		}
+		return nil, fmt.Errorf("gpu.probe nvidia: no NVIDIA GPU found (neither NVML nor nvidia-smi); gpu.probe auto or none runs without one")
 	}
-	g.smi, g.source = p, "nvidia-smi"
+	g.smi, g.source = smi, "nvidia-smi"
 	return g, nil
 }
+
+// Present: an NVIDIA GPU was found at start. Fixed after newGPU, so no lock.
+func (g *GPU) Present() bool { return g.present }
 
 // enableGPUZ toggles the GPU-Z reader (config gpuz.enabled, default on). Remains silent if GPU-Z is not running.
 func (g *GPU) enableGPUZ(log *Logger) { g.gpuz, g.gpuzOn = newGPUZReader(log), true }
@@ -99,22 +121,23 @@ func (g *GPU) GPUZActive() bool {
 	return g.last != nil && g.last.Sensors.hasGPUZ()
 }
 
-func findNvidiaSmi() (string, error) {
+// findNvidiaSmi: path of nvidia-smi and whether it was found (PATH, then the driver's usual places).
+func findNvidiaSmi() (string, bool) {
 	if p, err := exec.LookPath("nvidia-smi.exe"); err == nil {
-		return p, nil
+		return p, true
 	}
 	if p, err := exec.LookPath("nvidia-smi"); err == nil {
-		return p, nil
+		return p, true
 	}
 	for _, c := range []string{
 		filepath.Join(os.Getenv("SystemRoot"), "System32", "nvidia-smi.exe"),
 		`C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe`,
 	} {
 		if _, err := os.Stat(c); err == nil {
-			return c, nil
+			return c, true
 		}
 	}
-	return "", fmt.Errorf("nvidia-smi.exe not found")
+	return "", false
 }
 
 // smiFields: what we query from nvidia-smi (order = response columns). The first five are required,
@@ -127,6 +150,9 @@ var smiFields = []string{
 
 // Sample measures via NVML, otherwise via nvidia-smi (no console window), and stores the last value.
 func (g *GPU) Sample(ctx context.Context) (*GPUSample, error) {
+	if !g.present {
+		return nil, errNoGPU
+	}
 	if nv := g.dev(); nv != nil {
 		util, memUtil, total, used, free, err := nv.sample()
 		if err == nil {
@@ -250,6 +276,9 @@ func (g *GPU) addGPUZ(s *GPUSensors) {
 
 // PowerLimits reads current, default, min, and max limits (Watt): via NVML, otherwise via nvidia-smi.
 func (g *GPU) PowerLimits() guardLimits {
+	if !g.present {
+		return guardLimits{Err: errNoGPU.Error()}
+	}
 	if nv := g.dev(); nv != nil {
 		return nv.limits()
 	}
@@ -282,6 +311,9 @@ func (g *GPU) PowerLimits() guardLimits {
 // SetPowerLimit sets the power limit (Watt): NVML (Admin) or `nvidia-smi -pl` (root). The Guard clamps the value
 // to [Min, Default] beforehand; no further checks here.
 func (g *GPU) SetPowerLimit(w float64) error {
+	if !g.present {
+		return errNoGPU
+	}
 	if nv := g.dev(); nv != nil {
 		return nv.setLimit(w)
 	}

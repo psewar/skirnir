@@ -24,7 +24,7 @@ import time
 import aiohttp
 from aiohttp import web
 
-from . import state
+from . import problems as problems_mod, state
 from .common import VERSION, load_json_file, log, save_json_file, state_dir
 from .outcome import bad_gateway, failed, invalid
 
@@ -170,7 +170,7 @@ async def release_swap(node, version):
             return   # Task is ongoing, aborted, or replaced
         if node.inflight > 0:
             now = time.time()
-            u.update(state="failed", message=f"Knoten wurde in {SWAP_WAIT_S // 60} min nicht leer ({node.inflight} Anfragen) - nicht getauscht",
+            u.update(state="failed", message=f"node did not become idle within {SWAP_WAIT_S // 60} min ({node.inflight} requests) - not swapped",
                      t=now, ts=_ts(now))
             e["ollama_update"] = u
             state.REG.save()
@@ -239,7 +239,7 @@ def note_version(node, version, now=None, source="poll"):
         state.MQTT_DIRTY.append(True)
     u = e.get("ollama_update") or {}
     if u.get("version") and u.get("state") not in ("done", "failed") and u["version"] == version:
-        u.update(state="done", message=f"laeuft mit {version}", t=now, ts=_ts(now))
+        u.update(state="done", message=f"running {version}", t=now, ts=_ts(now))
         e["ollama_update"] = u
         state.REG.save()
         state.remember({"event": "ollama_update", "node": e["name"], "state": "done", "version": version})
@@ -294,7 +294,8 @@ def note_report(node, report, now=None):
 
 
 def problems(now=None):
-    """HA Problems: failed or stalled Ollama updates, failed version check only after three days of silence."""
+    """Problem records (problems.py, ADR-0101): failed or stalled Ollama updates, failed version check only after three
+    days of silence."""
     now = now or time.time()
     out = []
     if state.REG is None:
@@ -302,11 +303,11 @@ def problems(now=None):
     for e in state.REG.nodes.values():
         u = update_view(e, now)
         if u.get("state") == "failed":
-            out.append(f"Ollama-Update auf {e['name']} fehlgeschlagen: {u.get('message') or '?'}")
+            out.append(problems_mod.make("ollama_update_failed", node=e["name"], message=u.get("message") or "?"))
         elif u.get("state") == "stalled":
-            out.append(f"Ollama-Update auf {e['name']} haengt ({u.get('message')})")
+            out.append(problems_mod.make("ollama_update_stalled", node=e["name"], message=u.get("message")))
     if LATEST.get("error") and _cfg().get("enabled") and (not LATEST.get("version") or now - _last_ok() > 3 * 86400):
-        out.append(f"Ollama-Versionspruefung scheitert: {LATEST['error']}")
+        out.append(problems_mod.make("ollama_version_check_failing", error=LATEST["error"]))
     return out
 
 

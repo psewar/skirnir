@@ -9,7 +9,7 @@ import time
 from . import admission, cloud, perf
 from . import request as request_mod
 from . import state
-from .nodes import card_gib
+from .nodes import empty_room_gib
 
 
 def known_concrete(name):
@@ -261,7 +261,7 @@ def role_possible_when_free(role):
         for n in state.NODES.values():
             if n.state == "offline" or not n.offers(t["model"]):
                 continue
-            if not n.vram_total_gib or not _too_large(n, state.CFG.need_gib(t["model"], t["num_ctx"], n)):
+            if not n.capacity_gib() or not _too_large(n, state.CFG.need_gib(t["model"], t["num_ctx"], n)):
                 return True
     return False
 
@@ -353,13 +353,17 @@ def _state_gate(n, t, now):
     return None, {}
 
 
+_node_block = assess   # the explanation's name before router 0.37.1; tests written against it keep working (ADR-0108)
+
+
 def _memory_facts(n):
     return {k: v for k, v in (n.memory or {}).items() if k in ("ram_available_gib", "commit_free_gib")}
 
 
 def _too_large(n, need):
-    """`need` does not fit even on the empty card (minus the free reserve): a configuration error, waiting does not help."""
-    return bool(n.vram_total_gib) and need > card_gib(n, "free")
+    """`need` does not fit even on the empty node (card, or main memory without a GPU, minus the free reserve): a
+    configuration error, waiting does not help. Unknown capacity (0) is never too large."""
+    return bool(n.capacity_gib()) and need > empty_room_gib(n, "free")
 
 
 def _fit(n, model, ctx, budget):

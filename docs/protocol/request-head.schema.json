@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Request head (router to agent, binary frame REQ)",
+  "description": "Payload of a REQ frame is this JSON object, a newline (0x0A), then the request body (may be empty). The whole request travels in one frame. The agent forwards it to a configured route (tunnel.routes, exact path match without query, listed methods only, else 405) or to its upstream when method and path are on the passthrough allowlist (index.json, exact match without query, else 403). An unreadable head is answered with ERR.",
+  "type": "object",
+  "properties": {
+    "method": {"type": "string", "description": "HTTP method, upper case.", "x-since-agent": "baseline"},
+    "path": {"type": "string", "description": "Request path including an optional query, starting with /.", "x-since-agent": "baseline"},
+    "headers": {
+      "type": "object",
+      "description": "Request headers to set on the forwarded request, one value each. The router sends Content-Type: application/json when there is a body, else none.",
+      "additionalProperties": {"type": "string"},
+      "x-since-agent": "baseline"
+    }
+  },
+  "required": ["method", "path"],
+  "additionalProperties": true,
+  "examples": [
+    {"method": "POST", "path": "/api/chat", "headers": {"Content-Type": "application/json"}},
+    {"method": "GET", "path": "/api/tags", "headers": {}}
+  ]
+}

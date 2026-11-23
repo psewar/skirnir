@@ -2,77 +2,96 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "fb19cb6e10c3a581eb7ddbc5362fc56ce26d9100",
- "change_digest": "f20f0857e28835ad0e58d3265b7d47bb114fc779ffbe3dfd61bc7692310ebe3a",
+ "base_sha": "5935bea72e2ac4999404c2aa162370962131c787",
+ "change_digest": "28493688e4257d3b07262a9cbe336a493c4fbe9a31480a1ce19292879f0ce85c",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
+  "AGENTS.md",
   "CHANGELOG.md",
-  "design/routing-algorithm.md",
-  "docs/adr/0108-one-pure-node-assessment-for-selection-and-explanation.md",
+  "README.de.md",
+  "README.md",
+  "agent/README.md",
+  "agent/protocol_conformance_test.go",
+  "docs/adr/0107-versioned-router-agent-protocol-with-a-written-specification.md",
   "docs/adr/README.md",
+  "docs/protocol.de.md",
+  "docs/protocol.md",
+  "docs/protocol/challenge.schema.json",
+  "docs/protocol/config-bundle.schema.json",
+  "docs/protocol/control-ollama-swap.schema.json",
+  "docs/protocol/control-ollama-update.schema.json",
+  "docs/protocol/control-update.schema.json",
+  "docs/protocol/control-upstream.schema.json",
+  "docs/protocol/facts.schema.json",
+  "docs/protocol/heartbeat-ack.schema.json",
+  "docs/protocol/heartbeat.schema.json",
+  "docs/protocol/hello.schema.json",
+  "docs/protocol/index.json",
+  "docs/protocol/node-refusal.schema.json",
+  "docs/protocol/ollama-state.schema.json",
+  "docs/protocol/power.schema.json",
+  "docs/protocol/request-head.schema.json",
+  "docs/protocol/response-head.schema.json",
+  "docs/protocol/status.schema.json",
+  "docs/reference.de.md",
+  "docs/reference.md",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/fallback_observation.py",
-  "router/skirnir_router/ha.py",
-  "router/skirnir_router/metrics.py",
-  "router/skirnir_router/nodes.py",
-  "router/skirnir_router/ops.py",
-  "router/skirnir_router/poll.py",
-  "router/skirnir_router/proxy.py",
-  "router/skirnir_router/scheduler.py",
-  "test/selftest_availability.py",
-  "test/selftest_cloud_wait_for_load.py",
-  "test/selftest_fallback_keeps_busy_model.py",
-  "test/selftest_node_assessment.py",
-  "test/selftest_openai_node_standby.py",
-  "test/selftest_server_while_standby.py",
-  "test/selftest_standby_switch.py",
-  "test/selftest_upstream_blocked.py"
+  "test/protocol_schema.py",
+  "test/selftest_protocol.py"
  ],
  "risk_ids": [
-  "TM-05",
-  "TM-08",
-  "TM-15",
+  "TM-07",
+  "TM-13",
+  "TM-14",
   "TM-16"
  ],
  "boundaries": [
-  "B1",
   "B3",
-  "B6",
+  "B8",
   "B9"
  ],
- "summary": "Behaviour-preserving refactor of node selection (router 0.37.1, ADR-0108 proposed). scheduler.assess replaces the mirrored candidates_for/_node_block judgement; candidates_for and choose no longer change state; the expired-open -> half_open breaker transition moved to scheduler.probe_breakers, called by the two request paths (proxy._Acquire before every choose, ops.run_shadow before its candidates_for); views never mutated and still do not. Budget arithmetic shares nodes.card_gib/Node.card_budget_gib, the measured-occupancy sum shares Node._real_gib (same float summation order), loading_for/tier_loading share one loop. Traced: B6/TM-05 - the cloud data-class and provider gate (Routing.tier_blocked, cloud.provider_block_reason) is unchanged and still applied in choose before any tier is judged; probe_breakers calls the same pure tier_blocked and only moves a breaker, it selects nothing and sends nothing; a cloud tier still yields a candidate only through candidates_for with the same breaker test. TM-08 (stage 3 breaker, admission): the probe reaches exactly the targets the old mutating selection reached (tiers not blocked by the request, not excluded, nodes offering the model and passing offline/draining/busy), so a failing node is probed once and re-opens on one failure as before; admission and deadlines untouched. B3: agent-reported facts (mem_pressure, upstream_blocked, standby_models, VRAM) are read as before and remain assertions of that host; no new trust in them. B1: the availability endpoint keeps its auth check and response fields; 503 blocker fields are unchanged except one corner the agent does not report (held server's model loaded while the standby serves, under memory pressure or the agent's RAM block), which now reports memory_pressure with the same RAM fields used elsewhere instead of no reason - no new data exposed. B9/TM-15: journal entries (breaker half_open, no_node blockers) keep their shape and content; no new logging. TM-16: ci.yml only gains one self-test line; no action, permission or review-policy change. No configuration, dependency, endpoint, agent or deployment change. Added text names no organisation, host, address or person.",
+ "summary": "Documentation, schemas and tests only: docs/protocol.md (+ German twin) and docs/protocol/*.json specify the existing router-agent tunnel protocol as version 1 (ADR-0107, proposed); test/protocol_schema.py (dependency-free validator), test/selftest_protocol.py (added to ci.yml) and agent/protocol_conformance_test.go bind the specification to the router, the Go agent and test/fake_agent.py. No router or agent code, configuration, version, dependency or wire change. Traced B3: login (challenge, Ed25519 signature over nonce|node|pubkey, 32-KiB hello, enrollment limits, revocation), frame dispatch, request streams and the agent passthrough allowlist were read in registry.py, tunnel.py, poll.py, agent/tunnel.go, passthrough.go, heartbeat.go, facts.go; the documentation matches the code and the new tests now cross-check the allowlist (TM-14), the hello and its refusal cases (TM-07) and the update order fields (TM-13) in CI. B8: update and Ollama update orders are only described, their verification is unchanged. B9: one added CI step with no new action, permission or dependency; AGENTS.md gains a documentation rule and weakens no review policy. Tests bind only loopback (aiohttp TestServer, httptest) and start the fake agent as a subprocess without credentials. The published details (limits, message fields) were already public in the open code; the docs add that the configuration bundle (MQTT password) and the update token are secrets agents must not log. Examples use reserved domains/ranges only. Re-reviewed after merging main (#176, #178, #180, #181, #183) at merge-base 5935bea72e2a: the diff against main is again only this PR's documentation, schemas, tests, CI step and AGENTS.md rule; conflicts were resolved in docs/reference*.md and the ADR index. The schemas were brought up to agent 0.36.0 as the conformance tests demanded (facts and heartbeat gpu_present, GPU values and sensors absent without a GPU, game.enabled, game.via path with the legacy pfad, guard state not_applicable); the router's handling of these fields (registry.node_spec_from_entry, poll.apply_heartbeat, poll.note_game_memory) was read and is described as implemented. The end-to-end self-test now also runs the fake agent without a GPU. No router or agent code changed in this PR.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_node_assessment.py",
+   "command": "python test/selftest_protocol.py",
    "result": "passed",
-   "evidence": "2112-state matrix: candidates_for, assess, blockers and choose agree; selection changes no breaker and writes no journal; probe_breakers moves exactly the due breakers past the state gate, nodes and a cloud provider (request-blocked and excluded tiers untouched). Instrument checked: four drifted schedulers (extra filter in candidates_for, pre-0.37.1 explanation order, impure selection, probe ignoring the gate) each make it fail."
+   "evidence": "Ran 21 tests OK after the merge (Windows, Python 3.12), including both end-to-end runs (fake agent with and without a GPU) through the validating relay and the rejected cases (hello without pubkey/sig/t, 65-character node name, facts not an object -> 401; OLLAMA without up or with non-list tags dropped; POWER with unknown state dropped). Before the schema update it failed naming gpu_present and game.enabled."
   },
   {
-   "command": "differential comparison against origin/main scheduler/nodes (outside the repository, 20,000 random node states)",
+   "command": "cd agent && go test ./...",
    "result": "passed",
-   "evidence": "0 mismatches in judgement codes and facts, candidates, blockers/unavailable, loading_for/tier_loading, role_possible_when_free, choose on the request path (pick, breaker states, journal, routing record), shadow path and all budgets; the only difference is the explanation in the release-and-loaded corner (old pair disagreed there). Injected divergences were detected."
+   "evidence": "ok on Windows after the merge; TestProtocol* failed before the schema update naming Facts.gpu_present, GameFact.enabled and heartbeat gpu_present, and pass now (the heartbeat type table gained gpu_present from GPU.Present)."
   },
   {
-   "command": "all python commands of the CI python job (Windows, Python 3.12) and both pwsh self-tests",
+   "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./...",
    "result": "passed",
-   "evidence": "76 commands, 75 ok; check_adr_index.py fails only because ADR-0101..0107 of the preceding PRs are not on main yet (numbers must be consecutive)."
+   "evidence": "gofmt empty, vet clean for host, windows and linux."
   },
   {
-   "command": "CI python + sessions-postgres jobs in WSL (Python 3.11, disposable PostgreSQL 16)",
+   "command": "all python test/... and pwsh steps of the ci.yml python job (local runner script)",
    "result": "passed",
-   "evidence": "all self-tests and the four PostgreSQL integrations ok; red only: check_adr_index (as above), check_pinned_references/selftest_pydeps/selftest_sbom (git cannot read the Windows worktree from WSL, packaging missing in that venv; all pass on Windows), the two pwsh tests (no pwsh in WSL; pass on Windows)."
+   "evidence": "80 steps ok on Windows; the PR-only check_public_changes step was run separately with the merge-base."
   },
   {
-   "command": "python test/run_tests.py (end-to-end suite through the lock wrapper)",
+   "command": "ruff check .",
    "result": "passed",
-   "evidence": "332 PASS, 0 FAIL, STATE: passed; includes breaker OPEN after 3 errors, HALF_OPEN probe -> CLOSED and the journal sequence open, half_open, closed."
+   "evidence": "All checks passed."
   },
   {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "command": "python router/router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "All checks passed; configuration ok; control flow 0 findings."
+   "evidence": "configuration ok."
+  },
+  {
+   "command": "python test/check_adr_index.py",
+   "result": "passed",
+   "evidence": "ADR index ok: 107 ADRs."
+  },
+  {
+   "command": "python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "control flow ok, 0 findings."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -80,14 +99,24 @@
    "evidence": "run after staging this record."
   },
   {
-   "command": "python test/check_public_changes.py",
+   "command": "python test/check_public_changes.py --base $(git merge-base origin/main HEAD)",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s); added lines reviewed manually."
+   "evidence": "Public-change scan: 0 finding(s)."
+  },
+  {
+   "command": "go test ./... on Linux",
+   "result": "not_run",
+   "evidence": "No Go toolchain in the local WSL; GOOS=linux go vet passed, CI runs go test on Linux and Windows."
+  },
+  {
+   "command": "python test/run_tests.py (end-to-end suite)",
+   "result": "not_run",
+   "evidence": "No router Python changed in this PR; the suite is required only for router changes."
   }
  ],
  "limitations": [
-  "A future request path that selects without calling probe_breakers would let an expired breaker through with the same verdict but without marking it half_open (no probe penalty, re-open after the normal failure count instead of one failure); both existing request paths call it, the self-test guards purity, not the callers.",
-  "The differential comparison ran on random synthetic states with stub catalog figures; it does not cover concurrency across awaits (the selection has none) or the proxy's wait/retry loop beyond the end-to-end suite.",
-  "check_adr_index stays red on this branch until the PRs holding ADR-0101..0107 are merged; this is ordering, not content."
+  "PostgreSQL integrations not run: this PR touches no session, memory or storage code.",
+  "Pre-existing, not changed here: a heartbeat the router cannot apply is answered with the exception text in HBACK error to the approved agent; the router fails an open stream on an unknown frame type.",
+  "The specification describes what the code does today; it does not prove the absence of protocol flaws. Values and patterns are checked by the Python validator; the Go side checks structure, types and required fields."
  ]
 }
