@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Session API/config unit tests; no PostgreSQL/asyncpg needed.
+"""Session API/config unit tests, store URL parsing and the SQLite statement translation; no database needed.
 
 Run: python test/selftest_sessions.py
 """
@@ -12,6 +12,7 @@ import os
 import sys
 import unittest
 from unittest.mock import AsyncMock, patch
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -20,8 +21,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from skirnir_router import app, auth, config, session_api, state  # noqa: E402
 from skirnir_router.session_config import SessionConfig, parse_session_config  # noqa: E402
 from skirnir_router.outcome import failed  # noqa: E402
-from skirnir_router.session_store import SessionStore  # noqa: E402
+from skirnir_router import sqlite_store  # noqa: E402
+from skirnir_router.session_store import OutboxStore, PostgresSessionStore, SessionStore  # noqa: E402
 from skirnir_router.session_types import NOT_FOUND, UNAVAILABLE  # noqa: E402
+from skirnir_router.session_url import StoreURL, parse_store_url  # noqa: E402
+from skirnir_router.sqlite_store import SqliteSessionStore, translate  # noqa: E402
 
 BASE = os.path.join(os.path.dirname(__file__), "..", "router", "config.example.yaml")
 URL = session_api.PREFIX
@@ -81,7 +85,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.store.read.return_value = [{"seq": 1}]
         self.open_patch = patch.object(session_api.PostgresSessionStore, "open", return_value=self.store)
         self.open_mock = self.open_patch.start()
-        self.env_patch = patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "test-only"})
+        self.env_patch = patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "postgresql://test-only"})
         self.env_patch.start()
         api, _ = app.build_apps()
         self.client = TestClient(TestServer(api))
@@ -277,7 +281,7 @@ class OffTests(unittest.IsolatedAsyncioTestCase):
         previous = state.CFG
         state.CFG = configuration()
         try:
-            with patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "secret-value"}), \
+            with patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "postgresql://secret-value"}), \
                     patch.object(session_api.PostgresSessionStore, "open", return_value=UNAVAILABLE):
                 api, _ = app.build_apps()
                 client = TestClient(TestServer(api))
@@ -295,6 +299,101 @@ class OffTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status, 404)
         finally:
             state.CFG = previous
+
+    async def test_unsupported_url_scheme_refuses_startup_without_opening(self):
+        # ADR-0114: the scheme picks the engine; anything else stops the start before a driver or file is touched.
+        previous = state.CFG
+        state.CFG = configuration()
+        try:
+            url = "mysql://" + "user:secret-value" + "@192.0.2.70/sessions"
+            with patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": url}), \
+                    patch.object(session_api.PostgresSessionStore, "open") as opening:
+                api, _ = app.build_apps()
+                client = TestClient(TestServer(api))
+                try:
+                    with self.assertRaisesRegex(RuntimeError, "URL scheme not supported") as ctx:
+                        await client.start_server()
+                    self.assertNotIn("secret-value", str(ctx.exception))
+                    opening.assert_not_called()
+                finally:
+                    await client.close()
+        finally:
+            state.CFG = previous
+
+
+class StoreUrlTests(unittest.TestCase):
+    """ADR-0114: which engine a connection URL names, and where a SQLite file lies."""
+    def test_postgresql_schemes_keep_the_url_for_asyncpg(self):
+        asked = []
+        for url in ("postgresql://db.example.invalid/skirnir", "postgres://127.0.0.1/skirnir", "PostgreSQL://127.0.0.1/x"):
+            self.assertEqual(parse_store_url(url, lambda: asked.append(1)), StoreURL("postgresql"))
+        self.assertEqual(asked, [], "the state folder is only needed for a relative SQLite file")
+
+    def test_sqlite_relative_file_lies_in_the_state_folder(self):
+        folder = os.path.abspath("synthetic-state")
+        self.assertEqual(parse_store_url("sqlite:///sessions.db", folder), StoreURL("sqlite", os.path.join(folder, "sessions.db")))
+        self.assertEqual(parse_store_url("sqlite:///store/sessions.db", lambda: folder).path,
+                         os.path.join(folder, "store", "sessions.db"))
+        absolute = os.path.abspath(os.path.join("elsewhere", "sessions.db"))
+        self.assertEqual(parse_store_url("sqlite:///" + absolute, folder).path, absolute)
+
+    def test_unsupported_and_unsafe_urls_are_problems_without_the_url(self):
+        for url in ("", None, "test-only", "mysql://" + "u:secret-value" + "@192.0.2.1/x", "sqlite://sessions.db", "sqlite:///",
+                    "sqlite:///dir/", "sqlite:///../x.db", "sqlite:///a/../../x.db", "sqlite:///x.db?mode=ro", "sqlite:///x.db#f",
+                    "sqlite:///:memory:", "sqlite:///x\x01.db"):
+            result = parse_store_url(url, "synthetic-state")
+            self.assertTrue(failed(result), url)
+            self.assertEqual(result.status, 400)
+            self.assertNotIn("secret-value", result.message)
+
+
+class SqliteTranslationTests(unittest.TestCase):
+    """ADR-0122: the SQLite store runs the PostgreSQL statements through a fixed rule set."""
+    def test_rules(self):
+        cases = {
+            "SELECT * FROM skirnir_sessions.sessions WHERE owner=$1 AND id=$2 FOR UPDATE":
+                "SELECT * FROM sessions WHERE owner=?1 AND id=?2",
+            "UPDATE skirnir_sessions.turns SET lease_until=clock_timestamp()+$4*interval '1 second' WHERE lease=$3":
+                "UPDATE turns SET lease_until=clock_timestamp()+CAST(?4*1000000 AS INTEGER) WHERE lease=?3",
+            "SELECT 1 WHERE updated_at<clock_timestamp()-$1*interval '1 day' AND x<now()-interval '20 days' ORDER BY a FOR UPDATE SKIP LOCKED LIMIT 1":
+                "SELECT 1 WHERE updated_at<clock_timestamp()-CAST(?1*86400000000 AS INTEGER) AND x<now()-1728000000000 ORDER BY a LIMIT 1",
+            "SELECT 1 WHERE ('*'=ANY($2::text[]) OR project=ANY($2::text[])) AND session_id = ANY($3::uuid[])":
+                "SELECT 1 WHERE ('*' IN (SELECT value FROM json_each(?2)) OR project IN (SELECT value FROM json_each(?2))) "
+                "AND session_id IN (SELECT value FROM json_each(?3))",
+            "DELETE FROM skirnir_sessions.sessions WHERE (owner,id) IN (SELECT * FROM unnest($1::text[],$2::uuid[]))":
+                "DELETE FROM sessions WHERE (owner,id) IN (SELECT a.value,b.value FROM json_each(?1) a JOIN json_each(?2) b ON a.key=b.key)",
+            "SELECT operation_id, scope->>'__bank' AS bank, strpos(lower(payload::text),lower($4))>0":
+                "SELECT operation_id, json_extract(scope,'$.__bank') AS bank, instr(lower(payload),lower(?4))>0",
+            "UPDATE t SET scope=jsonb_build_object('__bank',scope->>'__bank'), retry_ids=retry_ids || jsonb_build_array($5::text)":
+                "UPDATE t SET scope=json_object('__bank',json_extract(scope,'$.__bank')), retry_ids=json_insert(retry_ids,'$[#]',?5)",
+            "SELECT EXTRACT(EPOCH FROM clock_timestamp()-created_at) FROM x":
+                "SELECT ((clock_timestamp()-created_at)/1000000.0) FROM x",
+            "INSERT INTO skirnir_sessions.sessions (owner,id) VALUES ($1,$2) RETURNING *":
+                "INSERT INTO sessions(created_at,updated_at,owner,id) VALUES(now(),now(),?1,?2) RETURNING *",
+            "INSERT INTO skirnir_sessions.handoff_imports(owner,event_id) VALUES($1,$2)":
+                "INSERT INTO handoff_imports(owner,event_id) VALUES(?1,?2)",
+        }
+        for postgres, expected in cases.items():
+            self.assertEqual(translate(postgres), expected, postgres)
+        for lock in ("SELECT pg_advisory_xact_lock(7365471202492)", "SELECT pg_advisory_xact_lock(hashtextextended($1,0))"):
+            self.assertIsNone(translate(lock))
+
+    def test_values_cross_like_asyncpg_hands_them_over(self):
+        sid = uuid4()
+        self.assertEqual(sqlite_store.parameter(sid), str(sid))
+        self.assertEqual(sqlite_store.parameter([sid, "x"]), f'["{sid}", "x"]')
+        self.assertEqual(sqlite_store.parameter({"text": "Grüße"}), '{"text": "Grüße"}')
+        moment = datetime(2026, 1, 2, 3, 4, 5, 6, tzinfo=timezone.utc)
+        self.assertEqual(sqlite_store.column("created_at", sqlite_store.parameter(moment)), moment)
+        self.assertEqual(sqlite_store.column("id", str(sid)), sid)
+        self.assertIs(sqlite_store.column("delete_requested", 1), True)
+        self.assertEqual(sqlite_store.column("payload", '{"a": [1]}'), {"a": [1]})
+
+    def test_both_engines_provide_the_whole_protocol(self):
+        names = [n for n, v in vars(SessionStore).items() if inspect.iscoroutinefunction(v)]
+        names += [n for n, v in vars(OutboxStore).items() if inspect.iscoroutinefunction(v)]
+        for engine in (PostgresSessionStore, SqliteSessionStore):
+            self.assertEqual([n for n in names if not inspect.iscoroutinefunction(getattr(engine, n, None))], [], engine)
 
 
 if __name__ == "__main__":

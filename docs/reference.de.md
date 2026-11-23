@@ -32,10 +32,12 @@ Probleme an Home Assistant (`modes.gpu_guard`, Policy je Knoten im Agenten-Regis
 
 ## Optionaler persistenter Session-Speicher
 
-Die API `/v1/skirnir/sessions` kann explizit übermittelte Client-Ereignisse in PostgreSQL speichern. Sie ist
-**standardmäßig deaktiviert**; bestehende Installationen benötigen weder Datenbank noch zusätzliche Abhängigkeiten. Aktivierung
-über `router.session_store`, Installation von `router/requirements-session.txt` (`install.sh` erledigt das), DSN aus der
-konfigurierten Umgebungsvariable und Freigabe von `session_projects` je authentifiziertem Client.
+Die API `/v1/skirnir/sessions` kann explizit übermittelte Client-Ereignisse speichern. Sie ist **standardmäßig
+deaktiviert**; bestehende Installationen benötigen weder Datenbank noch zusätzliche Abhängigkeiten. Aktivierung über
+`router.session_store`, die URL des Stores aus der konfigurierten Umgebungsvariable und Freigabe von `session_projects` je
+authentifiziertem Client. Die URL wählt die Engine (ADR-0114): `postgresql://...` für eine PostgreSQL-Datenbank
+(`router/requirements-session.txt` installieren; `install.sh` erledigt das) oder `sqlite:///sessions.db` für eine Datei im
+Zustandsordner auf einem einzelnen Host, ohne Datenbankserver und ohne zusätzliches Paket.
 
 Unterstützt werden Session-Metadaten/Status, unveränderliche Nachrichten, idempotente Event-IDs, paginierter Verlauf,
 versionierte Task-Checkpoints sowie explizite Session-Löschung. Die authentifizierte Client-Identität bestimmt den Owner; eine
@@ -78,7 +80,7 @@ erst nach dauerhafter Speicherung der vollständigen Antwort gemeldet.
 
 ## Optionales gemeinsames Gedächtnis und Agent-Übergaben
 
-Serverseitig freigegebene Memory Scopes, eine persistente PostgreSQL-Outbox, signierte Agent-Übergaben und Session-Suche
+Serverseitig freigegebene Memory Scopes, eine persistente Outbox im Session-Store, signierte Agent-Übergaben und Session-Suche
 erweitern das optionale Context Gateway. Neue Strategien, Tool-Reduktion, automatische Checkpoints und Aufbewahrungsregeln
 bleiben standardmäßig aus. Private Bank-IDs und bestehende Inferenz-Clients bleiben kompatibel. Siehe
 [Aktivierung, Hermes-Anbindung, API und Rollback](../design/shared-memory-interoperability.de.md).

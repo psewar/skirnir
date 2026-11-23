@@ -2,124 +2,105 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "4a614341aecd17f58aa55ca5e88476373442af61",
-  "change_digest": "481a506bac6351fe5d07039f58aebaff3a8b4d9656ff9de647002f761ef9b8aa",
+  "base_sha": "d29ece8e1281e889f75577a2480d49df3871ae63",
+  "change_digest": "1eabab9277d63a3802737379524b37c988fd74f1ce3295f93580934fda0d4713",
   "reviewed_paths": [
     ".github/workflows/ci.yml",
+    "AGENTS.md",
     "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "agent/README.md",
-    "agent/app.go",
-    "agent/config.example.yaml",
-    "agent/config.go",
-    "agent/facts.go",
-    "agent/game.go",
-    "agent/game_test.go",
-    "agent/gpu.go",
-    "agent/guard.go",
-    "agent/health.go",
-    "agent/heartbeat.go",
-    "agent/install_windows.go",
-    "agent/install_windows_test.go",
-    "agent/main.go",
-    "agent/mqtt.go",
-    "agent/nogpu_test.go",
-    "design/english-names.md",
-    "design/gpu-guard.md",
-    "design/routing-algorithm.md",
-    "docs/adr/0102-the-agent-starts-without-a-gpu.md",
-    "docs/adr/0103-game-detection-is-a-module-that-can-be-switched-off.md",
+    "design/managed-context.md",
+    "design/memory-reliability.de.md",
+    "design/memory-reliability.md",
+    "design/session-store.md",
+    "design/shared-memory-interoperability.de.md",
+    "design/shared-memory-interoperability.md",
+    "docs/adr/0122-the-sqlite-session-store-runs-the-postgresql-statements-on-one-connection.md",
     "docs/adr/README.md",
     "docs/configuration.de.md",
     "docs/configuration.md",
-    "docs/install-agent.de.md",
-    "docs/install-agent.md",
+    "docs/install-router.de.md",
+    "docs/install-router.md",
     "docs/operations.de.md",
     "docs/operations.md",
     "docs/reference.de.md",
     "docs/reference.md",
     "docs/security/reviews/current.json",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
+    "router/config.example.yaml",
     "router/skirnir_router/common.py",
-    "router/skirnir_router/nodes.py",
-    "router/skirnir_router/poll.py",
-    "router/skirnir_router/problems.py",
-    "router/skirnir_router/registry.py",
-    "router/skirnir_router/scheduler.py",
-    "test/fake_agent.py",
-    "test/run_tests.py",
-    "test/selftest_availability.py",
-    "test/selftest_cpu_node.py"
+    "router/skirnir_router/posture.py",
+    "router/skirnir_router/session_api.py",
+    "router/skirnir_router/session_store.py",
+    "router/skirnir_router/session_url.py",
+    "router/skirnir_router/sqlite_migrations.py",
+    "router/skirnir_router/sqlite_store.py",
+    "test/integration_context.py",
+    "test/integration_deletion_lifecycle.py",
+    "test/integration_interoperability.py",
+    "test/integration_sessions.py",
+    "test/selftest_context.py",
+    "test/selftest_isolation_rotation.py",
+    "test/selftest_log_hygiene_paths.py",
+    "test/selftest_posture.py",
+    "test/selftest_sessions.py",
+    "test/store_engines.py"
   ],
   "risk_ids": [
-    "TM-07",
-    "TM-14",
+    "TM-11",
+    "TM-12",
     "TM-15"
   ],
   "boundaries": [
-    "B3",
-    "B8",
+    "B4",
+    "B5",
     "B9"
   ],
-  "summary": "Agent 0.36.0 / router 0.36.0: the agent runs without an NVIDIA GPU (gpu.probe auto|nvidia|none, default auto, ADR-0102), game detection can be switched off (game.enabled, ADR-0103), the game fact's via is 'path' (router maps the old 'pfad'), Home Assistant display names can be English (mqtt.entity_language, unique_id and entity ID unchanged), and the Windows install checks the event-log source in the registry instead of matching error text. B3 (router <-> agent): new fact/heartbeat field gpu_present and the guard state not_applicable from an approved agent. The router takes gpu_present only as a real boolean (heartbeat) or literal false (facts), and memory values only as non-boolean numbers; otherwise the node stays a GPU node or nothing fits. A compromised approved agent could already misreport VRAM, utilisation and guard state (TM-07: telemetry is an assertion of that host); claiming no GPU or not_applicable gives it no capability beyond that: it can attract or repel models for its own node and avoid the require_fresh_status cap, as reporting 'normal' already did. No new route, frame, authentication path or egress. B8 (agent host): install_windows reads HKLM SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\<service> read-only in the existing admin install step; service account, ACLs, update and signing paths are unchanged. With gpu.probe auto and no NVIDIA driver at all the GPU guard does not run; without a driver no workload can use the card, so the power-limit protection loses nothing; gpu.probe nvidia keeps the refusal. POST /gpuz stays loopback-only and now answers 409 without a GPU. B9: /health (loopback) gains gpu_probe and gpu_present, MQTT discovery gains constant English names; no secret, host or user data. The fake agent and E2E use loopback and synthetic values only. Re-reviewed after merging origin/main (PR 178 structured problems / router 0.35.0 / ADR-0101, PR 176 docs) into the branch: conflicts only in CHANGELOG (both rows kept, v0.41.0 above v0.40.0), VERSION (0.36.0 kept), ADR index (regenerated, 0101-0103) and this record. Semantic overlap with router/skirnir_router/problems.py: ram_spill is already empty for a node without a GPU; the gpu_guard problem now also requires gpu_present, so a node without a GPU never raises it even if its agent claims a guard problem (an approved agent cannot plant a GPU-guard alarm for a node that has no GPU); docs/operations(.de).md say so. No other change to #178's codes, metrics or config.",
+  "summary": "Router 0.39.0: the session store is chosen by the scheme of its URL (implements ADR-0114 from #177; ADR-0122 proposed). postgresql:// and postgres:// open the unchanged PostgresSessionStore (asyncpg already accepted only these schemes, so no existing installation changes); sqlite:///<file> opens a new SqliteSessionStore in router.state_dir (absolute with sqlite:////...). Any other scheme, a SQLite URL with a query, fragment, '..', a control character or :memory: is a fixed 400 Problem before anything opens; the URL never appears in a Problem, log line or posture finding (a PostgreSQL URL may carry a password). B4 (router <-> session store): the SQLite store reuses CoreStore/ManagedStore/ReliabilityStore/ExchangeStore unchanged (create/get/update/delete/append/read moved verbatim from PostgresSessionStore into CoreStore), so every owner-scoped WHERE clause, lease check, idempotency comparison and deletion-lifecycle step is the same code on both engines; sqlite_store.translate rewrites only fixed server statements (parameters stay bound, never interpolated; the cache key is the constant SQL text). Concurrency: one connection used by one worker thread, one asyncio lock per call, BEGIN IMMEDIATE per call; cancellation/timeouts queue the rollback in the same FIFO thread before the next BEGIN, so no transaction is shared between callers (tested: timeout and cancellation while another process holds the file lock, the next call sees no leftovers). A second process on the same file serializes on the file lock (busy_timeout = timeout_s). Isolation is verified by the same two-principal contract tests on both engines, through the HTTP API too. File: created 0600 via os.open with O_NOFOLLOW where available (a symlink in place of the file is refused), an existing file and its -wal/-shm/-journal companions are chmod 0600 at every start (ADR-0056 spirit); the router unit's UMask=0077 applies too. trusted_schema=OFF so a tampered file cannot make triggers/views call application functions (our triggers use none; Unicode lower/clock functions are only used in top-level statements); STRICT tables and json_valid checks reject wrongly typed values; foreign keys on (cascade delete). Driver/file faults stay at the existing `database` boundary (fixed UNAVAILABLE); startup logs only class, errno and SQLite error name. B4/B5 deletion and restore (TM-12, ADR-0076): delete/cleanup/replay_deletions/outbox_* are the shared mixin code, the deletion journal replay runs unchanged at start before the outbox worker; tested on SQLite: session delete with/without memory, deletion requested in flight, retention, simulated restore + replay, stuck/reconcile listing, and a real file backup (sqlite3 backup API) restored over the store file then replayed (session gone, pending send marked deleted without payload). secure_delete=ON overwrites deleted rows in the database file (tested: a deleted marker is absent from the file after close); older page versions remain in the -wal file until the next checkpoint and in backups (documented, comparable to PostgreSQL dead tuples/WAL). B9: posture reports session_store_url_unsupported (medium, URL not printed), session_store_sqlite_file (info: path and mode, backup command) and session_store_file_readable (medium, POSIX mode & 077). No new route, auth path, network listener, egress or dependency (stdlib sqlite3; no lock change). Memory outbox: OutboxStore is now its own Protocol; memory.py still takes the session store as outbox, so outbox_enabled still requires session_store.enabled, now on either engine. Tests changed: the four integration files run one contract class per engine via test/store_engines.py; selftests using a patched PostgresSessionStore.open now set a postgresql:// shaped synthetic DSN (the factory refuses scheme-less values). CI: the SQLite halves are added to the python job; the sessions-postgres job keeps its name (required check) and runs both engines.",
   "findings": [],
   "tests": [
     {
-      "command": "python test/selftest_cpu_node.py",
+      "command": "python test/integration_sessions.py (SQLite; Windows Python 3.12 and WSL Python 3.11; PostgreSQL 16 with SKIRNIR_TEST_SESSION_DSN in WSL)",
       "result": "passed",
-      "evidence": "router: facts/heartbeat without GPU values, full-size holdings, no ram_spill, RAM budget and capacity, model_too_large/vram_full, guard not_applicable not capping, older agents unchanged, pfad->path, enabled false; rejected cases: non-numeric memory, non-boolean gpu_present, facts other than false; after the merge also: no gpu_guard/ram_spill problem for nodes without a GPU (including one whose agent claims a guard problem; this check fails without the problems.py change), a GPU node still raises it."
+      "evidence": "33 tests on Linux (13 PostgreSQL, 20 SQLite) incl. two-principal isolation, HTTP 404 for foreign owner, timeout/cancel while another process holds the lock, migration rollback and newer schema, 0600 file/WAL modes and re-tightening, refused symlink, unsupported URLs refused without opening, closed store 503, deleted marker absent from the file; on Windows the POSIX-only mode/symlink tests skip."
     },
     {
-      "command": "python test/selftest_problems.py",
+      "command": "python test/integration_context.py, integration_deletion_lifecycle.py, integration_interoperability.py (both engines, WSL with disposable PostgreSQL 16; SQLite also on Windows)",
       "result": "passed",
-      "evidence": "all passed (after the merge)."
+      "evidence": "24 / 13 / 51 tests OK: leases, serialized claims, expired workers, compactions, managed inference over all protocols, deletion lifecycle incl. journal replay and a real SQLite file backup restored and replayed, outbox claims/verification/retries/totals/capacity, handoff export/import, discovery cursor. PostgreSQL-only relay tests (asyncpg pool) unchanged and passing."
     },
     {
-      "command": "python test/check_adr_index.py",
+      "command": "pg-testlauf: all run steps of the CI jobs python and sessions-postgres in WSL (Python 3.11, PostgreSQL 16)",
       "result": "passed",
-      "evidence": "ADR index ok: 103 ADRs (after the merge)."
+      "evidence": "82 steps ok; red only check_adr_index (ADR-0104..0121 not yet on main, merge order), selftest_pinned_references (git cannot read the Windows worktree gitdir in WSL), the two pwsh selftests (no pwsh in WSL) and selftest_pydeps/selftest_sbom (no packaging module in that env). These five pass on Windows."
     },
     {
-      "command": "python test/run_tests.py (through a local lock wrapper that serialises the fixed loopback ports)",
+      "command": "python test/selftest_sessions.py; python test/selftest_posture.py; selftest_context, selftest_memory, selftest_interoperability, selftest_reliability, selftest_verified_delivery, selftest_deletion_lifecycle, selftest_isolation_rotation, selftest_log_hygiene_paths",
       "result": "passed",
-      "evidence": "0 failures, STATE passed; includes the new fake agent with FAKE_GPU=0 (online, gpu_present false, guard not_applicable, no HA problem)."
+      "evidence": "new: URL parsing (rejected schemes and unsafe SQLite paths without echoing the URL), unsupported scheme stops startup without opening a driver, every translation rule, value conversion, both engines provide all SessionStore/OutboxStore methods; posture codes session_store_url_unsupported, session_store_sqlite_file, session_store_file_readable and no password in output."
     },
     {
-      "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml (Windows, Python 3.12)",
+      "command": "python test/run_tests.py (end-to-end suite, run through a local lock wrapper that serializes runs)",
       "result": "passed",
-      "evidence": "74 self-tests after the merge; selftest_availability needed its fake node to gain capacity_gib/reserve_gib."
+      "evidence": "0 failures, STATE: passed."
     },
     {
-      "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./...",
+      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/selftest_control_flow.py && python test/check_control_flow.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check",
       "result": "passed",
-      "evidence": "gofmt empty, vet clean on both GOOS, go test ok on Windows (incl. install_windows_test.go)."
+      "evidence": "all clean (control flow: 0 findings; every new except/raise carries exception-ok)."
     },
     {
-      "command": "GOOS=linux go test -c, test binary run under WSL Ubuntu",
+      "command": "python test/check_public_changes.py --base <merge-base>",
       "result": "passed",
-      "evidence": "PASS (nogpu_test.go, config, mqtt and the other Linux tests)."
-    },
-    {
-      "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_control_flow.py ; python test/selftest_control_flow.py ; python test/check_pinned_references.py ; python tools/security/lock_requirements.py check",
-      "result": "passed",
-      "evidence": "all clean."
-    },
-    {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
-      "result": "passed",
-      "evidence": "run after staging this record."
-    },
-    {
-      "command": "python test/check_public_changes.py",
-      "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s)."
+      "evidence": "Public-change scan: 0 finding(s); added lines manually reviewed (reserved addresses, example.invalid, synthetic credentials assembled)."
     }
   ],
   "limitations": [
-    "The end-to-end suite uses a fake agent; the real agent without a GPU was exercised by Go unit tests (probe none), not on a physical CPU-only machine.",
-    "gpu.probe auto on a machine whose NVIDIA driver is missing entirely now starts as a CPU node instead of refusing (documented in ADR-0102).",
-    "The router's RAM budget trusts the agent's memory fact like the VRAM fact before (TM-07); on Linux MemAvailable can include page cache of a mapped model, so the budget is an estimate; Ollama's own memory check and memory pressure remain the guard.",
-    "The catalog's VRAM measurement (/admin/measure) still needs a GPU; not changed here.",
-    "PostgreSQL integrations were not run: no session, memory or storage code changed."
+    "Deleted content can remain in the -wal file until the next checkpoint (about 4 MiB of writes, or router stop) and in backups; documented in design/session-store.md, comparable to PostgreSQL dead tuples and WAL segments.",
+    "The symlink check (O_NOFOLLOW) happens when the router creates/opens the file; sqlite3.connect opens the path again afterwards, and the -wal/-shm files are opened by SQLite itself. Exploiting that gap needs write access to the router's state folder, which already means control of the router's files.",
+    "The whole SQLite store is one writer at a time; a slow call (large history read) delays others up to timeout_s, then they answer 503.",
+    "check_adr_index stays red on CI until ADR-0104..0121 from the earlier portability PRs are merged; until then the SQLite steps of the python job do not run on CI, the sessions-postgres job runs both engines.",
+    "ADR-0114's separate outbox-only store is not implemented; the outbox remains in the session store (now on either engine).",
+    "Not tested on a real router host or with a large SQLite file; CI covers Linux, Windows was used for development runs."
   ]
 }

@@ -16,7 +16,8 @@ from . import auth, deletion_journal, metrics, state
 from .outcome import Problem, failed, invalid, too_large
 from .session_config import SessionConfig
 from .context_config import ContextConfig
-from .session_store import PostgresSessionStore
+from .common import state_dir
+from .session_store import PostgresSessionStore, open_session_store  # noqa: F401  (PostgresSessionStore: tests patch its open)
 from .session_types import NOT_FOUND, UNAVAILABLE
 
 STORE_KEY = "skirnir_session_store"  # string keys support aiohttp 3.8 (router minimum)
@@ -40,9 +41,12 @@ async def lifecycle(app):
         dsn = os.environ.get(cfg.dsn_env)
         if not dsn:
             raise RuntimeError("session store requires its configured DSN environment variable")  # exception-ok: aborts startup
-        store = await PostgresSessionStore.open(dsn, cfg)
+        # ADR-0114: the URL's scheme picks the engine (postgresql://, sqlite:///<file> in the state folder)
+        store = await open_session_store(dsn, cfg, lambda: state_dir(state.CFG))
         if failed(store):
-            raise RuntimeError("session store startup failed; check driver, database and credentials")  # exception-ok: aborts startup
+            # Problem messages are fixed texts without the URL (session_url.py, the stores' startup boundary).
+            raise RuntimeError(f"session store startup failed: {store.message}; check the URL scheme, driver, database "  # exception-ok: aborts startup
+                               "and credentials")
         # ADR-0076: before anything sends restored memory, deletions recorded outside the database are applied again
         replayed = await deletion_journal.replay(store, cfg.delete_memory_with_session)
         if failed(replayed):

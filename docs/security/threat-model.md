@@ -45,7 +45,7 @@ API and Control share the router trust domain; these are not isolated processes.
 | B1 | Client → API: token/IP identity, role/model rights, routing and project aliases. |
 | B2 | Admin → Control: privileged configuration, registration and updates; browser and proxy trust. |
 | B3 | Router ↔ agent/model: key possession plus approval; telemetry and replies remain assertions of that host. |
-| B4 | Router ↔ PostgreSQL: owner-scoped state, outbox/leases; DBA/backups outside API isolation. |
+| B4 | Router ↔ session store (PostgreSQL, or a SQLite file in the state folder since ADR-0114): owner-scoped state, outbox/leases; DBA, file access and backups outside API isolation. |
 | B5 | Router ↔ Hindsight: bank/grant enforcement; direct backend access and its own model egress are separate. |
 | B6 | Router → cloud: classify the final payload; transmitted bytes cannot be recalled. |
 | B7 | Router → classifier: enforce locality; classification has false negatives and is not a hard DLP boundary. |

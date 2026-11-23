@@ -186,7 +186,7 @@ class ManagedHarness(unittest.IsolatedAsyncioTestCase):
             patch.object(ops, "maybe_shadow"), patch.object(proxy.fallback_observation, "begin", return_value=None),
             patch.object(proxy.fallback_observation, "finish"), patch.object(proxy.poll, "poll_node", AsyncMock()),
             patch.object(session_api.PostgresSessionStore, "open", return_value=self.store),
-            patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "synthetic-test-only"})]
+            patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "postgresql://synthetic-test-only"})]
         for p in self.patches:
             p.start()
         self.mode, self.seen, self.completed = "normal", [], set()

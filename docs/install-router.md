@@ -12,7 +12,7 @@ TLS certificate, the firewall, secrets, the optional decision engine and the com
 |---|---|
 | Operating system | Debian 12 or Ubuntu (or comparable; `install.sh` supports Debian and Ubuntu, elsewhere follow [Manual installation](#manual-installation)). A container is fine. On Windows the router runs with the default event loop (development). |
 | Python | 3.11 or newer |
-| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installs missing ones). What the distribution lacks or ships too old (on Debian 12: `asyncpg` for the session store) comes into the venv only from the hash-locked `router/requirements-lock.txt` (ADR-0074). |
+| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installs missing ones). What the distribution lacks or ships too old (on Debian 12: `asyncpg` for a PostgreSQL session store) comes into the venv only from the hash-locked `router/requirements-lock.txt` (ADR-0074). A SQLite session store (`sqlite:///...`, ADR-0114) uses Python's own `sqlite3` and needs SQLite 3.37 or newer (Debian 12 has 3.40). |
 | Ports | **11434** for clients (Ollama, OpenAI and Anthropic APIs), **11435** for the agents' tunnel, the web UI, `/admin/*` and `/metrics` |
 | Name and certificate | A DNS name that clients and nodes use (`<name>`, e.g. `router.example.net`) and a TLS certificate for it, see [TLS certificate](#tls-certificate) |
 

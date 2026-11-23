@@ -12,7 +12,7 @@ GPU-Knoten stehen in [install-agent.de.md](install-agent.de.md), die Konfigurati
 |---|---|
 | Betriebssystem | Debian 12 oder Ubuntu (oder vergleichbar; `install.sh` unterstützt Debian und Ubuntu, sonst [Installation von Hand](#installation-von-hand)). Ein Container genügt. Unter Windows läuft der Router mit dem Standard-Event-Loop (Entwicklung). |
 | Python | 3.11 oder neuer |
-| Pakete | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installiert fehlende). Was die Distribution nicht oder zu alt mitbringt (unter Debian 12: `asyncpg` für den Session-Store), kommt nur aus der hash-gesperrten `router/requirements-lock.txt` ins venv (ADR-0074). |
+| Pakete | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installiert fehlende). Was die Distribution nicht oder zu alt mitbringt (unter Debian 12: `asyncpg` für einen PostgreSQL-Session-Store), kommt nur aus der hash-gesperrten `router/requirements-lock.txt` ins venv (ADR-0074). Ein SQLite-Session-Store (`sqlite:///...`, ADR-0114) nutzt das `sqlite3` von Python und braucht SQLite 3.37 oder neuer (Debian 12 hat 3.40). |
 | Ports | **11434** für Clients (Ollama-, OpenAI- und Anthropic-API), **11435** für den Tunnel der Agenten, die Web-UI, `/admin/*` und `/metrics` |
 | Name und Zertifikat | Ein DNS-Name, den Clients und Knoten verwenden (`<name>`, z. B. `router.example.net`), und ein TLS-Zertifikat dafür, siehe [TLS-Zertifikat](#tls-zertifikat) |
 

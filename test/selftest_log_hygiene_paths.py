@@ -167,7 +167,7 @@ class SessionPathHygieneTests(unittest.IsolatedAsyncioTestCase, Hygiene):
         self.store.get.return_value = self.session
         self.store.append.return_value = ({"seq": 1, "event_id": "one"}, True)
         self.patches = [patch.object(session_api.PostgresSessionStore, "open", return_value=self.store),
-                        patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "test-only"})]
+                        patch.dict(os.environ, {"SKIRNIR_SESSION_DSN": "postgresql://test-only"})]
         for p in self.patches:
             p.start()
         self.start_capture()

@@ -32,11 +32,12 @@ problems to Home Assistant (`modes.gpu_guard`, per-node policy in the agent regi
 
 ## Optional persistent session API
 
-The router can persist explicit client events in PostgreSQL using an opt-in session
-API at `/v1/skirnir/sessions`. It is **disabled by default** and adds no dependency
-or service requirement to existing installations. Enable `router.session_store`,
-install `router/requirements-session.txt` (`install.sh` does), supply the DSN through the configured
-environment variable, and grant `session_projects` to individual authenticated clients.
+The router can persist explicit client events using an opt-in session API at `/v1/skirnir/sessions`. It is
+**disabled by default** and adds no dependency or service requirement to existing installations. Enable
+`router.session_store`, supply the store's URL through the configured environment variable, and grant
+`session_projects` to individual authenticated clients. The URL picks the engine (ADR-0114): `postgresql://...` for a
+PostgreSQL database (install `router/requirements-session.txt`; `install.sh` does), or `sqlite:///sessions.db` for a file
+in the state folder on a single host, without a database server or extra package.
 
 The API supports session metadata/status, append-only messages, idempotent event IDs,
 paginated history, versioned task checkpoints and explicit session deletion. Owner
@@ -84,7 +85,7 @@ limits and migration/rollback](../design/managed-context.md).
 
 ## Optional shared memory and agent interoperability
 
-Server-controlled shared scopes, a durable PostgreSQL memory outbox, signed agent
+Server-controlled shared scopes, a durable memory outbox in the session store, signed agent
 handoffs and session discovery extend the existing optional context gateway. New
 strategies, tool-result reduction, automatic checkpoints and retention remain off
 by default. Private bank IDs and existing inference clients stay compatible.

@@ -76,8 +76,10 @@ python test/check_public_changes.py                            # public-data sca
   `test/requirements-hindsight.txt` refreshes the locks in the same PR: `lock_requirements.py pin --lock
   router/requirements-lock.txt <name>==<version> ...` for what the router may install on top of the distribution, and
   `lock_requirements.py resolve` (on Linux) for `requirements-ci-lock.txt`; never edit a lock by hand.
-- PostgreSQL integrations (`test/integration_sessions.py`, `integration_context.py`, `integration_interoperability.py`)
-  run when `SKIRNIR_TEST_SESSION_DSN` points to a disposable test database.
+- Session store integrations (`test/integration_sessions.py`, `integration_context.py`,
+  `integration_deletion_lifecycle.py`, `integration_interoperability.py`) run their contract on SQLite always (no server
+  needed) and on PostgreSQL when `SKIRNIR_TEST_SESSION_DSN` points to a disposable test database (ADR-0114). A store
+  change passes both engines.
 - Agent (Go, in `agent/`): `gofmt -l .` must print nothing; `go vet ./...` also with `GOOS=windows`; `go test ./...`
   on Linux and Windows (the agent runs as a Windows service in production, file locking and `*_windows_test.go` only
   show there). Platform code lives in `*_windows.go` with a `*_other.go` counterpart.
