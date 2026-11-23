@@ -69,6 +69,11 @@ func (h *HealthServer) Run(ctx context.Context) {
 			w.Write([]byte("json: " + err.Error() + "\n"))
 			return
 		}
+		if !h.app.gpu.Present() { // ADR-0102: GPU-Z values without a GPU the agent measures have no place
+			w.WriteHeader(409)
+			w.Write([]byte("no GPU (gpu.probe)\n"))
+			return
+		}
 		if !h.app.gpu.SetRelayed(&s) {
 			w.WriteHeader(409)
 			w.Write([]byte("gpuz.enabled: false\n"))
@@ -94,6 +99,8 @@ type Snapshot struct {
 	Identity  string                 `json:"identity,omitempty"`
 	Uptime    string                 `json:"uptime"`
 	GPU       *GPUSample             `json:"gpu"`
+	GPUProbe  string                 `json:"gpu_probe"`   // 0.36.0: gpu.probe as configured (auto | nvidia | none)
+	GPUFound  bool                   `json:"gpu_present"` // 0.36.0: a GPU was found; false = runs without one (ADR-0102)
 	GPUError  string                 `json:"gpu_error,omitempty"`
 	GPUZRelay string                 `json:"gpuz_relay_age,omitempty"` // Age of the last Relay values (empty = never)
 	Guard     GuardStatus            `json:"gpu_guard"`
@@ -111,6 +118,7 @@ type Snapshot struct {
 func (a *App) snapshot() Snapshot {
 	s := Snapshot{Version: version, Node: a.cfg.Node, Uptime: time.Since(a.started).Round(time.Second).String(),
 		Heartbeat: a.hb.Status(), Children: a.sup.Status()}
+	s.GPUProbe, s.GPUFound = a.cfg.GPU.Probe, a.gpu.Present()
 	s.GPU, _ = a.gpu.Last()
 	if _, err := a.gpu.Last(); err != nil {
 		s.GPUError = err.Error()

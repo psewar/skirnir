@@ -29,15 +29,20 @@
       "description": "System model, shown in the UI and Home Assistant. Absent when unknown.",
       "x-since-agent": "baseline"
     },
+    "gpu_present": {
+      "type": "boolean",
+      "description": "Whether the agent found a GPU (agent setting gpu.probe). false: the node runs without one and the router sizes its models by main memory (ADR-0102). Absent (agents before 0.36.0) counts as true; the Go agent always sends it.",
+      "x-since-agent": "0.36.0"
+    },
     "gpu": {
       "type": "string",
-      "description": "Name of the GPU the agent measures. Absent when no GPU sample was available at login.",
+      "description": "Name of the GPU the agent measures. Absent without a GPU or when no GPU sample was available at login.",
       "x-since-agent": "baseline"
     },
     "vram_total_mib": {
       "type": "integer",
       "minimum": 0,
-      "description": "Total VRAM of that GPU in MiB; the router derives the node's VRAM capacity from it. Absent when unknown.",
+      "description": "Total VRAM of that GPU in MiB; the router derives the node's VRAM capacity from it. Absent without a GPU or when unknown.",
       "x-since-agent": "baseline"
     },
     "mac": {
@@ -115,7 +120,18 @@
       "agent_version": "0.35.2",
       "ollama_managed": true,
       "ollama_push": true,
-      "ollama_swap_gate": true
+      "ollama_swap_gate": true,
+      "gpu_present": true
+    },
+    {
+      "hostname": "cpu-node",
+      "os": "linux",
+      "arch": "arm64",
+      "ollama_version": "0.13.0",
+      "ollama_url": "http://127.0.0.1:11434",
+      "agent_version": "0.36.0",
+      "ollama_managed": false,
+      "gpu_present": false
     },
     {
       "hostname": "server-node",

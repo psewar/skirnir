@@ -45,11 +45,13 @@ type App struct {
 }
 
 func newApp(cfg *Config, log *Logger) (*App, error) {
-	gpu, err := newGPU()
+	gpu, err := newGPU(cfg.GPU.Probe)
 	if err != nil {
 		return nil, err
 	}
-	if cfg.GPUZ.on() {
+	if !gpu.Present() {
+		log.Infof("gpu: no NVIDIA GPU (gpu.probe %s) - running without one: heartbeat without GPU values and with gpu_present false, GPU guard and GPU-Z not applicable", cfg.GPU.Probe)
+	} else if cfg.GPUZ.on() {
 		gpu.enableGPUZ(log)
 	}
 	sup, err := newSupervisor(cfg.Children, cfg.Logging, log, filepath.Dir(cfg.path))
@@ -60,7 +62,7 @@ func newApp(cfg *Config, log *Logger) (*App, error) {
 	a.ctlToken = loadOrCreateControlToken(cfg.path, log)
 	a.hb = newHeartbeat(cfg.Node, gpu, log)
 	a.hb.sup = sup
-	a.game = newGameWatch(log)
+	a.game = newGameWatch(log, cfg.Game.on())
 	a.hb.game = a.game
 	a.guard = newGuard(cfg.GPUGuard, gpu, log)
 	a.hb.guard = a.guard
@@ -155,6 +157,9 @@ func (a *App) effectiveMQTT() *MQTTCfg {
 		}
 		if a.cfg.MQTT.SttFallbackPort != 0 {
 			c.SttFallbackPort = a.cfg.MQTT.SttFallbackPort
+		}
+		if a.cfg.MQTT.EntityLanguage != "" {
+			c.EntityLanguage = a.cfg.MQTT.EntityLanguage
 		}
 		mqttDefaults(&c, a.cfg.Node)
 		return &c

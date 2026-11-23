@@ -14,7 +14,7 @@ Prometheus scraping /metrics remains the right place - the router is not a time-
 import os
 import time
 
-from . import admission, perf, scheduler, state
+from . import admission, perf, problems, scheduler, state
 from . import nodes as nodes_mod
 from .common import VERSION, load_json_file, save_json_file, state_dir
 
@@ -27,7 +27,10 @@ METRICS_SAVE_S = 60
 
 
 def _labels(d):
-    return "{" + ",".join(f'{k}="{str(v).replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34))}"' for k, v in d.items()) + "}"
+    """Label set in Prometheus text format: backslash, double quote and line feed escaped (router 0.35.0 adds the line
+    feed: a model name a node reports must not start a new sample line)."""
+    return "{" + ",".join(f'{k}="{str(v).replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34)).replace(chr(10), chr(92) + "n")}"'
+                          for k, v in d.items()) + "}"
 
 
 def _dirty():
@@ -74,13 +77,14 @@ def observe_rerank(outcome, duration_s):
     _hist("skirnir_rerank_duration_seconds", {"outcome": outcome}, RERANK_BUCKETS, duration_s)
 
 
-def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion_tokens, queued_s, cost_chf=0.0):
-    """At the end of every request from proxy.dispatch."""
+def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion_tokens, queued_s, cost=0.0):
+    """At the end of every request from proxy.dispatch. cost is in the catalogue currency (router.cloud.currency); the
+    metric and usage field names keep their historical _chf suffix (ADR-0105)."""
     client = info.get("client") or "-"
     base = {"role": info["role"], "node": info["node"], "model": info["model"], "client": client, "via": info["via"], "outcome": outcome}
     _counter("skirnir_requests_total", base)
-    if cost_chf:
-        _counter("skirnir_cloud_cost_chf_total", {"node": info["node"], "model": info["model"], "client": client, "role": info["role"]}, cost_chf)
+    if cost:
+        _counter("skirnir_cloud_cost_chf_total", {"node": info["node"], "model": info["model"], "client": client, "role": info["role"]}, cost)
     _hist("skirnir_request_duration_seconds", {"role": info["role"], "outcome": outcome}, DURATION_BUCKETS, duration_s)
     if ttft_s is not None:
         _hist("skirnir_ttft_seconds", {"model": info["model"], "node": info["node"]}, TTFT_BUCKETS, max(0.0, ttft_s))
@@ -91,7 +95,7 @@ def observe_request(info, outcome, duration_s, ttft_s, prompt_tokens, completion
         _counter("skirnir_tokens_total", {**tl, "kind": "prompt"}, prompt_tokens)
     if completion_tokens:
         _counter("skirnir_tokens_total", {**tl, "kind": "completion"}, completion_tokens)
-    usage_add(client, info["role"], info["model"], outcome, prompt_tokens or 0, completion_tokens or 0, cost_chf)
+    usage_add(client, info["role"], info["model"], outcome, prompt_tokens or 0, completion_tokens or 0, cost)
 
 
 # ---------------- Usage ----------------
@@ -267,6 +271,11 @@ def render():
         pick = scheduler.choose(role, role["tiers"], None, now, mutate=False)   # View: /metrics does not toggle any breaker
         rows.append(({"role": role["name"]}, 1 if pick else 0))
     gauge("skirnir_role_ready", "1 = role could be served right now", rows)
+    # Router 0.35.0 (ADR-0101): the problems Home Assistant gets, as a gauge, so Prometheus/Alertmanager can alert without
+    # MQTT. Fixed codes; node and subject come from configuration, agent registry or the models a node reports.
+    active = problems.compute(now, lang="en")
+    gauge("skirnir_problem", "active problem (number with this label set, normally 1); codes in ADR-0101", problems.metric_rows(active))
+    gauge("skirnir_problems_active", "number of active problems", [({}, len(active))])
     gauge("skirnir_perf_gen_tps", "EWMA generation speed tok/s per model@node",
           [({"model": e["model"], "node": e["node"]}, (e.get("ewma") or {}).get("gen_tps")) for e in state.PERF.values() if isinstance(e, dict) and e.get("model")])
     gauge("skirnir_perf_error_rate", "share of non-ok outcomes in the last 20 results",
@@ -282,8 +291,12 @@ def render():
     t = usage_totals(usage_today())
     gauge("skirnir_usage_today_requests", "requests today (all clients)", [({}, t["requests"])])
     from . import cloud
-    gauge("skirnir_cloud_spend_month_chf", "cloud spend in the current month per provider", [({"provider": p}, round(cloud.spend_month(p), 4)) for p in state.CLOUD])
-    gauge("skirnir_cloud_budget_month_chf", "monthly budget per provider", [({"provider": p}, float(t_.spec.get("budget_month_chf") or 0)) for p, t_ in state.CLOUD.items()])
+    # ADR-0105: the names keep their historical _chf suffix (dashboards and alerts use them); the amounts are in the catalogue
+    # currency, which skirnir_cloud_currency_info names
+    gauge("skirnir_cloud_spend_month_chf", "cloud spend in the current month per provider (catalogue currency)", [({"provider": p}, round(cloud.spend_month(p), 4)) for p in state.CLOUD])
+    gauge("skirnir_cloud_budget_month_chf", "monthly budget per provider (catalogue currency)", [({"provider": p}, cloud.budget_month(t_.spec)) for p, t_ in state.CLOUD.items()])
+    gauge("skirnir_cloud_currency_info", "1, labelled with the currency of cloud prices, budgets and spend (router.cloud.currency)",
+          [({"currency": cloud.currency()}, 1)] if state.CLOUD else [])
     gauge("skirnir_cloud_enabled", "1 = provider enabled and has a key", [({"provider": p}, 1 if (t_.spec.get("enabled", True) and t_.api_key) else 0) for p, t_ in state.CLOUD.items()])
     gauge("skirnir_usage_today_tokens", "tokens today", [({"kind": "prompt"}, t["prompt_tokens"]), ({"kind": "completion"}, t["completion_tokens"])])
 

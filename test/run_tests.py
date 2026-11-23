@@ -733,7 +733,7 @@ def main():
               and ha_["cloud"]["testcloud"]["budget_percent"] >= 100, str(ha_["problems"]) + f" spend={ha_['cloud_spend_month_chf']}")
         txt = http(C + "/metrics")[1].decode()
         check("/metrics: Cloud outputs and budget per provider", 'skirnir_cloud_spend_month_chf{provider="testcloud"}' in txt and 'skirnir_cloud_budget_month_chf{provider="testcloud"} 1.9' in txt
-              and 'skirnir_cloud_cost_chf_total{' in txt, " | ".join(l for l in txt.splitlines() if l.startswith("skirnir_cloud_"))[:300])
+              and 'skirnir_cloud_cost_chf_total{' in txt and 'skirnir_cloud_currency_info{currency="CHF"} 1' in txt, " | ".join(l for l in txt.splitlines() if l.startswith("skirnir_cloud_"))[:300])
         st, raw = http(R + "/api/chat", {"model": "testcloud:mini", "messages": msg, "stream": False})
         check("specific Cloud model name is NOT directly callable (only via roles)", st == 404, f"{st}")
         st, raw = http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"data_class": "geheimnis"}})
@@ -742,11 +742,12 @@ def main():
         # --- Tier 7: Settings via UI (settings block in roles.yaml, allowlist settings.py), cloud models in catalog, logo ---
         cfg7 = json.loads(http(C + "/admin/config")[1])
         items7 = {i["path"]: i for i in cfg7.get("settings", {}).get("items", [])}
-        bud7 = items7.get("router.cloud.providers.testcloud.budget_month_chf") or {}
+        bud7 = items7.get("router.cloud.providers.testcloud.budget_month") or {}   # ADR-0105: neutral path; test-config.yaml keeps the old key
         check("GET /admin/config: editable settings with value/base/group (budget per provider, client data class, score); endpoints not included",
               bud7.get("value") == 1.9 and bud7.get("group") == "Cloud-Anbieter" and bud7.get("entity") == "testcloud"
               and "router.client_auth.clients.tester.data_class" in items7 and items7["modes.score.warm"]["set"] is False and items7["modes.score.warm"]["default"] == 100.0
-              and "router.cloud.providers.testcloud.base_url" not in items7 and "router.client_auth.clients.tester.token_sha256" not in items7, str(sorted(items7)[:5]))
+              and "router.cloud.providers.testcloud.base_url" not in items7 and "router.client_auth.clients.tester.token_sha256" not in items7
+              and bud7.get("base") == 1.9 and "router.cloud.providers.testcloud.budget_month_chf" not in items7, str(sorted(items7)[:5]))
         st, raw = http(C + "/admin/config", {"settings": {"router.cloud.providers.testcloud.budget_month_chf": 50, "router.cloud.providers.testcloud.warn_at_percent": 90}}, method="PUT")
         s7 = state()["cloud"]["testcloud"]
         check("PUT settings: budget changed live (1.9 -> 50), provider back under the limit", st == 200 and s7["budget_month_chf"] == 50.0 and s7["budget_percent"] < 10, f"{st} {s7}")
@@ -769,7 +770,8 @@ def main():
         ri = rinfo(raw2, st2)
         check("Reset (null): back to config.yaml, data class back to personal", st == 200 and ri.get("model") == "qwen3.6:35b-a3b" and any("personal" in s_["reason"] for s_ in ri.get("skipped", [])), str(ri.get("skipped")))
         txt7 = open(os.path.join(HERE, "roles.yaml"), encoding="utf-8").read()
-        check("roles.yaml carries the settings block (budget), the reset client entry is gone", "budget_month_chf: 50" in txt7 and "tester.data_class" not in txt7, txt7[-300:])
+        check("roles.yaml carries the settings block (budget, written under the neutral key after a PUT with the old path), the reset client entry is gone",
+              "testcloud.budget_month: 50" in txt7 and "budget_month_chf" not in txt7 and "tester.data_class" not in txt7, txt7[-300:])
         rc7 = subprocess.run([PY, os.path.join(HERE, "..", "router", "router.py"), "--check", os.path.join(HERE, "test-config.yaml")], cwd=HERE, capture_output=True, text=True)
         check("--check accepts roles.yaml with settings (Deploy check on the CT)", rc7.returncode == 0 and "with roles.yaml" in rc7.stdout, (rc7.stdout + rc7.stderr)[-200:])
         st, raw = http(C + "/admin/config", {"settings": {"modes.score.errors": 42, "modes.keep_alive.busy": "7m", "router.openai.default_think": None}}, method="PUT")
@@ -787,7 +789,9 @@ def main():
               and "\nsettings:" not in (open(os.path.join(HERE, "roles.yaml"), encoding="utf-8").read()), "")
         st, raw = http(C + "/admin/config", {"models": {"testcloud:maxi": {"cloud": "testcloud", "provider_model": "maxi-2", "price_chf_per_m": {"input": 2, "output": 8}, "context_tokens": 200000, "reasoning": True}}}, method="PUT")
         cfg7 = json.loads(http(C + "/admin/config")[1])
-        check("Cloud model via UI into the catalog: provider, prices, context; marked as UI model", st == 200 and (cfg7["models"].get("testcloud:maxi") or {}).get("price_chf_per_m", {}).get("output") == 8.0
+        check("Cloud model via UI into the catalog (old price name accepted, shown under both names): provider, prices, context; marked as UI model",
+              st == 200 and (cfg7["models"].get("testcloud:maxi") or {}).get("price_per_m", {}).get("output") == 8.0
+              and (cfg7["models"].get("testcloud:maxi") or {}).get("price_chf_per_m", {}).get("output") == 8.0
               and "testcloud:maxi" in cfg7["ui_models"] and "testcloud:mini" not in cfg7["ui_models"], raw.decode()[:120])
         st, raw = http(C + "/admin/config", {"models": {"x:y": {"cloud": "nope"}}}, method="PUT")
         check("Cloud model with unknown provider -> 400", st == 400, raw.decode()[:100])
@@ -830,7 +834,7 @@ def main():
         ri = rinfo(*http(R + "/api/chat", {"model": "wolke:latest", "messages": msg, "stream": False, "routing": {"execution": "cloud"}})[::-1])
         check("Source IP + data class via UI: request without header is pi-voice and may go to cloud", st == 200 and ri.get("client") == "pi-voice" and ri.get("node") == "cloud:testcloud",
               f"{st} {raw.decode()[:80]} client={ri.get('client')} node={ri.get('node')} {ri.get('skipped')}")
-        http(C + "/admin/config", {"settings": {"router.cloud.providers.testcloud.budget_month_chf": None}}, method="PUT")
+        http(C + "/admin/config", {"settings": {"router.cloud.providers.testcloud.budget_month": None}}, method="PUT")   # the neutral path resets the old one
         st, raw = http(C + "/admin/config", {"settings": {"router.client_auth.clients.pi-voice.ip": "nix"}}, method="PUT")
         check("invalid IP -> 400", st == 400 and "IP address" in raw.decode(), raw.decode()[:100])
         st, raw = http(C + "/admin/config", {"clients": {"pi-voice": {"token_sha256": "00"}}}, method="PUT")
@@ -1699,6 +1703,32 @@ def main():
         http(C + f"/admin/nodes/{fp_tray}/revoke", {})
         http(C + f"/admin/nodes/{fp_tray}", method="DELETE")
         tray.terminate(); tray.wait()
+        # Node without a GPU (router/agent 0.36.0, ADR-0102): the agent reports gpu_present false and no GPU values; the
+        # router takes the node online, sizes models by its main memory and reports neither a guard nor a RAM problem.
+        logs["agent-cpu"] = open(os.path.join(HERE, "fake-agent-cpu.log"), "w+")
+        cpu = subprocess.Popen([PY, os.path.join(HERE, "fake_agent.py"), "wss://127.0.0.1:21435", "cpu", "http://127.0.0.1:21002", os.path.join(HERE, "fake-agent-cpu.key")],
+                               stdout=logs["agent-cpu"], stderr=subprocess.STDOUT, cwd=HERE,
+                               env={**os.environ, "FAKE_GPU": "0", "FAKE_OLLAMA_MANAGED": "0", "FAKE_OLLAMA_PUSH": "0"})
+        procs.append(cpu)
+        reg_cpu = lambda: next((n for n in json.loads(http(C + "/admin/nodes")[1])["nodes"] if n["name"] == "cpu"), None)  # noqa: E731
+        for _ in range(40):
+            if reg_cpu(): break
+            time.sleep(0.25)
+        fp_cpu = reg_cpu()["fp"]
+        http(C + f"/admin/nodes/{fp_cpu}/approve", {"mqtt": False})
+        for _ in range(60):
+            nc = state()["nodes"].get("cpu") or {}
+            if nc.get("state") == "free" and nc.get("memory"): break
+            time.sleep(0.25)
+        check("Node without GPU: registered with gpu_present false, online, memory known, no GPU values",
+              reg_cpu()["facts"].get("gpu_present") is False and nc.get("state") == "free" and nc.get("gpu_present") is False
+              and (nc.get("memory") or {}).get("ram_total_gib") == 32.0 and nc.get("gpu_util") is None and nc.get("vram_free_gib") is None, str(nc)[:300])
+        check("Node without GPU: guard not_applicable, no ram_spill, no HA problem for the node",
+              (nc.get("gpu_guard") or {}).get("state") == "not_applicable" and not nc.get("ram_spill_gib")
+              and not any("Knoten cpu" in p for p in json.loads(http(C + "/admin/ha")[1])["problems"]), str(nc.get("gpu_guard")))
+        http(C + f"/admin/nodes/{fp_cpu}/revoke", {})
+        cpu.terminate(); cpu.wait()   # before deleting: a running agent would re-register the deleted key at once
+        http(C + f"/admin/nodes/{fp_cpu}", method="DELETE")
         st, raw = http(C + "/admin/config", {"settings": {"modes.ollama_update.window_start": "03:00", "modes.ollama_update.window_end": "03:01"}}, method="PUT")
         ou = json.loads(http(C + "/admin/ollama-update")[1])
         check("Ollama-Update: Night window visible from settings, currently outside", st == 200 and ou["window_start"] == "03:00" and ou["in_window"] is (time.localtime().tm_hour == 3 and time.localtime().tm_min == 0), str({k: ou[k] for k in ("window_start", "window_end", "in_window")}))

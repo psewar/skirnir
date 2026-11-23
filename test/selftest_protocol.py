@@ -438,15 +438,20 @@ class FakeAgentEndToEnd(unittest.IsolatedAsyncioTestCase):
         relay_app.router.add_get("/api/ps", self.relay.ollama)
         self.relay_server = TestServer(relay_app, host="127.0.0.1")
         await self.relay_server.start_server()
+        self.agent = None
+
+    def start_agent(self, gpu):
         base = f"127.0.0.1:{self.relay_server.port}"
-        env = {**os.environ, "FAKE_OLLAMA_MANAGED": "1", "FAKE_OLLAMA_PUSH": "1", "FAKE_OLLAMA_SWAP_GATE": "1"}
+        env = {**os.environ, "FAKE_OLLAMA_MANAGED": "1", "FAKE_OLLAMA_PUSH": "1", "FAKE_OLLAMA_SWAP_GATE": "1",
+               "FAKE_GPU": "1" if gpu else "0"}
         self.agent = subprocess.Popen([sys.executable, os.path.join(HERE, "fake_agent.py"), f"ws://{base}", "synthetic-node",
                                        f"http://{base}", os.path.join(self.tmp, "agent.key")],
                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
 
     async def asyncTearDown(self):
-        self.agent.kill()
-        self.agent.wait(10)
+        if self.agent is not None:
+            self.agent.kill()
+            self.agent.wait(10)
         await self.relay_server.close()
         await self.router.close()
         state.CFG, state.REG, state.NODES, state.PENDING = self.previous
@@ -454,6 +459,16 @@ class FakeAgentEndToEnd(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     async def test_fake_agent_and_router_speak_the_specified_protocol(self):
+        self.start_agent(gpu=True)
+        node = await self.conversation()
+        self.assertTrue(node.gpu_present)
+
+    async def test_a_node_without_a_gpu_speaks_the_specified_protocol(self):
+        self.start_agent(gpu=False)   # facts gpu_present false, heartbeats without GPU values (agent 0.36.0, ADR-0102)
+        node = await self.conversation()
+        self.assertFalse(node.gpu_present)
+
+    async def conversation(self):
         self.assertTrue(await until(lambda: len(state.PENDING) == 1), f"agent never registered: {self.relay.problems}")
         fp = next(iter(state.PENDING))
         key = base64.b64decode(state.REG.nodes[fp]["pubkey"])
@@ -473,6 +488,7 @@ class FakeAgentEndToEnd(unittest.IsolatedAsyncioTestCase):
                          ("router-to-agent", "REQ"), ("agent-to-router", "RESP"), ("agent-to-router", "DATA"), ("agent-to-router", "END")]:
             self.assertIn(expected, seen)
         self.assertEqual(self.relay.problems, [])
+        return node
 
 
 if __name__ == "__main__":

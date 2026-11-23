@@ -11,7 +11,7 @@
 | **11434 `/v1/messages`** | Anthropic-Messages-API: `POST /v1/messages` (streamend und nicht), `POST /v1/messages/count_tokens`; `GET /v1/models` antwortet in Anthropic-Form, wenn die Anfrage `anthropic-version` trägt. Übersetzung auf `/api/chat` wie bei `/v1`, siehe [Anthropic-Clients](clients.de.md#anthropic-clients-claude-code). | Claude Code, Anthropic-SDKs |
 | **11434 `/rerank`, `/info`** | Optionales TEI-kompatibles Reranking auf einem GPU-Knoten durch den Agent-Tunnel (standardmäßig aus, Client-Recht `rerank`), siehe [Rerank-Endpunkt](#optionaler-rerank-endpunkt). | Gedächtnisdienste |
 | **11434 `/v1/skirnir/…`** | Optionale Sitzungs- und Gedächtnis-APIs, standardmäßig aus ([unten](#optionaler-persistenter-session-speicher)). | Agenten-Frameworks |
-| **11435** | Web-UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/nodes` (`POST`/`DELETE /admin/nodes/{fp}/quiet`: Messruhe für einen Knoten, bis zu einer Zeit kein Entladen und kein Vorwärmen, [ADR-0061](adr/0061-quiet-a-single-node-for-a-measurement.md)), `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2-Hashes in der Konfiguration, geprüftes Paar 10 min gecacht). Jede Nicht-GET-Anfrage an `/admin/*` braucht zusätzlich den Header `X-Skirnir-UI: 1` (CSRF-Schutz, [ADR-0042](adr/0042-admin-writes-require-a-custom-header.md); die Web-UI sendet ihn). Standard-Listener `127.0.0.1:11435`; für entfernte Agenten und Browser `control_listen` setzen ([ADR-0040](adr/0040-authentication-fails-closed-control-port-on-loopback-by-default.md)). Ohne `control_auth.users` antwortet der Port mit 503, auch über Loopback; unangemeldeter Loopback-Zugriff nur mit `control_auth.allow_unauthenticated_loopback: true` für die Entwicklung ([ADR-0053](adr/0053-control-port-requires-users-even-on-loopback.md)). TLS mit `control_tls`. | Browser, Skripte, Prometheus |
+| **11435** | Web-UI (`/`), `GET /admin/state`, `GET/PUT /admin/config`, `POST /admin/try`, `/admin/loadtest`, `/admin/measure`, `/admin/bench`, `/admin/decide`, `GET /admin/decision`, `/admin/usage`, `/admin/ha`, `/admin/problems` (aktive Probleme als Einträge, [operations.de.md](operations.de.md#probleme)), `/admin/nodes` (`POST`/`DELETE /admin/nodes/{fp}/quiet`: Messruhe für einen Knoten, bis zu einer Zeit kein Entladen und kein Vorwärmen, [ADR-0061](adr/0061-quiet-a-single-node-for-a-measurement.md)), `/admin/clients`, `GET /metrics`. Basic Auth (PBKDF2-Hashes in der Konfiguration, geprüftes Paar 10 min gecacht). Jede Nicht-GET-Anfrage an `/admin/*` braucht zusätzlich den Header `X-Skirnir-UI: 1` (CSRF-Schutz, [ADR-0042](adr/0042-admin-writes-require-a-custom-header.md); die Web-UI sendet ihn). Standard-Listener `127.0.0.1:11435`; für entfernte Agenten und Browser `control_listen` setzen ([ADR-0040](adr/0040-authentication-fails-closed-control-port-on-loopback-by-default.md)). Ohne `control_auth.users` antwortet der Port mit 503, auch über Loopback; unangemeldeter Loopback-Zugriff nur mit `control_auth.allow_unauthenticated_loopback: true` für die Entwicklung ([ADR-0053](adr/0053-control-port-requires-users-even-on-loopback.md)). TLS mit `control_tls`. | Browser, Skripte, Prometheus |
 | **11435 `/v1/tunnel`** | WebSocket vom Agenten: Anmeldung mit Ed25519-Signatur auf eine Challenge, Heartbeat, Konfigurationspaket, alle Ollama-Aufrufe als multiplexte Streams (REQ/RESP/DATA/END/ERR/CANCEL). Spezifiziert in [protocol.de.md](protocol.de.md) mit JSON-Schemas in `docs/protocol/`. | Agent → Router |
 | MQTT 8883 | Discovery und Zustände für Home Assistant (TLS, Passwort aus `secrets.env`). | Router → Broker |
 
@@ -20,12 +20,27 @@ schickt CANCEL, der Agent beendet die Ollama-Anfrage. Der Inferenz-Port nutzt TC
 alle 15 s, nach 4 ohne Antwort tot): Eine Anfrage ohne Stream kann minutenlang ohne ein Byte laufen, und irgendwo auf dem Weg zum
 Client verfällt der Verbindungszustand sonst still. Die Proben halten ihn frisch und lassen eine tote Verbindung als Fehler auffallen.
 
+**Kostenfelder** (Router 0.37.0, [ADR-0105](adr/0105-currency-neutral-cost-keys.md)): Beträge stehen in der Währung der
+Katalogpreise, die `router.cloud.currency` nennt; der Router rechnet nie um. Feld- und Metriknamen behalten ihre historische
+Endung `_chf`: `spend_month_chf`, `budget_month_chf` und `currency` je Anbieter in `/admin/state` (`cloud`), `cost_chf` in
+`/admin/usage`, `skirnir_cloud_spend_month_chf`, `skirnir_cloud_budget_month_chf` und `skirnir_cloud_cost_chf_total` in
+`/metrics`, dazu `skirnir_cloud_currency_info{currency="CHF"} 1`. Katalogeinträge in `GET /admin/config` (`models`) und
+`/admin/state` (`catalog_effective`) tragen den Preis als `price_per_m` und mit demselben Wert als `price_chf_per_m`.
+`PUT /admin/config` nimmt beide Preisnamen und beide Pfade der Budget-Einstellung an.
+
+**Benchmark** (`POST /admin/bench`, [ADR-0106](adr/0106-language-dependent-defaults-live-in-the-configuration.md)): ein
+Aufwärmlauf und zwei Messläufe mit `router.benchmark.prompt`, 200 Tokens, Temperatur 0. Jedes Ergebnis in `/admin/state`
+(`perf.<modell>@<knoten>.bench`) nennt `prompt_id`, die ersten 12 Hex-Ziffern des SHA-256 des Prompts; ein Ergebnis ohne sie
+lief mit dem Standard-Prompt. Tokens pro Sekunde hängen von der Sprache von Prompt und Antwort ab, vergleiche also nur
+Ergebnisse mit derselben `prompt_id`.
+
 ## GPU-Schutz
 
 Agent 0.7.0, [design/gpu-guard.md](../design/gpu-guard.md). Der Agent setzt ein Power-Limit von 80 % des Standardlimits (460 W
 bei einer 575-W-Karte), geht nach 10 Minuten Dauer-Vollast für 5 Minuten auf 70 %, setzt nach Treiber-Resets nach, hebt nie über
 den Standard und warnt bei Spannungsabfall am 16-Pin-Stecker, Speichertemperatur und Hardware-Drosselung. Standard an; die
-Abwahl (`gpu_guard.enabled: false`) ist eine Entscheidung und wird deshalb als Problem gemeldet. Das Limit zu setzen braucht
+Abwahl (`gpu_guard.enabled: false`) ist eine Entscheidung und wird deshalb als Problem gemeldet. Auf einem Knoten ohne GPU
+(Agent 0.36.0, `gpu.probe`, ADR-0102) meldet der Schutz `not_applicable`; das ist kein Problem und deckelt den Knoten nicht. Das Limit zu setzen braucht
 unter Windows das Konto LocalSystem. Der Router deckelt einen gedrosselten Knoten auf eine Anfrage, zieht Score ab und reicht
 Probleme an Home Assistant (`modes.gpu_guard`, Policy je Knoten im Agenten-Register).
 

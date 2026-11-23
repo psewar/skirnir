@@ -2,6 +2,7 @@
 
 Eine .exe (Go, statisch) ersetzt auf einem GPU-Rechner die Dauerlauf-Scheduled-Tasks: Heartbeat an den Router,
 MQTT-Geraet fuer Home Assistant, Aufsicht ueber lokale KI-Dienste (z. B. einen Wyoming-STT-Server als Kindprozess).
+Seit 0.36.0 laeuft er auch auf Rechnern ohne NVIDIA-GPU (Abschnitt [Ohne GPU](#ohne-gpu-0360)).
 
 | Datei | Zweck |
 |---|---|
@@ -90,7 +91,10 @@ Der Heartbeat traegt zwei Bloecke, damit der Router nicht aus fremdem VRAM raten
   Installationsorte von Spielen bekannter Verlage aus den Deinstallationseintraegen (HKLM 64/32 Bit und jeder geladene
   Benutzer-Zweig), ohne Launcher. Ist der Pfad eines Prozesses nicht lesbar (Anti-Cheat), zaehlt sein Name, wenn eine
   .exe >= 20 MB mit diesem Namen bis Tiefe 3 in einem Spielordner liegt (ohne Allerweltsnamen wie `launcher`, `updater`,
-  `crashpad_handler`). Den Index baut der Agent alle 6 h neu. `via` ist `pfad` oder `name`. Linux: `supported: false`.
+  `crashpad_handler`). Den Index baut der Agent alle 6 h neu. `via` ist `path` oder `name` (bis 0.35 `pfad` statt
+  `path`; der Router liest beides, ADR-0103). Linux: `supported: false`. Seit 0.36.0 schaltet `game.enabled: false` die
+  Erkennung ab (Standard an unter Windows, sonst aus); dann meldet der Block `enabled: false` und der Router kennt kein
+  Spiel.
   Seit 0.19.0 misst er, solange ein Spiel laeuft, dessen GPU-Bedarf ueber alle Spielprozesse (`procs`): eigener und
   geteilter Grafikspeicher (`\GPU Process Memory(*)`) und die hoechste Auslastung einer GPU-Engine (`\GPU Engine(*)`,
   fehlt im ersten Durchlauf, weil die Rate zwei Messungen braucht). Damit unterscheidet der Router ein kleines Spiel von
@@ -165,6 +169,32 @@ Nebeneffekt: ohne STT-Kind entfaellt auch der Portversuch auf 10300 in jedem Zyk
 
 Anlass war ein zweiter Knoten: dort standen `STT-Dienst` und `Alias-Modell strukturfaehig` dauerhaft `off`,
 weil beides nur auf dem ersten Knoten existiert. Tests dazu in `mqtt_test.go` (`go test ./...`).
+
+Ohne GPU (0.36.0) gelten die Sensorgruppen `gpu` und `gpuz` sicher als "gibt es hier nicht"; uebrig gebliebene Configs
+werden geloescht.
+
+**Sprache der Anzeigenamen (0.36.0, ADR-0103).** `mqtt.entity_language: de` (Standard, die Namen von bisher) oder `en`
+(`STT service`, `GPU guard`, `Router heartbeat`, ...). Es aendert sich nur der Anzeigename; `unique_id` und Entitaets-ID
+bleiben, Verlauf und Automationen laufen weiter. Die Einstellung ist knotenlokal, der Router provisioniert sie nicht.
+`nogpu_test.go` prueft, dass jede Entitaet einen englischen Namen hat.
+
+## Ohne GPU (0.36.0)
+
+Bis 0.35 startete der Agent ohne NVIDIA-GPU nicht. Seit 0.36.0 entscheidet `gpu.probe` (ADR-0102):
+
+| Wert | Verhalten |
+|---|---|
+| `auto` (Standard) | NVIDIA wie bisher (NVML, sonst `nvidia-smi`). Nur wo der Agent frueher den Start verweigerte (beides fehlt), laeuft er ohne GPU |
+| `nvidia` | ohne NVIDIA-GPU kein Start, wie bis 0.35 (fuer Betreiber, die einen fehlenden Treiber als Fehler sehen wollen) |
+| `none` | sucht keine GPU: CPU-Rechner; AMD, Intel und Apple vorerst ebenfalls so |
+
+Ohne GPU meldet der Agent `gpu_present: false` in den Fakten und in jedem Heartbeat (mit GPU `true`); der Heartbeat traegt
+dann keine GPU-Werte, aber weiter Speicher, Spiel, GPU-Schutz-Status, Updates und den Rest. Der GPU-Schutz meldet
+`not_applicable` und laeuft nicht, GPU-Z wird nicht geoeffnet (`POST /gpuz` antwortet 409), die GPU-Sensoren in HA
+entfallen. `status` und `/health` zeigen `gpu_probe` und `gpu_present`; das Diagnoseverb `gpu` prueft immer streng
+(NVIDIA) und sagt ohne GPU klar, dass keine da ist. Der Router bemisst Modelle auf so einem Knoten nach dem gemeldeten
+Hauptspeicher (verfuegbarer RAM plus was Ollama haelt, abzueglich Reserve) und kennt dort keine GPU-busy-Erkennung.
+Tests: `nogpu_test.go`.
 
 ## Selbst-Update ueber den Router (0.8.0)
 
@@ -259,6 +289,7 @@ Dauer-Vollast begrenzen und frueh warnen. Der Agent tut genau das (`guard.go`, r
 | `recovery` | zurueck auf das Dauerlimit, 60 s lang gemeldet |
 | `unavailable` | Limit nicht lesbar oder nicht setzbar (kein NVML, keine Berechtigung, Linux ohne root) - nur Beobachtung, **Problem** |
 | `aus` | `gpu_guard.enabled: false` - kein Limit; zaehlt auf Wunsch des Betreibers als **Problem**, damit eine vergessene Abwahl auffaellt |
+| `not_applicable` | (0.36.0) der Agent laeuft ohne GPU (`gpu.probe`), Grund `no_gpu` - nichts zu schuetzen, **kein** Problem, auch nicht mit `enabled: false` |
 
 Regeln: der Guard **senkt nur** (ein Fremdtool, das tiefer stellt, bleibt), hebt nur von einem selbst gesetzten Wert
 (Stufe 2 -> Dauerlimit) und geht **nie ueber das Standardlimit**; jedes Ziel ist auf [Min-Limit, Standardlimit]

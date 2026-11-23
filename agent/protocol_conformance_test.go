@@ -403,6 +403,7 @@ func TestProtocolHeartbeatMatchesSchema(t *testing.T) {
 	sample := jsonFields(reflect.TypeOf(GPUSample{}))
 	// The Go type behind each value Heartbeat.payload sets. A new key fails below until it is added here and documented.
 	types := map[string]reflect.Type{
+		"gpu_present":       reflect.TypeOf((*GPU).Present).Out(0),
 		"gpu_util_pct":      sample["gpu_util_pct"].typ,
 		"vram_total_mib":    sample["vram_total_mib"].typ,
 		"vram_used_mib":     sample["vram_used_mib"].typ,

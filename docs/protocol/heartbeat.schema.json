@@ -1,13 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Heartbeat (agent to router, binary frame HB, stream 0)",
-  "description": "GPU and node facts, sent every heartbeat_interval_s (3 s until the configuration bundle says otherwise). The router answers every HB with HBACK. It stores the values as the node's current state, runs its busy/free state machine and learns the desktop VRAM baseline from them. No field is required: a missing block means the agent does not report it, and the router keeps its previous behaviour for that fact (for example no game detection). The current Go agent always sends the four GPU fields and ts. Receivers ignore unknown fields.",
+  "description": "GPU and node facts, sent every heartbeat_interval_s (3 s until the configuration bundle says otherwise). The router answers every HB with HBACK. It stores the values as the node's current state, runs its busy/free state machine and learns the desktop VRAM baseline from them. No field is required: a missing block means the agent does not report it, and the router keeps its previous behaviour for that fact (for example no game detection). The current Go agent always sends ts and gpu_present, and the four GPU fields and sensors when it has a GPU. Receivers ignore unknown fields.",
   "type": "object",
   "properties": {
-    "gpu_util_pct": {"type": "integer", "minimum": 0, "maximum": 100, "description": "GPU utilisation in percent.", "x-since-agent": "baseline"},
-    "vram_total_mib": {"type": "integer", "minimum": 0, "description": "Total VRAM in MiB.", "x-since-agent": "baseline"},
-    "vram_used_mib": {"type": "integer", "minimum": 0, "description": "Used VRAM in MiB, all processes (Windows reports no per-process VRAM; the router subtracts Ollama's models and the agent's children).", "x-since-agent": "baseline"},
-    "vram_free_mib": {"type": "integer", "minimum": 0, "description": "Free VRAM in MiB.", "x-since-agent": "baseline"},
+    "gpu_present": {"type": "boolean", "description": "Whether the node has a GPU (ADR-0102). false: no GPU values follow and the router sizes models by main memory (the memory block). Absent (agents before 0.36.0): the router keeps what the facts said, and a node without the fact counts as having a GPU.", "x-since-agent": "0.36.0"},
+    "gpu_util_pct": {"type": "integer", "minimum": 0, "maximum": 100, "description": "GPU utilisation in percent. Absent without a GPU.", "x-since-agent": "baseline"},
+    "vram_total_mib": {"type": "integer", "minimum": 0, "description": "Total VRAM in MiB. Absent without a GPU.", "x-since-agent": "baseline"},
+    "vram_used_mib": {"type": "integer", "minimum": 0, "description": "Used VRAM in MiB, all processes (Windows reports no per-process VRAM; the router subtracts Ollama's models and the agent's children). Absent without a GPU.", "x-since-agent": "baseline"},
+    "vram_free_mib": {"type": "integer", "minimum": 0, "description": "Free VRAM in MiB. Absent without a GPU.", "x-since-agent": "baseline"},
     "ts": {"type": "integer", "description": "Unix time in seconds when the agent built the heartbeat. Informational; the router uses its own receive time.", "x-since-agent": "baseline", "x-ignored-by-receiver": true},
     "ollama_tls_sha256": {"type": "string", "description": "SHA-256 fingerprint of the agent's local TLS proxy certificate for a directly reachable node (tls_mode auto). Absent without such a proxy.", "x-since-agent": "baseline"},
     "ollama_proc_mib": {"type": "integer", "minimum": 0, "description": "VRAM of the Ollama process in MiB. Read by the router; the current Go agent does not send it.", "x-since-agent": "baseline", "x-legacy": true},
@@ -41,7 +42,7 @@
   "$defs": {
     "sensors": {
       "type": "object",
-      "description": "Temperature, power, throttling and GPU-Z values. The router stores the block unchanged for the UI and Home Assistant. Each field is absent when the source cannot provide it.",
+      "description": "Temperature, power, throttling and GPU-Z values. The router stores the block unchanged for the UI and Home Assistant. Each field is absent when the source cannot provide it; the whole block is absent without a GPU.",
       "properties": {
         "temp_c": {"type": "integer", "description": "GPU temperature in degrees Celsius."},
         "power_w": {"type": "number", "description": "Board power draw in W."},
@@ -68,7 +69,7 @@
       "type": "object",
       "description": "State of the agent's GPU guard (power limit, high-load tier, warnings; ADR-0019). The router flags a problem next to the node state and acknowledges its policy in HBACK gpu_guard_ack.",
       "properties": {
-        "state": {"type": "string", "description": "off, unavailable, normal, high_load, throttled or recovery (agents before 0.20.0 sent German values, which the router translates)."},
+        "state": {"type": "string", "description": "off, unavailable, normal, high_load, throttled, recovery, or not_applicable on a node without a GPU (agent 0.36.0; reason no_gpu). Agents before 0.20.0 sent German values, which the router translates."},
         "source": {"type": "string", "description": "Where the readings come from."},
         "power_w": {"type": "number", "description": "Current power draw in W."},
         "pin16_w": {"type": "number", "description": "Power through the 16-pin connector in W."},
@@ -100,12 +101,13 @@
     },
     "game": {
       "type": "object",
-      "description": "A running game as a fact. With supported false (no game detection on this platform) the router ignores the block; an absent block clears the node's game state.",
+      "description": "A running game as a fact. With supported false (no game detection on this platform) the router ignores the block; an absent block or enabled false clears the node's game state.",
       "properties": {
         "supported": {"type": "boolean", "description": "false: this platform does not detect games. Absent counts as true."},
+        "enabled": {"type": "boolean", "description": "false: game detection is switched off on this node (agent setting game.enabled, ADR-0103); nothing is detected and the router clears the node's game state. Absent (agents before 0.36.0) counts as true; the Go agent always sends it.", "x-since-agent": "0.36.0"},
         "running": {"type": "boolean", "description": "A game is running."},
         "name": {"type": "string", "description": "Program name of the game."},
-        "via": {"type": "string", "description": "How it was detected: pfad (by its folder; a German value kept on the wire for now) or name."},
+        "via": {"type": "string", "description": "How it was detected: path (by its folder) or name. Agents before 0.36.0 sent the German pfad for path; the router still accepts it and stores path."},
         "since": {"type": "integer", "description": "Unix seconds since the agent first saw it."},
         "folders": {"type": "integer", "minimum": 0, "description": "Game folders in the agent's index (0: nothing installed, nothing detected)."},
         "procs": {"type": "integer", "minimum": 0, "description": "Processes that count as the game.", "x-since-agent": "0.19.0"},
@@ -139,6 +141,13 @@
   "examples": [
     {"gpu_util_pct": 0, "vram_total_mib": 32563, "vram_used_mib": 7200, "vram_free_mib": 25363, "ts": 1790000000},
     {
+      "gpu_present": false, "ts": 1790000001,
+      "gpu_guard": {"state": "not_applicable", "source": "-", "high_load_s": 0, "problem": false, "reason": "no_gpu"},
+      "game": {"supported": false, "enabled": false, "running": false, "folders": 0},
+      "memory": {"ram_available_gib": 24.0, "ram_total_gib": 32.0}
+    },
+    {
+      "gpu_present": true,
       "gpu_util_pct": 4, "vram_total_mib": 24564, "vram_used_mib": 9100, "vram_free_mib": 15464, "ts": 1790000003,
       "sensors": {"temp_c": 51, "power_w": 61.5, "mem_util_pct": 3},
       "gpu_guard": {"state": "normal", "source": "nvml", "limit_w": 450.0, "high_load_s": 0, "problem": false},
@@ -146,7 +155,8 @@
       "ollama_update": {"version": "0.13.1", "state": "ready", "message": "waiting for the router's release", "ts": "2026-11-23T02:00:00Z"},
       "ollama_version": "0.13.0",
       "children_vram_mib": {"stt": 1800},
-      "game": {"supported": true, "running": false, "folders": 3},
+      "game": {"supported": true, "enabled": true, "running": true, "name": "example-game.exe", "via": "path", "since": 1789999000,
+               "folders": 3, "procs": 1, "gpu_dedicated_mib": 3000, "gpu_shared_mib": 200, "gpu_pct": 35.0},
       "memory": {"ram_available_gib": 41.2, "ram_total_gib": 63.7, "commit_free_gib": 50.1, "commit_limit_gib": 80.0},
       "routes": {"rerank": {"up": true, "reason": ""}},
       "standby_models": ["example-model:8b"]

@@ -207,7 +207,7 @@ class Tunnel:
             resp.status, resp.headers = head
             return resp
         self.streams.pop(sid, None)
-        why = payload.decode(errors="replace") if t == TUN_ERR else "unlesbarer Antwortkopf" if t == TUN_RESP else "unerwarteter Rahmen"
+        why = payload.decode(errors="replace") if t == TUN_ERR else "unreadable response head" if t == TUN_RESP else "unexpected frame"
         # exception-ok: emulates aiohttp; the caller handles a ClientError at its network boundary
         raise ClientError(f"tunnel {self.name()}: {why}")
 

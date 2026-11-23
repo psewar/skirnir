@@ -60,6 +60,51 @@ var entityNames = map[string]string{
 	"ollama_kuerzung":        "ollama_truncation",
 }
 
+// entityNamesEN: English display names for mqtt.entity_language: en (agent 0.36.0, ADR-0103). The German names in
+// sensorDefs stay the default so existing dashboards keep their labels; only the display name changes, never unique_id or
+// entity ID. Every sensorDef has an entry here (mqtt_test.go checks it).
+var entityNamesEN = map[string]string{
+	"stt":                    "STT service",
+	"ollama":                 "Ollama",
+	"gaming_mode":            "Gaming mode",
+	"alias_model_structure":  "Alias model structured output",
+	"alias_model":            "Alias model",
+	"vram_used_mb":           "VRAM used",
+	"ollama_loaded":          "Ollama loaded models",
+	"ollama_loaded_names":    "Ollama loaded",
+	"agent_version":          "Agent version",
+	"router_heartbeat":       "Router heartbeat",
+	"ollama_kuerzungen":      "Ollama truncations",
+	"ollama_letzte_kuerzung": "Ollama last truncation",
+	"ollama_kuerzung":        "Ollama truncation",
+	"gpu_temp_c":             "GPU temperature",
+	"gpu_power_w":            "GPU power",
+	"gpu_power_limit_w":      "GPU power limit",
+	"gpu_fan_pct":            "GPU fan",
+	"gpu_throttle":           "GPU throttling",
+	"gpu_mem_temp_c":         "GPU memory temperature",
+	"gpu_hotspot_c":          "GPU hot spot",
+	"gpu_voltage_v":          "GPU voltage",
+	"gpu_pin16_power_w":      "GPU 16-pin power",
+	"gpu_pin16_voltage_v":    "GPU 16-pin voltage",
+	"gpu_perfcap":            "GPU PerfCap",
+	"cpu_temp_c":             "CPU temperature",
+	"gpu_guard_state":        "GPU guard",
+	"gpu_guard_problem":      "GPU guard problem",
+	"gpu_guard_target_w":     "GPU guard target limit",
+	"gpu_guard":              "GPU guard event",
+}
+
+// displayName: the entity's name in Home Assistant for mqtt.entity_language ("" and "de" = German, "en" = English).
+func (s sensorDef) displayName(lang string) string {
+	if lang == entityLanguageEN {
+		if n, ok := entityNamesEN[s.objID]; ok {
+			return n
+		}
+	}
+	return s.name
+}
+
 func (s sensorDef) entityName() string {
 	if n, ok := entityNames[s.objID]; ok {
 		return n
@@ -276,7 +321,7 @@ func (m *MQTTModule) device() map[string]any {
 		"identifiers":  []string{m.cfg.DeviceID},
 		"name":         m.cfg.DeviceName,
 		"manufacturer": firstNonEmpty(m.cfg.Manufacturer, "skirnir-router"),
-		"model":        firstNonEmpty(m.cfg.Model, "GPU-Knoten"),
+		"model":        firstNonEmpty(m.cfg.Model, map[bool]string{true: "GPU node", false: "GPU-Knoten"}[m.cfg.EntityLanguage == entityLanguageEN]),
 		"sw_version":   version,
 	}
 }
@@ -330,7 +375,7 @@ func (m *MQTTModule) syncDiscovery(c paho.Client) {
 
 func (m *MQTTModule) discoveryPayload(s sensorDef, dev map[string]any) []byte {
 	cfg := map[string]any{
-		"name":                  s.name,
+		"name":                  s.displayName(m.cfg.EntityLanguage),
 		"unique_id":             m.cfg.DeviceID + "_" + s.objID,
 		"default_entity_id":     s.comp + "." + m.cfg.DeviceID + "_" + s.entityName(),
 		"state_topic":           m.stateTopic(),
@@ -548,6 +593,11 @@ func (m *MQTTModule) sensorState(st map[string]any) {
 		}
 	}
 	sens.mqttState(st)
+	if m.gpu != nil && !m.gpu.Present() { // ADR-0102: no GPU, so the GPU sensor groups do not apply (removed if left over)
+		m.setApplies("gpu", false)
+		m.setApplies("gpuz", false)
+		return
+	}
 	if sens.hasNVML() {
 		m.setApplies("gpu", true)
 	}

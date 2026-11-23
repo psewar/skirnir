@@ -2,7 +2,7 @@
 
 How a node agent talks to the router: what to implement to write an agent of your own (for example for a platform the Go
 agent does not support), and what the router and the Go agent promise each other. This is protocol **version 1**: the
-protocol as router 0.34 and agent 0.35 speak it. Why it is specified this way: [ADR-0107](adr/0107-versioned-router-agent-protocol-with-a-written-specification.md).
+protocol as router 0.37 and agent 0.36 speak it. Why it is specified this way: [ADR-0107](adr/0107-versioned-router-agent-protocol-with-a-written-specification.md).
 
 The machine-readable part lives in [`docs/protocol/`](protocol/): one JSON Schema per message and
 [`index.json`](protocol/index.json) with the frame codes, the agent's passthrough allowlist and the limits. Where this
@@ -62,11 +62,12 @@ frames. On approval the router sends `status approved` with the bundle on the sa
 ## Facts
 
 The hello's `facts` object describes the machine ([facts](protocol/facts.schema.json)): host name, OS and architecture,
-GPU and VRAM, the MAC address for Wake-on-LAN, versions, and flags for optional features. The router stores it and builds
-the node from it. No fact is required, but an agent should send `hostname`, `os`, `arch` and `agent_version`; without
-the last three the router cannot offer agent updates. Feature flags (`ollama_managed`, `ollama_swap_gate`,
+GPU and VRAM, the MAC address for Wake-on-LAN, versions, and flags for optional features. The router stores it and
+builds the node from it. No fact is required, but an agent should send `hostname`, `os`, `arch` and `agent_version`;
+without the last three the router cannot offer agent updates. Feature flags (`ollama_managed`, `ollama_swap_gate`,
 `upstream_release`, `upstream_fallback`) are opt-in: the router only sends the related control messages when the flag is
-`true`.
+`true`. `gpu_present: false` (agent 0.36.0) announces a node without a GPU: the router sizes its models by main memory
+instead of VRAM (ADR-0102); an absent `gpu_present` counts as a GPU, as every older agent had one.
 
 ## Frames
 
@@ -109,11 +110,13 @@ The agent's own refusals are a RESP with `403` or `405`, one DATA frame with
 ### Heartbeat
 
 The agent sends HB every `heartbeat_interval_s` (3 s until the bundle says otherwise); the router answers each one with
-HBACK (`state` free, busy or offline, `busy_reason`, `gpu_guard_ack`). The heartbeat carries GPU utilisation and VRAM
-and, as optional blocks, sensors, the GPU guard, update progress, the agent's children's VRAM, a running game, main
-memory, the health of tunnel routes and the standby Ollama's models. A missing block means the agent does not report
-that fact; the router then keeps its previous behaviour for it. A heartbeat the router cannot apply is answered with
-`state: ""` and `error`.
+HBACK (`state` free, busy or offline, `busy_reason`, `gpu_guard_ack`). The heartbeat carries `gpu_present` and, on a
+node with a GPU, GPU utilisation and VRAM; as optional blocks it carries sensors, the GPU guard, update progress, the
+agent's children's VRAM, a running game, main memory, the health of tunnel routes and the standby Ollama's models. The
+game block says `enabled: false` when game detection is switched off on the node (agent 0.36.0, ADR-0103); `via` is
+`path` or `name` (older agents sent the German `pfad`, which the router still accepts). A missing block means the agent
+does not report that fact; the router then keeps its previous behaviour for it. A heartbeat the router cannot apply is
+answered with `state: ""` and `error`.
 
 ### Upstream state
 

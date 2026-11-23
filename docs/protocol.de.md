@@ -2,7 +2,7 @@
 
 Wie ein Knoten-Agent mit dem Router spricht: was man umsetzen muss, um einen eigenen Agenten zu schreiben (etwa für eine
 Plattform, die der Go-Agent nicht unterstützt), und was Router und Go-Agent einander zusichern. Dies ist **Version 1** des
-Protokolls, so wie Router 0.34 und Agent 0.35 es sprechen. Warum es so festgehalten wird:
+Protokolls, so wie Router 0.37 und Agent 0.36 es sprechen. Warum es so festgehalten wird:
 [ADR-0107](adr/0107-versioned-router-agent-protocol-with-a-written-specification.md) (englisch).
 
 Der maschinenlesbare Teil liegt in [`docs/protocol/`](protocol/): je Nachricht ein JSON-Schema und
@@ -69,8 +69,10 @@ Das Objekt `facts` im Hello beschreibt die Maschine ([facts](protocol/facts.sche
 Architektur, GPU und VRAM, die MAC-Adresse für Wake-on-LAN, Versionen und Schalter für optionale Funktionen. Der Router
 speichert es und baut daraus den Knoten. Kein Fakt ist Pflicht, aber ein Agent sollte `hostname`, `os`, `arch` und
 `agent_version` schicken; ohne die letzten drei kann der Router keine Agent-Updates anbieten. Funktionsschalter
-(`ollama_managed`, `ollama_swap_gate`, `upstream_release`, `upstream_fallback`) sind ausdrücklich: Der Router schickt die
-zugehörigen Steuernachrichten nur, wenn der Schalter `true` ist.
+(`ollama_managed`, `ollama_swap_gate`, `upstream_release`, `upstream_fallback`) sind ausdrücklich: Der Router schickt
+die zugehörigen Steuernachrichten nur, wenn der Schalter `true` ist. `gpu_present: false` (Agent 0.36.0) meldet einen
+Knoten ohne GPU: Der Router bemisst seine Modelle am Hauptspeicher statt am VRAM (ADR-0102); fehlt `gpu_present`, gilt
+eine GPU als vorhanden, wie bei jedem älteren Agenten.
 
 ## Rahmen
 
@@ -113,12 +115,14 @@ Eigene Ablehnungen des Agenten sind ein RESP mit `403` oder `405`, ein DATA-Rahm
 
 ### Heartbeat
 
-Der Agent schickt HB alle `heartbeat_interval_s` (3 s, bis das Paket etwas anderes sagt); der Router beantwortet jeden mit
-HBACK (`state` free, busy oder offline, `busy_reason`, `gpu_guard_ack`). Der Heartbeat trägt GPU-Auslastung und VRAM und
-als optionale Blöcke Sensoren, den GPU-Schutz, den Stand von Updates, den VRAM der Kinder des Agenten, ein laufendes
-Spiel, den Hauptspeicher, die Gesundheit der Tunnel-Routen und die Modelle des Bereitschafts-Ollama. Fehlt ein Block,
-meldet der Agent diesen Fakt nicht; der Router behält dafür sein bisheriges Verhalten. Einen Heartbeat, den der Router
-nicht anwenden kann, beantwortet er mit `state: ""` und `error`.
+Der Agent schickt HB alle `heartbeat_interval_s` (3 s, bis das Paket etwas anderes sagt); der Router beantwortet jeden
+mit HBACK (`state` free, busy oder offline, `busy_reason`, `gpu_guard_ack`). Der Heartbeat trägt `gpu_present` und auf
+einem Knoten mit GPU die GPU-Auslastung und den VRAM; als optionale Blöcke Sensoren, den GPU-Schutz, den Stand von
+Updates, den VRAM der Kinder des Agenten, ein laufendes Spiel, den Hauptspeicher, die Gesundheit der Tunnel-Routen und
+die Modelle des Bereitschafts-Ollama. Der Spiel-Block meldet `enabled: false`, wenn die Spiel-Erkennung auf dem Knoten
+abgeschaltet ist (Agent 0.36.0, ADR-0103); `via` ist `path` oder `name` (ältere Agenten schickten das deutsche `pfad`,
+das der Router weiter annimmt). Fehlt ein Block, meldet der Agent diesen Fakt nicht; der Router behält dafür sein
+bisheriges Verhalten. Einen Heartbeat, den der Router nicht anwenden kann, beantwortet er mit `state: ""` und `error`.
 
 ### Upstream-Zustand
 
