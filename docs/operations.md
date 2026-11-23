@@ -190,8 +190,8 @@ document at `release_url`, for example from a mirror or an internal repository w
 The rules are strict (ADR-0124): final HTTPS URL (plain HTTP only to `127.0.0.1`/`::1`), no redirect, at most 64 KiB,
 20 s, `version` in the agent's version grammar, `sha256` with 64 hex digits, `size` in bytes, and every `url` ends in the
 archive name the agent expects for that platform. Platforms without an agent archive are skipped; a malformed entry for a
-known platform discards the whole document and the router keeps the last known version (a problem is raised after three
-days without a successful check). The document names only the version and the expected hashes. The agent still downloads from
+known platform discards the whole document and the router keeps the last known version (problem `ollama_version_check_failing`
+after three days without a successful check). The document names only the version and the expected hashes. The agent still downloads from
 its own source `ollama_update.source` in the layout `<source>v<version>/<archive>` and `<source>v<version>/sha256sum.txt`
 and refuses an order whose hash does not match that source's `sha256sum.txt`. For a mirror both sides therefore point at it:
 the router at the document, each agent with `ollama_update.source` at the directory. Nothing changes on the agent.

@@ -65,7 +65,7 @@ class WakeOnLanPinned(unittest.IsolatedAsyncioTestCase):
         self.real_socket = wol.socket.socket
         wol.socket.socket = FakeSocket
         FakeSocket.sent, FakeSocket.fail = [], False
-        state.CFG = SimpleNamespace(wol_broadcasts=["255.255.255.255", "192.0.2.255"], wol_wait_s=90, wol_retry_s=20,
+        state.CFG = SimpleNamespace(wol_broadcasts=["198.51.100.255", "192.0.2.255"], wol_wait_s=90, wol_retry_s=20,
                                     wol_cooldown_s=300, wakers={})
 
     def tearDown(self):
@@ -75,7 +75,7 @@ class WakeOnLanPinned(unittest.IsolatedAsyncioTestCase):
         wol.send_magic_packet("AA-BB-CC-DD-EE-01")
         packet = b"\xff" * 6 + bytes.fromhex("aabbccddee01") * 16
         self.assertEqual([(s[3], s[4]) for s in FakeSocket.sent],
-                         [(packet, ("255.255.255.255", 9)), (packet, ("192.0.2.255", 9))])
+                         [(packet, ("198.51.100.255", 9)), (packet, ("192.0.2.255", 9))])
         self.assertEqual(FakeSocket.sent[0][:3], (socket.AF_INET, socket.SOCK_DGRAM,
                                                   ((socket.SOL_SOCKET, socket.SO_BROADCAST, 1),)))
 
@@ -325,7 +325,7 @@ class Configuration(unittest.TestCase):
             ("localhost is not literal loopback", {"x": {**ok, "url": "http://localhost:8123/hook"}}),
             ("query", {"x": {**ok, "url": "https://automation.example.net/hook?turn=on"}}),
             ("fragment", {"x": {**ok, "url": "https://automation.example.net/hook#x"}}),
-            ("credentials in the URL", {"x": {**ok, "url": "https://user:pw@automation.example.net/hook"}}),
+            ("credentials in the URL", {"x": {**ok, "url": "https://user@automation.example.test/hook"}}),
             ("other scheme", {"x": {**ok, "url": "ftp://127.0.0.1/hook"}}),
             ("invalid port", {"x": {**ok, "url": "https://automation.example.net:port/hook"}}),
             ("no URL", {"x": {"kind": "http_webhook"}}),

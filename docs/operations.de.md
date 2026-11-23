@@ -195,7 +195,7 @@ Die Regeln sind streng (ADR-0124): endgültige HTTPS-URL (einfaches HTTP nur an 
 höchstens 64 KiB, 20 s, `version` in der Versionsschreibweise des Agenten, `sha256` mit 64 Hex-Ziffern, `size` in Byte,
 und jede `url` endet auf den Archivnamen, den der Agent für diese Plattform erwartet. Plattformen ohne Agent-Archiv werden
 übersprungen; ein fehlerhafter Eintrag für eine bekannte Plattform verwirft das ganze Dokument, und der Router behält die
-zuletzt bekannte Version (ein Problem nach drei Tagen ohne erfolgreiche Prüfung). Das Dokument nennt nur die Version
+zuletzt bekannte Version (Problem `ollama_version_check_failing` nach drei Tagen ohne erfolgreiche Prüfung). Das Dokument nennt nur die Version
 und die erwarteten Hashes. Der Agent lädt weiterhin von seiner eigenen Quelle `ollama_update.source` im Layout
 `<source>v<version>/<archiv>` und `<source>v<version>/sha256sum.txt` und lehnt einen Auftrag ab, dessen Hash nicht zur
 `sha256sum.txt` dieser Quelle passt. Für einen Spiegel zeigen also beide Seiten auf ihn: der Router auf das Dokument, jeder

@@ -1,125 +1,108 @@
 {
-  "schema_version": 1,
-  "status": "completed",
-  "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "4a614341aecd17f58aa55ca5e88476373442af61",
-  "change_digest": "481a506bac6351fe5d07039f58aebaff3a8b4d9656ff9de647002f761ef9b8aa",
-  "reviewed_paths": [
-    ".github/workflows/ci.yml",
-    "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "agent/README.md",
-    "agent/app.go",
-    "agent/config.example.yaml",
-    "agent/config.go",
-    "agent/facts.go",
-    "agent/game.go",
-    "agent/game_test.go",
-    "agent/gpu.go",
-    "agent/guard.go",
-    "agent/health.go",
-    "agent/heartbeat.go",
-    "agent/install_windows.go",
-    "agent/install_windows_test.go",
-    "agent/main.go",
-    "agent/mqtt.go",
-    "agent/nogpu_test.go",
-    "design/english-names.md",
-    "design/gpu-guard.md",
-    "design/routing-algorithm.md",
-    "docs/adr/0102-the-agent-starts-without-a-gpu.md",
-    "docs/adr/0103-game-detection-is-a-module-that-can-be-switched-off.md",
-    "docs/adr/README.md",
-    "docs/configuration.de.md",
-    "docs/configuration.md",
-    "docs/install-agent.de.md",
-    "docs/install-agent.md",
-    "docs/operations.de.md",
-    "docs/operations.md",
-    "docs/reference.de.md",
-    "docs/reference.md",
-    "docs/security/reviews/current.json",
-    "router/skirnir_router/common.py",
-    "router/skirnir_router/nodes.py",
-    "router/skirnir_router/poll.py",
-    "router/skirnir_router/problems.py",
-    "router/skirnir_router/registry.py",
-    "router/skirnir_router/scheduler.py",
-    "test/fake_agent.py",
-    "test/run_tests.py",
-    "test/selftest_availability.py",
-    "test/selftest_cpu_node.py"
-  ],
-  "risk_ids": [
-    "TM-07",
-    "TM-14",
-    "TM-15"
-  ],
-  "boundaries": [
-    "B3",
-    "B8",
-    "B9"
-  ],
-  "summary": "Agent 0.36.0 / router 0.36.0: the agent runs without an NVIDIA GPU (gpu.probe auto|nvidia|none, default auto, ADR-0102), game detection can be switched off (game.enabled, ADR-0103), the game fact's via is 'path' (router maps the old 'pfad'), Home Assistant display names can be English (mqtt.entity_language, unique_id and entity ID unchanged), and the Windows install checks the event-log source in the registry instead of matching error text. B3 (router <-> agent): new fact/heartbeat field gpu_present and the guard state not_applicable from an approved agent. The router takes gpu_present only as a real boolean (heartbeat) or literal false (facts), and memory values only as non-boolean numbers; otherwise the node stays a GPU node or nothing fits. A compromised approved agent could already misreport VRAM, utilisation and guard state (TM-07: telemetry is an assertion of that host); claiming no GPU or not_applicable gives it no capability beyond that: it can attract or repel models for its own node and avoid the require_fresh_status cap, as reporting 'normal' already did. No new route, frame, authentication path or egress. B8 (agent host): install_windows reads HKLM SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\<service> read-only in the existing admin install step; service account, ACLs, update and signing paths are unchanged. With gpu.probe auto and no NVIDIA driver at all the GPU guard does not run; without a driver no workload can use the card, so the power-limit protection loses nothing; gpu.probe nvidia keeps the refusal. POST /gpuz stays loopback-only and now answers 409 without a GPU. B9: /health (loopback) gains gpu_probe and gpu_present, MQTT discovery gains constant English names; no secret, host or user data. The fake agent and E2E use loopback and synthetic values only. Re-reviewed after merging origin/main (PR 178 structured problems / router 0.35.0 / ADR-0101, PR 176 docs) into the branch: conflicts only in CHANGELOG (both rows kept, v0.41.0 above v0.40.0), VERSION (0.36.0 kept), ADR index (regenerated, 0101-0103) and this record. Semantic overlap with router/skirnir_router/problems.py: ram_spill is already empty for a node without a GPU; the gpu_guard problem now also requires gpu_present, so a node without a GPU never raises it even if its agent claims a guard problem (an approved agent cannot plant a GPU-guard alarm for a node that has no GPU); docs/operations(.de).md say so. No other change to #178's codes, metrics or config.",
-  "findings": [],
-  "tests": [
-    {
-      "command": "python test/selftest_cpu_node.py",
-      "result": "passed",
-      "evidence": "router: facts/heartbeat without GPU values, full-size holdings, no ram_spill, RAM budget and capacity, model_too_large/vram_full, guard not_applicable not capping, older agents unchanged, pfad->path, enabled false; rejected cases: non-numeric memory, non-boolean gpu_present, facts other than false; after the merge also: no gpu_guard/ram_spill problem for nodes without a GPU (including one whose agent claims a guard problem; this check fails without the problems.py change), a GPU node still raises it."
-    },
-    {
-      "command": "python test/selftest_problems.py",
-      "result": "passed",
-      "evidence": "all passed (after the merge)."
-    },
-    {
-      "command": "python test/check_adr_index.py",
-      "result": "passed",
-      "evidence": "ADR index ok: 103 ADRs (after the merge)."
-    },
-    {
-      "command": "python test/run_tests.py (through a local lock wrapper that serialises the fixed loopback ports)",
-      "result": "passed",
-      "evidence": "0 failures, STATE passed; includes the new fake agent with FAKE_GPU=0 (online, gpu_present false, guard not_applicable, no HA problem)."
-    },
-    {
-      "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml (Windows, Python 3.12)",
-      "result": "passed",
-      "evidence": "74 self-tests after the merge; selftest_availability needed its fake node to gain capacity_gib/reserve_gib."
-    },
-    {
-      "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./...",
-      "result": "passed",
-      "evidence": "gofmt empty, vet clean on both GOOS, go test ok on Windows (incl. install_windows_test.go)."
-    },
-    {
-      "command": "GOOS=linux go test -c, test binary run under WSL Ubuntu",
-      "result": "passed",
-      "evidence": "PASS (nogpu_test.go, config, mqtt and the other Linux tests)."
-    },
-    {
-      "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_control_flow.py ; python test/selftest_control_flow.py ; python test/check_pinned_references.py ; python tools/security/lock_requirements.py check",
-      "result": "passed",
-      "evidence": "all clean."
-    },
-    {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
-      "result": "passed",
-      "evidence": "run after staging this record."
-    },
-    {
-      "command": "python test/check_public_changes.py",
-      "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s)."
-    }
-  ],
-  "limitations": [
-    "The end-to-end suite uses a fake agent; the real agent without a GPU was exercised by Go unit tests (probe none), not on a physical CPU-only machine.",
-    "gpu.probe auto on a machine whose NVIDIA driver is missing entirely now starts as a CPU node instead of refusing (documented in ADR-0102).",
-    "The router's RAM budget trusts the agent's memory fact like the VRAM fact before (TM-07); on Linux MemAvailable can include page cache of a mapped model, so the budget is an estimate; Ollama's own memory check and memory pressure remain the guard.",
-    "The catalog's VRAM measurement (/admin/measure) still needs a GPU; not changed here.",
-    "PostgreSQL integrations were not run: no session, memory or storage code changed."
-  ]
+ "schema_version": 1,
+ "status": "completed",
+ "reviewer": "Claude Code (Opus 5.5) repository security review",
+ "base_sha": "d29ece8e1281e889f75577a2480d49df3871ae63",
+ "change_digest": "3673f91c184efe608fc9d980df78bb5f0cf24cc7c12c695b87826708f4fe1089",
+ "reviewed_paths": [
+  ".github/workflows/ci.yml",
+  "CHANGELOG.md",
+  "README.de.md",
+  "README.md",
+  "design/routing-algorithm.md",
+  "docs/adr/0124-wake-webhooks-and-release-documents-follow-the-cloud-transport-rules.md",
+  "docs/adr/README.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
+  "docs/operations.de.md",
+  "docs/operations.md",
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "docs/security/reviews/current.json",
+  "router/config.example.yaml",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/nodes.py",
+  "router/skirnir_router/ollamaupdate.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/registry.py",
+  "router/skirnir_router/scheduler.py",
+  "router/skirnir_router/settings.py",
+  "router/skirnir_router/values.py",
+  "router/skirnir_router/waker_config.py",
+  "router/skirnir_router/wakers.py",
+  "router/skirnir_router/wol.py",
+  "test/run_tests.py",
+  "test/selftest_release_source.py",
+  "test/selftest_wakers.py",
+  "test/test-config.yaml"
+ ],
+ "risk_ids": [
+  "TM-03",
+  "TM-06",
+  "TM-08",
+  "TM-13",
+  "TM-14",
+  "TM-15"
+ ],
+ "boundaries": [
+  "B2",
+  "B7",
+  "B8",
+  "B9"
+ ],
+ "summary": "Router 0.41.0 implements ADR-0117 (waker and release-source interfaces) with ADR-0124 (transport rules). Two new outbound destinations: (1) the http_webhook waker POSTs a fixed body {event, node, mac} to a URL from config.yaml; (2) release_source: document GETs a neutral release document. Both go through values.egress_url (ADR-0048 rules: final URL, HTTPS or HTTP to literal 127.0.0.1/::1 only, no userinfo/query/fragment) and refuse 3xx without following (allow_redirects=False), with total timeouts (webhook 1-60 s, document 20 s), trust_env off. Traced callers: proxy._wake_or_refuse -> wakers.wake (shared wait/poll loop, unchanged cadence and cooldown for wol), scheduler.wakeable_for -> wakers.can_wake (wol eligibility identical to `n.wol and n.mac`), registry.node_policy and node_spec_from_entry (B2: the admin policy may only name 'wol' or a configured waker; URL and token_env are config-file only, consistent with ADR-0016), settings.EDITABLE (release_source added as a choice beside the already UI-editable release_url; UI writes are validated by the probe parse in write_overrides, so a document URL must pass egress_url there too), ollamaupdate.check_latest -> _fetch_document/parse_document -> LATEST -> order_update (B8: the order still carries only version, canonical archive name, sha256 and size; the agent downloads from its own ollama_update.source and refuses a hash that differs from that source's sha256sum.txt, agent TestOllamaUpdateRun; downgrade refusals of ADR-0073 unchanged). Secrets/logs (B9): the bearer token is read from the environment at call time and never logged; a configured but empty token fails closed without a request; log lines carry only the receiver host and exception class, never the URL path (a webhook ID can be a secret). No command execution was added; command/ipmi kinds are refused at load. Found and fixed during review: a deeply nested release document under the size cap raised RecursionError past the JSON boundary (now caught, test added); an OS error from the magic-packet socket used to escape as an exception (now a wake_send_failed fact, socket closed).",
+ "findings": [],
+ "tests": [
+  {
+   "command": "python test/selftest_wakers.py",
+   "result": "passed",
+   "evidence": "18 tests: magic packet bytes/addresses/port 9 and SO_BROADCAST pinned, WOL cadence every retry_interval_s, cooldown, eligibility as before; webhook fixed body + bearer token, missing token sends nothing, 301/302/303/307/308 refused and target never contacted, HTTP 500 refused, 0.5 s timeout while another coroutine keeps running, unreachable port; config refusals (plain HTTP non-loopback, localhost, query, fragment, userinfo, ftp, bad port, command/ipmi kinds, name wol, unknown key, token value instead of env name, timeout range/type, repeat type) and policy refusal of a URL as waker."
+  },
+  {
+   "command": "python test/selftest_release_source.py",
+   "result": "passed",
+   "evidence": "10 tests: document equals GitHub source output for the same release; redirect refused (target not fetched), oversized with and without Content-Length, timeout, HTTP 404, invalid JSON, invalid UTF-8, 30000-deep nesting (fails without the RecursionError catch, checked), every malformed field; release_source/release_url refused at config load for http non-loopback, query, empty URL, unknown kind."
+  },
+  {
+   "command": "python test/run_tests.py (end-to-end, run under a local port lock)",
+   "result": "passed",
+   "evidence": "STATE passed, 0 failures, 337 PASS lines after rebase on d29ece8, including policy waker refusal/accept/reset and the unchanged WOL attempt + cooldown checks."
+  },
+  {
+   "command": "all python test/selftest_*.py listed in .github/workflows/ci.yml (Windows, Python 3.12)",
+   "result": "passed",
+   "evidence": "75 of 75 exit 0 after rebase."
+  },
+  {
+   "command": "cd agent && go test -run 'TestOllamaUpdateRun|TestOllamaVerifyOrder' ./...",
+   "result": "passed",
+   "evidence": "ok; the agent still refuses an order whose sha256 differs from its source's sha256sum.txt (no agent code changed)."
+  },
+  {
+   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "All checks passed; configuration ok; control flow 0 findings."
+  },
+  {
+   "command": "python test/check_public_changes.py --base <merge-base>",
+   "result": "passed",
+   "evidence": "Public-change scan: 0 finding(s) after replacing a broadcast address and a credential URL in the test with reserved examples."
+  },
+  {
+   "command": "python tools/security/review.py check --base origin/main --head INDEX",
+   "result": "passed",
+   "evidence": "run after staging this record."
+  }
+ ],
+ "limitations": [
+  "python test/check_adr_index.py reports only the numbering gap (0104-0123 missing) because ADR-0124 is assigned ahead of the open portability PRs; it closes when they merge first as planned.",
+  "The configured destinations are trusted operator input: DNS of the configured host is not pinned, so a host whose name resolves into the LAN is reachable by design (no redirect can add a second destination).",
+  "The pre-existing github release source still follows redirects and has no size cap (unchanged; GitHub serves sha256sum.txt through a redirect). Its JSON comes from api.github.com by default.",
+  "release_url stays editable from the web UI as before; with release_source document an admin session can point the router at another document, which can only select a version/hash that the agent then verifies against its own source (B2 admin trust, TM-03).",
+  "/admin/config shows the configured webhook URL to admins like other configuration values; a webhook ID embedded in the path is visible there (not in logs).",
+  "No native ipmi waker (deferred); no UI control for the waker choice yet (config file and policy API only).",
+  "Webhook and document were exercised against loopback test servers only; no real Home Assistant/ioBroker/openHAB receiver or mirror was contacted.",
+  "PostgreSQL integrations were not run; no session/memory/storage code changed."
+ ]
 }
