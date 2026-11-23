@@ -250,6 +250,7 @@ Limits (`router.cloud`):
   local and gets the configured `refusal` sentence as its answer. Before an allowed request leaves, tool results are redacted:
   Home Assistant live-context entries of `redact_domains` (person, device_tracker, todo, lock, camera, ...),
   `redact_device_classes` (motion, presence, door, window, ...) and `redact_names`, and the whole result of `redact_tools`.
+  Patterns and texts for other countries and other tool formats: [below](#content-check-locale-packs-and-redactors).
   The journal records `privacy_check` with outcome, rule or probability and the number of redacted entries, never the text.
   A declared `routing.data_class` is never overruled.
 - **Credential scan** (`block`): prompts with recognisable keys (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
@@ -293,6 +294,41 @@ ends with `done_reason: length` and empty content, or `eval_count` is far above 
 thinks and needs `none`. The provider's thought (`reasoning_content`, or `reasoning` as vLLM sends it) arrives as
 Ollama's `thinking` (`reasoning` in the OpenAI shape, a thinking block in the Anthropic shape), except for a client that
 sent `think: false`.
+
+### Content check: locale packs and redactors
+
+Router 0.42.0 (ADR-0119, proposed in PR #177; [ADR-0125](adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md)).
+Without the new keys the content check behaves exactly as before (Swiss and German patterns, Home Assistant redaction,
+unrecognised tool results pass). All of them are set in `config.yaml` only; the web UI cannot change them.
+
+| Key under `router.cloud.privacy_check` | Default | Meaning |
+|---|---|---|
+| `locale` | `ch-de` | Locale pack: the patterns and keyword groups the rules check, the default `refusal` and the marker that replaces a whole tool result. `ch-de`: e-mail, Swiss phone numbers, IBAN, AHV number, street addresses with German suffixes, German and English keyword starts, German refusal. `en`: e-mail, phone numbers (international `+`/`00`, North American, national with a leading 0), IBAN, English keyword starts, English refusal; no national identifier and no street address. Your own `terms` and `refusal` apply on top of either. |
+| `redactors` | `[ha_assist]` | Tool formats redacted, in this order. `ha_assist`: Home Assistant's live context (entries of `redact_domains`, `redact_device_classes`, `redact_names`). `generic_json`: configured paths and keys of JSON tool results (below). At least one; `redact_tools` applies independently of the list. |
+| `generic_json` | – | Required with the redactor `generic_json`, refused without it. `tools` maps a tool name, or `*` for every JSON result, to dotted paths to remove (`events.*.attendees`: `*` stands for every key of an object or element of a list); an empty list marks a tool as recognised with nothing to remove. `keys` removes keys of these names at any depth in those results. A result of a tool named in `tools` that is not JSON keeps the request local. |
+| `unrecognised_tool_results` | `pass` | `keep_local`: a tool result that no redactor recognises keeps the request local. Recognised are Home Assistant's JSON with a `result` text, text with live-context entries, a tool in `redact_tools` and a JSON result of a tool in `generic_json.tools`. With Home Assistant, intent results such as `HassTurnOn` are not live context; list such tools under `generic_json.tools` with `[]` if they may pass. |
+
+```yaml
+router:
+  cloud:
+    privacy_check:
+      enabled: true
+      locale: en
+      redactors: [ha_assist, generic_json]
+      generic_json:
+        tools: {calendar_events: ["events.*.attendees", owner], HassTurnOn: []}
+        keys: [email, phone]
+      unrecognised_tool_results: keep_local
+```
+
+A request kept local by the redaction gets the refusal like any other; the journal records `result: unredacted` with
+`by: redaction:generic_json` or `redaction:unrecognised`. JSON nested too deeply to inspect (beyond the parser, or beyond
+100 levels for `generic_json`) also keeps the request local. `/admin/state` shows the locale, the redactors, the mode and,
+for `generic_json`, only the number of tools and keys. With `unrecognised_tool_results: pass` (the default), tool results
+of formats no redactor knows are sent as they are: the content check protects what the user wrote and the house context
+in known formats. Redactors for openHAB or ioBroker are not built yet; they will be added together with test data of
+their real formats. Locale packs are added only together with test sentences for their patterns. The privacy classifier
+is trained on German and English sentences; another locale pack does not change that.
 
 ### Institutional providers
 

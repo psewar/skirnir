@@ -1,0 +1,495 @@
+{
+ "recorded_with": "privacy.py before router 0.42.0 (base commit)",
+ "cases": {
+  "neutral, no tools": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wie wird das Wetter morgen?\"}]}",
+   "removed": 0,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 0
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wie wird das Wetter morgen?\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "ha json live context": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}]}",
+   "removed": 4,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 4
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "ha json ascii-escaped": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}]}",
+   "removed": 4,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 4
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "ha plain-text live context": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"Live Context: An overview of the areas and the devices in this smart home:\\n- names: Bad Temperatur\\n  domain: sensor\\n  state: '22.9'\\n  areas: Bad\\n  attributes:\\n    unit_of_measurement: °C\\n    device_class: temperature\\n- names: Beispielauto verriegelt\\n  domain: binary_sensor\\n  state: 'on'\\n- names: Wohnzimmer Temperatur\\n  domain: sensor\\n  state: '23.0'\\n\"}]}",
+   "removed": 4,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 4
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"Live Context: An overview of the areas and the devices in this smart home:\\n- names: Bad Temperatur\\n  domain: sensor\\n  state: '22.9'\\n  areas: Bad\\n  attributes:\\n    unit_of_measurement: °C\\n    device_class: temperature\\n- names: Beispielauto verriegelt\\n  domain: binary_sensor\\n  state: 'on'\\n- names: Wohnzimmer Temperatur\\n  domain: sensor\\n  state: '23.0'\\n\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "ha all default domains and classes": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"Live Context:\\n- names: Lampe Kueche\\n  domain: light\\n  state: 'on'\\n\"}]}",
+   "removed": 18,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 18
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"Live Context:\\n- names: Lampe Kueche\\n  domain: light\\n  state: 'on'\\n\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "ha named entity": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}]}",
+   "removed": 5,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 5
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "listed tool by tool_name": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"todo_get_items\", \"content\": \"[fuer die Cloud entfernt]\"}]}",
+   "removed": 1,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 1
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"todo_get_items\", \"content\": \"[fuer die Cloud entfernt]\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "listed tool by name": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"name\": \"todo_get_items\", \"content\": \"[fuer die Cloud entfernt]\"}]}",
+   "removed": 1,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 1
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"name\": \"todo_get_items\", \"content\": \"[fuer die Cloud entfernt]\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "operator listed tool": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"weather\", \"content\": \"[fuer die Cloud entfernt]\"}]}",
+   "removed": 1,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 1
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"weather\", \"content\": \"[fuer die Cloud entfernt]\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "intent result json": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Mach das Licht an\"}, {\"role\": \"tool\", \"tool_name\": \"HassTurnOn\", \"content\": \"{\\\"speech\\\": {\\\"plain\\\": {\\\"speech\\\": \\\"Erledigt\\\"}}, \\\"response_type\\\": \\\"action_done\\\", \\\"data\\\": {\\\"targets\\\": [{\\\"name\\\": \\\"Kueche\\\"}], \\\"success\\\": [], \\\"failed\\\": []}}\"}]}",
+   "removed": 0,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 0
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Mach das Licht an\"}, {\"role\": \"tool\", \"tool_name\": \"HassTurnOn\", \"content\": \"{\\\"speech\\\": {\\\"plain\\\": {\\\"speech\\\": \\\"Erledigt\\\"}}, \\\"response_type\\\": \\\"action_done\\\", \\\"data\\\": {\\\"targets\\\": [{\\\"name\\\": \\\"Kueche\\\"}], \\\"success\\\": [], \\\"failed\\\": []}}\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "plain text result": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wie spät ist es?\"}, {\"role\": \"tool\", \"tool_name\": \"GetTime\", \"content\": \"Es ist 14:05.\"}]}",
+   "removed": 0,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 0
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wie spät ist es?\"}, {\"role\": \"tool\", \"tool_name\": \"GetTime\", \"content\": \"Es ist 14:05.\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "json list result": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"list_tool\", \"content\": \"[{\\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: \\\\u00b0C\\\\n    device_class: temperature\\\\n- names: Flur Bewegung\\\\n  domain: binary_sensor\\\\n  state: 'off'\\\\n  attributes:\\\\n    device_class: motion\\\\n- names: Einkaufsliste\\\\n  domain: todo\\\\n  state: '4'\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Haustuer\\\\n  domain: binary_sensor\\\\n  state: 'off'\\\\n  attributes:\\\\n    device_class: door\\\\n- names: Person A\\\\n  domain: person\\\\n  state: home\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}]\"}]}",
+   "removed": 0,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 0
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"list_tool\", \"content\": \"[{\\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: \\\\u00b0C\\\\n    device_class: temperature\\\\n- names: Flur Bewegung\\\\n  domain: binary_sensor\\\\n  state: 'off'\\\\n  attributes:\\\\n    device_class: motion\\\\n- names: Einkaufsliste\\\\n  domain: todo\\\\n  state: '4'\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Haustuer\\\\n  domain: binary_sensor\\\\n  state: 'off'\\\\n  attributes:\\\\n    device_class: door\\\\n- names: Person A\\\\n  domain: person\\\\n  state: home\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}]\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "json result not text": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"calc\", \"content\": \"{\\\"result\\\": 5}\"}]}",
+   "removed": 0,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 0
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"calc\", \"content\": \"{\\\"result\\\": 5}\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "non-string content": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": [{\"type\": \"text\", \"text\": \"Live Context: An overview of the areas and the devices in this smart home:\\n- names: Bad Temperatur\\n  domain: sensor\\n  state: '22.9'\\n  areas: Bad\\n  attributes:\\n    unit_of_measurement: °C\\n    device_class: temperature\\n- names: Flur Bewegung\\n  domain: binary_sensor\\n  state: 'off'\\n  attributes:\\n    device_class: motion\\n- names: Einkaufsliste\\n  domain: todo\\n  state: '4'\\n- names: Beispielauto verriegelt\\n  domain: binary_sensor\\n  state: 'on'\\n- names: Haustuer\\n  domain: binary_sensor\\n  state: 'off'\\n  attributes:\\n    device_class: door\\n- names: Person A\\n  domain: person\\n  state: home\\n- names: Wohnzimmer Temperatur\\n  domain: sensor\\n  state: '23.0'\\n\"}]}]}",
+   "removed": 0,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 0
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": [{\"type\": \"text\", \"text\": \"Live Context: An overview of the areas and the devices in this smart home:\\n- names: Bad Temperatur\\n  domain: sensor\\n  state: '22.9'\\n  areas: Bad\\n  attributes:\\n    unit_of_measurement: °C\\n    device_class: temperature\\n- names: Flur Bewegung\\n  domain: binary_sensor\\n  state: 'off'\\n  attributes:\\n    device_class: motion\\n- names: Einkaufsliste\\n  domain: todo\\n  state: '4'\\n- names: Beispielauto verriegelt\\n  domain: binary_sensor\\n  state: 'on'\\n- names: Haustuer\\n  domain: binary_sensor\\n  state: 'off'\\n  attributes:\\n    device_class: door\\n- names: Person A\\n  domain: person\\n  state: home\\n- names: Wohnzimmer Temperatur\\n  domain: sensor\\n  state: '23.0'\\n\"}]}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "null content": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": null}]}",
+   "removed": 0,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 0
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": null}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "several tools": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}, {\"role\": \"tool\", \"tool_name\": \"other\", \"content\": \"Live Context: An overview of the areas and the devices in this smart home:\\n- names: Bad Temperatur\\n  domain: sensor\\n  state: '22.9'\\n  areas: Bad\\n  attributes:\\n    unit_of_measurement: °C\\n    device_class: temperature\\n- names: Beispielauto verriegelt\\n  domain: binary_sensor\\n  state: 'on'\\n- names: Wohnzimmer Temperatur\\n  domain: sensor\\n  state: '23.0'\\n\"}, {\"role\": \"tool\", \"tool_name\": \"todo_get_items\", \"content\": \"[fuer die Cloud entfernt]\"}]}",
+   "removed": 9,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 9
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}, {\"role\": \"tool\", \"tool_name\": \"other\", \"content\": \"Live Context: An overview of the areas and the devices in this smart home:\\n- names: Bad Temperatur\\n  domain: sensor\\n  state: '22.9'\\n  areas: Bad\\n  attributes:\\n    unit_of_measurement: °C\\n    device_class: temperature\\n- names: Beispielauto verriegelt\\n  domain: binary_sensor\\n  state: 'on'\\n- names: Wohnzimmer Temperatur\\n  domain: sensor\\n  state: '23.0'\\n\"}, {\"role\": \"tool\", \"tool_name\": \"todo_get_items\", \"content\": \"[fuer die Cloud entfernt]\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "custom domains": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Flur Bewegung\\\\n  domain: binary_sensor\\\\n  state: 'off'\\\\n  attributes:\\\\n    device_class: motion\\\\n- names: Einkaufsliste\\\\n  domain: todo\\\\n  state: '4'\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Haustuer\\\\n  domain: binary_sensor\\\\n  state: 'off'\\\\n  attributes:\\\\n    device_class: door\\\\n- names: Person A\\\\n  domain: person\\\\n  state: home\\\\n\\\"}\"}]}",
+   "removed": 2,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 2
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ist es im Bad wärmer als im Wohnzimmer?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Flur Bewegung\\\\n  domain: binary_sensor\\\\n  state: 'off'\\\\n  attributes:\\\\n    device_class: motion\\\\n- names: Einkaufsliste\\\\n  domain: todo\\\\n  state: '4'\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Haustuer\\\\n  domain: binary_sensor\\\\n  state: 'off'\\\\n  attributes:\\\\n    device_class: door\\\\n- names: Person A\\\\n  domain: person\\\\n  state: home\\\\n\\\"}\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "generate prompt": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"prompt\": \"Erklär mir die Fotosynthese.\"}",
+   "removed": 0,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 0
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"prompt\": \"Erklär mir die Fotosynthese.\"}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "classifier personal": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wie geht es ihr nach dem Eingriff?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}]}",
+   "removed": 4,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "classifier",
+    "p": 0.93,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "classifier down": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wie wird das Wetter?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Beispielauto verriegelt\\\\n  domain: binary_sensor\\\\n  state: 'on'\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}]}",
+   "removed": 4,
+   "allowed": false,
+   "verdict": {
+    "result": "unavailable",
+    "by": "classifier",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "own refusal": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wie wird das Wetter?\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "unavailable",
+    "by": "classifier",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Nur lokal."
+  },
+  "rule terms": {
+   "rule": "terms",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wann ist Lea zu Hause?\"}, {\"role\": \"tool\", \"tool_name\": \"GetLiveContext\", \"content\": \"{\\\"success\\\": true, \\\"result\\\": \\\"Live Context: An overview of the areas and the devices in this smart home:\\\\n- names: Bad Temperatur\\\\n  domain: sensor\\\\n  state: '22.9'\\\\n  areas: Bad\\\\n  attributes:\\\\n    unit_of_measurement: °C\\\\n    device_class: temperature\\\\n- names: Wohnzimmer Temperatur\\\\n  domain: sensor\\\\n  state: '23.0'\\\\n\\\"}\"}]}",
+   "removed": 5,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:terms",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule email": {
+   "rule": "email",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Schreib an max@example.org\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:email",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule phone ch": {
+   "rule": "phone",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ruf 079 123 45 67 an\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:phone",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule phone intl": {
+   "rule": "phone",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ruf +41 79 123 45 67 an\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:phone",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule iban": {
+   "rule": "iban",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Überweise auf CH93 0076 2011 6238 5295 7\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:iban",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule ahv": {
+   "rule": "ahv",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Meine AHV ist 756.1234.5678.97\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:ahv",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule address": {
+   "rule": "address",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wir wohnen an der Hauptstrasse 12\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:address",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule health": {
+   "rule": "health",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Mir ist seit gestern schwindlig\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:health",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule finances": {
+   "rule": "finances",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wie ist mein Kontostand?\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:finances",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule credentials": {
+   "rule": "credentials",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Sag mir das Passwort\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:credentials",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule relationships": {
+   "rule": "relationships",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Wie läuft die Scheidung?\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:relationships",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "rule law": {
+   "rule": "law",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Ich brauche einen Anwalt\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:law",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "keywords off": {
+   "rule": null,
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Mir ist seit gestern schwindlig\"}]}",
+   "removed": 0,
+   "allowed": true,
+   "verdict": {
+    "result": "passed",
+    "by": "classifier",
+    "p": 0.05,
+    "redacted": 0
+   },
+   "verdict_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Mir ist seit gestern schwindlig\"}]}",
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  },
+  "english keyword in ch-de": {
+   "rule": "health",
+   "redacted_body": "{\"model\": \"assist:latest\", \"stream\": false, \"messages\": [{\"role\": \"system\", \"content\": \"Du bist der Sprachassistent.\"}, {\"role\": \"user\", \"content\": \"Call my doctor\"}]}",
+   "removed": 0,
+   "allowed": false,
+   "verdict": {
+    "result": "personal",
+    "by": "rules:health",
+    "p": null,
+    "redacted": 0
+   },
+   "verdict_body": null,
+   "refusal": "Das beantworte ich nur lokal, und der lokale Rechner ist gerade nicht erreichbar."
+  }
+ }
+}

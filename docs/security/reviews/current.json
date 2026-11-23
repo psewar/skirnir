@@ -2,65 +2,74 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "d29ece8e1281e889f75577a2480d49df3871ae63",
- "change_digest": "0c2b46d38ef0499b1016119f75da292db6229a03830c4402c05a6dd63c54752d",
+ "base_sha": "b9389908f74964001ee1a5b74b37e787690231ad",
+ "change_digest": "691bf2cc03c7fa3a30fd23a5ed4510165fd8f75d15b31b570f6164e37f09022e",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0104-the-secrets-renderer-checks-its-source-and-renders-every-key-on-its-own.md",
+  "design/privacy-check.md",
+  "docs/adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md",
   "docs/adr/README.md",
-  "docs/install-router.de.md",
-  "docs/install-router.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
   "docs/security/reviews/current.json",
+  "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
-  "router/install.sh",
-  "router/render-env.conf.example",
-  "router/render-env.sh",
+  "router/config.example.yaml",
+  "router/skirnir_router/admin.py",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/pydeps.py",
-  "test/selftest_install.py",
-  "test/selftest_privilege_paths.py",
-  "test/selftest_pydeps.py",
-  "test/selftest_render_env.py"
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/privacy.py",
+  "router/skirnir_router/privacy_locale.py",
+  "router/skirnir_router/redactors.py",
+  "test/privacy_default_corpus.json",
+  "test/selftest_privacy_redactors.py"
  ],
  "risk_ids": [
-  "TM-14",
-  "TM-15",
-  "TM-16"
+  "TM-05"
  ],
  "boundaries": [
-  "B8",
-  "B9"
+  "B6",
+  "B7"
  ],
- "summary": "Re-review after merging main (PRs 178 and 181: structured problems, agent without a GPU). The changed paths against the new merge-base are exactly this PR's own; the merge touched only CHANGELOG (v0.41.1 row above v0.41.0/v0.40.0, agent column 0.36.0), VERSION 0.36.1, the regenerated ADR index (0101-0104 consecutive) and one row of the backup table in operations EN+DE that now names SECRET_FILE as the source with SECRET_SOURCE=file. Re-checked after the merge that the router still gates paho with find_spec (ha.py) and creates the MQTT publisher only with mqtt.host (app.py), and that no merged module reads secrets.env, render-env or MQTT_PASSWORD differently. Substance unchanged from the first review: render-env.sh no longer stops at a missing MQTT_PASSWORD; the access file is still sourced only after not_router_writable; the store is used only after an explicit login step whose HTTP status is reported; every name keeps the ADR-0080 rule; every value is refused on CR/LF; the file is written through mktemp in the target folder, group skirnir-router 0640 (0600 without the account) and an atomic rename; a failed fetch or a source with none of the names keeps the existing file. SECRET_SOURCE=file: SECRET_FILE passes not_router_writable, must be a regular file readable by root only, and is parsed with bash read, never sourced or evaluated. The bearer token goes to curl via stdin instead of argv (TM-15). install.sh --without-mqtt removes only python3-paho-mqtt and passes --without paho-mqtt to pydeps.py, which can only leave out requirements and refuses unknown names; hash-locked installation unchanged (TM-16). Added text names no organisation, host, address or person.",
+ "summary": "Router 0.42.0: the content check before a cloud tier (privacy.py, called only from proxy._Relay._via_cloud when cloud.needs_privacy_check holds) gets context redactors per tool format (redactors.py: ha_assist = the previous Home Assistant code moved unchanged, generic_json = configured dotted paths/keys) and locale packs (privacy_locale.py: ch-de = the previous patterns, keywords, refusal and marker, default; en = e-mail/phone/IBAN, English keywords). Implements ADR-0119 (proposed in #177) and adds ADR-0125 (unrecognised tool results pass by default; keep_local is an explicit switch). Traced B6: the verdict body is still what cloud.run sends; a refused or unredacted verdict returns the refusal before cloud.run; the redaction runs on a deep copy; redact_tools is applied before any redactor, so choosing other redactors cannot drop it. B7 unchanged: classifier call, loopback endpoint check and fail-closed handling are untouched. Default behaviour verified byte-identical (recorded corpus of 35 synthetic payloads from the base commit's privacy.py; 12,000 randomized synthetic payloads compared against origin/main privacy.py, 0 differences). The new keys are config.yaml only (not in settings.EDITABLE, asserted by test). Load-time refusals prevent configurations that look configured but redact nothing (empty/unknown/duplicate redactors, generic_json without its redactor and vice versa, malformed paths, unknown locale or mode). /admin/state shows generic_json only as counts. Found and fixed during the review: generic_json walks JSON recursively, so a deeply nested tool result could exhaust the stack; it now checks depth iteratively (limit 100) and treats deeper JSON as unredactable (request stays local). The pre-existing RecursionError of json.loads on extremely deep JSON (it reached the unexpected-error middleware as a 500 under ha_assist) now keeps the request local with the refusal; no payload left in either case. Regexes of the en pack use only bounded quantifiers. No secrets, hostnames or personal data added; test data is synthetic (example domains, published example IBANs, fictional UK/NANP numbers).",
  "findings": [],
  "tests": [
   {
-   "command": "every python command of .github/workflows/ci.yml, run in WSL Ubuntu with CI=1 (includes selftest_render_env, selftest_install, selftest_privilege_paths)",
+   "command": "python test/selftest_privacy_redactors.py",
    "result": "passed",
-   "evidence": "83 commands after the merge: all pass except check_pinned_references and check_public_changes (they need a git checkout WSL cannot resolve in this worktree; both rerun on Windows and passed) and test/run_tests.py, which the script started there by mistake outside the lock wrapper and which failed at its first route check; the suite then passed through the lock wrapper (entry below). selftest_render_env 14 OK, selftest_install 5 OK, selftest_privilege_paths all passed."
+   "evidence": "117 checks ALL OK: default corpus byte-identical (35 cases), every ch-de pattern and keyword group blocks, every default domain/device class/listed tool redacted, too-deep JSON stays local, en hits and non-hits, generic_json paths/keys/*/depth limit, named non-JSON stays local, keep_local mode, 13 refused configurations, nothing editable from the web UI, proxy refusal without provider call. Fault injection (AHV pattern removed; default mode flipped to keep_local) made it fail with 3 and 9 failures."
   },
   {
-   "command": "python test/selftest_pydeps.py && python tools/security/lock_requirements.py check",
+   "command": "python test/selftest_privacy_check.py",
    "result": "passed",
-   "evidence": "selftest_pydeps: all passed; Python locks: 0 problem(s)."
+   "evidence": "unchanged file, ALLE OK."
   },
   {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure; python test/check_adr_index.py; python test/selftest_control_flow.py && python test/check_control_flow.py; python test/check_pinned_references.py",
+   "command": "differential script outside the repository: origin/main privacy.py vs branch, default and 4 more configurations, 3 classifier outcomes",
    "result": "passed",
-   "evidence": "All checks passed; configuration ok; ADR index ok: 104 ADRs; control flow ok: 0 legacy findings; Pinned references: 0 finding(s)."
+   "evidence": "compared 12000 synthetic payloads, 0 differences (redacted body, rule hit, verdict journal, verdict body)."
   },
   {
-   "command": "python test/run_tests.py (end-to-end suite, run through a lock wrapper because of its fixed ports)",
+   "command": "every python command of the python job in .github/workflows/ci.yml on Windows except PostgreSQL integrations, run_tests.py, check_public_changes (separate entries) and check_adr_index (see limitations)",
    "result": "passed",
-   "evidence": "After the merge (router Python changed through main): 0 failures, STATE: passed."
+   "evidence": "76 commands passed (77 run; the 77th, check_adr_index, is listed under limitations)."
   },
   {
-   "command": "python test/check_public_changes.py --base $(git merge-base origin/main HEAD)",
+   "command": "python C:/<ops>/e2e/run_locked.py <worktree> (end-to-end suite through the lock wrapper)",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s)."
+   "evidence": "STATE: passed, 0 failures, 334 PASS lines, on the change rebased onto d29ece8; the later rebase onto b938990 only brought the secrets-renderer PR (render-env.sh, pydeps.py), not rerun. The suite does not exercise the privacy path."
+  },
+  {
+   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "result": "passed",
+   "evidence": "All checks passed; configuration ok; control flow ok, 0 findings."
+  },
+  {
+   "command": "python test/check_public_changes.py --base <merge-base>",
+   "result": "passed",
+   "evidence": "0 finding(s)."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -69,11 +78,11 @@
   }
  ],
  "limitations": [
-  "The store client was exercised against a fake store only; that the store answers a missing secret with HTTP 404 is assumed from its API. Any other status is treated as a failed fetch, keeps the existing file and is logged by name and status.",
-  "Pre-existing, both sources: a value ending in a backslash makes systemd's EnvironmentFile parser join the next line; that can lose the following key but cannot add a name. Not changed here.",
-  "As for the access file, only the file and its own folder are checked for owner and mode, not the folders above SECRET_FILE.",
-  "monitoring/render-monitoring.sh is unchanged (it never had the MQTT gate) and still treats a failed fetch like a missing name, which keeps its old file in both cases.",
-  "No real systemd, apt or venv run: install.sh was tested in its staging mode (--root, --no-venv); pydeps --without is covered by unit cases.",
-  "The code merged from main (PRs 178 and 181) was reviewed in their own records and is outside this record's change set; only its interaction with MQTT and secrets handling was re-checked here."
+  "python test/check_adr_index.py was run and reports one finding: ADR numbers not consecutive, because ADR-0105 to ADR-0124 belong to other open pull requests of the same series and ADR-0125 was assigned to this one. The index table was regenerated with --write and matches the files; the check passes once the earlier PRs are merged.",
+  "With the default unrecognised_tool_results: pass, tool results in formats no redactor knows still reach the provider unredacted (pre-existing; now documented, keep_local available).",
+  "No openHAB or ioBroker redactor: their tool-result formats could not be verified with real data.",
+  "The privacy classifier stays German/English (ADR-0077); the en pack's patterns are heuristics checked by test sentences, not a DLP guarantee.",
+  "The end-to-end suite does not cover the privacy path; it is covered by self-tests with fakes for classifier and provider.",
+  "ADR-0119 is proposed on another branch (#177); this change implements it and records one deviation in ADR-0125 for the maintainer to decide."
  ]
 }

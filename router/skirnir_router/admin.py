@@ -62,7 +62,11 @@ def _privacy_view(pc):
         return None
     return {"enabled": pc.enabled, "endpoint": pc.endpoint, "threshold": pc.threshold, "terms": len(pc.terms),
             "keywords": pc.keywords, "redact_domains": list(pc.redact_domains), "redact_device_classes": list(pc.redact_device_classes),
-            "redact_names": len(pc.redact_names), "redact_tools": list(pc.redact_tools)}
+            "redact_names": len(pc.redact_names), "redact_tools": list(pc.redact_tools),
+            # since 0.42.0: locale pack and redactors as facts; generic_json only as counts, like terms and names
+            "locale": pc.locale, "redactors": list(pc.redactors), "unrecognised_tool_results": pc.unrecognised_tool_results,
+            "generic_json": None if pc.generic_json is None else {"tools": len(pc.generic_json["tools"]),
+                                                                  "keys": len(pc.generic_json["keys"])}}
 
 
 def base_clients():
