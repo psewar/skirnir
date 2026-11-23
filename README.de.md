@@ -194,6 +194,7 @@ Meldeweg für Sicherheitslücken: [SECURITY.md](SECURITY.md).
 | [docs/operations.de.md](docs/operations.de.md) | Web-UI, Metriken, Home-Assistant-Entitäten, Agent- und Ollama-Updates, Schlüsselwechsel, Sichern und Zurückspielen, Namen, Messwerte |
 | [docs/troubleshooting.de.md](docs/troubleshooting.de.md) | Statuscodes, wartende Agenten, TLS-Fehler, Logs, Gedächtnis-Zustände |
 | [docs/reference.de.md](docs/reference.de.md) | Schnittstellen, GPU-Schutz, optionale Gedächtnis- und Sitzungsfunktionen, Rerank, OpenAI-kompatible Knoten, Grenzen, Repo-Layout |
+| [docs/protocol.de.md](docs/protocol.de.md) | Protokoll zwischen Router und Agent: Anmeldung, Rahmen, Nachrichten, JSON-Schemas, Konformitätstests (für einen eigenen Agenten) |
 | [docs/adr/](docs/adr/README.md) | Architecture Decision Records (englisch): warum Skirnir so gebaut ist |
 | [agent/README.md](agent/README.md) | Interna des Agenten |
 

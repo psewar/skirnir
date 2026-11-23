@@ -2,89 +2,96 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "b9389908f74964001ee1a5b74b37e787690231ad",
- "change_digest": "180b03b50f9fa64fd51fbc15e3724f55d7679b7a996ed1dc070744368751758e",
+ "base_sha": "5935bea72e2ac4999404c2aa162370962131c787",
+ "change_digest": "28493688e4257d3b07262a9cbe336a493c4fbe9a31480a1ce19292879f0ce85c",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
+  "AGENTS.md",
   "CHANGELOG.md",
-  "docs/adr/0105-currency-neutral-cost-keys.md",
-  "docs/adr/0106-language-dependent-defaults-live-in-the-configuration.md",
+  "README.de.md",
+  "README.md",
+  "agent/README.md",
+  "agent/protocol_conformance_test.go",
+  "docs/adr/0107-versioned-router-agent-protocol-with-a-written-specification.md",
   "docs/adr/README.md",
-  "docs/configuration.de.md",
-  "docs/configuration.md",
+  "docs/protocol.de.md",
+  "docs/protocol.md",
+  "docs/protocol/challenge.schema.json",
+  "docs/protocol/config-bundle.schema.json",
+  "docs/protocol/control-ollama-swap.schema.json",
+  "docs/protocol/control-ollama-update.schema.json",
+  "docs/protocol/control-update.schema.json",
+  "docs/protocol/control-upstream.schema.json",
+  "docs/protocol/facts.schema.json",
+  "docs/protocol/heartbeat-ack.schema.json",
+  "docs/protocol/heartbeat.schema.json",
+  "docs/protocol/hello.schema.json",
+  "docs/protocol/index.json",
+  "docs/protocol/node-refusal.schema.json",
+  "docs/protocol/ollama-state.schema.json",
+  "docs/protocol/power.schema.json",
+  "docs/protocol/request-head.schema.json",
+  "docs/protocol/response-head.schema.json",
+  "docs/protocol/status.schema.json",
   "docs/reference.de.md",
   "docs/reference.md",
   "docs/security/reviews/current.json",
-  "router/config.example.yaml",
-  "router/skirnir_router/admin.py",
-  "router/skirnir_router/agentupdate.py",
-  "router/skirnir_router/cloud.py",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/cost_keys.py",
-  "router/skirnir_router/fallback_observation.py",
-  "router/skirnir_router/metrics.py",
-  "router/skirnir_router/nodes.py",
-  "router/skirnir_router/ollamaupdate.py",
-  "router/skirnir_router/perf.py",
-  "router/skirnir_router/proxy.py",
-  "router/skirnir_router/settings.py",
-  "router/skirnir_router/tunnel.py",
-  "router/ui.html",
-  "test/run_tests.py",
-  "test/selftest_locale_neutral.py",
-  "test/selftest_ollama_push.py",
-  "test/test-config.yaml"
+  "test/protocol_schema.py",
+  "test/selftest_protocol.py"
  ],
  "risk_ids": [
-  "TM-02",
-  "TM-03",
-  "TM-08",
-  "TM-15",
+  "TM-07",
+  "TM-13",
+  "TM-14",
   "TM-16"
  ],
  "boundaries": [
-  "B2",
-  "B6",
+  "B3",
+  "B8",
   "B9"
  ],
- "summary": "Router 0.37.0, locale-neutral defaults (ADR-0105, ADR-0106 proposed). Cost keys budget_month / price_per_m with the old _chf names as aliases (cost_keys.py), normalised per layer in Config.merged and Config.parse, in PUT /admin/config (settings paths, cloud model bodies, merge with stored roles.yaml settings, client deletion) and in the settings view; both names with different values are refused, never resolved silently. router.cloud.currency (display only, ^[A-Z]{3}$, EDITABLE as str maxlen 3, escaped in ui.html) in the provider snapshot, start log and an info metric. Wire fields, usage data and metric names unchanged; catalogue views add the old price field. router.benchmark.prompt (config.yaml only, nonempty, <= 4000 characters) sent to local nodes only, result records a SHA-256 prefix, the prompt is not logged. observe_light default resolved by the configuration check; fallback_observation reads only the configuration. English texts in nodes/tunnel/update status/common/admin hints. Traced: settings allowlist (settings.coerce/spec_for) still applies after renaming because neutral_path only maps the exact provider budget key onto its allowlisted neutral path; every budget reader (cloud.budget_month, request_block_reason, budget_problems, snapshot, metrics) reads the normalised spec built by _parse_cloud, so a budget written under the old name keeps limiting spend (TM-08); write_overrides validates the merged probe before writing, so the web UI cannot persist a conflicting pair; ha.py untouched (reads unchanged budget_view fields). No credentials, routes, auth, tunnel, enrollment, data-class or cloud-payload logic changed. Re-reviewed after merging main (problems.py/ADR-0101, agent without GPU, secrets renderer): cloud.budget_problems from #178 now calls cloud.budget_month, and budget_month / request_cost also read the old key on an entry built in code (selftest_problems.py builds provider specs with budget_month_chf directly) - found by that test after the merge and fixed so a budget can never read as 0 = unlimited because of its name (TM-08). The translated strings are not part of the problems.py message catalogue; the only message-text check left (agentupdate retry delay for old agents) concerns agent-sent text, unchanged.",
+ "summary": "Documentation, schemas and tests only: docs/protocol.md (+ German twin) and docs/protocol/*.json specify the existing router-agent tunnel protocol as version 1 (ADR-0107, proposed); test/protocol_schema.py (dependency-free validator), test/selftest_protocol.py (added to ci.yml) and agent/protocol_conformance_test.go bind the specification to the router, the Go agent and test/fake_agent.py. No router or agent code, configuration, version, dependency or wire change. Traced B3: login (challenge, Ed25519 signature over nonce|node|pubkey, 32-KiB hello, enrollment limits, revocation), frame dispatch, request streams and the agent passthrough allowlist were read in registry.py, tunnel.py, poll.py, agent/tunnel.go, passthrough.go, heartbeat.go, facts.go; the documentation matches the code and the new tests now cross-check the allowlist (TM-14), the hello and its refusal cases (TM-07) and the update order fields (TM-13) in CI. B8: update and Ollama update orders are only described, their verification is unchanged. B9: one added CI step with no new action, permission or dependency; AGENTS.md gains a documentation rule and weakens no review policy. Tests bind only loopback (aiohttp TestServer, httptest) and start the fake agent as a subprocess without credentials. The published details (limits, message fields) were already public in the open code; the docs add that the configuration bundle (MQTT password) and the update token are secrets agents must not log. Examples use reserved domains/ranges only. Re-reviewed after merging main (#176, #178, #180, #181, #183) at merge-base 5935bea72e2a: the diff against main is again only this PR's documentation, schemas, tests, CI step and AGENTS.md rule; conflicts were resolved in docs/reference*.md and the ADR index. The schemas were brought up to agent 0.36.0 as the conformance tests demanded (facts and heartbeat gpu_present, GPU values and sensors absent without a GPU, game.enabled, game.via path with the legacy pfad, guard state not_applicable); the router's handling of these fields (registry.node_spec_from_entry, poll.apply_heartbeat, poll.note_game_memory) was read and is described as implemented. The end-to-end self-test now also runs the fake agent without a GPU. No router or agent code changed in this PR.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_locale_neutral.py",
+   "command": "python test/selftest_protocol.py",
    "result": "passed",
-   "evidence": "OK: 0 failed (62 checks, including the old key names on entries built in code), including the rejected cases: conflicting budget and price pairs in config.yaml, conflicting settings paths in roles.yaml and in PUT /admin/config, conflicting cloud model body, invalid currencies (eur, EURO, 5, empty, 'dollars' via settings), invalid benchmark prompts, observe_light with an unknown name or a non-list."
+   "evidence": "Ran 21 tests OK after the merge (Windows, Python 3.12), including both end-to-end runs (fake agent with and without a GPU) through the validating relay and the rejected cases (hello without pubkey/sig/t, 65-character node name, facts not an object -> 401; OLLAMA without up or with non-list tags dropped; POWER with unknown state dropped). Before the schema update it failed naming gpu_present and game.enabled."
   },
   {
-   "command": "all 74 python self-tests listed in .github/workflows/ci.yml after merging main (Windows, Python 3.12)",
+   "command": "cd agent && go test ./...",
    "result": "passed",
-   "evidence": "every file exited 0, including test/selftest_problems.py (all passed) and test/selftest_cpu_node.py; test/selftest_ollama_push.py adjusted to the English status message."
+   "evidence": "ok on Windows after the merge; TestProtocol* failed before the schema update naming Facts.gpu_present, GameFact.enabled and heartbeat gpu_present, and pass now (the heartbeat type table gained gpu_present from GPU.Present)."
+  },
+  {
+   "command": "cd agent && gofmt -l . && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./...",
+   "result": "passed",
+   "evidence": "gofmt empty, vet clean for host, windows and linux."
+  },
+  {
+   "command": "all python test/... and pwsh steps of the ci.yml python job (local runner script)",
+   "result": "passed",
+   "evidence": "80 steps ok on Windows; the PR-only check_public_changes step was run separately with the merge-base."
+  },
+  {
+   "command": "ruff check .",
+   "result": "passed",
+   "evidence": "All checks passed."
+  },
+  {
+   "command": "python router/router.py --check router/config.example.yaml --pure",
+   "result": "passed",
+   "evidence": "configuration ok."
   },
   {
    "command": "python test/check_adr_index.py",
    "result": "passed",
-   "evidence": "ADR index ok: 106 ADRs."
-  },
-  {
-   "command": "python test/run_tests.py (started through a local wrapper that serialises end-to-end runs)",
-   "result": "passed",
-   "evidence": "after merging main: 0 failures, STATE: passed (334 checks), including HA budget problem with the old key in test-config.yaml, roles.yaml written with the neutral key after a PUT with the old path, old price body shown under both names, skirnir_cloud_currency_info in /metrics."
-  },
-  {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure",
-   "result": "passed",
-   "evidence": "All checks passed!; configuration ok: 5 roles, 7 models in the catalog."
+   "evidence": "ADR index ok: 107 ADRs."
   },
   {
    "command": "python test/selftest_control_flow.py && python test/check_control_flow.py",
    "result": "passed",
-   "evidence": "control flow ok: 0 legacy findings."
-  },
-  {
-   "command": "python test/check_pinned_references.py ; python test/check_training_data.py ; python tools/security/lock_requirements.py check",
-   "result": "passed",
-   "evidence": "exit code 0 each."
+   "evidence": "control flow ok, 0 findings."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -92,15 +99,24 @@
    "evidence": "run after staging this record."
   },
   {
-   "command": "python test/check_public_changes.py --base <merge-base>",
+   "command": "python test/check_public_changes.py --base $(git merge-base origin/main HEAD)",
    "result": "passed",
-   "evidence": "Public-change scan: 0 finding(s); added lines manually reviewed for hosts, addresses and personal data."
+   "evidence": "Public-change scan: 0 finding(s)."
+  },
+  {
+   "command": "go test ./... on Linux",
+   "result": "not_run",
+   "evidence": "No Go toolchain in the local WSL; GOOS=linux go vet passed, CI runs go test on Linux and Windows."
+  },
+  {
+   "command": "python test/run_tests.py (end-to-end suite)",
+   "result": "not_run",
+   "evidence": "No router Python changed in this PR; the suite is required only for router changes."
   }
  ],
  "limitations": [
-  "No live router, real cloud provider or browser session; the web UI change was syntax-checked (node --check) and covered by the end-to-end API checks, not clicked through.",
-  "The Home Assistant cost sensor keeps the unit CHF (ha.py is outside this change); the budget problem text comes from the problems.py catalogue of ADR-0101 (de/en) and does not name the currency.",
-  "A roles.yaml edited by hand with both names and different values stops the router from loading the configuration (explicit error naming both keys) - intended fail-closed behaviour, documented.",
-  "Pre-existing, not introduced here: deleting a client in the same PUT that resets settings re-adds the reset settings from the stored file (admin._apply_delete_clients merges the stored block again); functional, not a security issue."
+  "PostgreSQL integrations not run: this PR touches no session, memory or storage code.",
+  "Pre-existing, not changed here: a heartbeat the router cannot apply is answered with the exception text in HBACK error to the approved agent; the router fails an open stream on an unknown frame type.",
+  "The specification describes what the code does today; it does not prove the absence of protocol flaws. Values and patterns are checked by the Python validator; the Go side checks structure, types and required fields."
  ]
 }
