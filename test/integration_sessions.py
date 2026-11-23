@@ -42,6 +42,9 @@ class SessionContract:
         self.sid = UUID(self.session["id"])
 
     async def asyncTearDown(self):
+        # A test may leave a Problem (a failed reopen) or a store it closed itself; only an open store is cleaned up.
+        if failed(self.store) or getattr(self.store, "closed", False):
+            return
         try:
             async with self.store.connection() as conn:
                 await conn.execute("DELETE FROM skirnir_sessions.sessions WHERE owner=ANY($1::text[])", [self.owner, self.other])
@@ -284,13 +287,16 @@ class SqliteTests(SessionContract, unittest.IsolatedAsyncioTestCase):
         for suffix in ("", "-wal", "-shm"):
             if os.path.exists(self.engine.path + suffix):
                 os.remove(self.engine.path + suffix)
-        stores = await asyncio.gather(*(self.engine.open(self.cfg) for _ in range(4)))
-        self.assertFalse(any(failed(store) for store in stores), stores)
-        created = await asyncio.gather(*(store.create(self.owner, "work", "private", {}) for store in stores))
-        self.assertEqual(len({row["id"] for row in created}), 4)
+        # Several processes starting at once on a file that does not exist yet: creation, the switch to WAL (which SQLite
+        # does not queue behind the busy handler) and the migration must all succeed for every opener.
+        stores = await asyncio.gather(*(self.engine.open(self.cfg) for _ in range(8)))
         for store in stores[1:]:
-            await store.close()
+            if not failed(store):
+                self.addAsyncCleanup(store.close)
         self.store = stores[0]
+        self.assertEqual([store for store in stores if failed(store)], [])
+        created = await asyncio.gather(*(store.create(self.owner, "work", "private", {}) for store in stores))
+        self.assertEqual(len({row["id"] for row in created}), 8)
         db = self.raw()
         try:
             self.assertEqual(db.execute("SELECT count(*) FROM schema_version").fetchone()[0], len(sqlite_migrations.MIGRATIONS))

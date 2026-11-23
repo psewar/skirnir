@@ -20,6 +20,7 @@ import asyncio
 import functools
 import json
 import os
+import random
 import re
 import sqlite3
 import time
@@ -152,11 +153,19 @@ def create_private(path):
 
 
 def tighten_companions(path):
-    if not hasattr(os, "fchmod"):
+    """Tighten the WAL files that exist to 0600; a symbolic link in their place is refused like one for the file."""
+    if not hasattr(os, "fchmod"):   # POSIX only, like create_private
         return
-    for suffix in ("-wal", "-shm", "-journal"):
-        if os.path.isfile(path + suffix) and not os.path.islink(path + suffix):
-            os.chmod(path + suffix, 0o600)
+    for suffix in ("-wal", "-shm"):
+        try:
+            fd = os.open(path + suffix, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except FileNotFoundError:  # exception-ok: SQLite creates and removes these files itself, also from another
+            # connection at this very moment, so whether one exists is only known by opening it (a check would race).
+            continue
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
 
 
 class Connection:
@@ -253,17 +262,19 @@ class SqliteSessionStore(CoreStore, ManagedStore, ReliabilityStore, ExchangeStor
 
     def connect(self):
         create_private(self.path)
+        # The busy timeout (connect's timeout, then the pragma first of all) covers every lock wait SQLite hands to the
+        # busy handler: BEGIN IMMEDIATE, the migration, every store call.
         db = sqlite3.connect(self.path, timeout=self.timeout_s, isolation_level=None)
         self.db = db
+        db.execute(f"PRAGMA busy_timeout={int(self.timeout_s * 1000)}")
         db.create_function("clock_timestamp", 0, self.clock)
         db.create_function("now", 0, lambda: self.transaction_time)
         db.create_function("lower", 1, lower, deterministic=True)
         # trusted_schema off: nothing stored in the file (a trigger, a view) may call an application function.
         # secure_delete: deleted sessions and payloads are overwritten in the file, not left in free pages (ADR-0076).
-        for pragma in ("PRAGMA trusted_schema=OFF", "PRAGMA foreign_keys=ON", "PRAGMA secure_delete=ON",
-                       f"PRAGMA busy_timeout={int(self.timeout_s * 1000)}"):
+        for pragma in ("PRAGMA trusted_schema=OFF", "PRAGMA foreign_keys=ON", "PRAGMA secure_delete=ON"):
             db.execute(pragma)
-        if db.execute("PRAGMA journal_mode=WAL").fetchone()[0] != "wal":
+        if self.switch_to_wal(db) != "wal":
             return unavailable("session store file system does not support SQLite's WAL mode; use a local disk")
         db.execute("PRAGMA synchronous=FULL")   # a commit the store reported is on disk, as with PostgreSQL's default
         tighten_companions(self.path)
@@ -275,6 +286,24 @@ class SqliteSessionStore(CoreStore, ManagedStore, ReliabilityStore, ExchangeStor
             raise  # exception-ok: re-raised unchanged after the rollback
         db.execute("COMMIT" if problem is None else "ROLLBACK")
         return problem
+
+    def switch_to_wal(self, db):
+        """The journal mode after asking for WAL. Switching a new file needs its exclusive lock, and SQLite does not wait
+        for a concurrent opener (a second process starting at the same moment) through the busy handler: it answers
+        SQLITE_BUSY at once, or keeps the old mode and reports that. So this asks again until the answer is "wal" or
+        timeout_s has passed; then a file system without WAL shows as the old mode, a lasting lock as the fault."""
+        deadline = time.monotonic() + self.timeout_s
+        while True:
+            try:
+                mode = db.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            except sqlite3.OperationalError as exc:  # exception-ok: whether the lock is free is only known by trying
+                # (see docstring); the case is told apart by SQLite's error code, never by the message.
+                if exc.sqlite_errorcode & 0xFF != sqlite3.SQLITE_BUSY or time.monotonic() >= deadline:
+                    raise  # exception-ok: another fault, or still busy after timeout_s: the startup boundary reports it
+                mode = None
+            if mode == "wal" or (mode is not None and time.monotonic() >= deadline):
+                return mode
+            time.sleep(0.005 + random.random() * 0.02)   # spread the retries of several openers
 
     def begin(self):
         self.db.execute("BEGIN IMMEDIATE")

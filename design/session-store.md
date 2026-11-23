@@ -150,7 +150,9 @@ differs ([ADR-0122](../docs/adr/0122-the-sqlite-session-store-runs-the-postgresq
   asyncio lock for its whole block and runs as one `BEGIN IMMEDIATE` transaction: one writer at a time, which is what
   the row locks, advisory locks and `SKIP LOCKED` achieve between PostgreSQL connections. Leases, the single pending
   turn, idempotent appends, outbox claims and exact outbox totals keep their meaning. A second process on the same file
-  (a backup, an accidental second router) waits up to `timeout_s` (`busy_timeout`) instead of interleaving.
+  (a backup, an accidental second router) waits up to `timeout_s` (`busy_timeout`) instead of interleaving. Switching
+  a new file to WAL is the one lock SQLite does not queue behind the busy timeout; the store asks again until it has WAL
+  or `timeout_s` has passed, so several processes starting on a new file at once all come up.
 * Cancellation or a timeout queues the rollback in the worker thread behind the statement that may still run and
   before the next caller's `BEGIN`; the caller gets 503 like on PostgreSQL.
 * `sqlite_store.translate` turns each PostgreSQL statement into SQLite once (cached): parameters, schema prefix, casts,
