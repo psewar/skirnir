@@ -2,150 +2,111 @@
   "schema_version": 1,
   "status": "completed",
   "reviewer": "Claude Code (Opus 5.5) repository security review",
-  "base_sha": "715e7a61789304784208f55f45033319d6c0cb43",
-  "change_digest": "2d4d3778cde01f3b139e03127681b6a13bdfa7e65914b10b28e45c1ed331af35",
+  "base_sha": "50f1eb2359676244f2bcfc3bcac099aa67414b72",
+  "change_digest": "b5ab189effbd4b74ea6ff339c6354c0f1d1ddaeda00e90c896085282d013a8e8",
   "reviewed_paths": [
-    ".github/dependabot.yml",
     ".github/workflows/ci.yml",
-    ".github/workflows/security.yml",
     "AGENTS.md",
     "CHANGELOG.md",
-    "README.de.md",
-    "README.md",
-    "design/router-container.md",
-    "docs/adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md",
+    "design/managed-context.md",
+    "design/memory-reliability.de.md",
+    "design/memory-reliability.md",
+    "design/session-store.md",
+    "design/shared-memory-interoperability.de.md",
+    "design/shared-memory-interoperability.md",
+    "docs/adr/0122-the-sqlite-session-store-runs-the-postgresql-statements-on-one-connection.md",
     "docs/adr/README.md",
+    "docs/configuration.de.md",
+    "docs/configuration.md",
     "docs/install-router.de.md",
     "docs/install-router.md",
+    "docs/operations.de.md",
+    "docs/operations.md",
+    "docs/reference.de.md",
+    "docs/reference.md",
     "docs/security/reviews/current.json",
-    "router/.dockerignore",
-    "router/Dockerfile",
+    "docs/security/threat-model.de.md",
+    "docs/security/threat-model.md",
     "router/compose.yaml",
-    "router/container/entrypoint.sh",
-    "router/container/healthcheck.py",
-    "router/requirements-container-lock.txt",
+    "router/config.example.yaml",
     "router/skirnir_router/common.py",
-    "test/selftest_container_image.py",
-    "test/smoke_container.sh",
-    "test/smoke_container_cert.py",
-    "tools/security/lock_requirements.py"
+    "router/skirnir_router/posture.py",
+    "router/skirnir_router/session_api.py",
+    "router/skirnir_router/session_store.py",
+    "router/skirnir_router/session_url.py",
+    "router/skirnir_router/sqlite_migrations.py",
+    "router/skirnir_router/sqlite_store.py",
+    "test/integration_context.py",
+    "test/integration_deletion_lifecycle.py",
+    "test/integration_interoperability.py",
+    "test/integration_sessions.py",
+    "test/selftest_context.py",
+    "test/selftest_isolation_rotation.py",
+    "test/selftest_log_hygiene_paths.py",
+    "test/selftest_posture.py",
+    "test/selftest_sessions.py",
+    "test/store_engines.py"
   ],
   "risk_ids": [
-    "TM-03",
-    "TM-14",
-    "TM-15",
-    "TM-16"
+    "TM-11",
+    "TM-12",
+    "TM-15"
   ],
   "boundaries": [
-    "B2",
-    "B8",
+    "B4",
+    "B5",
     "B9"
   ],
-  "summary": "New deployment path: an official router container image (ADR-0116, proposed in #177; ADR-0121 proposed here) plus a compose example, a CI build-and-start job and a static self-test. Router code changes only VERSION (0.38.0); no route, auth, enrollment, data-class, cloud or session logic changes. Supply chain (TM-16, B9): base image python:3.14-slim-trixie pinned by index digest (checked by check_pinned_references, updated by Dependabot); every Python package from the new router/requirements-container-lock.txt with all PyPI hashes, installed with --require-hashes --no-deps --only-binary=:all: (no sdist build scripts, no resolution), versions equal to the CI lock; verified in the build (pydeps verify, pip check, imports) and pip removed afterwards; lock_requirements check/verify-pypi and pip-audit now cover the lock. Host impact (TM-14, B8): the router runs as uid/gid 10001 with no capabilities (CapEff 0 verified), compose adds read-only root, no-new-privileges, cap_drop ALL; /etc/skirnir-router is mounted read-only and the program folder is root-owned, both verified unwritable from the running container; only the state and log volumes are writable. No secret is baked in (no ENV/ARG secret names, no COPY of configuration or certificates, .dockerignore excludes config/ and *.env); secrets arrive via env_file. Posture/ProcessView (TM-14): in the container a read-only certificate mount is a read-only mount, so tls_files_changeable is not raised; the start reported only control_on_network (info), so no posture code change was needed. Logs (TM-15): router log to stdout as before; entrypoint sets umask 077 like UMask=0077 (state files observed 0600). The health probe sends GET /api/version (auth-exempt) over loopback without certificate verification and carries no secret. --init runs as root only in a one-off container with the config folder writable, equivalent to sudo router.py --init on a host, and hands config.yaml to root:10001 0640 like setup_init.readable_for_router. The compose PostgreSQL service is not published to the host and gets its password from its own env file; locally built images use pull_policy: never so a same-named registry image is never pulled. CI job container builds and runs PR code with Docker on the runner without secrets (persist-credentials false) and pushes nothing. Refreshed after merging origin/main with the whole first portability wave (router 0.37.2, agent 0.36.0, ADRs 0101-0120, including install.sh --without-mqtt and pydeps --without): no router requirement changed, so the container lock stays as pinned; the image's pydeps.py verify call is unaffected (--without is optional); install.sh's program-file list is still covered by the image (selftest_container_image parity check). Conflicts were only VERSION, CHANGELOG, the ADR index and this record; the changed paths are the same 23 as reviewed. Checks re-run on the merged tree.",
-  "findings": [
-    {
-      "id": "container-published-ports-bypass-host-firewall",
-      "evidence": "router/compose.yaml publishes 11434 and 11435 on all host addresses (as the systemd unit listens on 0.0.0.0). Docker forwards published ports with its own packet-filter rules before ufw's or firewalld's usual INPUT rules, so an operator following the existing Firewall section could leave the control port reachable from everywhere (TM-03 exposure of the admin UI and tunnel; login and TLS still apply).",
-      "resolution": "docs/install-router.md and .de.md (Container) say so and name the remedies: the DOCKER-USER chain, publishing on one host address, or 127.0.0.1 behind a reverse proxy. The default stays all addresses because remote agents must reach 11435; control_auth and TLS remain the controls.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "container-lock-not-audited",
-      "evidence": "The first draft added router/requirements-container-lock.txt without adding it to the pip-audit of hash-locked sets in .github/workflows/security.yml, so a vulnerable pinned version in the image would not have been reported (TM-16).",
-      "resolution": "security.yml audits it with pip-audit --require-hashes --disable-pip; lock_requirements.py verify-pypi and check include it. Local run: No known vulnerabilities found.",
-      "disposition": "fixed"
-    },
-    {
-      "id": "container-local-image-name-could-be-pulled",
-      "evidence": "compose.yaml refers to the locally built image by the short name skirnir-router; without a pull policy, compose (or Podman short-name resolution) would try a registry when the local image is missing and could run an unrelated image of that name (TM-16).",
-      "resolution": "pull_policy: never on the router and the locally built embed service; test/selftest_container_image.py asserts it for the router.",
-      "disposition": "fixed"
-    }
-  ],
+  "summary": "Router 0.39.0: the session store is chosen by the scheme of its URL (implements ADR-0114 from #177; ADR-0122 proposed). postgresql:// and postgres:// open the unchanged PostgresSessionStore (asyncpg already accepted only these schemes, so no existing installation changes); sqlite:///<file> opens a new SqliteSessionStore in router.state_dir (absolute with sqlite:////...). Any other scheme, a SQLite URL with a query, fragment, '..', a control character or :memory: is a fixed 400 Problem before anything opens; the URL never appears in a Problem, log line or posture finding (a PostgreSQL URL may carry a password). B4 (router <-> session store): the SQLite store reuses CoreStore/ManagedStore/ReliabilityStore/ExchangeStore unchanged (create/get/update/delete/append/read moved verbatim from PostgresSessionStore into CoreStore), so every owner-scoped WHERE clause, lease check, idempotency comparison and deletion-lifecycle step is the same code on both engines; sqlite_store.translate rewrites only fixed server statements (parameters stay bound, never interpolated; the cache key is the constant SQL text). Concurrency: one connection used by one worker thread, one asyncio lock per call, BEGIN IMMEDIATE per call; cancellation/timeouts queue the rollback in the same FIFO thread before the next BEGIN, so no transaction is shared between callers (tested: timeout and cancellation while another process holds the file lock, the next call sees no leftovers). A second process on the same file serializes on the file lock (busy_timeout = timeout_s). Isolation is verified by the same two-principal contract tests on both engines, through the HTTP API too. File: created 0600 via os.open with O_NOFOLLOW where available (a symlink in place of the file is refused), an existing file and its -wal/-shm/-journal companions are chmod 0600 at every start (ADR-0056 spirit); the router unit's UMask=0077 applies too. trusted_schema=OFF so a tampered file cannot make triggers/views call application functions (our triggers use none; Unicode lower/clock functions are only used in top-level statements); STRICT tables and json_valid checks reject wrongly typed values; foreign keys on (cascade delete). Driver/file faults stay at the existing `database` boundary (fixed UNAVAILABLE); startup logs only class, errno and SQLite error name. B4/B5 deletion and restore (TM-12, ADR-0076): delete/cleanup/replay_deletions/outbox_* are the shared mixin code, the deletion journal replay runs unchanged at start before the outbox worker; tested on SQLite: session delete with/without memory, deletion requested in flight, retention, simulated restore + replay, stuck/reconcile listing, and a real file backup (sqlite3 backup API) restored over the store file then replayed (session gone, pending send marked deleted without payload). secure_delete=ON overwrites deleted rows in the database file (tested: a deleted marker is absent from the file after close); older page versions remain in the -wal file until the next checkpoint and in backups (documented, comparable to PostgreSQL dead tuples/WAL). B9: posture reports session_store_url_unsupported (medium, URL not printed), session_store_sqlite_file (info: path and mode, backup command) and session_store_file_readable (medium, POSIX mode & 077). No new route, auth path, network listener, egress or dependency (stdlib sqlite3; no lock change). Memory outbox: OutboxStore is now its own Protocol; memory.py still takes the session store as outbox, so outbox_enabled still requires session_store.enabled, now on either engine. Tests changed: the four integration files run one contract class per engine via test/store_engines.py; selftests using a patched PostgresSessionStore.open now set a postgresql:// shaped synthetic DSN (the factory refuses scheme-less values). CI: the SQLite halves are added to the python job; the sessions-postgres job keeps its name (required check) and runs both engines. Re-reviewed after merging origin/main (first portability wave, ADR-0101..0120 incl. ADR-0114 proposed, and #185 router container image, router 0.38.0, ADR-0121) into the branch: conflicts only in CHANGELOG (v0.44.0 on top), VERSION (0.39.0), ADR index (regenerated, now gap-free 0001-0122), the install-router package row (both sides kept), AGENTS.md (container rules plus both-engine integrations) and this record. The image copies the whole skirnir_router package, so the new modules ship in it; sqlite3 is in its Python. Checked inside the built image (Python 3.14, SQLite 3.46.1): the 20 SQLite contract tests pass as user 10001, and with --read-only, cap-drop ALL, no-new-privileges and a state volume the store opens sqlite:///sessions.db in /var/lib/skirnir-router, writes, and the file is 0600 owned by 10001. compose.yaml and install-router (EN/DE) name sqlite:/// as the single-host option. ADR-0114 stays proposed: repository practice accepts ADRs in a separate maintainer PR (e.g. ADR-0098..0100).",
+  "findings": [],
   "tests": [
     {
-      "command": "bash test/smoke_container.sh --engine podman (as root inside the local rootful Podman machine)",
+      "command": "python test/integration_sessions.py (SQLite; Windows Python 3.12 and WSL Python 3.11; PostgreSQL 16 with SKIRNIR_TEST_SESSION_DSN in WSL)",
       "result": "passed",
-      "evidence": "On the merged tree 15 of the script's 16 checks ok: build, uid/gid 10001, no secret in the image environment, --check of config.example.yaml, --init writes config.yaml root:10001 0640, healthcheck HEALTH: ok 0.11.0-router0.38.0, uid 10001, CapEff 0000000000000000, configuration and program folders read-only, state_dir writable, posture 0 high 0 medium 1 info (control_on_network), no tls_files_changeable, no errors in the log. The failing check is the published port: inside this WSL-based Podman machine forwarding to 127.0.0.1 does not answer (environment); the CI Docker run of the same script passed it."
+      "evidence": "33 tests on Linux (13 PostgreSQL, 20 SQLite) incl. two-principal isolation, HTTP 404 for foreign owner, timeout/cancel while another process holds the lock, migration rollback and newer schema, 0600 file/WAL modes and re-tightening, refused symlink, unsupported URLs refused without opening, closed store 503, deleted marker absent from the file; on Windows the POSIX-only mode/symlink tests skip."
     },
     {
-      "command": "podman run ... -p 127.0.0.1:28434:11434 skirnir-router-smoke, then curl -sk https://127.0.0.1:28434/api/version from the Windows host",
+      "command": "python test/integration_context.py, integration_deletion_lifecycle.py, integration_interoperability.py (both engines, WSL with disposable PostgreSQL 16; SQLite also on Windows)",
       "result": "passed",
-      "evidence": "{\"version\": \"0.11.0-router0.38.0\"} through the published port; the container IP answered the same inside the machine. (run before the merges; the CI Docker job checks the published port on every run)"
+      "evidence": "24 / 13 / 51 tests OK: leases, serialized claims, expired workers, compactions, managed inference over all protocols, deletion lifecycle incl. journal replay and a real SQLite file backup restored and replayed, outbox claims/verification/retries/totals/capacity, handoff export/import, discovery cursor. PostgreSQL-only relay tests (asyncpg pool) unchanged and passing."
     },
     {
-      "command": "bash test/smoke_container.sh --engine podman --no-build --selftests",
+      "command": "pg-testlauf: all run steps of the CI jobs python and sessions-postgres in WSL (Python 3.11, PostgreSQL 16)",
       "result": "passed",
-      "evidence": "On the merged tree: 67 router self-tests pass inside the image (Python 3.14, read-only root, uid 10001, source mounted read-only)."
+      "evidence": "After the merge: 87 steps ok, including all four integration files in both jobs (PostgreSQL 16 and SQLite) and check_adr_index (122 ADRs). Red only from the WSL environment: selftest_pinned_references (worktree gitdir), the two pwsh selftests, selftest_pydeps/selftest_sbom/selftest_container_image (no packaging module there); all six pass on Windows."
     },
     {
-      "command": "python test/selftest_container_image.py",
+      "command": "python test/selftest_sessions.py; python test/selftest_posture.py; selftest_context, selftest_memory, selftest_interoperability, selftest_reliability, selftest_verified_delivery, selftest_deletion_lifecycle, selftest_isolation_rotation, selftest_log_hygiene_paths",
       "result": "passed",
-      "evidence": "Ran 17 tests OK (Dockerfile pinning, install flags, uid, no secrets, install.sh file parity, layout, lock coverage and versions, compose limits, healthcheck with HTTP, TLS, 404, non-router answer, refused connection, missing and broken configuration)."
+      "evidence": "new: URL parsing (rejected schemes and unsafe SQLite paths without echoing the URL), unsupported scheme stops startup without opening a driver, every translation rule, value conversion, both engines provide all SessionStore/OutboxStore methods; posture codes session_store_url_unsupported, session_store_sqlite_file, session_store_file_readable and no password in output."
     },
     {
-      "command": "python tools/security/lock_requirements.py check && python tools/security/lock_requirements.py verify-pypi",
+      "command": "python test/run_tests.py (end-to-end suite, run through a local lock wrapper that serializes runs)",
       "result": "passed",
-      "evidence": "Python locks: 0 problem(s); PyPI verification: 0 problem(s)."
+      "evidence": "0 failures, STATE: passed (before and after the merge)."
     },
     {
-      "command": "python -m pip_audit --require-hashes --disable-pip -r router/requirements-container-lock.txt",
+      "command": "ruff check .; python router/router.py --check router/config.example.yaml --pure; python test/selftest_control_flow.py && python test/check_control_flow.py; python test/check_pinned_references.py; python tools/security/lock_requirements.py check",
       "result": "passed",
-      "evidence": "No known vulnerabilities found."
+      "evidence": "all clean (control flow: 0 findings; every new except/raise carries exception-ok)."
     },
     {
-      "command": "python -m pip install --dry-run --only-binary=:all: --require-hashes --no-deps (cp314, manylinux x86_64 and aarch64) -r router/requirements-container-lock.txt",
+      "command": "python test/check_public_changes.py --base <merge-base>",
       "result": "passed",
-      "evidence": "17 wheels resolve on both architectures."
+      "evidence": "Public-change scan: 0 finding(s); added lines manually reviewed (reserved addresses, example.invalid, synthetic credentials assembled)."
     },
     {
-      "command": "python test/check_pinned_references.py && python test/selftest_pinned_references.py",
+      "command": "podman build of router/Dockerfile; integration_sessions.py SqliteTests and an open/write of sqlite:///sessions.db in the state volume inside the image",
       "result": "passed",
-      "evidence": "Pinned references: 0 finding(s); selftest 0 failure(s)."
-    },
-    {
-      "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/selftest_control_flow.py && python test/check_control_flow.py",
-      "result": "passed",
-      "evidence": "ruff clean; configuration ok; control flow ok: 0 findings."
-    },
-    {
-      "command": "python test/selftest_pydeps.py ; selftest_dependency_audit.py ; selftest_sbom.py ; selftest_install.py ; selftest_init.py ; selftest_posture.py ; selftest_process_view.py ; selftest_english_names.py",
-      "result": "passed",
-      "evidence": "all passed / OK."
-    },
-    {
-      "command": "python test/check_public_changes.py --base $(git merge-base origin/main HEAD)",
-      "result": "passed",
-      "evidence": "Public-change scan: 0 finding(s) after replacing a DSN example in compose.yaml with prose."
-    },
-    {
-      "command": "python tools/security/review.py check --base origin/main --head INDEX",
-      "result": "passed",
-      "evidence": "run after staging this record."
-    },
-    {
-      "command": "python test/run_tests.py (end-to-end suite, run through a local lock so parallel runs do not share ports)",
-      "result": "passed",
-      "evidence": "STATE: passed, 0 failures (334 PASS lines) on the tree with the whole first wave merged; also passed on the two earlier trees of this PR."
-    },
-    {
-      "command": "python test/check_adr_index.py",
-      "result": "passed",
-      "evidence": "ADR index ok: 121 ADRs (0101-0120 now on main)."
-    },
-    {
-      "command": "CI job container on the previous push of this PR (Docker, GitHub runner)",
-      "result": "passed",
-      "evidence": "All 16 smoke checks ok including /api/version over the published port; 63 router self-tests inside the image."
+      "evidence": "20 SQLite tests OK in the image (Python 3.14, SQLite 3.46.1, user 10001); store in /var/lib/skirnir-router with read-only root, no capabilities: file 0600, uid 10001. test/smoke_container.sh itself was not run locally (its bind mounts assume a Linux host)."
     }
   ],
   "limitations": [
-    "The image's Debian base packages are not scanned (no container image scanner in CI); pip-audit covers only the Python lock. Base updates arrive as Dependabot digest PRs.",
-    "Publishing to a registry, an image SBOM and build provenance (ADR-0116) are not implemented: CI builds and tests only; publishing is the maintainer's release decision.",
-    "compose.yaml was validated with docker-compose config (default, sessions and decision profiles); a full compose up was not run. The smoke test starts the container with the same flags as compose.yaml. The sessions and decision services were not started.",
-    "Secrets passed as environment variables are visible to anyone who can inspect the container (docker group, root-equivalent), comparable to secrets.env readable by root and the router's group on a host.",
-    "The --init one-off container runs as root with the engine's default capabilities and a writable bind mount, by design (like sudo router.py --init).",
-    "The CI container job runs PR code in Docker on the runner without secrets, as the existing jobs run PR Python; the ci.yml and security.yml changes need explicit maintainer review.",
-    "Locally the smoke script's published-port check cannot connect inside the WSL-based Podman machine, so its last line is STATE: failed there; the CI Docker job is the authoritative run."
+    "Deleted content can remain in the -wal file until the next checkpoint (about 4 MiB of writes, or router stop) and in backups; documented in design/session-store.md, comparable to PostgreSQL dead tuples and WAL segments.",
+    "The symlink check (O_NOFOLLOW) happens when the router creates/opens the file; sqlite3.connect opens the path again afterwards, and the -wal/-shm files are opened by SQLite itself. Exploiting that gap needs write access to the router's state folder, which already means control of the router's files.",
+    "The whole SQLite store is one writer at a time; a slow call (large history read) delays others up to timeout_s, then they answer 503.",
+    "ADR-0114's separate outbox-only store is not implemented; the outbox remains in the session store (now on either engine).",
+    "Not tested on a real router host or with a large SQLite file; CI covers Linux, Windows was used for development runs.",
+    "test/smoke_container.sh was not run locally (Windows host); CI's container job runs it, including the router self-tests inside the image."
   ]
 }
