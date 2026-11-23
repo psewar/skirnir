@@ -20,6 +20,7 @@ from . import cost_keys
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, REASONING_OFF, THINK_MODES, TRUST_LEVELS, log, open_private, tls_fingerprint
 from .outcome import Problem, failed, invalid
+from .problems import LANGUAGES as PROBLEM_LANGUAGES
 
 
 def _d(path):
@@ -78,7 +79,8 @@ SCHEMA = {
     "router": {
         "listen": None, "control_listen": None, "public_url": None, "state_dir": None, "control_tls": {"cert": None, "key": None},
         "ollama_poll_s": None, "heartbeat_interval_s": None, "heartbeat_stale_s": None, "offline_after_misses": None,
-        "agent_missing_problem_s": None, "ram_spill_problem_gib": None, "expose_concrete_models": None, "request_timeout_s": None,
+        "agent_missing_problem_s": None, "ram_spill_problem_gib": None, "problem_language": None, "expose_concrete_models": None,
+        "request_timeout_s": None,
         "toolcall_rescue": None,
         # since 0.37.0: the warm benchmark's prompt (perf.py); tok/s depends on its language, so measurements are comparable
         # only with the same prompt
@@ -379,6 +381,10 @@ class Config:
             self.hb_stale_s = 2 * self.hb_interval_s + 1
         self.agent_missing_s = float(r.get("agent_missing_problem_s", _d("router.agent_missing_problem_s")))   # Agent was there and silent -> HA problem
         self.ram_spill_problem_gib = float(r.get("ram_spill_problem_gib", _d("router.ram_spill_problem_gib")))   # model in system RAM -> HA problem
+        # Router 0.35.0 (ADR-0101): language of the problem texts for HA and /admin/problems; de = the texts before 0.35
+        self.problem_language = r.get("problem_language", _d("router.problem_language"))
+        if self.problem_language not in PROBLEM_LANGUAGES:
+            return invalid(f"router.problem_language must be one of {PROBLEM_LANGUAGES}, not {self.problem_language!r}")
         self.expose_concrete = bool(r.get("expose_concrete_models", False))
         self.request_timeout_s = float(r.get("request_timeout_s", _d("router.request_timeout_s")))
         self.heartbeat_token = r.get("heartbeat_token") or ""

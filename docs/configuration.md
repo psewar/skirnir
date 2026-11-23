@@ -133,6 +133,9 @@ roles:
   to a large model moves there. A light game (measured: 735 MiB, 2 %) leaves the node free, and prewarm still runs; a
   prewarm skipped while the game was still being judged runs once it counts as light or has ended (0.8.8). An
   agent that does not report GPU use gets the old behaviour. `game_heavy` and its reason are in `/admin/state`.
+  Since agent 0.36.0 `game.enabled: false` in the agent configuration switches detection off (ADR-0103); the agent then
+  reports `enabled: false` and the router knows no game for the node. A node without a GPU (`gpu_present: false`,
+  ADR-0102) has no GPU busy detection; the router sizes its models by the memory facts below.
   When available RAM or free commit stays below `memory_pressure.min_free_gib` (8 GiB) for
   `memory_pressure.polls` heartbeats (2), the node is under memory pressure: nothing is loaded cold and no prewarm runs,
   loaded models keep answering and nothing is unloaded. Reason code `memory_pressure` with `Retry-After` 60 s.

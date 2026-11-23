@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 
 from aiohttp import ClientTimeout
 
-from . import cost_keys, state
+from . import cost_keys, problems, state
 from .common import DATA_CLASSES_DEFAULT, REASONING_OFF, log, parse_tool_args, read_env_value
 from .nodes import Breaker
 
@@ -312,16 +312,25 @@ def currency():
     return (getattr(state.CFG, "cloud", None) or {}).get("currency") or cost_keys.CURRENCY_DEFAULT
 
 
+def _neutral(entry, aliases, key):
+    """The value of a neutral cost key; on an entry that did not pass through the configuration check (a spec built
+    in code), the old name with the same meaning. A budget must never read as 0 = unlimited because of the name."""
+    if key in entry:
+        return entry[key]
+    old = next((o for o, n in aliases.items() if n == key), None)
+    return entry.get(old) if old else None
+
+
 def budget_month(spec):
     """Monthly budget of a provider in the catalogue currency; 0 = none. config.py already moved the old name
-    budget_month_chf to budget_month (ADR-0105)."""
-    return float(spec.get("budget_month") or 0)
+    budget_month_chf to budget_month (ADR-0105); a spec built elsewhere may still carry the old name."""
+    return float(_neutral(spec, cost_keys.PROVIDER_ALIASES, "budget_month") or 0)
 
 
 def request_cost(model, prompt_tokens, completion_tokens):
     """Cost of one request in the catalogue currency (models.<m>.price_per_m per million tokens)."""
     e = state.CFG.models.get(model) or {}
-    p = e.get("price_per_m") or {}
+    p = _neutral(e, cost_keys.MODEL_ALIASES, "price_per_m") or {}
     return (prompt_tokens or 0) / 1e6 * float(p.get("input", 0)) + (completion_tokens or 0) / 1e6 * float(p.get("output", 0))
 
 
@@ -340,17 +349,19 @@ def budget_view():
 
 
 def budget_problems():
+    """Problem records (problems.py, ADR-0101): budget exhausted or above warn_at_percent, per provider."""
     probs = []
     for name, t in state.CLOUD.items():
         budget = budget_month(t.spec)
         if not budget:
             continue
-        pct = 100 * spend_month(name) / budget
+        spend = spend_month(name)
+        pct = 100 * spend / budget
         warn = float(t.spec.get("warn_at_percent", 80))
         if pct >= 100:
-            probs.append(f"Cloud {name}: Monatsbudget erschoepft ({spend_month(name):.2f}/{budget:.2f})")
+            probs.append(problems.make("cloud_budget_exhausted", subject=name, provider=name, spend=spend, budget=budget))
         elif pct >= warn:
-            probs.append(f"Cloud {name}: {pct:.0f} % des Monatsbudgets ({spend_month(name):.2f}/{budget:.2f})")
+            probs.append(problems.make("cloud_budget_warning", subject=name, provider=name, spend=spend, budget=budget, percent=pct))
     return probs
 
 

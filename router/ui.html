@@ -36,6 +36,7 @@
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
   .muted { color:var(--muted); } .warn { color:var(--warn); } .bad { color:var(--bad); } .ok { color:var(--ok); }
   pre { background:#0b0f14; border:1px solid var(--line); border-radius:4px; padding:8px; white-space:pre-wrap; max-height:260px; overflow:auto; font-size:12px; }
+  ul.problems { list-style:none; margin:0; padding:0; } ul.problems li { padding:2px 0; } ul.problems code { margin-right:6px; }
   .decisions { max-height:60vh; overflow:auto; }
   .decisions div { font-family: ui-monospace, Consolas, monospace; font-size:12px; padding:2px 0; border-bottom:1px dashed var(--line); }
   .dec-ctl { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:4px 0 8px; font-size:13px; }
@@ -90,6 +91,10 @@
   <button data-tab="einstellungen" onclick="showTab('einstellungen')">Einstellungen<span class="dot" hidden>●</span></button>
 </nav>
 <main id="main" data-active="uebersicht">
+  <section class="wide" data-tab="uebersicht">
+    <h2>Probleme <span class="muted" style="font-weight:normal">– dieselben wie das HA-Attribut problems und skirnir_problem in /metrics</span></h2>
+    <ul class="problems" id="problems"><li class="muted">–</li></ul>
+  </section>
   <section class="wide" data-tab="uebersicht">
     <h2>Context Gateway / Memory</h2>
     <div class="tiles" id="context-services"><span class="muted">Status wird geladen / loading status</span></div>
@@ -547,6 +552,12 @@ const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Te
   "neue Version hinterlegt": "new version staged",
   "Agent auf {v} aktualisieren? Der Dienst startet neu, Ollama und STT auf dem Knoten damit auch.": "Update agent to {v}? The service restarts, and so do Ollama and STT on the node.",
   "Registereintrag löschen?": "Delete registry entry?",
+  "Probleme": "Problems",
+  "– dieselben wie das HA-Attribut problems und skirnir_problem in /metrics": "– the same as the HA attribute problems and skirnir_problem in /metrics",
+  "keine": "none",
+  "kritisch": "critical",
+  "Warnung": "warning",
+  "Probleme nicht abrufbar: {e}": "Problems unavailable: {e}",
 };
 function t(s, vars) {   // Uebersetzung (Fallback: deutscher Text) und {name}-Platzhalter aus vars
   let r = LANG === 'de' ? s : (I18N_EN[s] ?? s);
@@ -1310,10 +1321,32 @@ async function renderContextServices() {
     }
   } catch (_) { document.getElementById('context-services').textContent = 'Status unavailable'; }
 }
+// Router 0.35.0 (ADR-0101): active problems as records; texts in the UI language. Built with textContent only, so a node or
+// model name reported by an agent stays text (ADR-0065).
+async function renderProblems() {
+  const root = document.getElementById('problems');
+  try {
+    const r = await api('/admin/problems?lang=' + LANG);
+    root.replaceChildren();
+    if (!r.problems.length) {
+      const li = document.createElement('li'); li.className = 'ok'; li.textContent = t('keine'); root.append(li); return;
+    }
+    for (const p of r.problems) {
+      const li = document.createElement('li'); li.className = p.severity === 'critical' ? 'bad' : 'warn';
+      const sev = document.createElement('b'); sev.textContent = (p.severity === 'critical' ? t('kritisch') : t('Warnung')) + ' ';
+      const code = document.createElement('code'); code.textContent = p.code;
+      const msg = document.createElement('span'); msg.textContent = p.message;
+      li.append(sev, code, msg); root.append(li);
+    }
+  } catch (e) {
+    const li = document.createElement('li'); li.className = 'muted'; li.textContent = t('Probleme nicht abrufbar: {e}', { e: e.message });
+    root.replaceChildren(li);
+  }
+}
 let TICK = 0;
-async function refresh() { STATE = await api(decisionsUrl()); await loadMetrics(); await renderContextServices(); sampleLive(); renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderOps(); renderDecisions();
+async function refresh() { STATE = await api(decisionsUrl()); await loadMetrics(); await renderContextServices(); await renderProblems(); sampleLive(); renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderOps(); renderDecisions();
   if (!dirty && (++TICK % 5 === 0)) { CFG = await api('/admin/config?lang=' + LANG); renderModels(); } }   // Konfiguration aendert sich selten: alle 15 s statt 3 s
-async function load() { CFG = await api('/admin/config?lang=' + LANG); STATE = await api(decisionsUrl()); await loadMetrics(); await renderContextServices(); sampleLive(); dirty = false; renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderModels(); renderRoles(); renderSettings(); renderClients(); renderOps(); renderDecisions(); $('#msg').textContent = ''; }
+async function load() { CFG = await api('/admin/config?lang=' + LANG); STATE = await api(decisionsUrl()); await loadMetrics(); await renderContextServices(); await renderProblems(); sampleLive(); dirty = false; renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderModels(); renderRoles(); renderSettings(); renderClients(); renderOps(); renderDecisions(); $('#msg').textContent = ''; }
 // Rollen-Editor setzt nur `dirty`; Tab-Punkt daraus ableiten (Einstellungen/Katalog pflegen ihre Punkte selbst)
 $('#roles').addEventListener('change', () => { rolesDirty = true; markDirty(); });
 $('#roles').addEventListener('click', e => { if (e.target.tagName === 'BUTTON') { rolesDirty = true; setTimeout(markDirty, 0); } });

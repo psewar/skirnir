@@ -135,6 +135,9 @@ roles:
   Spiel (gemessen: 735 MiB, 2 %) lässt den Knoten frei, und das Vorwärmen läuft weiter; ein Vorwärmen, das ausgelassen wurde,
   während das Spiel noch beurteilt wurde, läuft, sobald es als leicht gilt oder beendet ist (0.8.8). Ein Agent, der keine
   GPU-Nutzung meldet, bekommt das alte Verhalten. `game_heavy` und sein Grund stehen in `/admin/state`.
+  Seit Agent 0.36.0 schaltet `game.enabled: false` in der Agent-Konfiguration die Erkennung ab (ADR-0103); der Agent meldet
+  dann `enabled: false`, und der Router kennt für den Knoten kein Spiel. Ein Knoten ohne GPU (`gpu_present: false`,
+  ADR-0102) hat keine GPU-busy-Erkennung; der Router bemisst seine Modelle nach den Speicherfakten unten.
   Liegen verfügbarer RAM oder freier Commit `memory_pressure.polls` Heartbeats lang (2) unter `memory_pressure.min_free_gib`
   (8 GiB), steht der Knoten unter Speicherdruck: nichts wird kalt geladen, kein Prewarm; geladene Modelle antworten weiter,
   entladen wird nichts. Grund-Code `memory_pressure` mit `Retry-After` 60 s. `skirnir-agent game` zeigt, was der Agent erkennt.

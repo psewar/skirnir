@@ -101,6 +101,8 @@ router:
                                   # POST /v1/heartbeat/<node> (Tests, Diagnose); registrierte Agenten brauchen keinen Token
   agent_missing_problem_s: 300  # Agent hat schon gemeldet und schweigt seit 5 min -> HA-Problem (Alarm-Automation)
   ram_spill_problem_gib: 0.5    # a loaded model with at least this much in system RAM (runs partly on the CPU) -> HA problem; 0 = off
+  problem_language: de          # language of the problem texts (HA attribute problems, /admin/problems): de (default, the texts
+                                # before router 0.35) or en; codes and the /metrics gauge skirnir_problem do not change (ADR-0101)
   expose_concrete_models: true   # konkrete Modellnamen werden 1:1 geroutet (404 wenn kein Knoten sie hat); Rollen = nach Zweck
   request_timeout_s: 600
   # benchmark:                   # warm benchmark in the model catalogue (Router 0.37.0); tok/s depends on the language of

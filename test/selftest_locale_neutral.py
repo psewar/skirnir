@@ -97,6 +97,12 @@ def cost_keys_in_config(tmp):
     state.CFG = cfg
     cost = cloud.request_cost("openai:gpt-5-mini", 1_000_000, 500_000)
     check("request cost uses the price under the neutral key", abs(cost - 3.0) < 1e-9, str(cost))
+    check("a provider spec built in code with the old budget name still limits (never 0 = unlimited)",
+          cloud.budget_month({"budget_month_chf": 5.0}) == 5.0 and cloud.budget_month({"budget_month": 6, "budget_month_chf": 5}) == 6.0
+          and cloud.budget_month({}) == 0.0)
+    cfg.models["synthetic:old"] = {"cloud": "openai", "price_chf_per_m": {"input": 2.0, "output": 0}}
+    check("a catalogue entry built in code with the old price name is still charged",
+          abs(cloud.request_cost("synthetic:old", 1_000_000, 0) - 2.0) < 1e-9)
     cfg = load(tmp, price(example(), price_per_m=old, price_chf_per_m={"input": 2.0, "output": 4.0}))
     check("catalogue: both price names with different values are refused", failed(cfg) and "price_chf_per_m" in cfg.message
           and "models.openai:gpt-5-mini" in cfg.message, getattr(cfg, "message", ""))

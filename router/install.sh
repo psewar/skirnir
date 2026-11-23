@@ -7,6 +7,8 @@
 # Options: --prefix DIR (default /opt/skirnir-router), --config-dir DIR (default /etc/skirnir-router).
 # For packaging and tests: --root DIR installs below DIR without root, apt or systemctl; --no-venv skips the venv
 # (checks then use the system python); --os-release FILE reads the distribution from FILE.
+# --without-mqtt: no MQTT library (python3-paho-mqtt / paho-mqtt) for a router without Home Assistant (ADR-0104); refused
+# while the configuration names an MQTT broker (mqtt.host). Without the option the library is installed, as before.
 #
 # Checks before changing anything: root, Debian/Ubuntu, Python >= 3.11, a complete source folder. Missing packages are
 # installed with apt (or reported with --check). The program files are replaced, the configuration is never touched:
@@ -20,6 +22,7 @@ ROOT=""
 CHECK_ONLY=0
 NO_VENV=0
 OS_RELEASE=/etc/os-release
+WITH_MQTT=1
 PACKAGES="python3 python3-venv python3-aiohttp python3-yaml python3-cryptography python3-paho-mqtt python3-uvloop curl jq"
 
 refuse() { echo "$1"; echo "STATE: refused"; exit 2; }
@@ -32,12 +35,21 @@ while [ $# -gt 0 ]; do
     --check) CHECK_ONLY=1; shift ;;
     --no-venv) NO_VENV=1; shift ;;
     --os-release) OS_RELEASE="${2:?--os-release needs a file}"; shift 2 ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --without-mqtt) WITH_MQTT=0; shift ;;
+    -h|--help) sed -n '2,/^set -u$/p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) refuse "unknown option $1 (see --help)" ;;
   esac
 done
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
+# Optional requirements left out on request: the apt package, and the requirement pydeps.py would otherwise take from the lock
+PYDEPS_WITHOUT=()
+VENV_IMPORTS="aiohttp, yaml, cryptography, paho.mqtt"
+if [ "$WITH_MQTT" -eq 0 ]; then
+  PACKAGES="${PACKAGES/ python3-paho-mqtt/}"
+  PYDEPS_WITHOUT=(--without paho-mqtt)
+  VENV_IMPORTS="aiohttp, yaml, cryptography"
+fi
 DEST="$ROOT$PREFIX"
 CONF="$ROOT$CONFIG_DIR"
 UNITS="$ROOT/etc/systemd/system"
@@ -68,6 +80,19 @@ PRE_LAYOUT=(bash "$SRC/router-layout.sh" --check)
 [ -n "$ROOT" ] && PRE_LAYOUT+=(--root "$ROOT")
 if [ -f "$CONF/config.yaml" ]; then
   PRE_OUT="$("${PRE_LAYOUT[@]}" 2>&1)" || { echo "$PRE_OUT" | grep -v '^STATE:'; refuse "Nothing was changed."; }
+fi
+# --without-mqtt with a configuration that names a broker would silently drop the Home Assistant connection (the router
+# starts without the library and only logs it): refused before anything changes, the configuration decides.
+if [ "$WITH_MQTT" -eq 0 ] && [ -f "$CONF/config.yaml" ]; then
+  MQTT_STATE="$(python3 -c 'import sys, yaml
+c = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+m = c.get("mqtt") if isinstance(c, dict) else None
+print("on" if isinstance(m, dict) and m.get("host") else "off")' "$CONF/config.yaml" 2>/dev/null)"
+  case "$MQTT_STATE" in
+    off) echo "Without MQTT: $CONF/config.yaml names no MQTT broker; python3-paho-mqtt is not installed" ;;
+    on) refuse "--without-mqtt: $CONF/config.yaml names an MQTT broker (mqtt.host). Remove the mqtt: section first, or install without --without-mqtt. Nothing was changed." ;;
+    *) refuse "--without-mqtt: cannot read the mqtt: section of $CONF/config.yaml (python3 with python3-yaml missing, or not YAML). Nothing was changed." ;;
+  esac
 fi
 
 # --- packages ---------------------------------------------------------------------------------------------------
@@ -132,16 +157,16 @@ if [ "$NO_VENV" -eq 0 ]; then
   # Only what the distribution lacks, and only from the hash-locked file (ADR-0074): pydeps.py plans, pip checks hashes.
   PLAN="$(mktemp)" || refuse "cannot create a temporary file"
   "$VENV/bin/python" "$DEST/skirnir_router/pydeps.py" plan --requirements "$DEST/requirements-session.txt" \
-    --lock "$DEST/requirements-lock.txt" > "$PLAN" \
+    --lock "$DEST/requirements-lock.txt" "${PYDEPS_WITHOUT[@]}" > "$PLAN" \
     || { rm -f "$PLAN"; refuse "the venv needs Python packages that neither the distribution nor requirements-lock.txt provides (above)"; }
   if [ -s "$PLAN" ]; then
     "$VENV/bin/python" -m pip install -q --disable-pip-version-check --require-hashes --no-deps -r "$PLAN" \
       || { rm -f "$PLAN"; refuse "pip could not install the locked packages into $VENV"; }
   fi
   rm -f "$PLAN"
-  "$VENV/bin/python" "$DEST/skirnir_router/pydeps.py" verify --requirements "$DEST/requirements-session.txt" \
+  "$VENV/bin/python" "$DEST/skirnir_router/pydeps.py" verify --requirements "$DEST/requirements-session.txt" "${PYDEPS_WITHOUT[@]}" \
     || refuse "the venv does not meet router/requirements-session.txt"
-  "$VENV/bin/python" -c 'import aiohttp, yaml, cryptography, paho.mqtt' || refuse "the venv cannot import the router's packages"
+  "$VENV/bin/python" -c "import $VENV_IMPORTS" || refuse "the venv cannot import the router's packages"
   PY="$VENV/bin/python"
   echo "Python environment: $VENV"
 fi

@@ -24,7 +24,7 @@ import time
 import aiohttp
 from aiohttp import web
 
-from . import state
+from . import problems as problems_mod, state
 from .common import VERSION, load_json_file, log, save_json_file, state_dir
 from .outcome import bad_gateway, failed, invalid
 
@@ -294,7 +294,8 @@ def note_report(node, report, now=None):
 
 
 def problems(now=None):
-    """HA Problems: failed or stalled Ollama updates, failed version check only after three days of silence."""
+    """Problem records (problems.py, ADR-0101): failed or stalled Ollama updates, failed version check only after three
+    days of silence."""
     now = now or time.time()
     out = []
     if state.REG is None:
@@ -302,11 +303,11 @@ def problems(now=None):
     for e in state.REG.nodes.values():
         u = update_view(e, now)
         if u.get("state") == "failed":
-            out.append(f"Ollama-Update auf {e['name']} fehlgeschlagen: {u.get('message') or '?'}")
+            out.append(problems_mod.make("ollama_update_failed", node=e["name"], message=u.get("message") or "?"))
         elif u.get("state") == "stalled":
-            out.append(f"Ollama-Update auf {e['name']} haengt ({u.get('message')})")
+            out.append(problems_mod.make("ollama_update_stalled", node=e["name"], message=u.get("message")))
     if LATEST.get("error") and _cfg().get("enabled") and (not LATEST.get("version") or now - _last_ok() > 3 * 86400):
-        out.append(f"Ollama-Versionspruefung scheitert: {LATEST['error']}")
+        out.append(problems_mod.make("ollama_version_check_failing", error=LATEST["error"]))
     return out
 
 
