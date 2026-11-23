@@ -106,6 +106,10 @@ eine sichere Konfiguration mit der Rolle `standard`. TLS-Zertifikat und -Schlüs
 `sudo systemctl enable --now skirnir-router` und `https://<name>:11435/` öffnen (Benutzer `admin`). Einzelheiten,
 TLS-Varianten und Firewall: [docs/install-router.de.md](docs/install-router.de.md).
 
+**Oder als Container** (Docker, Podman, Unraid, TrueNAS): `docker build -t skirnir-router router/`, dasselbe `--init` in
+einem Wegwerf-Container, dann `docker compose up -d` mit [router/compose.yaml](router/compose.yaml). Das Image läuft ohne
+Rechte, per Digest festgelegt und hash-gesperrt; Schritte in [docs/install-router.de.md#container](docs/install-router.de.md#container).
+
 **3. GPU-Knoten hinzufügen.** Ollama installieren und an Loopback binden (`OLLAMA_HOST=127.0.0.1`), dann das Modell der Rolle
 laden: `ollama pull qwen3:8b`. Den Agenten aus dem [Release](https://github.com/psewar/skirnir/releases) laden:
 
@@ -187,7 +191,7 @@ Meldeweg für Sicherheitslücken: [SECURITY.md](SECURITY.md).
 
 | Dokument | Inhalt |
 |---|---|
-| [docs/install-router.de.md](docs/install-router.de.md) | Voraussetzungen, `install.sh`, erste Konfiguration, TLS, Firewall, Secrets, Befehle, Installation von Hand, LXC-Deploy |
+| [docs/install-router.de.md](docs/install-router.de.md) | Voraussetzungen, `install.sh`, erste Konfiguration, TLS, Firewall, Secrets, Befehle, Installation von Hand, Container (Docker, Podman), LXC-Deploy |
 | [docs/install-agent.de.md](docs/install-agent.de.md) | GPU-Knoten unter Windows und Linux, Ollama, Freigabe, Update-Schlüssel |
 | [docs/configuration.de.md](docs/configuration.de.md) | Client-Identitäten, Rollen und Stufen, Scheduler und Admission, Auto-Rolle, Cloud-Stufen |
 | [docs/clients.de.md](docs/clients.de.md) | Home Assistant, Node-RED, OpenAI- und Anthropic-Clients, Claude Code, der `routing`-Block |
