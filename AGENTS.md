@@ -44,6 +44,9 @@ A pull request is complete when it contains, as far as they apply:
   (same sections and facts, English and German); the README keeps the quick start, details live in `docs/`; the
   matching `design/` document describes the new behaviour.
 - **ADR** for every decision (next section).
+- **Protocol.** A change to what router and agent send each other (frames, messages, fields) updates the schemas in
+  `docs/protocol/` and `docs/protocol.md` with its German twin; `test/selftest_protocol.py` and
+  `agent/protocol_conformance_test.go` fail until code, schemas and the test fake agent agree (ADR-0107).
 - **Configuration.** A new key goes into the schema (`SCHEMA` in `router/skirnir_router/config.py`), the example
   configuration (`router/config.example.yaml`, `agent/config.example.yaml`) and, if the web UI may change it at runtime,
   `EDITABLE` in `router/skirnir_router/settings.py`. New options default to off or to the previous behaviour; an
@@ -70,12 +73,17 @@ python test/selftest_control_flow.py && python test/check_control_flow.py   # ex
 python test/selftest_<topic>.py                                # the self-tests your change touches
 python test/run_tests.py       # end-to-end suite, ~3 min; needs the loopback ports 21434/21435 and 210xx free
 python test/check_public_changes.py                            # public-data scan of your added lines
+bash test/smoke_container.sh   # router image: build, --init, start, health (Docker or Podman, rootful); --selftests too
 ```
 
 - Python dependencies are hash-locked (ADR-0074). A change to `router/requirements*.txt`, `requirements-dev.txt` or
   `test/requirements-hindsight.txt` refreshes the locks in the same PR: `lock_requirements.py pin --lock
-  router/requirements-lock.txt <name>==<version> ...` for what the router may install on top of the distribution, and
-  `lock_requirements.py resolve` (on Linux) for `requirements-ci-lock.txt`; never edit a lock by hand.
+  router/requirements-lock.txt <name>==<version> ...` for what the router may install on top of the distribution,
+  `lock_requirements.py resolve` (on Linux) for `requirements-ci-lock.txt`, and `lock_requirements.py pin --lock
+  router/requirements-container-lock.txt` with the router's whole dependency closure at the CI lock's versions for the
+  container image (ADR-0121; `test/selftest_container_image.py` compares them); never edit a lock by hand.
+- The router image (`router/Dockerfile`, `router/compose.yaml`) ships the same program files as `router/install.sh`;
+  CI's `container` job builds and starts it and runs the router self-tests inside it. A new program file goes into both.
 - Session store integrations (`test/integration_sessions.py`, `integration_context.py`,
   `integration_deletion_lifecycle.py`, `integration_interoperability.py`) run their contract on SQLite always (no server
   needed) and on PostgreSQL when `SKIRNIR_TEST_SESSION_DSN` points to a disposable test database (ADR-0114). A store

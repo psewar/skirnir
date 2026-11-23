@@ -37,6 +37,7 @@ jobs:
       - name: Audit the hash-locked sets as written (ADR-0074)
         run: |
           pip-audit --require-hashes --disable-pip -r router/requirements-lock.txt
+          pip-audit --require-hashes --disable-pip -r router/requirements-container-lock.txt
           pip-audit --require-hashes --disable-pip -r requirements-ci-lock.txt
       - name: Every locked hash is one PyPI publishes, no locked version is yanked
         run: python tools/security/lock_requirements.py verify-pypi

@@ -104,7 +104,9 @@ groups:
 Home Assistant ist optional. Ohne `mqtt:`-Abschnitt, oder wenn `paho-mqtt` fehlt, veröffentlicht der Router nichts. Routing,
 UI, `/admin/*`, `/metrics` und alle Fakten der Agenten funktionieren genauso: GPU, Spiel, Speicher, Schlaf. Auch das eigene
 MQTT-Gerät des Agenten ist optional (`mqtt:` in der Agent-Konfiguration). Der Router veröffentlicht über MQTT mit TLS (Port
-8883), das Passwort kommt aus `secrets.env`.
+8883), das Passwort kommt aus `secrets.env`. Ein mit `install.sh --without-mqtt` installierter Router hat keine MQTT-Bibliothek
+und veröffentlicht ebenfalls nichts; vor einem `mqtt:`-Abschnitt ohne die Option erneut installieren (das Skript lehnt die
+Option ab, solange einer gesetzt ist).
 
 Der Router meldet sich per MQTT-Discovery als Gerät **Skirnir** an: Sensoren für Knoten online/belegt, verfügbare Modelle,
 bereite Rollen (Attribut: welcher Knoten und welches Modell jetzt gewählt würde), Anfragen und Tokens heute, Cloud-Kosten
@@ -181,6 +183,24 @@ nie den Code, und seit Agent 0.31.0 keine ältere: Ein Auftrag unter dem install
 abgelehnt, ausser die Konfiguration des Knotens setzt `ollama_update.allow_downgrade: true` für ein bewusstes Zurückgehen
 (ADR-0073). Vorerst nur Windows-Knoten; die Linux-Archive sind tar.zst.
 
+## Secrets-Renderer
+
+`render-env.sh` rendert `secrets.env` vor jedem Start des Routers (`skirnir-router-secrets.service`) und mit dem optionalen
+Timer täglich (`skirnir-router-secrets-refresh.service`, startet den Router neu, wenn sich die Datei geändert hat). Seine
+Ausgabe steht im Journal: `journalctl -u skirnir-router-secrets -u skirnir-router-secrets-refresh`. Jeder Lauf endet mit einer
+Zustandszeile ([install-router.de.md](install-router.de.md#secrets), ADR-0104):
+
+| Zustand | Bedeutung | Nächster Schritt |
+|---|---|---|
+| `STATE: written` | Die Datei wurde ersetzt; die Zeile davor nennt, wie viele der Namen vorhanden waren. | Keiner. Als `missing in the source` gemeldete Namen stehen einfach nicht in der Datei. |
+| `STATE: unchanged` | Gleicher Inhalt wie bisher. | Keiner. |
+| `STATE: kept` | Die bestehende Datei bleibt: Die Quelle ist nicht bereit (`secret store not reachable`, `refused the login (HTTP ...)`, `SECRET_FILE ... missing`), ein Name liess sich nicht abrufen (`fetch failed (...)`; ein vorübergehender Fehler lässt nichts wegfallen), oder die Quelle enthält keinen der Namen. | Beheben, was die Zeile davor nennt; der nächste Lauf oder `systemctl start skirnir-router-secrets` rendert erneut. Um die Datei bewusst zu leeren, sie von Hand löschen. |
+| `STATE: not-configured` | Keine `render-env.conf`: `secrets.env` wird von Hand gepflegt. | Keiner, oder eine Quelle einrichten. |
+| `STATE: refused` | `render-env.conf`, `SECRET_STORE_AUTH_FILE` oder `SECRET_FILE` hat eine Prüfung nicht bestanden (Besitzer, Modus, ein Pfad, den der Router schreiben darf), die Konfiguration ist unvollständig, oder `SECRET_SOURCE` ist unbekannt. | Die Datei beheben, die die Zeile davor nennt. |
+
+Ein Wert mit Zeilenumbruch wird nie geschrieben (er würde eine weitere Variable in der Umgebung der Router-Unit beginnen);
+der Name wird gemeldet und übersprungen. Kein Secret-Wert erscheint in der Ausgabe.
+
 ## Schlüsselwechsel
 
 Der Signierschlüssel der Agenten lässt sich ohne Lücke wechseln
@@ -215,7 +235,7 @@ verschiebt sie.
 | Was | Standardpfad | Warum |
 |---|---|---|
 | Konfigurationsordner | `/etc/skirnir-router/` | `config.yaml` (schreiben nur Root-Werkzeuge, nie der Router), die Zertifikate in `certs/` (oder `tls/` bei älteren Installationen) und der Release-Ordner `agent/` (`manifest.json` und die signierten Agent-Binaries; lassen sich auch erneut aus einem Release kopieren). |
-| Quelle der Secrets | der eigene Secret-Store und `/etc/skirnir-router-secrets/render-env.conf` mit dem Zugang dazu | `secrets.env` wird daraus erzeugt und lässt sich neu erzeugen: die Quelle sichern, nicht die erzeugte Datei. Wer `secrets.env` von Hand pflegt, hat sie als Quelle. Die Zugangsdatei enthält ein Geheimnis; ihr Backup so geschützt halten wie die Datei selbst. |
+| Quelle der Secrets | der eigene Secret-Store und `/etc/skirnir-router-secrets/render-env.conf` mit dem Zugang dazu (mit `SECRET_SOURCE=file`: statt des Stores die Datei, die `SECRET_FILE` nennt) | `secrets.env` wird daraus erzeugt und lässt sich neu erzeugen: die Quelle sichern, nicht die erzeugte Datei. Wer `secrets.env` von Hand pflegt, hat sie als Quelle. Die Zugangsdatei enthält ein Geheimnis; ihr Backup so geschützt halten wie die Datei selbst. |
 | Zustandsordner (`router.state_dir`) | `/var/lib/skirnir-router/` | Alles, was der Router selbst schreibt, siehe nächste Tabelle. Ohne `state_dir` liegen diese Dateien neben der `config.yaml`. |
 | Session-Datenbank (optional) | die PostgreSQL-Datenbank oder die SQLite-Datei, die `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) nennt (ADR-0114) | Sessions (Ereignisse, verwaltete Turns, Verdichtungen, Übergabe-Importe) und die Memory-Outbox. PostgreSQL: mit dessen eigenen Werkzeugen sichern. SQLite: siehe `sessions.db` unten. |
 | Gedächtnis-Backend (optional) | ausserhalb von Skirnir (Hindsight) | Dort liegt das Langzeitgedächtnis; sichern, wie dieser Dienst es beschreibt. |

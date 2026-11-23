@@ -16,6 +16,7 @@ from .context_config import ContextConfig, parse_context_config
 from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
 from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
+from . import cost_keys
 from . import settings as settings_mod
 from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, REASONING_OFF, THINK_MODES, TRUST_LEVELS, log, open_private, tls_fingerprint
 from .outcome import Problem, failed, invalid
@@ -57,6 +58,15 @@ def load_yaml(path, default=None):
 _TIER = {"model": None, "num_ctx": None, "busy_ok": None}
 # Text a role appends to the system message of its chat request when exactly that model serves it (ADR-0094).
 SYSTEM_APPEND_MAX_CHARS = 8000
+# The warm benchmark's prompt (router.benchmark.prompt, perf.bench_model). The default is the prompt every earlier
+# measurement used, so they stay comparable; generation speed depends on the language of prompt and answer (tokenizers
+# split languages into differently many tokens), so compare tok/s only between runs with the same prompt.
+BENCH_PROMPT_DEFAULT = ("Erkläre in etwa 200 Wörtern, was ein Netzwerk-Router macht, welche Aufgaben er im Heimnetz übernimmt "
+                        "und worin er sich von einem Switch unterscheidet. Antworte auf Deutsch in ganzen Sätzen.")
+BENCH_PROMPT_MAX_CHARS = 4000
+# decision_engine.observe_light when the key is absent: the classes for which a free lower tier might do (observation mode,
+# fallback_observation.py). Kept from router 0.6.7 so behaviour is unchanged; only names among decision_engine.options apply.
+OBSERVE_LIGHT_DEFAULT = ("standard", "assist")
 _CANARY = {"model": None, "num_ctx": None, "percent": None, "busy_ok": None}
 # Sampling defaults a role gives its local tiers for what the client leaves out (ADR-0093): Ollama option names,
 # (type, lowest, highest). A cloud tier never gets them (gpt-5 models refuse a temperature other than their default).
@@ -72,6 +82,9 @@ SCHEMA = {
         "agent_missing_problem_s": None, "ram_spill_problem_gib": None, "problem_language": None, "expose_concrete_models": None,
         "request_timeout_s": None,
         "toolcall_rescue": None,
+        # since 0.37.0: the warm benchmark's prompt (perf.py); tok/s depends on its language, so measurements are comparable
+        # only with the same prompt
+        "benchmark": {"prompt": None},
         "memory_scopes": {"*": {"data_class": None, "allow_cloud": None, "writers": None}},
         "hindsight": {k: None for k in HindsightConfig.__dataclass_fields__},
         "context_manager": {k: None for k in ContextConfig.__dataclass_fields__},
@@ -85,7 +98,10 @@ SCHEMA = {
                                           "cloud": None, "data_class": None, "privacy_check": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   "egress_allow": None, "privacy_check": dict.fromkeys(PRIVACY_FIELDS),
-                  "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None, "budget_month_chf": None,
+                  "currency": None,   # since 0.37.0 (ADR-0105): unit of prices and budgets, display only
+                  # ADR-0105: budget_month; budget_month_chf is its old name (alias, cost_keys.py)
+                  "providers": {"*": {"kind": None, "base_url": None, "api_key_env": None, "secrets_file": None, "enabled": None,
+                                      "budget_month": None, "budget_month_chf": None,
                                       "warn_at_percent": None, "region": None, "timeout_s": None, "max_inflight": None, "max_data_class": None,
                                       "trust": None}}},
         "openai": {"enabled": None, "default_think": None},
@@ -114,7 +130,9 @@ SCHEMA = {
                      "measured_on": None, "vram_gib_8k": None, "vram_gib_32k": None, "partial_offload": None,
                      # since 0.3.5: real = weights/kv from nvidia-smi delta (not /api/ps), both values per context
                      "real": None, "vram_real_gib": None, "vram_ps_gib": None,
-                     "cloud": None, "provider_model": None, "price_chf_per_m": None, "context_tokens": None, "reasoning": None,
+                     "cloud": None, "provider_model": None, "context_tokens": None, "reasoning": None,
+                     # ADR-0105: price_per_m; price_chf_per_m is its old name (alias, cost_keys.py)
+                     "price_per_m": None, "price_chf_per_m": None,
                      # since 0.33.0 (ADR-0098): the reasoning_effort value that turns a cloud model's reasoning off
                      "reasoning_off": None,
                      # since 0.6.5: max concurrent requests per node (qwen3.8: 1, Ollama cannot parallelize qwen35)
@@ -221,9 +239,15 @@ class Config:
 
     def merged(self, overrides=None):
         import copy
-        c = copy.deepcopy(load_yaml(self.path))   # eigene Kopie: merged() schreibt hinein
+        c = copy.deepcopy(load_yaml(self.path))   # own copy: merged() writes into it
         if overrides is None and self.use_overrides and os.path.exists(self.overrides_path):
-            overrides = copy.deepcopy(load_yaml(self.overrides_path, {}) or {})
+            overrides = load_yaml(self.overrides_path, {}) or {}
+        overrides = copy.deepcopy(overrides)   # the caller's tree stays as given (write_overrides writes it afterwards)
+        # ADR-0105: each layer under the neutral cost keys before merging, so an old name in one layer and the neutral key
+        # in the other do not conflict; the later layer wins as for every key
+        for tree, where in ((c, "config.yaml"), (overrides, "roles.yaml")):
+            if failed(problem := cost_keys.normalize_tree(tree, where)):
+                return problem
         for k, v in (overrides or {}).items():
             if k == "roles":
                 # UI writes only tiers/latency_first. Everything else on a role (priority, canary, shadow) remains from
@@ -244,7 +268,10 @@ class Config:
                 cl[str(name)] = {**(cl.get(name) or {}), **(spec or {})}
         # Stage 7 (UI settings): settings {path: value} last - roles from roles.yaml are known then (client roles)
         if (overrides or {}).get("settings"):
-            applied = settings_mod.apply(c, overrides["settings"])
+            block = cost_keys.normalize_settings(overrides["settings"], "roles.yaml settings")
+            if failed(block):
+                return block
+            applied = settings_mod.apply(c, block)
             if failed(applied):
                 return applied
         return c
@@ -271,6 +298,8 @@ class Config:
     def parse(self, c):
         """Check and adopt tree c. None = ok, Problem = invalid (then object may be partially populated -
         hence reload() checks on a probe first)."""
+        if failed(problem := cost_keys.normalize_tree(c)):   # merged() did this per layer; direct callers may pass old names
+            return problem
         errs = validate_schema(c)
         if errs:
             return invalid("configuration: " + "; ".join(errs))
@@ -363,6 +392,11 @@ class Config:
         # Rescue tool calls stranded in text (see toolcall_rescue). Default on:
         # tier applies only if Ollama parsed nothing itself, otherwise leaves everything untouched.
         self.toolcall_rescue = bool(r.get("toolcall_rescue", _d("router.toolcall_rescue")))
+        bench = r.get("benchmark") or {}
+        prompt = BENCH_PROMPT_DEFAULT if bench.get("prompt") is None else bench["prompt"]
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > BENCH_PROMPT_MAX_CHARS:
+            return invalid(f"router.benchmark.prompt must be a nonempty text of at most {BENCH_PROMPT_MAX_CHARS} characters")
+        self.bench_prompt = prompt
         # OpenAI-compatible interface /v1 (Node-RED-MCP, other OpenAI clients). Router translates to
         # /api/chat itself, because Ollama's own /v1 does not know num_ctx/keep_alive (model would reload with default context).
         oa = r.get("openai") or {}
@@ -465,6 +499,9 @@ class Config:
         scan = cl.get("credential_scan", _d("router.cloud.credential_scan"))
         if scan not in ("block", "off"):
             return invalid("router.cloud.credential_scan must be block or off")
+        currency = cl.get("currency", _d("router.cloud.currency"))   # ADR-0105: display only, the router never converts
+        if not isinstance(currency, str) or not cost_keys.CURRENCY_PATTERN.match(currency):
+            return invalid("router.cloud.currency must be a three-letter currency code in capitals, such as CHF, EUR or USD")
         allow = {"api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com"} | {str(h) for h in (cl.get("egress_allow") or [])}
         providers = {}
         for pname, spec in (cl.get("providers") or {}).items():
@@ -504,7 +541,8 @@ class Config:
         self.cloud = {"enabled": bool(cl.get("enabled", _d("router.cloud.enabled"))), "data_classes": classes,
                       "default_data_class": cl.get("default_data_class", _d("router.cloud.default_data_class")),
                       "max_cloud_data_class": cl.get("max_cloud_data_class", _d("router.cloud.max_cloud_data_class")),
-                      "credential_scan": scan, "egress_allow": sorted(allow), "providers": providers, "privacy_check": privacy}
+                      "credential_scan": scan, "egress_allow": sorted(allow), "providers": providers, "privacy_check": privacy,
+                      "currency": currency}
         for cname, cspec in self.client_auth["clients"].items():
             if cspec.get("data_class") is not None and cspec["data_class"] not in classes:
                 return invalid(f"client_auth.clients.{cname}.data_class must be one of the data classes {classes}")
@@ -711,9 +749,15 @@ class Config:
             return invalid("decision_engine.jevlike.endpoint missing, but jevlike is in the chain")
         if "local_llm" in chain and not (de.get("local_llm") or {}).get("model"):
             return invalid("decision_engine.local_llm.model missing, but local_llm is in the chain")
-        light = [str(o) for o in (de.get("observe_light") or [])]
-        if [o for o in light if o not in options]:
-            return invalid(f"decision_engine.observe_light: only options of the engine ({options}), not {light}")
+        given = de.get("observe_light")
+        if given is not None and not isinstance(given, list):
+            return invalid("decision_engine.observe_light must be a list of options")
+        if given is None:   # absent: the default, limited to the engine's options (other names could never match a class)
+            light = [o for o in OBSERVE_LIGHT_DEFAULT if o in options]
+        else:               # a list, also an empty one, is taken as given
+            light = [str(o) for o in given]
+            if [o for o in light if o not in options]:
+                return invalid(f"decision_engine.observe_light: only options of the engine ({options}), not {light}")
         if "embed" in chain and not (de.get("embed") or {}).get("endpoint"):
             return invalid("decision_engine.embed.endpoint missing, but embed is in the chain")
         if "tfidf" in chain and not (de.get("tfidf") or {}).get("model_path"):
@@ -722,7 +766,7 @@ class Config:
             v = (de.get("policy") or {}).get(k)
             if v is not None and not lo <= float(v) <= hi:
                 return invalid(f"decision_engine.policy.{k} must be between {lo} and {hi}")
-        out.update({"enabled": True, "role": role, "options": options, "default": default, "chain": chain})
+        out.update({"enabled": True, "role": role, "options": options, "default": default, "chain": chain, "observe_light": light})
         return out
 
     def catalog_twin(self, model):
@@ -819,8 +863,15 @@ def read_overrides():
 
 
 def settings_view(lang="de"):
+    """Settings for the UI. Base values and the override flags are read under the neutral cost keys (ADR-0105), so a
+    config.yaml or roles.yaml that still uses an old name shows its value at the renamed setting."""
+    import copy
     ov = read_overrides()
-    return settings_mod.view(state.CFG, state.CFG.base(), ov.get("settings") or {}, lang=lang)
+    base = copy.deepcopy(state.CFG.base())
+    # display only: a conflicting pair (config.yaml edited since the last load) stays unrenamed here, the reload reports it
+    cost_keys.normalize_tree(base)
+    block = cost_keys.normalize_settings(ov.get("settings") or {})
+    return settings_mod.view(state.CFG, base, {} if failed(block) else block, lang=lang)
 
 
 def role_options(role, raw):

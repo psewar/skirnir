@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Refusal body (agent to router, DATA frame after RESP 403 or 405)",
+  "description": "Body the agent sends when it refuses a request itself, without asking the upstream: 403 for a path or method that is not on the passthrough allowlist (ADR-0073), 405 with an Allow header for a configured route called with an unlisted method. The stream then ends with END.",
+  "type": "object",
+  "properties": {
+    "error": {
+      "type": "object",
+      "description": "The refusal.",
+      "properties": {
+        "reason": {"type": "string", "enum": ["path_not_allowed_on_node", "method_not_allowed"], "description": "Fixed reason code."}
+      },
+      "required": ["reason"],
+      "additionalProperties": true
+    }
+  },
+  "required": ["error"],
+  "additionalProperties": true,
+  "examples": [
+    {"error": {"reason": "path_not_allowed_on_node"}},
+    {"error": {"reason": "method_not_allowed"}}
+  ]
+}

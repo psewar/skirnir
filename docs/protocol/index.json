@@ -1,0 +1,55 @@
+{
+  "protocol": "skirnir router-agent tunnel",
+  "version": 1,
+  "description": "Machine-readable index of docs/protocol.md: frame codes, text messages and their schemas, the agent's passthrough allowlist and the size and time limits. test/selftest_protocol.py and agent/protocol_conformance_test.go compare it with the router, the Go agent and the test fake agent.",
+  "endpoint": "/v1/tunnel",
+  "text_messages": {
+    "challenge": {"direction": "router-to-agent", "schema": "challenge.schema.json"},
+    "hello": {"direction": "agent-to-router", "schema": "hello.schema.json"},
+    "status": {"direction": "router-to-agent", "schema": "status.schema.json"},
+    "config": {"direction": "router-to-agent", "schema": "status.schema.json"},
+    "update": {"direction": "router-to-agent", "schema": "control-update.schema.json"},
+    "ollama-update": {"direction": "router-to-agent", "schema": "control-ollama-update.schema.json"},
+    "ollama-swap": {"direction": "router-to-agent", "schema": "control-ollama-swap.schema.json"},
+    "upstream-hold": {"direction": "router-to-agent", "schema": "control-upstream.schema.json"},
+    "upstream-release": {"direction": "router-to-agent", "schema": "control-upstream.schema.json"}
+  },
+  "frames": {
+    "REQ": {"code": 1, "direction": "router-to-agent", "stream": "request", "payload": "request-head.schema.json, newline, body"},
+    "RESP": {"code": 2, "direction": "agent-to-router", "stream": "request", "payload": "response-head.schema.json"},
+    "DATA": {"code": 3, "direction": "agent-to-router", "stream": "request", "payload": "response body bytes"},
+    "END": {"code": 4, "direction": "agent-to-router", "stream": "request", "payload": "empty"},
+    "ERR": {"code": 5, "direction": "agent-to-router", "stream": "request", "payload": "UTF-8 text"},
+    "CANCEL": {"code": 6, "direction": "router-to-agent", "stream": "request", "payload": "empty"},
+    "HB": {"code": 7, "direction": "agent-to-router", "stream": "0", "payload": "heartbeat.schema.json"},
+    "HBACK": {"code": 8, "direction": "router-to-agent", "stream": "0", "payload": "heartbeat-ack.schema.json"},
+    "OLLAMA": {"code": 9, "direction": "agent-to-router", "stream": "0", "payload": "ollama-state.schema.json", "since_agent": "0.14.0"},
+    "POWER": {"code": 10, "direction": "agent-to-router", "stream": "0", "payload": "power.schema.json", "since_agent": "0.24.0"}
+  },
+  "passthrough": {
+    "/api/chat": ["POST"],
+    "/api/generate": ["POST"],
+    "/api/embed": ["POST"],
+    "/api/embeddings": ["POST"],
+    "/api/show": ["POST"],
+    "/api/tags": ["GET"],
+    "/api/ps": ["GET"],
+    "/api/version": ["GET"],
+    "/v1/chat/completions": ["POST"],
+    "/v1/embeddings": ["POST"],
+    "/v1/models": ["GET"]
+  },
+  "limits": {
+    "hello_max_bytes": 32768,
+    "router_max_message_bytes": 2097152,
+    "agent_max_message_bytes": 67108864,
+    "nonce_min_bytes": 16,
+    "node_name_max_chars": 64,
+    "challenge_wait_s": 15,
+    "hello_wait_s": 15,
+    "router_ping_interval_s": 20,
+    "agent_read_timeout_s": 90,
+    "ollama_resync_s": 30,
+    "ollama_fresh_s": 45
+  }
+}

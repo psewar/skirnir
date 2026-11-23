@@ -1,10 +1,15 @@
-"""Selection: role -> tiers -> matching nodes -> rank."""
+"""Selection: role -> tiers -> matching nodes -> rank.
+
+Whether a node can serve a tier is judged in one place, assess(): candidates_for keeps the nodes it finds nothing against,
+blockers() explains the others to the client. The selection is pure; the one state change it used to make on the way (an
+expired open breaker moving to half_open) is the caller's step, probe_breakers(), run right before choose() (ADR-0108)."""
 
 import time
 
 from . import admission, cloud, perf
 from . import request as request_mod
 from . import state
+from .nodes import empty_room_gib
 
 
 def known_concrete(name):
@@ -30,55 +35,35 @@ def resolve_tiers(name, body):
     return None, None
 
 
-def candidates_for(tier, client_ctx, now, exclude=(), mutate=True):
-    """Candidates for a tier. mutate=False is the pure view (HA image, /metrics): no breaker switches to half_open."""
+def candidates_for(tier, client_ctx, now, exclude=()):
+    """(ctx, candidates) for a tier: the local nodes offering its model that assess() finds nothing against, or the cloud
+    provider whose breaker lets a request through. Pure: changes no node (breaker transitions: probe_breakers)."""
     ctx = min(client_ctx, tier["num_ctx"]) if client_ctx else tier["num_ctx"]
-    need = None
-    out = []
-    allows = (lambda n: n.breaker_allows(now)) if mutate else (lambda n: n.breaker_would_allow(now))
     if tier.get("cloud"):   # Stage 5: the provider is the only "node" of this tier (guard checks request.tier_blocked)
         t = cloud.target_for(tier)
-        if t is not None and t.name not in exclude and allows(t):
-            out.append(t)
-        return ctx, 0.0, out
-    for n in state.NODES.values():
-        if n.name in exclude or n.state == "offline" or not n.offers(tier["model"]):
+        return ctx, ([t] if t is not None and t.name not in exclude and t.breaker_would_allow(now) else [])
+    return ctx, [n for n in state.NODES.values()
+                 if n.name not in exclude and n.offers(tier["model"]) and assess(n, tier, ctx, now)[0] is None]
+
+
+def probe_breakers(tiers, now, exclude=(), req=None):
+    """The one state change of a selection, made by the caller right before choose() or candidates_for (proxy._Acquire,
+    ops.run_shadow): every target the selection is about to judge whose open breaker has run out (open_s over) moves to
+    half_open, with log and journal entry, so it is ranked with its probe penalty. Same targets as the selection reaches
+    the breaker check for: tiers the request does not block, targets not excluded, local nodes offering the model and
+    passing the state gate (offline, draining, busy). Views (HA, /metrics, availability, observation) do not call it.
+    Before router 0.37.1 candidates_for(mutate=True) made this transition while judging (ADR-0108)."""
+    for t in tiers:
+        if req is not None and req.tier_blocked(t):
             continue
-        if now < n.draining_until:   # Agent update running: node draining, no new requests
+        if t.get("cloud"):
+            target = cloud.target_for(t)
+            if target is not None and target.name not in exclude:
+                target.breaker_probe(now)
             continue
-        if n.state == "busy" and not tier["busy_ok"]:
-            continue
-        if not allows(n):   # Stage 3: nodes with open breaker stay out (half_open: one probe)
-            continue
-        need = state.CFG.need_gib(tier["model"], ctx, n)
-        if n.releases_server_for(tier["model"]):
-            # 0.16.3: the release stops the standby with all its models, and the server sizes itself to the card (its
-            # own reserve) as it did before the hold - no budget to check, only a game (busy, above) or memory pressure.
-            # 2026-10-24: with a budget the catalog's planning figure refused the release (28.8 > 28.5 GiB).
-            # 0.17.0: the agent judges the RAM itself and reports a block; then no candidate (no 180-s wait for nothing)
-            if not n.mem_pressure and not n.upstream_blocked:
-                out.append(n)
-            continue
-        if n.standby_switch(tier["model"]):
-            # 0.15.0: reachable only by holding the OpenAI-compatible server for the standby Ollama - a cold candidate
-            # whose budget is the card once the server has stopped (score: modes.score.switch penalty)
-            if not n.mem_pressure and need <= n.standby_budget_gib():
-                out.append(n)
-            continue
-        lc = n.loaded_context(tier["model"])
-        if n.is_loaded(tier["model"]) and (lc is None or lc >= ctx):
-            # Already loaded with sufficient context: needs no extra VRAM, so no budget check.
-            # The Heartbeat during/shortly after a response shows little free VRAM (compute buffer, KV); with the
-            # Budget check failed on 2026-09-10 for the warm primary node 0.2 s after its own response,
-            # and the follow-up request ran on the fallback tier of the other node.
-            out.append(n)
-            continue
-        if n.mem_pressure:   # Agent >= 0.17.0: RAM tight - do not load cold (the loaded one above keeps answering)
-            continue
-        if need > n.budget_gib(now, tier["model"]):
-            continue
-        out.append(n)
-    return ctx, need, out
+        for n in state.NODES.values():
+            if n.name not in exclude and n.offers(t["model"]) and _state_gate(n, t, now)[0] is None:
+                n.breaker_probe(now)
 
 
 def score(node, model):
@@ -118,32 +103,30 @@ def rank(nodes, model, req=None):
 def loading_for(tiers, now, exclude=()):
     """A node that could be a candidate for one of the tiers and is currently loading a model (unexpired claim from
     announce_load): reason to wait instead of 503. Returns (node, loading model) or None."""
-    for t in tiers:
-        if t.get("cloud"):
-            continue
-        for n in state.NODES.values():
-            if n.name in exclude or n.state == "offline" or t["model"] not in n.models:
-                continue
-            if n.state == "busy" and not t["busy_ok"]:
-                continue
-            for m, (_gib, deadline) in n.loading.items():
-                if now < deadline and not n.is_loaded(m):
-                    return n, m
-    return None
+    return _claimed_load(tiers, now, exclude, own_model=False)
 
 
 def tier_loading(tiers, now, exclude=()):
     """A node loading the model of one of these local tiers itself (unexpired claim from announce_load, same model or
     blob): (node, model) or None. Unlike loading_for, a load of some other model on the node does not count - the request
     waits only for a load that will serve one of these tiers (ADR-0095 before a cloud tier, ADR-0096 before a cold one)."""
+    return _claimed_load(tiers, now, exclude, own_model=True)
+
+
+def _claimed_load(tiers, now, exclude, own_model):
+    """First (node, model) with an unexpired load claim on a node not offline, not excluded and not busy for a tier that
+    does not allow busy. own_model=False (loading_for): the node has the tier's model installed and loads anything;
+    own_model=True (tier_loading): the node loads the tier's model (or its blob) itself."""
     for t in tiers:
         if t.get("cloud"):
             continue
         for n in state.NODES.values():
             if n.name in exclude or n.state == "offline" or (n.state == "busy" and not t["busy_ok"]):
                 continue
+            if not own_model and t["model"] not in n.models:
+                continue
             for m, (_gib, deadline) in n.loading.items():
-                if now < deadline and not n.is_loaded(m) and n.same_blob(m, t["model"]):
+                if now < deadline and not n.is_loaded(m) and (not own_model or n.same_blob(m, t["model"])):
                     return n, m
     return None
 
@@ -163,14 +146,14 @@ def _interactive_pick(per_tier, req, now):
     loaded next to the busy first model evicted it as soon as its request ended, and the requests waiting for it went
     to the cloud."""
     local = [pt for pt in per_tier if not pt[1].get("cloud")]
-    busy = {n.name for _i, t, _c, _n, cands in local for n in cands if n.is_loaded(t["model"]) and admission.saturated(n, t["model"])}
+    busy = {n.name for _i, t, _c, cands in local for n in cands if n.is_loaded(t["model"]) and admission.saturated(n, t["model"])}
     if not busy:
         return None   # nothing warm is busy: the normal path (warm first) decides as before
     # Other nodes first: a fallback model on the busy node shared the GPU with the running request (both
     # slower) and occupied VRAM that the warm model might need - only if it is the only one that can, it may
     for other_only in (True, False):
         for warm_only in (True, False):
-            for i, t, ctx, _need, cands in local:
+            for i, t, ctx, cands in local:
                 free = [n for n in cands if not admission.saturated(n, t["model"]) and (n.is_loaded(t["model"]) or not warm_only)
                         and (n.name not in busy or not other_only)
                         and (n.is_loaded(t["model"]) or n.name not in busy or _fits_beside_answering(n, t["model"], ctx, now))]
@@ -180,9 +163,10 @@ def _interactive_pick(per_tier, req, now):
     return None
 
 
-def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
+def choose(role, tiers, client_ctx, now, exclude=(), req=None):
     """Returns (tier_index, tier, ctx, node) or None. `req` (request.Routing) filters tiers by requirements,
-    prefers tiers with desired capabilities and keeps a session on its warm node."""
+    prefers tiers with desired capabilities and keeps a session on its warm node. Changes no node; a request path runs
+    probe_breakers() with the same arguments first (ADR-0108). Writes only the routing record of `req`."""
     per_tier = []
     if req is not None:
         req.skipped = []
@@ -192,23 +176,23 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
             if why:
                 req.skipped.append({"tier": i, "model": t["model"], "ctx": t["num_ctx"], "reason": why})
                 continue
-        ctx, need, cands = candidates_for(t, client_ctx, now, exclude, mutate)
-        per_tier.append((i, t, ctx, need, cands))
+        ctx, cands = candidates_for(t, client_ctx, now, exclude)
+        per_tier.append((i, t, ctx, cands))
     if req is not None and req.canary:
         # Stage 6: triggered canary tier gets traffic even cold - otherwise a candidate model next to a
         # warm primary model would never see a request. If no node can serve it, proceed normally.
-        for i, t, ctx, _need, cands in per_tier:
+        for i, t, ctx, cands in per_tier:
             if t.get("canary") and cands:
                 req.reason = "canary"
                 return i, t, ctx, rank(cands, t["model"], req)[0]
     if req is not None and req.prefer:
         pref = [pt for pt in per_tier if not request_mod.lacks(pt[1]["model"], sorted(req.prefer))]
-        if any(pt[4] for pt in pref):
+        if any(pt[3] for pt in pref):
             per_tier = pref
     if req is not None and req.session_id:
         aff = request_mod.affinity(req.session_id)
         if aff:
-            for i, t, ctx, _need, cands in per_tier:
+            for i, t, ctx, cands in per_tier:
                 if t["model"] != aff["model"]:
                     continue
                 n = next((c for c in cands if c.name == aff["node"]), None)
@@ -222,7 +206,7 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
             return pick
     if role.get("latency_first"):
         local_cands_seen = False
-        for i, t, ctx, _need, cands in per_tier:
+        for i, t, ctx, cands in per_tier:
             if t.get("cloud"):
                 # Stage 5: a cloud tier has no load time but is never "warm". It counts as warm as long as no
                 # local tier BEFORE it has candidates - so a cold local model still wins over cloud (cost),
@@ -239,7 +223,7 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None, mutate=True):
                 if req is not None:
                     req.reason = "warm-first"
                 return i, t, ctx, rank(warm, t["model"], req)[0]
-    for i, t, ctx, _need, cands in per_tier:
+    for i, t, ctx, cands in per_tier:
         if cands:
             if req is not None:
                 req.reason = "rank"
@@ -265,7 +249,9 @@ def any_online_node_with(model):
 
 def role_possible_when_free(role):
     """Could any online node serve the role if it were not busy? (Model present and
-    tier fits into total VRAM minus free reserve.) Distinguishes 'game running' from 'role broken'."""
+    tier fits into total VRAM minus free reserve.) Distinguishes 'game running' from 'role broken'. Shares the empty-card
+    test with assess() (MODEL_TOO_LARGE); the rest of assess does not apply here, since busy, draining and breaker are
+    exactly what this question looks past."""
     for t in role["tiers"]:
         if t.get("cloud"):
             ct = cloud.target_for(t)
@@ -275,9 +261,7 @@ def role_possible_when_free(role):
         for n in state.NODES.values():
             if n.state == "offline" or not n.offers(t["model"]):
                 continue
-            if not n.capacity_gib():
-                return True
-            if state.CFG.need_gib(t["model"], t["num_ctx"], n) <= n.capacity_gib() - n.reserve_gib("free"):
+            if not n.capacity_gib() or not _too_large(n, state.CFG.need_gib(t["model"], t["num_ctx"], n)):
                 return True
     return False
 
@@ -312,8 +296,51 @@ def server_busy(node, tier, waited_s):
     return {"code": SERVER_BUSY, "retry_after_s": RETRY_AFTER_S[SERVER_BUSY], "blockers": [b], "detail": _detail(SERVER_BUSY, [b])}
 
 
-def _node_block(n, t, ctx, now):
-    """Base code for why node `n` cannot serve tier `t` right now - or None (could serve)."""
+def assess(n, t, ctx, now):
+    """The one judgement whether local node `n` can serve tier `t` at context `ctx` right now: (None, {}) if it can,
+    otherwise (base code, facts for the client). candidates_for keeps the nodes without a code, blockers() explains the
+    others, so selection and explanation cannot drift apart (ADR-0108; until router 0.37.1 they were two mirrored
+    functions, candidates_for and _node_block). Pure: reads the node, changes nothing. The caller has checked that `n`
+    offers the model (n.offers) and handles exclusion itself. Order of the checks: state gate, breaker, then the way the
+    model is reached (release of the held server, switch to the standby, already loaded, cold load)."""
+    code, info = _state_gate(n, t, now)
+    if code is not None:
+        return code, info
+    if not n.breaker_would_allow(now):   # Stage 3: open breaker stays out (half_open or open_s over: one probe)
+        return NODE_FAILING, {"breaker": n.breaker}
+    model = t["model"]
+    if n.releases_server_for(model):
+        # 0.16.3: the release stops the standby with all its models, and the server sizes itself to the card (its
+        # own reserve) as it did before the hold - no budget to check, only a game (busy, above) or memory pressure.
+        # 2026-10-24: with a budget the catalog's planning figure refused the release (28.8 > 28.5 GiB).
+        if n.mem_pressure:
+            return MEMORY_PRESSURE, _memory_facts(n)
+        b = n.upstream_blocked
+        if b:   # 0.17.0: the agent judges the RAM itself and keeps the server held (no 180-s wait for nothing)
+            return MEMORY_PRESSURE, {"ram_available_gib": b.get("ram_available_gib"), "ram_total_gib": b.get("ram_total_gib"),
+                                     "need_gib": b.get("need_gib"), "limit_percent": b.get("limit_percent"), "agent": True}
+        return None, {}
+    if n.standby_switch(model):
+        # 0.15.0: reachable only by holding the OpenAI-compatible server for the standby Ollama - a cold candidate
+        # whose budget is the card once the server has stopped (score: modes.score.switch penalty)
+        if n.mem_pressure:
+            return MEMORY_PRESSURE, _memory_facts(n)
+        return _fit(n, model, ctx, n.standby_budget_gib())
+    lc = n.loaded_context(model)
+    if n.is_loaded(model) and (lc is None or lc >= ctx):
+        # Already loaded with sufficient context: needs no extra VRAM, so no budget check.
+        # The Heartbeat during/shortly after a response shows little free VRAM (compute buffer, KV); with the
+        # Budget check failed on 2026-09-10 for the warm primary node 0.2 s after its own response,
+        # and the follow-up request ran on the fallback tier of the other node.
+        return None, {}
+    if n.mem_pressure:   # Agent >= 0.17.0: RAM tight - do not load cold (the loaded one above keeps answering)
+        return MEMORY_PRESSURE, _memory_facts(n)
+    return _fit(n, model, ctx, n.budget_gib(now, model))
+
+
+def _state_gate(n, t, now):
+    """The node-state part of assess(), checked before the breaker: offline, draining (agent update running, no new
+    requests), busy for a tier that does not allow busy. probe_breakers() moves a breaker only past this gate."""
     if n.state == "offline":
         return NODE_OFFLINE, {}
     if now < n.draining_until:
@@ -323,26 +350,30 @@ def _node_block(n, t, ctx, now):
         if n.busy_reason == "game" and n.game:
             info["game"] = n.game.get("name")
         return GPU_BUSY, info
-    if not n.breaker_would_allow(now):
-        return NODE_FAILING, {"breaker": n.breaker}
-    lc = n.loaded_context(t["model"])
-    if n.is_loaded(t["model"]) and (lc is None or lc >= ctx):
-        return None, {}
-    if n.mem_pressure:   # Like candidates_for: do not cold-load while main memory is tight
-        return MEMORY_PRESSURE, {k: v for k, v in (n.memory or {}).items() if k in ("ram_available_gib", "commit_free_gib")}
-    if n.releases_server_for(t["model"]):   # 0.16.3: like candidates_for - the release needs no budget
-        b = n.upstream_blocked or {}
-        if b:   # 0.17.0: the agent keeps the server held for want of RAM
-            return MEMORY_PRESSURE, {"ram_available_gib": b.get("ram_available_gib"), "ram_total_gib": b.get("ram_total_gib"),
-                                     "need_gib": b.get("need_gib"), "limit_percent": b.get("limit_percent"), "agent": True}
-        return None, {}
-    need = state.CFG.need_gib(t["model"], ctx, n)
-    budget = n.standby_budget_gib() if n.standby_switch(t["model"]) else n.budget_gib(now, t["model"])
+    return None, {}
+
+
+_node_block = assess   # the explanation's name before router 0.37.1; tests written against it keep working (ADR-0108)
+
+
+def _memory_facts(n):
+    return {k: v for k, v in (n.memory or {}).items() if k in ("ram_available_gib", "commit_free_gib")}
+
+
+def _too_large(n, need):
+    """`need` does not fit even on the empty node (card, or main memory without a GPU, minus the free reserve): a
+    configuration error, waiting does not help. Unknown capacity (0) is never too large."""
+    return bool(n.capacity_gib()) and need > empty_room_gib(n, "free")
+
+
+def _fit(n, model, ctx, budget):
+    """Cold load of `model` at `ctx` against `budget`: (None, {}) if it fits, otherwise why not, with the numbers."""
+    need = state.CFG.need_gib(model, ctx, n)
     if need <= budget:
         return None, {}
     foreign = n.foreign_vram_gib()
     info = {"need_gib": round(need, 2), "budget_gib": round(budget, 2), "foreign_vram_gib": round(foreign, 2)}
-    if n.capacity_gib() and need > n.capacity_gib() - n.reserve_gib("free"):
+    if _too_large(n, need):
         return MODEL_TOO_LARGE, info
     if foreign > 0 and need <= budget + foreign:
         return GPU_BUSY, dict(info, busy_reason="foreign_vram", gpu_util=n.gpu_util)
@@ -359,7 +390,7 @@ def blockers(tiers, client_ctx, now, exclude=()):
         for n in state.NODES.values():
             if not n.offers(t["model"]):
                 continue
-            code, info = _node_block(n, t, ctx, now)
+            code, info = assess(n, t, ctx, now)
             if code is None:
                 if n.name not in exclude:
                     continue   # Could serve (e.g. became free): no blocker

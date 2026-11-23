@@ -121,7 +121,7 @@ def note_hello(e, facts, now=None):
         e["version_since"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now))
     u = e.get("update") or {}
     if u.get("version") and u.get("state") not in ("done", "failed") and v == u["version"]:
-        u.update(state="done", message=f"laeuft mit {v}", t=now, ts=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        u.update(state="done", message=f"running {v}", t=now, ts=time.strftime("%Y-%m-%dT%H:%M:%S"))
         e["update"] = u
         state.remember({"event": "agent_update", "node": e["name"], "state": "done", "version": v})
         state.MQTT_DIRTY.append(True)

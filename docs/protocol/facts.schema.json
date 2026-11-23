@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent facts",
+  "description": "What the agent knows about its machine, sent inside the hello message. The router stores the object as it is (registry) and derives the node from it: name fallback, GPU, VRAM, MAC for Wake-on-LAN, the binary for agent updates, and which optional features the agent supports. No field is required by the router; without os, arch and agent_version the router cannot offer agent updates. Receivers ignore unknown fields.",
+  "type": "object",
+  "properties": {
+    "hostname": {
+      "type": "string",
+      "description": "Host name of the machine. Used as the node name when hello.node is empty, and as the Home Assistant device name.",
+      "x-since-agent": "baseline"
+    },
+    "os": {
+      "type": "string",
+      "description": "Operating system in Go's GOOS spelling (windows, linux, darwin). Selects the agent and Ollama update archive.",
+      "x-since-agent": "baseline"
+    },
+    "arch": {
+      "type": "string",
+      "description": "CPU architecture in Go's GOARCH spelling (amd64, arm64). Selects the agent and Ollama update archive.",
+      "x-since-agent": "baseline"
+    },
+    "manufacturer": {
+      "type": "string",
+      "description": "System manufacturer, shown in the UI and Home Assistant. Absent when unknown.",
+      "x-since-agent": "baseline"
+    },
+    "model": {
+      "type": "string",
+      "description": "System model, shown in the UI and Home Assistant. Absent when unknown.",
+      "x-since-agent": "baseline"
+    },
+    "gpu_present": {
+      "type": "boolean",
+      "description": "Whether the agent found a GPU (agent setting gpu.probe). false: the node runs without one and the router sizes its models by main memory (ADR-0102). Absent (agents before 0.36.0) counts as true; the Go agent always sends it.",
+      "x-since-agent": "0.36.0"
+    },
+    "gpu": {
+      "type": "string",
+      "description": "Name of the GPU the agent measures. Absent without a GPU or when no GPU sample was available at login.",
+      "x-since-agent": "baseline"
+    },
+    "vram_total_mib": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total VRAM of that GPU in MiB; the router derives the node's VRAM capacity from it. Absent without a GPU or when unknown.",
+      "x-since-agent": "baseline"
+    },
+    "mac": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$",
+      "description": "MAC address of the interface that reaches the router, for Wake-on-LAN. The Go agent sends upper case. Absent when unknown.",
+      "x-since-agent": "baseline"
+    },
+    "local_ip": {
+      "type": "string",
+      "description": "IP address of that interface, informational (UI).",
+      "x-since-agent": "baseline"
+    },
+    "ollama_version": {
+      "type": "string",
+      "description": "Version reported by the local Ollama's /api/version at login. Absent for an OpenAI-compatible upstream or when Ollama did not answer.",
+      "x-since-agent": "baseline"
+    },
+    "ollama_url": {
+      "type": "string",
+      "description": "Base URL of the upstream the agent forwards to, informational (UI).",
+      "x-since-agent": "baseline"
+    },
+    "agent_version": {
+      "type": "string",
+      "description": "Version of the agent. The router compares it with the release it offers and completes an update order when it changes.",
+      "x-since-agent": "baseline"
+    },
+    "ollama_managed": {
+      "type": "boolean",
+      "description": "true: Ollama runs as a child of this agent, so the router may offer Ollama updates (control message ollama-update). Only true enables them.",
+      "x-since-agent": "0.12.1"
+    },
+    "ollama_push": {
+      "type": "boolean",
+      "description": "true: the agent reports the Ollama state itself (frame OLLAMA). Informational: the router decides by the frames it receives.",
+      "x-since-agent": "0.14.0"
+    },
+    "ollama_swap_gate": {
+      "type": "boolean",
+      "description": "true: after downloading an Ollama update the agent reports state ready and swaps only on the router's ollama-swap message.",
+      "x-since-agent": "0.15.0"
+    },
+    "upstream_api": {
+      "type": "string",
+      "enum": ["ollama", "openai"],
+      "description": "Kind of upstream. Absent means ollama; the Go agent sends only openai, for an OpenAI-compatible server.",
+      "x-since-agent": "0.21.0"
+    },
+    "upstream_release": {
+      "type": "boolean",
+      "description": "true (with upstream_api openai): the agent stops and starts its OpenAI-compatible upstream on upstream-hold and upstream-release.",
+      "x-since-agent": "0.22.0"
+    },
+    "upstream_fallback": {
+      "type": "boolean",
+      "description": "true (with upstream_release): while the upstream is held, a standby Ollama serves in its place and the OLLAMA frame says serving ollama.",
+      "x-since-agent": "0.23.0"
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "hostname": "GPU-DESKTOP",
+      "os": "windows",
+      "arch": "amd64",
+      "manufacturer": "Example Systems",
+      "model": "Tower 1",
+      "gpu": "Example GPU 24G",
+      "vram_total_mib": 24564,
+      "mac": "02:00:00:00:00:01",
+      "local_ip": "192.0.2.21",
+      "ollama_version": "0.13.0",
+      "ollama_url": "http://127.0.0.1:11434",
+      "agent_version": "0.35.2",
+      "ollama_managed": true,
+      "ollama_push": true,
+      "ollama_swap_gate": true,
+      "gpu_present": true
+    },
+    {
+      "hostname": "cpu-node",
+      "os": "linux",
+      "arch": "arm64",
+      "ollama_version": "0.13.0",
+      "ollama_url": "http://127.0.0.1:11434",
+      "agent_version": "0.36.0",
+      "ollama_managed": false,
+      "gpu_present": false
+    },
+    {
+      "hostname": "server-node",
+      "os": "linux",
+      "arch": "amd64",
+      "ollama_url": "http://127.0.0.1:8080",
+      "agent_version": "0.35.2",
+      "upstream_api": "openai",
+      "upstream_release": true,
+      "upstream_fallback": true
+    }
+  ]
+}

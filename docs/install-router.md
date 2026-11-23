@@ -3,16 +3,17 @@
 **English** · [Deutsch](install-router.de.md) · [README](../README.md)
 
 The router is one Python process with a systemd unit. This page covers a fresh installation on Debian or Ubuntu, the
-TLS certificate, the firewall, secrets, the optional decision engine and the command-line tools. GPU nodes are in
-[install-agent.md](install-agent.md), the configuration in [configuration.md](configuration.md).
+TLS certificate, the firewall, secrets, the optional decision engine and the command-line tools. Docker, Podman, Unraid,
+TrueNAS or Synology: see [Container](#container). GPU nodes are in [install-agent.md](install-agent.md), the
+configuration in [configuration.md](configuration.md).
 
 ## Requirements
 
 | What | Details |
 |---|---|
-| Operating system | Debian 12 or Ubuntu (or comparable; `install.sh` supports Debian and Ubuntu, elsewhere follow [Manual installation](#manual-installation)). A container is fine. On Windows the router runs with the default event loop (development). |
+| Operating system | Debian 12 or Ubuntu (or comparable; `install.sh` supports Debian and Ubuntu, elsewhere follow [Manual installation](#manual-installation)). A system container (LXC) is fine; for Docker or Podman use the router image ([Container](#container)). On Windows the router runs with the default event loop (development). |
 | Python | 3.11 or newer |
-| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installs missing ones). What the distribution lacks or ships too old (on Debian 12: `asyncpg` for a PostgreSQL session store) comes into the venv only from the hash-locked `router/requirements-lock.txt` (ADR-0074). A SQLite session store (`sqlite:///...`, ADR-0114) uses Python's own `sqlite3` and needs SQLite 3.37 or newer (Debian 12 has 3.40). |
+| Packages | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installs missing ones). `python3-paho-mqtt` is needed only for Home Assistant over MQTT (`install.sh --without-mqtt` leaves it out). What the distribution lacks or ships too old (on Debian 12: `asyncpg` for a PostgreSQL session store) comes into the venv only from the hash-locked `router/requirements-lock.txt` (ADR-0074). A SQLite session store (`sqlite:///...`, ADR-0114) uses Python's own `sqlite3` and needs SQLite 3.37 or newer (Debian 12 has 3.40). |
 | Ports | **11434** for clients (Ollama, OpenAI and Anthropic APIs), **11435** for the agents' tunnel, the web UI, `/admin/*` and `/metrics` |
 | Name and certificate | A DNS name that clients and nodes use (`<name>`, e.g. `router.example.net`) and a TLS certificate for it, see [TLS certificate](#tls-certificate) |
 
@@ -41,8 +42,10 @@ Before changing anything the script checks: root, Debian/Ubuntu, Python 3.11 or 
 
 The last line is always `STATE: installed`, `STATE: checked` or `STATE: refused` (with the reason above it).
 **Upgrade** = run the script again from the new release, then `systemctl restart skirnir-router`. Options: `--prefix DIR`
-(default `/opt/skirnir-router`), `--config-dir DIR` (default `/etc/skirnir-router`); `--root DIR`, `--no-venv` and
-`--os-release FILE` are for packaging and tests (`--help` lists them).
+(default `/opt/skirnir-router`), `--config-dir DIR` (default `/etc/skirnir-router`); `--without-mqtt` for a router without
+Home Assistant: the MQTT library (`python3-paho-mqtt`, `paho-mqtt` from the lock) is not installed, and the script refuses
+while `config.yaml` names an MQTT broker (`mqtt.host`); without the option it is installed as before (ADR-0104).
+`--root DIR`, `--no-venv` and `--os-release FILE` are for packaging and tests (`--help` lists them).
 
 ## First configuration
 
@@ -125,7 +128,7 @@ The start log lists the posture findings (lines `posture …`). Then open `https
 |---|---|
 | `skirnir-router.service` | The router. Runs `/opt/skirnir-router/venv/bin/python router.py /etc/skirnir-router/config.yaml` as its own account `skirnir-router` without capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=tmpfs`, `PrivateTmp`, `UMask=0077` (ADR-0086). Writes only its state directory `/var/lib/skirnir-router` (`router.state_dir`) and its log directory `/var/log/skirnir-router`; `/etc/skirnir-router` stays root's and is read through the group. Reads `secrets.env` as environment. `install.sh` and `deploy.py` create the account and set owners and modes with `router-layout.sh`. |
 | `skirnir-router-cert.path` + `.service` | Optional: restart on a renewed certificate (see above). |
-| `skirnir-router-secrets.service` | Renders `secrets.env` before the router starts (`render-env.sh`); does nothing without `render-env.conf`. |
+| `skirnir-router-secrets.service` | Renders `secrets.env` before the router starts (`render-env.sh`, from a secret store or a root-only file); does nothing without `render-env.conf`. |
 | `skirnir-router-secrets.timer` + `-secrets-refresh.service` | Optional: renders daily and restarts the router when a secret changed. |
 
 ## Firewall
@@ -140,15 +143,38 @@ The start log lists the posture findings (lines `posture …`). Then open `https
 
 The router reads `/etc/skirnir-router/secrets.env` (root, 0640 for its group `skirnir-router`) as environment: `MQTT_PASSWORD`, `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, the keys named in `EXTRA_SECRET_KEYS` (further cloud providers, ADR-0080) and, for the optional memory
-layers, the variables their configuration names. Maintain it by hand, or let
-`render-env.sh` render it from a secret store with a universal-auth API: access goes into
-`/etc/skirnir-router-secrets/render-env.conf` (folder 0700 root, file 0600; template
-[router/render-env.conf.example](../router/render-env.conf.example)); the daily timer restarts the router when a secret
-changed. If the secret store is unreachable the last file stays. The access file is read by root, so it must not lie in
-a folder the router may write: `render-env.sh` refuses a file (or `SECRET_STORE_AUTH_FILE`) under `/etc/skirnir-router`,
-`/var/lib/skirnir-router` or `/var/log/skirnir-router`, or one that is not owned by root or writable by group or others,
-and the router unit cannot see `/etc/skirnir-router-secrets` at all. `install.sh` and `deploy.py` move an old
-`/etc/skirnir-router/render-env.conf` there (ADR-0073).
+layers, the variables their configuration names. Every one of them is optional: `MQTT_PASSWORD` only matters with an
+`mqtt:` section. There are three ways to provide them:
+
+1. **By hand**: write `secrets.env` yourself (`KEY=value` per line, root:skirnir-router 0640) and create no
+   `render-env.conf`; `render-env.sh` then renders nothing (`STATE: not-configured`).
+2. **`render-env.sh` from a root-only file** (`SECRET_SOURCE=file`, `SECRET_FILE=...` in `render-env.conf`): the renderer
+   copies the file with the same checks as for a store - only built-in and `EXTRA_SECRET_KEYS` names, no value with a line
+   break, a name given twice is skipped. The file must be owned by root, readable by root only (0600) and lie outside the
+   router's paths, e.g. `/etc/skirnir-router-secrets/secrets.source.env`. It is read line by line, never sourced.
+3. **`render-env.sh` from a secret store** with a universal-auth API (`SECRET_SOURCE=store`, the default): access goes
+   into `render-env.conf` (`SECRET_STORE_DOMAIN`, `SECRET_STORE_CLIENT_ID`, `SECRET_STORE_CLIENT_SECRET` or
+   `SECRET_STORE_AUTH_FILE`, `PROJECT_ID`, `ENVIRONMENT`).
+
+`render-env.conf` lives in `/etc/skirnir-router-secrets/` (folder 0700 root, file 0600; template
+[router/render-env.conf.example](../router/render-env.conf.example)). The renderer works in three steps (ADR-0104): it
+checks that its source is ready and says so (store: not reachable, login refused, or ready; file: missing, refused, or
+ready), then fetches every name on its own (present, missing, or fetch failed), then writes every present name. The
+existing file stays when the source is not ready, when any fetch failed (a transient fault drops no secret) and when the
+source holds none of the names. Its last line is `STATE: written`, `unchanged`, `kept`, `not-configured` or `refused`
+([operations.md](operations.md#secrets-renderer)). The daily timer restarts the router when the file changed.
+
+systemd `LoadCredential=` is an alternative for the values the router reads from a file: point `mqtt.password_file` or a
+cloud provider's `secrets_file` at the credential (`/run/credentials/skirnir-router.service/<name>`, a `KEY=value` file).
+The session-store and memory variables come only from the environment and need `secrets.env` (or another
+`EnvironmentFile`). A client for a further store (e.g. Vault) is not built in; it would be one more source in
+`render-env.sh`.
+
+`render-env.conf` and `SECRET_STORE_AUTH_FILE` are sourced by root, so they must not lie in a folder the router may write:
+`render-env.sh` refuses such a file (and `SECRET_FILE`) under `/etc/skirnir-router`, `/var/lib/skirnir-router` or
+`/var/log/skirnir-router`, or one that is not owned by root or writable by group or others, and the router unit cannot see
+`/etc/skirnir-router-secrets` at all. `install.sh` and `deploy.py` move an old `/etc/skirnir-router/render-env.conf` there
+(ADR-0073).
 
 ## Optional: decision engine for the auto role
 
@@ -193,6 +219,79 @@ Without `install.sh` (another distribution, or to see each step):
    `systemctl enable --now skirnir-router`.
 5. Secrets and, if wanted, the decision engine as above.
 6. Install agents and approve them in the UI ([install-agent.md](install-agent.md)).
+
+## Container
+
+The router image runs the same program with the same `config.yaml` and the same paths as `install.sh`
+([ADR-0116](adr/0116-an-official-container-image-for-the-router.md),
+[ADR-0121](adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md); how it works:
+[design/router-container.md](../design/router-container.md)). `router/Dockerfile` builds on the digest-pinned
+`python:3.14-slim-trixie` and installs Python packages only from the hash-locked `router/requirements-container-lock.txt`
+(wheels only, amd64 and arm64). The router runs as uid/gid 10001 (`skirnir-router`) without capabilities; no secret is
+in the image. There is no image in a registry yet: build it from a release or clone.
+
+```bash
+docker build -t skirnir-router router/                  # Podman: podman build --format docker -t skirnir-router router/
+```
+
+(`--format docker` keeps the image's health check, which Podman's default image format drops; `compose.yaml` repeats it.)
+
+| In the container | From | Contents |
+|---|---|---|
+| `/etc/skirnir-router` | your folder `config/`, **read-only** | `config.yaml`, `certs/fullchain.pem`, `certs/privkey.pem` |
+| `/var/lib/skirnir-router` | volume `state` | `router.state_dir`: roles changed in the web UI, node registry, journals |
+| `/var/log/skirnir-router` | volume `logs` | `client_auth.audit_log` |
+| environment | `secrets.env` | the variables the `*_env` keys name: `MQTT_PASSWORD`, `OPENAI_API_KEY`, `SKIRNIR_SESSION_DSN` … |
+| stdout | `docker compose logs router` | the router's log, including the posture report at start |
+
+**First start.**
+
+1. Copy `router/compose.yaml` into a folder of your own (outside the clone: it will hold your secrets) and work there.
+2. First configuration, written by `--init` as root in a one-off container, so `config.yaml` is root's and readable for
+   the router's group, as on a host:
+
+   ```bash
+   mkdir config
+   docker run --rm -it --user 0:0 -v "$PWD/config:/etc/skirnir-router" skirnir-router \
+     --init /etc/skirnir-router --public-url https://<name>:11435
+   ```
+
+   It asks for the web UI password, shows the client token **once** and prints the posture report.
+3. Put the certificate and key for `<name>` into `config/certs/` (`fullchain.pem`, `privkey.pem`) and give the folder to
+   group 10001, readable but not writable for it:
+   `sudo chown -R root:10001 config && sudo chmod -R g+rX,g-w,o-rwx config`. With rootless Podman the container's group
+   10001 is a subordinate group of your user: `podman unshare chown -R 0:10001 config` instead.
+4. Secrets: `secrets.env` next to `compose.yaml`, one `KEY=value` per line for the `*_env` keys of your configuration;
+   it may be empty (`touch secrets.env && chmod 600 secrets.env`).
+5. `docker compose up -d`, then `docker compose ps` (state `healthy`) and `docker compose logs router`.
+
+`compose.yaml` runs the router as uid 10001 on a read-only root file system without capabilities and without privilege
+gain; only the two volumes and a small `/tmp` are writable. It publishes both ports on all host addresses: firewall them
+as in [Firewall](#firewall), or write `127.0.0.1:11434:11434` behind a reverse proxy. Docker forwards published ports
+before ufw's and firewalld's usual rules see them; restrict them in Docker's `DOCKER-USER` chain or publish them on one
+host address (`192.0.2.10:11435:11435`). A bind mount instead of a volume
+for the state or logs must belong to uid 10001 (`sudo chown 10001:10001 <folder>`, mode 0700). Unraid, TrueNAS and
+Synology: the same mounts, environment, user 10001:10001 and the read-only option in their container settings.
+
+**Commands** run in a one-off container with the service's mounts and account, e.g.
+`docker compose run --rm router --check /etc/skirnir-router/config.yaml --files`, `... --posture
+/etc/skirnir-router/config.yaml`, `... --hash`. **Upgrade:** build the image of the new release under the same name and
+run `docker compose up -d`; the state stays in its volume.
+
+**What the systemd install does and you provide here:** there is no secret renderer in the image (`render-env.sh` and its
+timer): keep `secrets.env` yourself or use your orchestrator's secrets, and run `docker compose up -d` after a change.
+There is no certificate unit (`skirnir-router-cert.path`): renew on the host into `config/certs/`, then
+`docker compose restart router`. `router-layout.sh` does not run: the read-only mount is what keeps the router from
+changing its configuration and certificates, so the posture report does not list them as changeable.
+
+**Optional services** stay off unless their profile is named: `docker compose --profile sessions up -d` adds PostgreSQL
+for `router.session_store` (password in its own `postgres.env`; the posture report keeps `session_store_unverified_tls`
+until PostgreSQL has TLS), `--profile decision` the embedding decision service (`docker build -t skirnir-embed
+decision-embed/` first, endpoint `http://embed:8082`). Agents stay native binaries on the GPU nodes and connect to
+`https://<name>:11435` as with any router.
+
+On a single host the session store needs no PostgreSQL: `SKIRNIR_SESSION_DSN=sqlite:///sessions.db` in `secrets.env` keeps it as an owner-only file in the `state` volume (ADR-0114; the image has Python's `sqlite3`); back it up as `sessions.db` in
+[operations](operations.md#what-to-back-up).
 
 ## Security checklist
 

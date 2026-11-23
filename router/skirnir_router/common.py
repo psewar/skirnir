@@ -152,7 +152,7 @@ async def read_json(request):
 
 def safe_node_name(name):
     out = "".join(ch for ch in str(name).lower() if ch.isalnum() or ch in "-_.")
-    return (out or "knoten")[:40]
+    return (out or "node")[:40]
 
 
 # Node-RED-MCP (llm-call, ai-agent) and other OpenAI clients. Router translates to /api/chat and back,
