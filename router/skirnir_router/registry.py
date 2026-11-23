@@ -20,6 +20,7 @@ else:  # pragma: no cover
 from . import agentupdate, nodes, ollamaupdate, state, tunnel, values
 from .common import BASE64, VERSION, log, normalize_mac, open_private, read_env_value, read_json, safe_node_name
 from .outcome import Problem, failed, invalid, unauthenticated
+from .waker_config import check_choice as check_waker_choice
 
 # Unapproved identities are untrusted, even when they sign their own key.
 MAX_HELLO_BYTES = 32 * 1024
@@ -163,6 +164,7 @@ def node_spec_from_entry(e):
         spec["vram_total_gib"] = round(facts["vram_total_mib"] / 1024, 1)
     spec["mac"] = pol.get("mac") or facts.get("mac") or spec.get("mac")
     spec["wol"] = bool(pol.get("wol", spec.get("wol", False)))
+    spec["waker"] = pol.get("waker") or spec.get("waker") or "wol"   # policy, else nodes.<name>.waker, else Wake-on-LAN
     spec["weight"] = int(pol.get("weight", spec.get("weight", 1)))
     if pol.get("foreign_vram_baseline_gib") is not None:
         spec["foreign_vram_baseline_gib"] = pol["foreign_vram_baseline_gib"]
@@ -175,6 +177,8 @@ def node_spec_from_entry(e):
         spec["gpu_guard"] = bool(pol["gpu_guard"])
     if facts.get("gpu"):
         spec["gpu"] = facts["gpu"]
+    if facts.get("gpu_present") is False:   # Agent >= 0.36.0 without a GPU (ADR-0102): models sized by main memory
+        spec["gpu_present"] = False
     if facts.get("upstream_api") == "openai":   # Agent fronts an OpenAI-compatible server (openai_node.py); else Ollama
         spec["upstream_api"] = "openai"
         if facts.get("upstream_release") is True:   # ... and can stop/start it on order (agent >= 0.22.0)
@@ -394,7 +398,7 @@ async def handle_nodes(request):
     return web.json_response({"nodes": registry_view(), "pending": [x["name"] for x in registry_view() if x["state"] == "pending"]})
 
 
-POLICY_KEYS = ("wol", "weight", "mqtt", "foreign_vram_baseline_gib", "mac", "max_inflight", "busy_gpu_util_pct", "busy_foreign_gib",
+POLICY_KEYS = ("wol", "waker", "weight", "mqtt", "foreign_vram_baseline_gib", "mac", "max_inflight", "busy_gpu_util_pct", "busy_foreign_gib",
                "gpu_guard", "auto_update", "ollama_auto_update")
 
 
@@ -413,6 +417,8 @@ def node_policy(body):
             pol[k] = values.number(pol[k], k, integer=True)
             if failed(pol[k]):
                 return pol[k]
+    if pol.get("waker") is not None and failed(problem := check_waker_choice(pol["waker"], state.CFG.wakers, "waker")):
+        return problem   # only a configured name; the UI never sets a waker's destination (ADR-0124)
     if pol.get("mac") is not None:
         pol["mac"] = normalize_mac(pol["mac"])
         if pol["mac"] is None:

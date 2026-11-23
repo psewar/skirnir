@@ -87,6 +87,52 @@ class InstallTests(unittest.TestCase):
         self.assertEqual((rc, last), (2, "STATE: refused"), out)
         self.assertTrue(os.path.exists(os.path.join(self.root, "opt", "skirnir-router", "router.py")), "program files stay installed")
 
+    def test_without_mqtt(self):
+        """ADR-0104: --without-mqtt leaves out the MQTT library; refused while the configuration names a broker."""
+        rc, out, last = self.install("--help")
+        self.assertIn("--without-mqtt", out)
+        rc, out, last = self.install("--without-mqtt")
+        self.assertEqual((rc, last), (0, "STATE: installed"), out)
+        self.assertNotIn("python3-paho-mqtt", out, "the MQTT package is neither installed nor reported missing")
+        conf = os.path.join(self.root, "etc", "skirnir-router")
+        cert, key = os.path.join(self.tmp.name, "fullchain.pem"), os.path.join(self.tmp.name, "privkey.pem")
+        for path in (cert, key):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("synthetic\n")
+        init = subprocess.run([sys.executable, os.path.join(self.root, "opt", "skirnir-router", "router.py"), "--init", conf,
+                               "--public-url", "https://router.example.invalid:11435", "--cert", cert, "--key", key],
+                              input="synthetic-password-1234\n", capture_output=True, text=True, env=self.env)
+        self.assertEqual(init.returncode, 0, init.stdout + init.stderr)
+        rc, out, last = self.install("--without-mqtt")
+        self.assertEqual((rc, last), (0, "STATE: installed"), out)
+        self.assertIn("names no MQTT broker", out)
+        with open(os.path.join(conf, "config.yaml"), "a", encoding="utf-8") as f:
+            f.write("mqtt:\n  host: broker.example.invalid\n")
+        marker = os.path.join(self.root, "opt", "skirnir-router", "ui.html")
+        os.remove(marker)
+        rc, out, last = self.install("--without-mqtt")
+        self.assertEqual((rc, last), (2, "STATE: refused"), out)
+        self.assertIn("names an MQTT broker", out)
+        self.assertFalse(os.path.exists(marker), "a refused run changes no program file")
+        rc, out, last = self.install()
+        self.assertEqual((rc, last), (0, "STATE: installed"), "without the option the default (with MQTT) is unchanged: " + out)
+
+
+class RouterWithoutPahoTests(unittest.TestCase):
+    """The router needs the MQTT library only for an mqtt: section (ha.py checks for it with find_spec)."""
+
+    def test_check_and_import_without_paho(self):
+        router_dir = os.path.join(HERE, "..", "router")
+        code = ("import runpy, sys\n"
+                "sys.modules['paho'] = None   # find_spec('paho') is None, as without the package\n"
+                f"sys.path.insert(0, {router_dir!r})\n"
+                "from skirnir_router import ha, app\n"
+                "assert ha.mqtt is None, 'paho blocked'\n"
+                f"sys.argv = ['router.py', '--check', {os.path.join(router_dir, 'config.minimal.yaml')!r}, '--pure']\n"
+                f"runpy.run_path({os.path.join(router_dir, 'router.py')!r}, run_name='__main__')\n")
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

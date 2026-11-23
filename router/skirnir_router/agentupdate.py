@@ -25,7 +25,7 @@ from aiohttp import web
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from . import state
+from . import problems as problems_mod, state
 from .common import log
 
 TOKENS = {}          # token -> {"fp", "file", "expires", "uses"}
@@ -121,7 +121,7 @@ def note_hello(e, facts, now=None):
         e["version_since"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now))
     u = e.get("update") or {}
     if u.get("version") and u.get("state") not in ("done", "failed") and v == u["version"]:
-        u.update(state="done", message=f"laeuft mit {v}", t=now, ts=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        u.update(state="done", message=f"running {v}", t=now, ts=time.strftime("%Y-%m-%dT%H:%M:%S"))
         e["update"] = u
         state.remember({"event": "agent_update", "node": e["name"], "state": "done", "version": v})
         state.MQTT_DIRTY.append(True)
@@ -162,7 +162,7 @@ def note_report(node, report, now=None):
 
 
 def problems(now=None):
-    """HA Problems: failed or hanging updates."""
+    """Problem records (problems.py, ADR-0101): failed or hanging updates."""
     now = now or time.time()
     out = []
     if state.REG is None:
@@ -170,9 +170,9 @@ def problems(now=None):
     for e in state.REG.nodes.values():
         u = update_view(e, now)
         if u.get("state") == "failed":
-            out.append(f"Agent-Update auf {e['name']} fehlgeschlagen: {u.get('message') or '?'}")
+            out.append(problems_mod.make("agent_update_failed", node=e["name"], message=u.get("message") or "?"))
         elif u.get("state") == "stalled":
-            out.append(f"Agent-Update auf {e['name']} haengt ({u.get('message')})")
+            out.append(problems_mod.make("agent_update_stalled", node=e["name"], message=u.get("message")))
     return out
 
 

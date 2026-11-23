@@ -6,7 +6,8 @@
 # Nach der Freigabe schickt der Router den MQTT-Zugang fuer das HA-Geraet durch den Tunnel.
 #
 # Voraussetzungen auf dem Rechner
-#   - NVIDIA-Treiber (nvidia-smi funktioniert), Ollama installiert und gestartet (darf auf localhost bleiben),
+#   - NVIDIA-Treiber (nvidia-smi funktioniert) - oder ohne NVIDIA-GPU als CPU-Knoten (gpu.probe unten, seit 0.36.0),
+#     Ollama installiert und gestartet (darf auf localhost bleiben),
 #     gewuenschte Modelle einmal gepullt (der Router routet nur Rollen, deren Modelle der Knoten hat)
 #   - Netzwerkzugang zu https://router.example.net:11435
 #
@@ -74,6 +75,16 @@ tunnel:                                         # ausgehende Verbindung zum Rout
   #     upstream: http://127.0.0.1:8090         #   nur 127.0.0.1 oder [::1], sonst laedt die Config nicht
   #     health: /health                         #   alle 5 s abgefragt; 200 = up, sonst Grund starting/selftest_failed/unhealthy/unreachable
 
+# gpu:                                          # welche GPU der Agent misst (0.36.0, ADR-0102)
+#   probe: auto                                 #   auto (Standard): NVIDIA wie bisher (NVML, sonst nvidia-smi); fehlt beides,
+#                                               #   laeuft der Agent ohne GPU und meldet gpu_present: false (der Router
+#                                               #   bemisst Modelle dann nach dem Hauptspeicher, GPU-Schutz und GPU-Z
+#                                               #   entfallen). nvidia = ohne NVIDIA-GPU nicht starten (Verhalten bis 0.35),
+#                                               #   none = gar nicht suchen (CPU-Rechner, AMD/Intel/Apple vorerst so)
+
+# game:                                         # Spielerkennung (0.36.0, ADR-0103): Standard an unter Windows, sonst aus
+#   enabled: false                              #   aus = keine Prozess-Abfrage; der Router sieht enabled: false und kein Spiel
+
 # gpuz:                                         # GPU-Z-Sensoren (Windows) als Zusatzquelle, Standard an: laeuft GPU-Z,
 #   enabled: false                              #   kommen Speichertemperatur, Hot Spot, Spannung, 16-Pin-Leistung dazu
 
@@ -117,6 +128,8 @@ tunnel:                                         # ausgehende Verbindung zum Rout
 #   ollama_url: http://127.0.0.1:11434          #   fuer die Modell-Entitaeten
 #   alias_model: assist:latest                  #   optional: Alias-Modell, das der Knoten fuehrt -> zwei HA-Entitaeten (Basismodell, strukturfaehig)
 #   stt_child: stt                              #   welches Kind der STT-Server ist (Entitaet), stt_fallback_port: 10300
+#   entity_language: en                         #   Sprache der HA-Anzeigenamen: de (Standard, wie bisher) oder en; unique_id
+#                                               #   und Entitaets-ID bleiben (0.36.0, ADR-0103). Nur lokal, nicht provisioniert
 # secret_store:                                 # nur mit mqtt.password_secret: Universal-Auth-API (Client-ID/-Secret -> Token)
 #   domain: https://secrets.example.net         #   Pflicht, wenn password_secret gesetzt ist (kein Platzhalter mehr)
 #   project_id: 00000000-0000-0000-0000-000000000000

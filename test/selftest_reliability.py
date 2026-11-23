@@ -98,7 +98,7 @@ class ReliabilityApiTests(fixture.MemoryHarness):
 
     async def test_error_category_never_contains_upstream_body(self):
         await self.retain()
-        self.service.client.retain = AsyncMock(return_value=unavailable('SYNTHETIC_BODY_MUST_NOT_LEAK', 'upstream_auth'))
+        self.service.backend.client.retain = AsyncMock(return_value=unavailable('SYNTHETIC_BODY_MUST_NOT_LEAK', 'upstream_auth'))
         await memory_outbox.step(self.service)
         self.assertEqual(self.store.outbox_finish.call_args.kwargs, {'error': 'upstream_auth'})
         self.assertNotIn('SYNTHETIC_BODY', str(self.store.outbox_finish.call_args))
@@ -130,7 +130,7 @@ class ReliabilityApiTests(fixture.MemoryHarness):
                 await release.wait()
             finally:
                 active -= 1
-        self.service.client.retain = AsyncMock(side_effect=send)
+        self.service.backend.client.retain = AsyncMock(side_effect=send)
         worker = asyncio.create_task(memory_outbox.run(self.service))
         try:
             await asyncio.wait_for(entered.wait(), 2)

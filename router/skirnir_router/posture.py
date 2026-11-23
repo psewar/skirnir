@@ -5,7 +5,8 @@ model calls risky: an API port that serves unknown callers, a client policy chan
 only by their source address or sharing one token, a control port open without login, plaintext transport to a node's
 Ollama, the session store, or an API port without TLS. Each finding names its code, severity, the risk it maps to and
 the next step; no secret, token, hash or connection string is printed. The check reads the configuration and, for the
-session store, the sslmode of the DSN in the environment (never the DSN itself). At start the router also passes its own
+session store, the sslmode of the DSN in the environment (never the DSN itself), or for a SQLite URL the file's location
+and mode (ADR-0114). At start the router also passes its own
 view of the file system (process_view.py, ADR-0083) and reports TLS files it could change; the CLI runs outside the
 unit and cannot see that view, so it leaves this check out.
 
@@ -16,6 +17,9 @@ import ipaddress
 import os
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlsplit
+
+from .outcome import failed
+from .session_url import parse_store_url
 
 HIGH, MEDIUM, INFO = "high", "medium", "info"
 # sha256 of placeholder tokens from examples and tutorials; a client still using one has no real secret (ADR-0067).
@@ -113,7 +117,14 @@ def findings(cfg, environ=None, view=None):
     store = getattr(cfg, "session_store", None)
     if store is not None and getattr(store, "enabled", False):
         dsn = environ.get(store.dsn_env, "")
-        if dsn:
+        target = parse_store_url(dsn, lambda: _state_dir(cfg)) if dsn else None
+        if dsn and failed(target):
+            out.append(Finding("session_store_url_unsupported", MEDIUM, "TM-11",
+                               f"{store.dsn_env} names no supported engine: the router refuses to start the session store.",
+                               "use postgresql://... or sqlite:///<file> (a relative file lies in router.state_dir)"))
+        elif dsn and target.engine == "sqlite":
+            out.extend(_sqlite_file(target.path))
+        elif dsn:
             query = parse_qs(urlsplit(dsn).query) if "://" in dsn else {}
             mode = (query.get("sslmode") or [""])[0]
             host = urlsplit(dsn).hostname or "" if "://" in dsn else ""
@@ -137,6 +148,34 @@ def findings(cfg, environ=None, view=None):
             out.append(Finding("outbox_payload_retention_off", INFO, "TM-12",
                                "finished memory jobs keep their content in the outbox indefinitely.",
                                "set hindsight.outbox_retention_days to drop it after that many days (the job id stays)"))
+    return out
+
+
+def _state_dir(cfg):
+    """router.state_dir, else the folder of config.yaml (common.state_dir), else the working folder for a bare object."""
+    path = getattr(cfg, "path", None)
+    return getattr(cfg, "state_dir", None) or os.path.dirname(os.path.abspath(path or "."))
+
+
+def _sqlite_file(path):
+    """ADR-0114: where the SQLite session store lives and who can read it, as facts (TM-15, ADR-0056)."""
+    if not os.path.exists(path):
+        state = "not created yet; the router creates it owner-only at start"
+    elif os.name == "posix":
+        state = "mode " + format(os.stat(path).st_mode & 0o777, "04o")
+    else:
+        state = "access set by Windows ACLs"
+    out = [Finding("session_store_sqlite_file", INFO, "TM-15",
+                   f"the session store is the SQLite file {path} ({state}); it holds session content and the memory outbox.",
+                   f'back it up with sqlite3 {path} ".backup <copy>" (a plain copy of a running store can be torn), protect '
+                   "the copy like the file, and never restore deletions.jsonl older than it (ADR-0076)")]
+    if os.name == "posix":
+        readable = [path + suffix for suffix in ("", "-wal", "-shm")
+                    if os.path.isfile(path + suffix) and os.stat(path + suffix).st_mode & 0o077]
+        if readable:
+            out.append(Finding("session_store_file_readable", MEDIUM, "TM-15",
+                               "group or others can access " + ", ".join(readable) + ".",
+                               "the router tightens them to 0600 at its next start; find out who created or copied them (ADR-0056)"))
     return out
 
 

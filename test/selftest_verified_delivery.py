@@ -134,14 +134,14 @@ class VerifiedDeliveryTests(Harness):
         await memory_outbox.step(self.service)
         self.store.release(operation)
         self.operation_state = "not_found"
-        self.service.client.operation = lambda *args, **kwargs: _value({"status": "not_found"})
+        self.service.backend.client.operation = lambda *args, **kwargs: _value({"status": "not_found"})
         await memory_outbox.step(self.service)
         self.assertEqual((self.store.jobs[operation]["state"], self.store.jobs[operation]["last_error"]), ("dead", "remote_unknown"))
         second = await self.retain("second")
         await memory_outbox.step(self.service)
         self.store.jobs[second]["accepted_at"] = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         self.store.release(second)
-        self.service.client.operation = lambda *args, **kwargs: _value({"status": "processing"})
+        self.service.backend.client.operation = lambda *args, **kwargs: _value({"status": "processing"})
         await memory_outbox.step(self.service)
         self.assertEqual((self.store.jobs[second]["state"], self.store.jobs[second]["last_error"]), ("dead", "remote_pending"))
 

@@ -9,7 +9,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.34.1"
+VERSION = "0.41.0"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -152,7 +152,7 @@ async def read_json(request):
 
 def safe_node_name(name):
     out = "".join(ch for ch in str(name).lower() if ch.isalnum() or ch in "-_.")
-    return (out or "knoten")[:40]
+    return (out or "node")[:40]
 
 
 # Node-RED-MCP (llm-call, ai-agent) and other OpenAI clients. Router translates to /api/chat and back,

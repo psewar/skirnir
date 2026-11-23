@@ -15,7 +15,6 @@ import time
 from . import admission, decision, scheduler, state
 from .common import log, open_private, state_dir
 
-LIGHT_DEFAULT = ("standard", "assist")   # Classes for which a deeper tier might be an option (not Programming, not Analysis)
 CLASSIFY_PATHS = ("/api/chat", "/api/generate")
 FILE_MAX_BYTES = 20 * 2 ** 20            # requests.jsonl: this large, then rotate to .1 (~400 B per line, ~50,000 requests)
 LATE_WAIT_S = 5.0                        # Classification not finished when the request ends: wait for it
@@ -35,13 +34,13 @@ def start(body, path, role, tiers, req, node, model, reason, client):
 
 def alternative(tiers, blocked_model, req, client_ctx=None, now=None):
     """First free local tier of the role with a different model (warm before cold, other nodes before the blocked one) -
-    what a class-based fallback would take. None = none. Read-only view (mutate=False)."""
+    what a class-based fallback would take. None = none. Read-only view (no probe_breakers)."""
     now = now or time.time()
     found = []
     for i, t in enumerate(tiers):
         if t.get("cloud") or t["model"] == blocked_model or (req is not None and req.tier_blocked(t)):
             continue
-        _ctx, _need, cands = scheduler.candidates_for(t, client_ctx, now, mutate=False)
+        _ctx, cands = scheduler.candidates_for(t, client_ctx, now)
         for n in cands:
             if not admission.saturated(n, t["model"]):
                 found.append((not n.is_loaded(t["model"]), i, n.name, t["model"]))
@@ -142,7 +141,9 @@ async def _observe(body, path, role, tiers, req, node, model, reason, client):
     if d is None:
         return
     result = await d.classify_body(body, path)
-    light = set((state.CFG.decision or {}).get("observe_light") or LIGHT_DEFAULT)
+    # classes for which a free lower tier might do: decision_engine.observe_light as config.py resolved it (its default
+    # OBSERVE_LIGHT_DEFAULT when the key is absent; an empty list means none)
+    light = set((state.CFG.decision or {}).get("observe_light") or ())
     confident = not result.uncertainty.get("reasons") and not result.uncertainty.get("forced")
     alt = alternative(tiers, model, req)
     state.remember({"event": "decision_observe", "request_id": req.request_id, "client": client, "role": role["name"],

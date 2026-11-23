@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -44,9 +45,13 @@ func install(cfg *Config, cfgPath string) error {
 			return err
 		}
 	}
-	// Event-Log-Quelle
-	if err := eventlog.InstallAsEventCreate(in.ServiceName, eventlog.Info|eventlog.Warning|eventlog.Error); err != nil && !strings.Contains(err.Error(), "already exists") {
-		fmt.Printf("  event log source: %v (continuing)\n", err)
+	// Event log source: check first whether it exists (registry key), then create it - no matching of error text (ADR-0023).
+	if exists, err := eventSourceExists(in.ServiceName); err != nil {
+		fmt.Printf("  event log source: cannot check (%v), continuing\n", err)
+	} else if !exists {
+		if err := eventlog.InstallAsEventCreate(in.ServiceName, eventlog.Info|eventlog.Warning|eventlog.Error); err != nil {
+			fmt.Printf("  event log source: %v (continuing)\n", err)
+		}
 	}
 	// Dienst
 	if s, err := m.OpenService(in.ServiceName); err == nil {
@@ -327,4 +332,22 @@ func runQuiet(name string, args ...string) {
 	c := exec.Command(name, args...)
 	hideWindow(c)
 	_ = c.Run()
+}
+
+// eventLogApplicationKey: registry path (HKLM) of the Application log's sources, where eventlog.InstallAsEventCreate
+// registers one.
+const eventLogApplicationKey = `SYSTEM\CurrentControlSet\Services\EventLog\Application\`
+
+// eventSourceExists: whether the event log source is registered. Not found is an answer (false); any other failure is an
+// error for the caller.
+func eventSourceExists(name string) (bool, error) {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, eventLogApplicationKey+name, registry.QUERY_VALUE)
+	if errors.Is(err, registry.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	k.Close()
+	return true, nil
 }

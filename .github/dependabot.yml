@@ -11,11 +11,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
-  - package-ecosystem: docker-compose   # image digests of the monitoring stack (ADR-0055)
-    directory: /monitoring
+  - package-ecosystem: docker-compose   # image digests of the monitoring stack and the router compose example (ADR-0055)
+    directories: [/monitoring, /router]
     schedule:
       interval: weekly
-  - package-ecosystem: docker           # base image digests of the optional decision services (ADR-0055)
-    directories: [/decision-embed, /decision-jevlike]
+  - package-ecosystem: docker           # base image digests of the router image and the decision services (ADR-0055)
+    directories: [/router, /decision-embed, /decision-jevlike]
     schedule:
       interval: weekly

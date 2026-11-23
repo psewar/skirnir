@@ -72,23 +72,23 @@ check("setup: the planning figure exceeds the left-over budget and the whole car
 
 check("releases_server_for: the server's model while the standby serves", n.releases_server_for(BIG))
 check("releases_server_for: not for the standby's own model", not n.releases_server_for(DENSE))
-_, _, cands = scheduler.candidates_for(TIER, None, now)
+_, cands = scheduler.candidates_for(TIER, None, now)
 check("the node is a candidate for the server's model (no vram_full, no gpu_busy)", cands == [n], str([c.name for c in cands]))
-code, info = scheduler._node_block(n, TIER, 131072, now)
+code, info = scheduler.assess(n, TIER, 131072, now)
 check("reason code: none (it could serve)", code is None, f"{code} {info}")
 
 # Memory pressure still blocks the release (the server would fill RAM further)
 n = standby_node()
 n.mem_pressure = True
-_, _, cands = scheduler.candidates_for(TIER, None, time.time())
+_, cands = scheduler.candidates_for(TIER, None, time.time())
 check("memory pressure: no candidate", cands == [])
-code, _ = scheduler._node_block(n, TIER, 131072, time.time())
+code, _ = scheduler.assess(n, TIER, 131072, time.time())
 check("memory pressure: reason MEMORY_PRESSURE", code == scheduler.MEMORY_PRESSURE, str(code))
 
 # A game still blocks the release (unchanged)
 n = standby_node()
 n.state = "busy"
-code, _ = scheduler._node_block(n, TIER, 131072, time.time())
+code, _ = scheduler.assess(n, TIER, 131072, time.time())
 check("node busy (game): GPU_BUSY, no release", code == scheduler.GPU_BUSY, str(code))
 
 # The server running (no standby): its model is loaded, the old path applies
@@ -111,7 +111,7 @@ p.vram_free_gib = 3.2
 NEED["other:30b"] = 28.0
 state.NODES = {p.name: p}
 check("plain Ollama node: releases_server_for is False", not p.releases_server_for("other:30b"))
-code, _ = scheduler._node_block(p, {"model": "other:30b", "num_ctx": 32768, "busy_ok": False}, 32768, time.time())
+code, _ = scheduler.assess(p, {"model": "other:30b", "num_ctx": 32768, "busy_ok": False}, 32768, time.time())
 check("plain Ollama node: budget unchanged (loaded models stay counted as evictable, see budget_gib)",
       code == scheduler.VRAM_FULL, str(code))
 

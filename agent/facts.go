@@ -40,13 +40,17 @@ type Facts struct {
 	// UpstreamFallback (0.23.0): while the upstream is held, a standby Ollama serves in its place (tunnel.upstream_fallback);
 	// the OLLAMA frame then says serving "ollama".
 	UpstreamFallback bool `json:"upstream_fallback,omitempty"`
+	// GPUPresent (0.36.0, ADR-0102): whether the agent found a GPU (gpu.probe). Always sent; a router that does not see
+	// it (older agent) assumes a GPU, as every agent before 0.36.0 had one.
+	GPUPresent bool `json:"gpu_present"`
 }
 
 func collectFacts(ctx context.Context, routerURL, upstream, api string, gpu *GPU) Facts {
 	f := Facts{OS: runtime.GOOS, Arch: runtime.GOARCH, AgentVersion: version, OllamaURL: upstream}
 	f.Hostname, _ = os.Hostname()
 	f.Manufacturer, f.Model = systemModel()
-	if gpu != nil {
+	f.GPUPresent = gpu != nil && gpu.Present()
+	if f.GPUPresent {
 		if s, err := gpu.Sample(ctx); err == nil {
 			f.GPU, f.VRAMTotalMiB = s.Name, s.TotalMiB
 		}

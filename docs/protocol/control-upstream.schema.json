@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Upstream hold and release (router to agent, text frame)",
+  "description": "Stops (hold) or starts again (release) the agent's OpenAI-compatible upstream to free or use the GPU (facts.upstream_release true, ADR-0033 to ADR-0037). The agent ignores a repeated order and reports the result in the OLLAMA frame (upstream_state, serving, upstream_blocked). The router sends it only to agents that announced upstream_release.",
+  "type": "object",
+  "properties": {
+    "t": {"type": "string", "enum": ["upstream-hold", "upstream-release"], "description": "Message type: hold or release.", "x-since-agent": "0.22.0"}
+  },
+  "required": ["t"],
+  "additionalProperties": true,
+  "examples": [
+    {"t": "upstream-hold"},
+    {"t": "upstream-release"}
+  ]
+}

@@ -5,12 +5,16 @@ import math
 import re
 from dataclasses import dataclass
 
+from .memory_backend import BACKENDS
 from .outcome import failed, invalid
 
 
 @dataclass(frozen=True)
 class HindsightConfig:
     enabled: bool = False
+    # Memory backend adapter by name (memory_backend.BACKENDS; ADR-0115, ADR-0123). The section keeps its name for every
+    # backend; endpoint and token come from endpoint_env and api_key_env whichever adapter reads them.
+    backend: str = "hindsight"
     endpoint_env: str = "SKIRNIR_HINDSIGHT_URL"
     api_key_env: str = "SKIRNIR_HINDSIGHT_TOKEN"
     namespace_key_env: str = "SKIRNIR_MEMORY_NAMESPACE_KEY"
@@ -81,6 +85,8 @@ def parse_hindsight(raw):
     for k in ("enabled", "fail_open", "allow_http_loopback", "retention_enabled", "outbox_enabled", "gateway_enabled"):
         if type(values[k]) is not bool:
             return invalid(f"hindsight.{k} must be boolean")
+    if values["backend"] not in BACKENDS:
+        return invalid("hindsight.backend must be one of: " + ", ".join(BACKENDS))
     for k in ("endpoint_env", "api_key_env", "namespace_key_env"):
         if not isinstance(values[k], str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", values[k]):
             return invalid(f"hindsight.{k} must name an environment variable")
