@@ -2,79 +2,66 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "76d32f79fad63dbfd2d4128f6b2d7ce4608d77bc",
- "change_digest": "f735759428955cef7c39f852bd8e61db8d1702d31b16b3031b942cea16c4b010",
+ "base_sha": "937f6cf25df19fe8520c269c0d09df09df633dff",
+ "change_digest": "e43cebcab7c0f2b83e4a19db11587922c091c7f6208e6a62c2f2d3cf0210cffa",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "design/privacy-check.md",
-  "docs/adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md",
+  "agent/go.mod",
+  "agent/go.sum",
+  "docs/adr/0126-the-agent-pins-gorilla-websocket-to-the-advisory-fix-commit.md",
   "docs/adr/README.md",
-  "docs/configuration.de.md",
-  "docs/configuration.md",
   "docs/security/reviews/current.json",
-  "docs/security/risk-register.json",
-  "docs/security/threat-model.de.md",
-  "docs/security/threat-model.md",
-  "router/config.example.yaml",
-  "router/skirnir_router/admin.py",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/privacy.py",
-  "router/skirnir_router/privacy_locale.py",
-  "router/skirnir_router/redactors.py",
-  "test/privacy_default_corpus.json",
-  "test/selftest_privacy_redactors.py"
+  "agent/tunnel.go",
+  "agent/passthrough.go",
+  "agent/power.go",
+  "agent/mqtt.go",
+  ".github/workflows/security.yml",
+  "test/run_tests.py"
  ],
  "risk_ids": [
-  "TM-05"
+  "TM-16"
  ],
  "boundaries": [
-  "B6",
-  "B7"
+  "B3",
+  "B9"
  ],
- "summary": "Refreshed after merging main at 76d32f7 (#175: only the security gate's action pin and its review record changed; nothing in this PR's paths). Router 0.42.0: the content check before a cloud tier (privacy.py, called only from proxy._Relay._via_cloud when cloud.needs_privacy_check holds) gets context redactors per tool format (redactors.py: ha_assist = the previous Home Assistant code moved unchanged, generic_json = configured dotted paths/keys) and locale packs (privacy_locale.py: ch-de = the previous patterns, keywords, refusal and marker, default; en = e-mail/phone/IBAN, English keywords). Merged with origin/main (all other portability PRs, incl. #179 Shape protocol in proxy.py and #183 cost keys in cloud.py; neither touches privacy.py, and the cloud path still calls privacy.check before cloud.run and answers a refusal through the shape). Implements ADR-0119 (now on main, proposed) and adds ADR-0125 (unrecognised tool results pass by default; keep_local is an explicit switch). Traced B6: the verdict body is still what cloud.run sends; a refused or unredacted verdict returns the refusal before cloud.run; the redaction runs on a deep copy; redact_tools is applied before any redactor, so choosing other redactors cannot drop it. B7 unchanged: classifier call, loopback endpoint check and fail-closed handling are untouched. Default behaviour verified byte-identical (recorded corpus of 35 synthetic payloads from the base commit's privacy.py and re-recorded identically on the current main c69cfa1; 12,000 randomized synthetic payloads compared against the current origin/main privacy.py, 0 differences). The new keys are config.yaml only (not in settings.EDITABLE, asserted by test). Load-time refusals prevent configurations that look configured but redact nothing (empty/unknown/duplicate redactors, generic_json without its redactor and vice versa, malformed paths, unknown locale or mode). /admin/state shows generic_json only as counts. Found and fixed during the review: generic_json walks JSON recursively, so a deeply nested tool result could exhaust the stack; it now checks depth iteratively (limit 100) and treats deeper JSON as unredactable (request stays local). Before parsing, every tool result that starts like a JSON container has its nesting counted on the text (strings removed by a linear regex, brackets accumulated, no recursion); deeper than 512 levels it is not parsed and is unredactable, so the request stays local. This replaces relying on json.loads raising RecursionError, which the container CI showed to be interpreter-dependent: on Python 3.14 (C-stack based recursion check) a 100,000-level array parsed with a large stack, and ha_assist then passed it as plain text (reproduced locally in the 3.14 image with a 64 MiB stack against the previous head; fixed code passes with the default and the large stack). Before router 0.42.0 such a payload failed the request with a 500 or, on 3.14 with a large stack, passed; no live-context entries were hidden in it either way. Regexes of the en pack use only bounded quantifiers. No secrets, hostnames or personal data added; test data is synthetic (example domains, published example IBANs, fictional UK/NANP numbers).",
+ "summary": "Agent 0.36.1 fixes GO-2026-6278 (GHSA-w67g-5rqw-f597), which failed the required go-security check (govulncheck v1.9.0) on every pull request and, at its next run, on main: github.com/gorilla/websocket v1.5.3 generates client frame mask keys with math/rand.Uint32(). No tagged release after v1.5.3 exists; paho.mqtt.golang v1.5.1 and v1.5.2 both require v1.5.3, so the unaffected v1.5.1/v1.5.2 cannot be selected. The agent now requires the commit the advisory names as fixed, v1.5.4-0.20240701034025-d67f41855da4 (go get; go.sum hashes verified against sum.golang.org; go mod tidy changed nothing else, golang.org/x/net stays at v0.62.0, above the v0.26.0 the commit requires). Decision and rejected options in ADR-0126 (accepted by the maintainer). Traced the agent's use (B3): tunnel.go dials the router with websocket.Dialer{HandshakeTimeout, TLSClientConfig} (no Proxy, no NetDial), ws:// or wss:// from the router URL, then ReadMessage/WriteMessage/WriteControl; paho uses the library for MQTT over WebSockets. Inspected the module source diff v1.5.3 -> d67f418 (14 upstream commits): conn.go mask keys now from crypto/rand via io.ReadFull, ioutil -> io; client.go dial refactor that passes the context, for a Dialer without NetDial/NetDialContext still net.Dialer.DialContext, TLS handshake code unchanged; proxy.go now wraps golang.org/x/net/proxy (only reached with Dialer.Proxy set, which the agent does not set); server.go and tests change server code the agent does not use. No change to TLS verification, fingerprint pinning, enrollment, frame format or limits. The wire protocol is unchanged (masking is per frame and transparent to the router).",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_privacy_redactors.py",
+   "command": "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... (agent, before and after)",
    "result": "passed",
-   "evidence": "121 checks ALL OK on Python 3.12.10 and inside the router image on Python 3.14.10 with the default and with a 64 MiB stack (the previous head fails there with the large stack: the 100,000-level case passed); new checks: 513 levels not parsed at all (json.loads not called) and kept local, 512 levels parsed as before, brackets inside JSON strings not counted, plain text with many brackets passes as before. After the merge (relay test now uses OllamaShape like the other privacy tests, since #179): default corpus byte-identical (35 cases, re-recorded on current main c69cfa1 with an identical file), every ch-de pattern and keyword group blocks, every default domain/device class/listed tool redacted, too-deep JSON stays local, en hits and non-hits, generic_json paths/keys/*/depth limit, named non-JSON stays local, keep_local mode, 13 refused configurations, nothing editable from the web UI, proxy refusal without provider call. Fault injection (AHV pattern removed; default mode flipped to keep_local) made it fail with 3 and 9 failures."
+   "evidence": "main 937f6cf: Vulnerability #1 GO-2026-6278, 'Your code is affected by 1 vulnerability from 1 module'; this branch: 'No vulnerabilities found.'"
   },
   {
-   "command": "python test/selftest_privacy_check.py",
+   "command": "go test ./... (agent, Windows, go1.27.4)",
    "result": "passed",
-   "evidence": "unchanged file, ALLE OK."
+   "evidence": "ok github.com/psewar/skirnir/agent 16.9s"
   },
   {
-   "command": "differential script outside the repository: origin/main privacy.py vs branch, default and 4 more configurations, 3 classifier outcomes",
+   "command": "go test -count=1 ./... (agent, Linux, golang:1.27.4 container, repository mounted read-only)",
    "result": "passed",
-   "evidence": "compared 12000 synthetic payloads, 0 differences (redacted body, rule hit, verdict journal, verdict body)."
+   "evidence": "ok github.com/psewar/skirnir/agent 7.3s; with -run Protocol|RouterTLS|Routes|Power -v: 18 tests PASS, among them the tests that open real WebSocket connections through the tunnel (protocol conformance, router TLS incl. the rejected bad-certificate cases, routes, power). A first run with only agent/ mounted failed 7 protocol tests that read ../docs/protocol; not related to the change."
   },
   {
-   "command": "every python command of the python job in .github/workflows/ci.yml on Windows except PostgreSQL integrations, run_tests.py and check_public_changes (separate entries)",
+   "command": "gofmt -l . ; go vet ./... ; GOOS=windows go vet ./... ; GOOS=linux go vet ./...",
    "result": "passed",
-   "evidence": "85 commands, 0 failed, on the final tree (after the depth fix); check_adr_index reports ADR index ok: 125 ADRs."
+   "evidence": "gofmt prints nothing; vet clean on all three."
   },
   {
-   "command": "python C:/<ops>/e2e/run_locked.py <worktree> (end-to-end suite through the lock wrapper)",
+   "command": "python test/check_adr_index.py ; python test/check_pinned_references.py ; ruff check .",
    "result": "passed",
-   "evidence": "STATE: passed, 0 failures, 337 PASS lines, on the merged tree (origin/main c69cfa1 + this change), before the depth fix; not rerun after it (the fix is confined to redactors.py, which the suite does not reach). The suite does not exercise the privacy path."
+   "evidence": "ADR index ok: 126 ADRs; pinned references 0 findings; All checks passed."
   },
   {
-   "command": "bash test/smoke_container.sh --engine podman --image <local 3.14 router image> --no-build --selftests",
+   "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "71 router self-tests pass inside the image (Python 3.14.10), STATE: passed; the image was built earlier from main by the smoke script, the checkout is mounted read-only."
+   "evidence": "0 finding(s); added lines reviewed by hand: module versions, hashes, public advisory IDs, ADR text."
   },
   {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/selftest_control_flow.py && python test/check_control_flow.py",
-   "result": "passed",
-   "evidence": "All checks passed; configuration ok; control flow ok, 0 findings."
-  },
-  {
-   "command": "python test/check_public_changes.py --base <merge-base>",
-   "result": "passed",
-   "evidence": "0 finding(s)."
+   "command": "python test/run_tests.py",
+   "result": "not_run",
+   "evidence": "The end-to-end suite drives the Python fake agent (test/fake_agent.py), not the Go agent, so it does not reach the changed library; it runs nightly in CI."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -83,10 +70,8 @@
   }
  ],
  "limitations": [
-  "With the default unrecognised_tool_results: pass, tool results in formats no redactor knows still reach the provider unredacted (pre-existing; now documented, keep_local available).",
-  "No openHAB or ioBroker redactor: their tool-result formats could not be verified with real data.",
-  "The privacy classifier stays German/English (ADR-0077); the en pack's patterns are heuristics checked by test sentences, not a DLP guarantee.",
-  "The end-to-end suite does not cover the privacy path; it is covered by self-tests with fakes for classifier and provider.",
-  "ADR-0119 (on main, proposed) is implemented here; one deviation is recorded in ADR-0125 for the maintainer to decide."
+  "The agent now depends on an untagged upstream commit; the 14 upstream commits were read for the client paths the agent uses, not audited as a whole (server and proxy code are unused by the agent).",
+  "Not tested against a real router and node over ws:// and wss://, nor MQTT over WebSockets with a real broker; the Go tests use local httptest servers.",
+  "The agent version is set at build time; nodes keep the vulnerable library until the maintainer releases and rolls out agent 0.36.1."
  ]
 }
