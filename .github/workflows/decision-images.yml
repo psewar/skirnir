@@ -1,0 +1,41 @@
+name: Decision service images
+
+# ADR-0127: build the decision service images whose base images Dependabot updates (ADR-0055). Their Dockerfiles install
+# the newest packages, so a base whose Python a package does not support yet only shows when the image is built
+# (#150, #173). Runs when a file that goes into an image changes, and weekly for new package releases. The router image
+# has its own job in ci.yml. test/selftest_service_images.py keeps this list in step with .github/dependabot.yml and the
+# Dockerfiles' COPY lines.
+on:
+  pull_request:
+    paths:
+      - decision-embed/Dockerfile
+      - decision-embed/server.py
+      - decision-embed/embedder.py
+      - decision-jevlike/Dockerfile
+      - decision-jevlike/server.py
+      - test/smoke_decision_images.sh
+      - .github/workflows/decision-images.yml
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Decision service image (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [decision-embed, decision-jevlike]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build, compile, start imports
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: bash test/smoke_decision_images.sh --engine docker "$SERVICE"

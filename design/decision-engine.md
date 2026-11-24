@@ -82,3 +82,11 @@ in Sekunden neu, das Embedding-Modell bleibt - der Weg fuer echte Daten aus dem 
 Vorlagen und Daten in Standardschreibweise und ohne Reales neu erzeugt, Modelle neu trainiert, Vergleich über 20
 Aufteilungen statt einer, Privacy-Schwelle out-of-fold: [decision-training-data.md](decision-training-data.md)
 (ADR-0077 bis ADR-0079).
+
+## Addendum 2026-11-24: the service images are built in CI
+
+Dependabot updates the base images of `decision-embed/` and `decision-jevlike/`, and their Dockerfiles install the newest
+packages. `.github/workflows/decision-images.yml` builds both images when a file that goes into them changes and weekly,
+with `test/smoke_decision_images.sh`: build as `compose.yaml` does, then inside the image without network compile every
+program file and load every module it imports from outside `/app`. No service code runs, so no model is needed; a
+runtime incompatibility of a model is not covered. Why and the rejected options: ADR-0127.

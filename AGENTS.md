@@ -74,6 +74,7 @@ python test/selftest_<topic>.py                                # the self-tests 
 python test/run_tests.py       # end-to-end suite, ~3 min; needs the loopback ports 21434/21435 and 210xx free
 python test/check_public_changes.py                            # public-data scan of your added lines
 bash test/smoke_container.sh   # router image: build, --init, start, health (Docker or Podman, rootful; Linux or WSL); --selftests too
+bash test/smoke_decision_images.sh   # decision service images: build, compile, imports load (Docker or Podman)
 ```
 
 - Python dependencies are hash-locked (ADR-0074). A change to `router/requirements*.txt`, `requirements-dev.txt` or
@@ -84,6 +85,10 @@ bash test/smoke_container.sh   # router image: build, --init, start, health (Doc
   container image (ADR-0121; `test/selftest_container_image.py` compares them); never edit a lock by hand.
 - The router image (`router/Dockerfile`, `router/compose.yaml`) ships the same program files as `router/install.sh`;
   CI's `container` job builds and starts it and runs the router self-tests inside it. A new program file goes into both.
+- The decision service images (`decision-embed/`, `decision-jevlike/`) are built by `.github/workflows/decision-images.yml`
+  when a file that goes into them changes, and weekly (ADR-0127); a red run blocks the merge like any failing check.
+  A new directory in Dependabot's docker list, or a new file a Dockerfile copies, needs its entry there;
+  `test/selftest_service_images.py` fails until it has one.
 - Session store integrations (`test/integration_sessions.py`, `integration_context.py`,
   `integration_deletion_lifecycle.py`, `integration_interoperability.py`) run their contract on SQLite always (no server
   needed) and on PostgreSQL when `SKIRNIR_TEST_SESSION_DSN` points to a disposable test database (ADR-0114). A store

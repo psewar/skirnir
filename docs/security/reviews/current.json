@@ -2,18 +2,30 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "04c6e8d6e8a43fd6daad968fb81d6f3ea5327e42",
- "change_digest": "b185e58baaf6f007447131963244065bf373b4f038238d276384b1d44545aa0d",
+ "base_sha": "53314d27fe821c257a7b9e07995547d9ce4ec45f",
+ "change_digest": "6ba80b2aad7316c7b4625c2606955242db1c759f78295d509fc1b860a4bdf559",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
+  ".github/workflows/decision-images.yml",
   "AGENTS.md",
   "CHANGELOG.md",
-  "design/router-container.md",
-  "test/selftest_container_image.py",
-  "test/smoke_container.sh",
+  "design/decision-engine.md",
+  "docs/adr/0127-ci-builds-the-decision-service-images-when-they-change-and-weekly.md",
+  "docs/adr/README.md",
+  "test/selftest_service_images.py",
+  "test/smoke_decision_images.sh",
   "docs/security/reviews/current.json",
-  ".github/workflows/ci.yml",
-  "docs/security/threat-model.md",
-  "design/continuous-security-review.md"
+  ".github/dependabot.yml",
+  ".github/workflows/trusted-security-gate.yml",
+  ".github/workflows/security.yml",
+  "decision-embed/Dockerfile",
+  "decision-embed/compose.yaml",
+  "decision-embed/server.py",
+  "decision-embed/embedder.py",
+  "decision-jevlike/Dockerfile",
+  "decision-jevlike/compose.yaml",
+  "decision-jevlike/server.py",
+  "test/smoke_container.sh"
  ],
  "risk_ids": [
   "TM-16"
@@ -21,50 +33,48 @@
  "boundaries": [
   "B9"
  ],
- "summary": "test/smoke_container.sh (the router image smoke test, CI job container and local runs) now checks its shell after option parsing and before any engine call: when uname -s reports a Windows POSIX layer (*_NT-*, MINGW*, MSYS*, CYGWIN*; Git Bash, MSYS2 incl. UCRT64/CLANG64, Cygwin) it prints the state, the reason (these shells rewrite the container paths the script passes, so only the build worked and --check, --init and the self-tests failed with 'invalid option type') and a wsl command for this checkout, then exits 2 with STATE: refused. --help and unknown options behave as before; on Linux the check is a no-op and the script continues to the unchanged engine, curl and Dockerfile checks, so CI's container job (ubuntu-latest, --engine docker) is unaffected. The script gains no new input: uname output, the checkout path and the caller's own options only flow into the printed message, never into a command the script runs. Traced: option parsing, refuse(), cleanup trap (not yet installed at the check, so nothing to clean), the CI invocations in .github/workflows/ci.yml (unchanged). test/selftest_container_image.py (CI python job, Linux) runs the script with stand-in uname, docker and podman on PATH: refusal for four Windows system names without any engine call, the Linux case reaching the engine check, and the suggested command repeating only inert text. Docs: CHANGELOG tooling section, design/router-container.md and the AGENTS.md check list name the Linux/WSL requirement. No router or agent code, configuration key, endpoint, dependency, workflow or trust boundary changes; TM-16 is named because the script runs in CI, whose steps and pins are unchanged.",
- "findings": [
-  {
-   "id": "SMOKE-01",
-   "evidence": "In the first draft of this change the suggested command embedded the checkout path and the caller's options via printf %q inside a single-quoted bash -c string. %q falls back to $'...' quoting for control characters, which ends the surrounding single quotes, so a checkout folder named with a newline and $(...) would have run a command in the user's shell when the printed hint was pasted. Never committed.",
-   "resolution": "The hint now repeats only shell-inert text (inert(): letters, digits and / . _ + : @ = -, the path additionally spaces inside double quotes); anything else becomes a placeholder (<value>, /mnt/c/<checkout>). Rejected-case test test_suggested_command_repeats_only_inert_text passes an option with $(...), a quote, ; and backticks and asserts the placeholder and that none of them is echoed; checked by hand in Git Bash with a checkout folder named 'odd $(touch pwned) dir' (placeholder printed, no file created) and one with a space (quoted path).",
-   "disposition": "fixed"
-  }
- ],
+ "summary": "Refreshed after merging main at 53314d2 (#192: test/smoke_container.sh refuses under Git Bash, MSYS2 and Cygwin; it changed the smoke_container.sh line in AGENTS.md and added a changelog section, both kept beside this PR's lines; none of this PR's other paths). The merged tree was checked again; this PR's own content is unchanged. CI and tooling only; router, agent, the decision services and their images are unchanged. New workflow .github/workflows/decision-images.yml builds the decision-embed and decision-jevlike images (the directories besides router/ whose base images Dependabot updates) with the new test/smoke_decision_images.sh, on pull_request when a file that goes into an image changes, weekly and on workflow_dispatch (ADR-0127, proposed). Traced B9: trigger is pull_request (not pull_request_target), so candidate code runs with the read-only GITHUB_TOKEN and without secrets, as in ci.yml's container job; workflow permissions contents: read; checkout pinned to the same commit SHA as ci.yml with persist-credentials: false; the matrix value reaches the script through env (SERVICE) and is quoted, not interpolated into the shell; nothing is pushed or published; the import check runs with --network none. The script refuses an unknown service name and a missing Dockerfile before acting, builds with the build context of the service directory only, and inside the image only compiles the program files and imports modules (no service code runs, no model, no network). The build itself fetches packages from PyPI, the PyTorch CPU index and a pinned jevlike archive, exactly what the Dockerfiles already do on a host; the images stay local to the runner. The trusted security gate (workflow_run on CI) and the required checks are unchanged; the new workflow is path-filtered and therefore not a required check, which ADR-0127 states. ci.yml gains one step (test/selftest_service_images.py), nothing removed. AGENTS.md gains the check command and a rule; nothing weakened. The new self-test also guards the workflow's read-only permissions.",
+ "findings": [],
  "tests": [
   {
-   "command": "python3 test/selftest_container_image.py (Linux, inside the Podman machine)",
+   "command": "bash test/smoke_decision_images.sh --engine podman (current main)",
    "result": "passed",
-   "evidence": "20 tests OK (17 before plus 3 in SmokeScriptTests). Against origin/main's smoke_container.sh the new class fails 5 times (4 Windows system names, inert-text case); the Linux case passes on both, so Linux behaviour is unchanged."
+   "evidence": "decision-embed builds on python:3.14-slim, Python 3.14.10, loaded numpy, onnxruntime, tokenizers; decision-jevlike builds on python:3.15-slim, Python 3.15.2, loaded jevlike.data, jevlike.model, jevlike.train, torch; STATE: passed."
   },
   {
-   "command": "python test/selftest_container_image.py (Windows)",
+   "command": "bash test/smoke_decision_images.sh --engine podman decision-embed, with decision-embed/Dockerfile temporarily on the base image of #173 (python:3.15-slim@sha256:65a65fc7...)",
    "result": "passed",
-   "evidence": "20 tests, OK (skipped=3): SmokeScriptTests is Linux-only like the other script tests in this repository."
+   "evidence": "Rejected as intended: 'No matching distribution found for onnxruntime', FAIL decision-embed: the image does not build on python:3.15-slim, STATE: failed, exit 1. Dockerfile restored afterwards (git checkout)."
   },
   {
-   "command": "bash test/smoke_container.sh --engine podman --selftests ; bash test/smoke_container.sh ; --help ; --bogus (real Git Bash, MINGW64_NT)",
+   "command": "import check of the script against a synthetic /app/zz_missing.py (import doesnotexist_pkg; from numpy import no_such_name) in the decision-embed image",
    "result": "passed",
-   "evidence": "Refused with exit 2 and STATE: refused before any engine call, the hint names cd \"/mnt/d/...this checkout\" and the given options; --help prints the usage (exit 0); an unknown option is refused as before."
+   "evidence": "Rejected as intended: 'missing: doesnotexist_pkg, numpy.no_such_name', exit 1."
   },
   {
-   "command": "MSYS_NO_PATHCONV=1 wsl -d podman-machine-default -u root -e bash -c 'cd \"<this checkout in WSL>\" && bash test/smoke_container.sh --help' (the printed hint, with --help instead of a full run)",
+   "command": "bash test/smoke_decision_images.sh --engine podman decision-nope ; --help",
    "result": "passed",
-   "evidence": "The pasted hint reaches the script inside the Podman machine; there uname -s is Linux and the script continues past the new check to the existing engine check (with --engine nosuch: 'no container engine', STATE: refused)."
+   "evidence": "'unknown service decision-nope (known: decision-embed decision-jevlike)', STATE: refused; help prints the header."
   },
   {
-   "command": "bash test/smoke_container.sh (full build, start and --selftests)",
-   "result": "not_run",
-   "evidence": "The build/start path is unchanged by this change; CI's container job runs it on Linux with Docker."
+   "command": "python test/selftest_service_images.py",
+   "result": "passed",
+   "evidence": "11 tests OK, among them rejected cases: a new Dependabot docker directory without a build, a COPY source outside the trigger paths, a service missing from the script, no schedule, wider permissions, the router without its ci.yml job."
   },
   {
-   "command": "ruff check . ; bash -n test/smoke_container.sh ; python test/check_adr_index.py ; python test/check_pinned_references.py ; python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "command": "ruff check . ; check_adr_index.py ; selftest_pinned_references.py && check_pinned_references.py ; selftest_threat_review.py ; selftest_trusted_gate.py ; selftest_dependency_audit.py ; selftest_container_image.py ; selftest_english_names.py",
    "result": "passed",
-   "evidence": "All checks passed; syntax ok; ADR index ok: 126 ADRs; pinned references 0 findings; control flow ok, 0 findings."
+   "evidence": "All checks passed; ADR index ok: 127 ADRs; pinned references 0 findings; 26 + gate + audit + 17 tests OK; english names ok. Rerun on the merged tree (main 53314d2): ruff, ADR index, pinned references, selftest_service_images (11 OK), selftest_container_image (20 OK, 3 skipped on Windows, from #192), selftest_threat_review (26 OK), selftest_trusted_gate, public-data scan: all pass."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "0 finding(s); added lines reviewed by hand: generic Windows system names (build 19045), Podman's default machine name, Git for Windows' default install path and placeholders only."
+   "evidence": "0 finding(s); added lines reviewed by hand: no hostnames, paths of the own environment or personal data."
+  },
+  {
+   "command": ".github/workflows/decision-images.yml on GitHub (PR #193, head dfb3839 before the merge)",
+   "result": "passed",
+   "evidence": "Decision service image (decision-embed) pass, Decision service image (decision-jevlike) pass; all other PR checks passed as well. The workflow runs again on the merged head."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -73,8 +83,9 @@
   }
  ],
  "limitations": [
-  "shellcheck is not installed locally; the script was checked with bash -n, the self-test on Linux and manual runs in Git Bash.",
-  "Cygwin and MSYS2's own shells were not run; their uname -s names (CYGWIN_NT-*, MSYS_NT-*, UCRT64_NT-*) are covered by the stand-in test only. The drive-path derivation (/c/... and /cygdrive/c/... to /mnt/c/...) ran in real Git Bash for /d/... only.",
-  "The hint suggests the Podman machine as an example; with Docker Desktop the user picks their own WSL distribution."
+  "Pre-existing (TM-16 baseline, not introduced here): the decision images install unpinned packages; ADR-0127 leaves hash locks for them undecided. The check makes a breaking release visible, it does not make builds reproducible.",
+  "The check neither starts a service nor loads a model; runtime incompatibilities of a model are not covered.",
+  "A path-filtered workflow cannot be a required check; it gates by the rule not to merge with failing CI.",
+  "Weekly failures show in the Actions tab and its notification, not on a pull request."
  ]
 }
