@@ -73,7 +73,7 @@ python test/selftest_control_flow.py && python test/check_control_flow.py   # ex
 python test/selftest_<topic>.py                                # the self-tests your change touches
 python test/run_tests.py       # end-to-end suite, ~3 min; needs the loopback ports 21434/21435 and 210xx free
 python test/check_public_changes.py                            # public-data scan of your added lines
-bash test/smoke_container.sh   # router image: build, --init, start, health (Docker or Podman, rootful); --selftests too
+bash test/smoke_container.sh   # router image: build, --init, start, health (Docker or Podman, rootful; Linux or WSL); --selftests too
 bash test/smoke_decision_images.sh   # decision service images: build, compile, imports load (Docker or Podman)
 ```
 

@@ -9,6 +9,14 @@
   onnxruntime has no wheel for Python 3.15). `test/selftest_service_images.py` (new in CI) fails when a directory
   Dependabot updates, or a file a Dockerfile copies, is not covered. Images, services and their configuration are unchanged.
 
+## Development tooling (unreleased; router and agent unchanged)
+
+- `test/smoke_container.sh` refuses under Git Bash (MSYS2) and Cygwin on Windows before it builds or starts anything,
+  with `STATE: refused` and the `wsl` command that runs it inside WSL or the Podman machine for this checkout. Those
+  shells rewrite the container paths the script passes, so before only the build worked and `--check`, `--init` and
+  the self-tests failed with a misleading "invalid option type". Linux and CI behave as before;
+  `test/selftest_container_image.py` covers both cases with stand-in commands.
+
 ## Router–agent protocol specification (unreleased; router and agent unchanged)
 
 - The protocol between router and node agent is specified as version 1 (ADR-0107, proposed): `docs/protocol.md` and
