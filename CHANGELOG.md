@@ -1,5 +1,14 @@
 # Changelog
 
+## Decision service images in CI (unreleased; router and agent unchanged)
+
+- `.github/workflows/decision-images.yml` builds the `decision-embed` and `decision-jevlike` images on pull requests that
+  change a file going into them, and weekly (ADR-0127, proposed): `test/smoke_decision_images.sh` builds each image,
+  compiles its program files on the image's Python and loads every module they import, without network or models.
+  Before, nothing built these images, and a Dependabot base image bump that could not build looked green (#150, #173:
+  onnxruntime has no wheel for Python 3.15). `test/selftest_service_images.py` (new in CI) fails when a directory
+  Dependabot updates, or a file a Dockerfile copies, is not covered. Images, services and their configuration are unchanged.
+
 ## Router–agent protocol specification (unreleased; router and agent unchanged)
 
 - The protocol between router and node agent is specified as version 1 (ADR-0107, proposed): `docs/protocol.md` and
