@@ -226,7 +226,7 @@ The router image runs the same program with the same `config.yaml` and the same 
 ([ADR-0116](adr/0116-an-official-container-image-for-the-router.md),
 [ADR-0121](adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md); how it works:
 [design/router-container.md](../design/router-container.md)). `router/Dockerfile` builds on the digest-pinned
-`python:3.14-slim-trixie` and installs Python packages only from the hash-locked `router/requirements-container-lock.txt`
+`python:3.15-slim-trixie` and installs Python packages only from the hash-locked `router/requirements-container-lock.txt`
 (wheels only, amd64 and arm64). The router runs as uid/gid 10001 (`skirnir-router`) without capabilities; no secret is
 in the image. There is no image in a registry yet: build it from a release or clone.
 

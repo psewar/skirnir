@@ -230,7 +230,7 @@ Das Router-Image führt dasselbe Programm mit derselben `config.yaml` und densel
 ([ADR-0116](adr/0116-an-official-container-image-for-the-router.md),
 [ADR-0121](adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md); wie es
 funktioniert: [design/router-container.md](../design/router-container.md)). `router/Dockerfile` baut auf dem per Digest
-festgelegten `python:3.14-slim-trixie` auf und installiert Python-Pakete nur aus der hash-gesperrten
+festgelegten `python:3.15-slim-trixie` auf und installiert Python-Pakete nur aus der hash-gesperrten
 `router/requirements-container-lock.txt` (nur Wheels, amd64 und arm64). Der Router läuft als uid/gid 10001
 (`skirnir-router`) ohne Capabilities; im Image steckt kein Secret. Ein Image in einer Registry gibt es noch nicht: aus
 einem Release oder Klon bauen.

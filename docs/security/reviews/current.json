@@ -2,66 +2,71 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "937f6cf25df19fe8520c269c0d09df09df633dff",
- "change_digest": "e43cebcab7c0f2b83e4a19db11587922c091c7f6208e6a62c2f2d3cf0210cffa",
+ "base_sha": "30770cdf5084259c6ded9085464310bb6efd469d",
+ "change_digest": "bb6883fdaa84a2f3ccda410b8dd6ca2868fa0765aade64fc83a284e90a19f572",
  "reviewed_paths": [
   "CHANGELOG.md",
-  "agent/go.mod",
-  "agent/go.sum",
-  "docs/adr/0126-the-agent-pins-gorilla-websocket-to-the-advisory-fix-commit.md",
-  "docs/adr/README.md",
+  "design/router-container.md",
+  "docs/adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md",
+  "docs/install-router.de.md",
+  "docs/install-router.md",
+  "requirements-ci-lock.txt",
+  "router/Dockerfile",
+  "router/requirements-container-lock.txt",
+  "router/skirnir_router/common.py",
+  "tools/security/lock_requirements.py",
   "docs/security/reviews/current.json",
-  "agent/tunnel.go",
-  "agent/passthrough.go",
-  "agent/power.go",
-  "agent/mqtt.go",
-  ".github/workflows/security.yml",
-  "test/run_tests.py"
+  ".github/workflows/ci.yml",
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/pydeps.py",
+  "router/container/healthcheck.py",
+  "router/requirements-lock.txt",
+  "test/selftest_container_image.py",
+  "test/smoke_container.sh"
  ],
  "risk_ids": [
   "TM-16"
  ],
  "boundaries": [
-  "B3",
   "B9"
  ],
- "summary": "Agent 0.36.1 fixes GO-2026-6278 (GHSA-w67g-5rqw-f597), which failed the required go-security check (govulncheck v1.9.0) on every pull request and, at its next run, on main: github.com/gorilla/websocket v1.5.3 generates client frame mask keys with math/rand.Uint32(). No tagged release after v1.5.3 exists; paho.mqtt.golang v1.5.1 and v1.5.2 both require v1.5.3, so the unaffected v1.5.1/v1.5.2 cannot be selected. The agent now requires the commit the advisory names as fixed, v1.5.4-0.20240701034025-d67f41855da4 (go get; go.sum hashes verified against sum.golang.org; go mod tidy changed nothing else, golang.org/x/net stays at v0.62.0, above the v0.26.0 the commit requires). Decision and rejected options in ADR-0126 (accepted by the maintainer). Traced the agent's use (B3): tunnel.go dials the router with websocket.Dialer{HandshakeTimeout, TLSClientConfig} (no Proxy, no NetDial), ws:// or wss:// from the router URL, then ReadMessage/WriteMessage/WriteControl; paho uses the library for MQTT over WebSockets. Inspected the module source diff v1.5.3 -> d67f418 (14 upstream commits): conn.go mask keys now from crypto/rand via io.ReadFull, ioutil -> io; client.go dial refactor that passes the context, for a Dialer without NetDial/NetDialContext still net.Dialer.DialContext, TLS handshake code unchanged; proxy.go now wraps golang.org/x/net/proxy (only reached with Dialer.Proxy set, which the agent does not set); server.go and tests change server code the agent does not use. No change to TLS verification, fingerprint pinning, enrollment, frame format or limits. The wire protocol is unchanged (masking is per frame and transparent to the router).",
+ "summary": "Refreshed after merging main at 30770cd (#191, agent 0.36.1: gorilla/websocket pinned to the GO-2026-6278 fix commit, ADR-0126; it touches only agent/go.mod, agent/go.sum, the ADR index and its changelog row v0.47.1, none of this PR's paths). The only change to this PR's content is its changelog row, now v0.47.2 with agent 0.36.1; checks rerun on the merged tree, govulncheck for the agent now reports no vulnerability, so go-security no longer blocks. Dependabot #190 moves the router image's base from python:3.14-slim-trixie to python:3.15-slim-trixie (digest 65a65fc7...; checked that the official docker.io/library/python:3.15-slim-trixie tag currently resolves to this manifest-list digest, Python 3.15.2 on Debian trixie). The bump alone could not build: PyYAML 6.0.3 has no wheel for CPython 3.15 and the Dockerfile installs wheels only, and test/selftest_container_image.py requires the image's Python to be one the locks are checked for. Changes on top, after merging origin/main 937f6cf: (1) tools/security/lock_requirements.py adds 3.15 to PYTHONS; this only widens what the checker demands (the container lock must cover the requirements and their markers on 3.15 as well; needed_deps also considers 3.15), it removes no check. (2) PyYAML 6.0.3 -> 6.0.4 in router/requirements-container-lock.txt (lock_requirements.py pin) and requirements-ci-lock.txt (lock_requirements.py resolve on Linux, run in the pinned 3.15 base image with PIP_CONSTRAINT holding every other entry at its locked version, so only PyYAML moved; header unchanged). Both locks list the same 75 sha256 values for PyYAML 6.0.4, verify-pypi confirms every hash is PyPI's and nothing is yanked. PyYAML 6.0.4 (2026-11-20, yaml/pyyaml release notes) adds Python 3.15, drops 3.8/3.9, fixes exponential merge-key expansion and bundles libyaml 0.2.6. Hosts are unaffected: router/requirements-lock.txt has no PyYAML (hosts use the distribution's python3-yaml). The router parses YAML only from the operator's config.yaml and roles.yaml (config.load_yaml, CSafeLoader, mounted read-only in the image) and the healthcheck reads config.yaml; no request data reaches a YAML parser. (3) Router VERSION 0.42.1, CHANGELOG row v0.47.2, docs/design and the still proposed ADR-0121 name 3.15. The Dockerfile's controls are unchanged: --require-hashes --no-deps --only-binary=:all:, pydeps verify, pip check, imports, pip removed, uid/gid 10001, read-only program files. No new endpoint, configuration key, secret or trust boundary.",
  "findings": [],
  "tests": [
   {
-   "command": "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... (agent, before and after)",
+   "command": "bash test/smoke_container.sh --engine podman --image <local 3.15 image> --no-build --selftests (inside the rootful Podman machine)",
    "result": "passed",
-   "evidence": "main 937f6cf: Vulnerability #1 GO-2026-6278, 'Your code is affected by 1 vulnerability from 1 module'; this branch: 'No vulnerabilities found.'"
+   "evidence": "71 router self-tests pass inside the image built from this tree (Python 3.15.2, PyYAML 6.0.4), STATE: passed."
   },
   {
-   "command": "go test ./... (agent, Windows, go1.27.4)",
+   "command": "bash test/smoke_container.sh --engine podman --image <local 3.15 image> (build with Git Bash, start checks inside the Podman machine)",
    "result": "passed",
-   "evidence": "ok github.com/psewar/skirnir/agent 16.9s"
+   "evidence": "Image builds on the 3.15 base with the container lock (hashes, wheels only, pydeps verify, pip check, imports). Passed: uid/gid 10001, no secret in the environment, --check of config.example.yaml, --init writes config.yaml (root:10001 0640), healthcheck.py reports HEALTH: ok router0.42.1, router runs as uid 10001 without capabilities, configuration and program folders read-only, state_dir writable, no errors in the log. Two checks failed in this machine only: /api/version on the published port and the POSTURE line at start; the 3.14 image from main fails both identically in the same machine, so they come from the local environment (systemd unreachable in the Podman machine, containers started with --no-healthcheck through a local shim). CI's container job runs the full script with Docker."
   },
   {
-   "command": "go test -count=1 ./... (agent, Linux, golang:1.27.4 container, repository mounted read-only)",
+   "command": "python test/selftest_container_image.py",
    "result": "passed",
-   "evidence": "ok github.com/psewar/skirnir/agent 7.3s; with -run Protocol|RouterTLS|Routes|Power -v: 18 tests PASS, among them the tests that open real WebSocket connections through the tunnel (protocol conformance, router TLS incl. the rejected bad-certificate cases, routes, power). A first run with only agent/ mounted failed 7 protocol tests that read ../docs/protocol; not related to the change."
+   "evidence": "17 tests OK (fails without the PYTHONS change: '3.15' not found in the locked Pythons, as in the Dependabot CI run)."
   },
   {
-   "command": "gofmt -l . ; go vet ./... ; GOOS=windows go vet ./... ; GOOS=linux go vet ./...",
+   "command": "python tools/security/lock_requirements.py check ; python tools/security/lock_requirements.py verify-pypi",
    "result": "passed",
-   "evidence": "gofmt prints nothing; vet clean on all three."
+   "evidence": "Python locks: 0 problem(s); PyPI verification: 0 problem(s)."
   },
   {
-   "command": "python test/check_adr_index.py ; python test/check_pinned_references.py ; ruff check .",
+   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_adr_index.py ; python test/check_pinned_references.py ; python test/selftest_control_flow.py && python test/check_control_flow.py",
    "result": "passed",
-   "evidence": "ADR index ok: 126 ADRs; pinned references 0 findings; All checks passed."
+   "evidence": "All checks passed; configuration ok; ADR index ok: 126 ADRs (after merging main); pinned references 0 findings; control flow ok, 0 findings. Rerun on the merged tree together with lock check, selftest_container_image.py and the public-data scan: all pass; agent govulncheck v1.9.0: No vulnerabilities found."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "0 finding(s); added lines reviewed by hand: module versions, hashes, public advisory IDs, ADR text."
+   "evidence": "0 finding(s); added lines reviewed by hand: versions, hashes, image names and public release facts only."
   },
   {
    "command": "python test/run_tests.py",
    "result": "not_run",
-   "evidence": "The end-to-end suite drives the Python fake agent (test/fake_agent.py), not the Go agent, so it does not reach the changed library; it runs nightly in CI."
+   "evidence": "No router code changed besides VERSION; the end-to-end suite runs on the host's Python, not the image's, and runs nightly in CI."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -70,8 +75,9 @@
   }
  ],
  "limitations": [
-  "The agent now depends on an untagged upstream commit; the 14 upstream commits were read for the client paths the agent uses, not audited as a whole (server and proxy code are unused by the agent).",
-  "Not tested against a real router and node over ws:// and wss://, nor MQTT over WebSockets with a real broker; the Go tests use local httptest servers.",
-  "The agent version is set at build time; nodes keep the vulnerable library until the maintainer releases and rolls out agent 0.36.1."
+  "Trust in PyYAML 6.0.4 rests on PyPI's published hashes, the yaml/pyyaml release and CI's pip-audit; the wheels and the bundled libyaml 0.2.6 were not audited.",
+  "The base image is trusted by digest from Docker Official Images; its Debian packages were not scanned in this review.",
+  "Locally the published-port and start-posture checks could not run (Podman machine without systemd); they rely on CI's container job.",
+  "decision-embed stays on python:3.14-slim (#173): onnxruntime 1.32.0 has no wheel for Python 3.15; not part of this change."
  ]
 }
