@@ -2,27 +2,18 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "30770cdf5084259c6ded9085464310bb6efd469d",
- "change_digest": "bb6883fdaa84a2f3ccda410b8dd6ca2868fa0765aade64fc83a284e90a19f572",
+ "base_sha": "04c6e8d6e8a43fd6daad968fb81d6f3ea5327e42",
+ "change_digest": "b185e58baaf6f007447131963244065bf373b4f038238d276384b1d44545aa0d",
  "reviewed_paths": [
+  "AGENTS.md",
   "CHANGELOG.md",
   "design/router-container.md",
-  "docs/adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md",
-  "docs/install-router.de.md",
-  "docs/install-router.md",
-  "requirements-ci-lock.txt",
-  "router/Dockerfile",
-  "router/requirements-container-lock.txt",
-  "router/skirnir_router/common.py",
-  "tools/security/lock_requirements.py",
+  "test/selftest_container_image.py",
+  "test/smoke_container.sh",
   "docs/security/reviews/current.json",
   ".github/workflows/ci.yml",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/pydeps.py",
-  "router/container/healthcheck.py",
-  "router/requirements-lock.txt",
-  "test/selftest_container_image.py",
-  "test/smoke_container.sh"
+  "docs/security/threat-model.md",
+  "design/continuous-security-review.md"
  ],
  "risk_ids": [
   "TM-16"
@@ -30,43 +21,50 @@
  "boundaries": [
   "B9"
  ],
- "summary": "Refreshed after merging main at 30770cd (#191, agent 0.36.1: gorilla/websocket pinned to the GO-2026-6278 fix commit, ADR-0126; it touches only agent/go.mod, agent/go.sum, the ADR index and its changelog row v0.47.1, none of this PR's paths). The only change to this PR's content is its changelog row, now v0.47.2 with agent 0.36.1; checks rerun on the merged tree, govulncheck for the agent now reports no vulnerability, so go-security no longer blocks. Dependabot #190 moves the router image's base from python:3.14-slim-trixie to python:3.15-slim-trixie (digest 65a65fc7...; checked that the official docker.io/library/python:3.15-slim-trixie tag currently resolves to this manifest-list digest, Python 3.15.2 on Debian trixie). The bump alone could not build: PyYAML 6.0.3 has no wheel for CPython 3.15 and the Dockerfile installs wheels only, and test/selftest_container_image.py requires the image's Python to be one the locks are checked for. Changes on top, after merging origin/main 937f6cf: (1) tools/security/lock_requirements.py adds 3.15 to PYTHONS; this only widens what the checker demands (the container lock must cover the requirements and their markers on 3.15 as well; needed_deps also considers 3.15), it removes no check. (2) PyYAML 6.0.3 -> 6.0.4 in router/requirements-container-lock.txt (lock_requirements.py pin) and requirements-ci-lock.txt (lock_requirements.py resolve on Linux, run in the pinned 3.15 base image with PIP_CONSTRAINT holding every other entry at its locked version, so only PyYAML moved; header unchanged). Both locks list the same 75 sha256 values for PyYAML 6.0.4, verify-pypi confirms every hash is PyPI's and nothing is yanked. PyYAML 6.0.4 (2026-11-20, yaml/pyyaml release notes) adds Python 3.15, drops 3.8/3.9, fixes exponential merge-key expansion and bundles libyaml 0.2.6. Hosts are unaffected: router/requirements-lock.txt has no PyYAML (hosts use the distribution's python3-yaml). The router parses YAML only from the operator's config.yaml and roles.yaml (config.load_yaml, CSafeLoader, mounted read-only in the image) and the healthcheck reads config.yaml; no request data reaches a YAML parser. (3) Router VERSION 0.42.1, CHANGELOG row v0.47.2, docs/design and the still proposed ADR-0121 name 3.15. The Dockerfile's controls are unchanged: --require-hashes --no-deps --only-binary=:all:, pydeps verify, pip check, imports, pip removed, uid/gid 10001, read-only program files. No new endpoint, configuration key, secret or trust boundary.",
- "findings": [],
+ "summary": "test/smoke_container.sh (the router image smoke test, CI job container and local runs) now checks its shell after option parsing and before any engine call: when uname -s reports a Windows POSIX layer (*_NT-*, MINGW*, MSYS*, CYGWIN*; Git Bash, MSYS2 incl. UCRT64/CLANG64, Cygwin) it prints the state, the reason (these shells rewrite the container paths the script passes, so only the build worked and --check, --init and the self-tests failed with 'invalid option type') and a wsl command for this checkout, then exits 2 with STATE: refused. --help and unknown options behave as before; on Linux the check is a no-op and the script continues to the unchanged engine, curl and Dockerfile checks, so CI's container job (ubuntu-latest, --engine docker) is unaffected. The script gains no new input: uname output, the checkout path and the caller's own options only flow into the printed message, never into a command the script runs. Traced: option parsing, refuse(), cleanup trap (not yet installed at the check, so nothing to clean), the CI invocations in .github/workflows/ci.yml (unchanged). test/selftest_container_image.py (CI python job, Linux) runs the script with stand-in uname, docker and podman on PATH: refusal for four Windows system names without any engine call, the Linux case reaching the engine check, and the suggested command repeating only inert text. Docs: CHANGELOG tooling section, design/router-container.md and the AGENTS.md check list name the Linux/WSL requirement. No router or agent code, configuration key, endpoint, dependency, workflow or trust boundary changes; TM-16 is named because the script runs in CI, whose steps and pins are unchanged.",
+ "findings": [
+  {
+   "id": "SMOKE-01",
+   "evidence": "In the first draft of this change the suggested command embedded the checkout path and the caller's options via printf %q inside a single-quoted bash -c string. %q falls back to $'...' quoting for control characters, which ends the surrounding single quotes, so a checkout folder named with a newline and $(...) would have run a command in the user's shell when the printed hint was pasted. Never committed.",
+   "resolution": "The hint now repeats only shell-inert text (inert(): letters, digits and / . _ + : @ = -, the path additionally spaces inside double quotes); anything else becomes a placeholder (<value>, /mnt/c/<checkout>). Rejected-case test test_suggested_command_repeats_only_inert_text passes an option with $(...), a quote, ; and backticks and asserts the placeholder and that none of them is echoed; checked by hand in Git Bash with a checkout folder named 'odd $(touch pwned) dir' (placeholder printed, no file created) and one with a space (quoted path).",
+   "disposition": "fixed"
+  }
+ ],
  "tests": [
   {
-   "command": "bash test/smoke_container.sh --engine podman --image <local 3.15 image> --no-build --selftests (inside the rootful Podman machine)",
+   "command": "python3 test/selftest_container_image.py (Linux, inside the Podman machine)",
    "result": "passed",
-   "evidence": "71 router self-tests pass inside the image built from this tree (Python 3.15.2, PyYAML 6.0.4), STATE: passed."
+   "evidence": "20 tests OK (17 before plus 3 in SmokeScriptTests). Against origin/main's smoke_container.sh the new class fails 5 times (4 Windows system names, inert-text case); the Linux case passes on both, so Linux behaviour is unchanged."
   },
   {
-   "command": "bash test/smoke_container.sh --engine podman --image <local 3.15 image> (build with Git Bash, start checks inside the Podman machine)",
+   "command": "python test/selftest_container_image.py (Windows)",
    "result": "passed",
-   "evidence": "Image builds on the 3.15 base with the container lock (hashes, wheels only, pydeps verify, pip check, imports). Passed: uid/gid 10001, no secret in the environment, --check of config.example.yaml, --init writes config.yaml (root:10001 0640), healthcheck.py reports HEALTH: ok router0.42.1, router runs as uid 10001 without capabilities, configuration and program folders read-only, state_dir writable, no errors in the log. Two checks failed in this machine only: /api/version on the published port and the POSTURE line at start; the 3.14 image from main fails both identically in the same machine, so they come from the local environment (systemd unreachable in the Podman machine, containers started with --no-healthcheck through a local shim). CI's container job runs the full script with Docker."
+   "evidence": "20 tests, OK (skipped=3): SmokeScriptTests is Linux-only like the other script tests in this repository."
   },
   {
-   "command": "python test/selftest_container_image.py",
+   "command": "bash test/smoke_container.sh --engine podman --selftests ; bash test/smoke_container.sh ; --help ; --bogus (real Git Bash, MINGW64_NT)",
    "result": "passed",
-   "evidence": "17 tests OK (fails without the PYTHONS change: '3.15' not found in the locked Pythons, as in the Dependabot CI run)."
+   "evidence": "Refused with exit 2 and STATE: refused before any engine call, the hint names cd \"/mnt/d/...this checkout\" and the given options; --help prints the usage (exit 0); an unknown option is refused as before."
   },
   {
-   "command": "python tools/security/lock_requirements.py check ; python tools/security/lock_requirements.py verify-pypi",
+   "command": "MSYS_NO_PATHCONV=1 wsl -d podman-machine-default -u root -e bash -c 'cd \"<this checkout in WSL>\" && bash test/smoke_container.sh --help' (the printed hint, with --help instead of a full run)",
    "result": "passed",
-   "evidence": "Python locks: 0 problem(s); PyPI verification: 0 problem(s)."
+   "evidence": "The pasted hint reaches the script inside the Podman machine; there uname -s is Linux and the script continues past the new check to the existing engine check (with --engine nosuch: 'no container engine', STATE: refused)."
   },
   {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_adr_index.py ; python test/check_pinned_references.py ; python test/selftest_control_flow.py && python test/check_control_flow.py",
+   "command": "bash test/smoke_container.sh (full build, start and --selftests)",
+   "result": "not_run",
+   "evidence": "The build/start path is unchanged by this change; CI's container job runs it on Linux with Docker."
+  },
+  {
+   "command": "ruff check . ; bash -n test/smoke_container.sh ; python test/check_adr_index.py ; python test/check_pinned_references.py ; python test/selftest_control_flow.py && python test/check_control_flow.py",
    "result": "passed",
-   "evidence": "All checks passed; configuration ok; ADR index ok: 126 ADRs (after merging main); pinned references 0 findings; control flow ok, 0 findings. Rerun on the merged tree together with lock check, selftest_container_image.py and the public-data scan: all pass; agent govulncheck v1.9.0: No vulnerabilities found."
+   "evidence": "All checks passed; syntax ok; ADR index ok: 126 ADRs; pinned references 0 findings; control flow ok, 0 findings."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "0 finding(s); added lines reviewed by hand: versions, hashes, image names and public release facts only."
-  },
-  {
-   "command": "python test/run_tests.py",
-   "result": "not_run",
-   "evidence": "No router code changed besides VERSION; the end-to-end suite runs on the host's Python, not the image's, and runs nightly in CI."
+   "evidence": "0 finding(s); added lines reviewed by hand: generic Windows system names (build 19045), Podman's default machine name, Git for Windows' default install path and placeholders only."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -75,9 +73,8 @@
   }
  ],
  "limitations": [
-  "Trust in PyYAML 6.0.4 rests on PyPI's published hashes, the yaml/pyyaml release and CI's pip-audit; the wheels and the bundled libyaml 0.2.6 were not audited.",
-  "The base image is trusted by digest from Docker Official Images; its Debian packages were not scanned in this review.",
-  "Locally the published-port and start-posture checks could not run (Podman machine without systemd); they rely on CI's container job.",
-  "decision-embed stays on python:3.14-slim (#173): onnxruntime 1.32.0 has no wheel for Python 3.15; not part of this change."
+  "shellcheck is not installed locally; the script was checked with bash -n, the self-test on Linux and manual runs in Git Bash.",
+  "Cygwin and MSYS2's own shells were not run; their uname -s names (CYGWIN_NT-*, MSYS_NT-*, UCRT64_NT-*) are covered by the stand-in test only. The drive-path derivation (/c/... and /cygdrive/c/... to /mnt/c/...) ran in real Git Bash for /d/... only.",
+  "The hint suggests the Podman machine as an example; with Docker Desktop the user picks their own WSL distribution."
  ]
 }
