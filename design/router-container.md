@@ -84,7 +84,8 @@ service, a locally built `skirnir-embed` image). Images from a registry are dige
   (`test/smoke_container_cert.py`), starts the container as `compose.yaml` does and checks the health probe,
   `/api/version` over the published port, uid 10001 without capabilities, a read-only configuration and program folder,
   a writable state folder, the posture report and a log without errors. `--selftests` runs the router's self-tests
-  inside the image, on its Python and packages.
+  inside the image, on its Python and packages. It runs on Linux or inside WSL; under Git Bash (MSYS2) or Cygwin, which
+  rewrite the container paths it passes, it refuses before building anything and names the `wsl` command instead.
 
 ## Not yet
 

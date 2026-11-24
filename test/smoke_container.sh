@@ -23,6 +23,10 @@ TOOLING="selftest_pinned_references selftest_pydeps selftest_sbom selftest_threa
          selftest_dependency_audit selftest_container_image selftest_control_flow selftest_english_names
          selftest_training_data selftest_privacy_threshold"
 refuse() { echo "$1"; echo "STATE: refused"; exit 2; }
+# A command that a refusal suggests is meant to be pasted: it repeats only shell-inert text, the rest as a placeholder.
+inert() { case "$1" in "" | *[!A-Za-z0-9/._+:@=-]*) return 1 ;; esac; }
+ARGS=""
+for a in "$@"; do if inert "$a"; then ARGS="$ARGS $a"; else ARGS="$ARGS <value>"; fi; done
 while [ $# -gt 0 ]; do
   case "$1" in
     --engine) ENGINE="${2:?--engine needs docker or podman}"; shift 2 ;;
@@ -36,6 +40,20 @@ done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # --- preconditions ----------------------------------------------------------------------------------------------------
+# Git Bash (MSYS2) and Cygwin rewrite arguments that look like POSIX paths before the engine sees them
+# (/etc/skirnir-router becomes C:\Program Files\Git\etc\skirnir-router); without that rewriting (MSYS_NO_PATHCONV) the
+# engine would not find the host folders under /tmp either. The build would pass and every later step fail with a
+# misleading message, so refuse before anything is built or started.
+SYSTEM=$(uname -s)
+case "$SYSTEM" in
+  *_NT-*|MINGW*|MSYS*|CYGWIN*)
+    dir=$(printf '%s\n' "$ROOT" | sed -nE 's#^(/cygdrive)?/([a-zA-Z])(/.*)?$#/mnt/\L\2\E\3#p')   # this checkout in WSL
+    if inert "${dir// /}"; then dir="\"$dir\""; else dir="/mnt/c/<checkout>"; fi
+    refuse "this shell is $SYSTEM (Git Bash, MSYS2 or Cygwin on Windows): it rewrites the container paths this test
+passes, so only the build would work. Run it on Linux or inside WSL (Docker Desktop's distribution or the rootful Podman
+machine), e.g. from this shell:
+  MSYS_NO_PATHCONV=1 wsl -d podman-machine-default -u root -e bash -c 'cd $dir && bash test/smoke_container.sh$ARGS'" ;;
+esac
 if [ -z "$ENGINE" ]; then
   for e in docker podman; do command -v "$e" >/dev/null 2>&1 && { ENGINE=$e; break; }; done
 fi

@@ -11,7 +11,9 @@ Static checks of router/Dockerfile, router/compose.yaml, router/container/ and r
     takes secrets only from env_file, never pulls the router image, and keeps optional services behind profiles;
   * container/healthcheck.py derives port and scheme from config.yaml like the router and reports a healthy router,
     an error status, a non-router answer, nothing listening and a missing configuration as facts (plain HTTP and TLS
-    against local fake servers).
+    against local fake servers);
+  * test/smoke_container.sh refuses under Git Bash/MSYS2 and Cygwin, which rewrite its container paths, before it calls
+    the engine, and lets Linux through (stand-in uname and engines on PATH).
 The build and a real start are test/smoke_container.sh (CI job "container"). Synthetic values only.
     python test/selftest_container_image.py
 """
@@ -21,7 +23,9 @@ import json
 import os
 import re
 import shlex
+import shutil
 import ssl
+import subprocess
 import sys
 import tempfile
 import threading
@@ -32,6 +36,7 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ROUTER = os.path.join(ROOT, "router")
+SMOKE = os.path.join(HERE, "smoke_container.sh")
 sys.path.insert(0, os.path.join(ROOT, "tools", "security"))
 import lock_requirements  # noqa: E402
 import pydeps  # noqa: E402  (lock_requirements put router/skirnir_router on the path)
@@ -201,6 +206,54 @@ class ComposeTests(unittest.TestCase):
     def test_healthcheck_matches_the_image(self):
         self.assertEqual(self.router["healthcheck"]["test"],
                          ["CMD", "python", "/opt/skirnir-router/container/healthcheck.py"])
+
+
+@unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("bash"), "stand-in commands need a Linux shell")
+class SmokeScriptTests(unittest.TestCase):
+    """test/smoke_container.sh checks its shell before it builds or starts anything."""
+
+    def run_smoke(self, system, *args):
+        """(exit code, output, engine calls) with stand-ins for uname, docker and podman first on PATH."""
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = os.path.join(tmp, "calls")
+            bodies = {"uname": f"echo {shlex.quote(system)}"}
+            bodies.update({e: f'echo "{e} $*" >> {shlex.quote(calls)}; exit 1' for e in ("docker", "podman")})
+            for name, body in bodies.items():
+                path = os.path.join(tmp, name)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(f"#!/bin/sh\n{body}\n")
+                os.chmod(path, 0o755)
+            env = dict(os.environ, PATH=tmp + os.pathsep + os.environ.get("PATH", ""))
+            r = subprocess.run(["bash", SMOKE, *args], env=env, capture_output=True, text=True, timeout=30)
+            engine = ""
+            if os.path.exists(calls):
+                with open(calls, encoding="utf-8") as f:
+                    engine = f.read()
+        return r.returncode, r.stdout + r.stderr, engine
+
+    def test_refuses_under_windows_shells_before_the_engine(self):
+        for system in ("MINGW64_NT-10.0-19045", "MSYS_NT-10.0-19045", "UCRT64_NT-10.0-19045", "CYGWIN_NT-10.0-19045"):
+            with self.subTest(system=system):
+                rc, out, engine = self.run_smoke(system, "--engine", "podman", "--selftests")
+                self.assertEqual((rc, out.strip().splitlines()[-1]), (2, "STATE: refused"), out)
+                self.assertIn(system, out)
+                self.assertIn("MSYS_NO_PATHCONV=1 wsl -d podman-machine-default -u root -e bash -c 'cd /mnt/", out)
+                self.assertIn("&& bash test/smoke_container.sh --engine podman --selftests'", out, "keeps the options")
+                self.assertEqual(engine, "", "nothing is built or started")
+
+    def test_suggested_command_repeats_only_inert_text(self):
+        rc, out, engine = self.run_smoke("MINGW64_NT-10.0-19045", "--image", "x$(touch pwned)';`id`", "--no-build")
+        self.assertEqual((rc, engine), (2, ""), out)
+        self.assertIn("bash test/smoke_container.sh --image <value> --no-build'", out)
+        for text in ("$(", "`", "pwned"):
+            self.assertNotIn(text, out)
+
+    def test_linux_goes_on_to_the_engine(self):
+        rc, out, engine = self.run_smoke("Linux", "--engine", "podman")
+        self.assertEqual((rc, out.strip().splitlines()[-1]), (2, "STATE: refused"), out)
+        self.assertIn("podman does not answer", out)
+        self.assertNotIn("wsl", out)
+        self.assertEqual(engine.split(), ["podman", "version"])
 
 
 class _Version(http.server.BaseHTTPRequestHandler):
