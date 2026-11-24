@@ -250,6 +250,14 @@ Beim Messen des Weckens zwei Fallen beachten: ein Magic Packet vor dem ersten Po
 Rechner im Hybrid-Standby antwortet auf Pings, ohne dass Ollama läuft. Ein vorhandenes HA-Weckskript wird danach
 überflüssig; erst entfernen, wenn der Router-Weckpfad einmal nachweislich durchgelaufen ist.
 
+**Wakers (router 0.41.0, ADR-0117, ADR-0124).** `send_magic_packet` above is now one implementation of a waker,
+`wakers.Waker` with `wake(node) -> Sent | Problem`, chosen per node (`nodes.<name>.waker` or the policy key `waker`, default
+`wol`). Eligibility is `node.wol and waker.ready(node)` (for `wol`: a MAC, as before). The wait-and-poll loop above stays the
+only judge of whether the node came up and is shared by all wakers (`wakers.wake`); a waker re-sends every
+`retry_interval_s` only if it declares `repeat` (`wol` always, `http_webhook` only when configured). A waker that cannot send
+returns a `Problem` with a fixed `kind`, and the router answers 503 without waiting. `http_webhook` posts
+`{"event": "wake", "node", "mac"}` to a configured final URL under the ADR-0048 transport rules; there is no command waker.
+
 ## 5. Messung (vor dem ersten Produktivbetrieb)
 
 Die Zahlen im Modellkatalog sind Platzhalter. Messvorschrift pro Modell, pro GPU-Typ einmal:

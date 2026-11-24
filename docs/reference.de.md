@@ -46,10 +46,12 @@ Probleme an Home Assistant (`modes.gpu_guard`, Policy je Knoten im Agenten-Regis
 
 ## Optionaler persistenter Session-Speicher
 
-Die API `/v1/skirnir/sessions` kann explizit übermittelte Client-Ereignisse in PostgreSQL speichern. Sie ist
-**standardmäßig deaktiviert**; bestehende Installationen benötigen weder Datenbank noch zusätzliche Abhängigkeiten. Aktivierung
-über `router.session_store`, Installation von `router/requirements-session.txt` (`install.sh` erledigt das), DSN aus der
-konfigurierten Umgebungsvariable und Freigabe von `session_projects` je authentifiziertem Client.
+Die API `/v1/skirnir/sessions` kann explizit übermittelte Client-Ereignisse speichern. Sie ist **standardmäßig
+deaktiviert**; bestehende Installationen benötigen weder Datenbank noch zusätzliche Abhängigkeiten. Aktivierung über
+`router.session_store`, die URL des Stores aus der konfigurierten Umgebungsvariable und Freigabe von `session_projects` je
+authentifiziertem Client. Die URL wählt die Engine (ADR-0114): `postgresql://...` für eine PostgreSQL-Datenbank
+(`router/requirements-session.txt` installieren; `install.sh` erledigt das) oder `sqlite:///sessions.db` für eine Datei im
+Zustandsordner auf einem einzelnen Host, ohne Datenbankserver und ohne zusätzliches Paket.
 
 Unterstützt werden Session-Metadaten/Status, unveränderliche Nachrichten, idempotente Event-IDs, paginierter Verlauf,
 versionierte Task-Checkpoints sowie explizite Session-Löschung. Die authentifizierte Client-Identität bestimmt den Owner; eine
@@ -72,6 +74,11 @@ ausgeschlossen. Hermes mit eigenem Memory-Provider behält `memory.owner: client
 [Konfiguration, API und Grenzen (Englisch)](../design/hindsight-memory.md). Gedächtnis-Zustände in Antworten:
 [troubleshooting.de.md](troubleshooting.de.md#gedächtnis-zustände).
 
+Der Router spricht das Gedächtnis über eine Backend-Schnittstelle an; Hindsight ist ihr einziger Adapter
+(`hindsight.backend: hindsight`, Vorgabe). Grants, Inhaltsfilter, Recall-Budgets, Outbox und Löschablauf gelten für jedes
+Backend gleich, und das Hindsight-kompatible Gateway behält sein Format. Weitere Adapter (etwa mem0 oder pgvector) kämen
+als Pull-Request mit denselben Vertragstests ([Backend-Schnittstelle](../design/hindsight-memory.md#backend-interface)).
+
 CI prüft neue Zeilen auf gängige identifizierende Angaben und Secrets; die [Repository-Vorgaben](../AGENTS.md) verlangen
 zusätzlich eine manuelle Datenschutzprüfung. Tests und Beispiele nutzen synthetische Daten. Echte Verbindungswerte und
 Memory-Daten gehören nicht ins Repository.
@@ -92,7 +99,7 @@ erst nach dauerhafter Speicherung der vollständigen Antwort gemeldet.
 
 ## Optionales gemeinsames Gedächtnis und Agent-Übergaben
 
-Serverseitig freigegebene Memory Scopes, eine persistente PostgreSQL-Outbox, signierte Agent-Übergaben und Session-Suche
+Serverseitig freigegebene Memory Scopes, eine persistente Outbox im Session-Store, signierte Agent-Übergaben und Session-Suche
 erweitern das optionale Context Gateway. Neue Strategien, Tool-Reduktion, automatische Checkpoints und Aufbewahrungsregeln
 bleiben standardmäßig aus. Private Bank-IDs und bestehende Inferenz-Clients bleiben kompatibel. Siehe
 [Aktivierung, Hermes-Anbindung, API und Rollback](../design/shared-memory-interoperability.de.md).
@@ -239,7 +246,7 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 
 | Pfad | Inhalt |
 |---|---|
-| `router/router.py`, `router/skirnir_router/` | Dienst: `app`, `config` (Schema), `proxy` (Ollama-API), `openai_api`, `anthropic_api`, `shape` (Antwortformate: nativ, OpenAI, Anthropic; ADR-0120), `request` (routing-Block), `scheduler`, `admission`, `nodes`, `poll` (Zustandsautomat, Prewarm), `registry` (Agenten-Register), `tunnel`, `auth`, `cloud`, `decision/` (Engines), `metrics`, `perf`, `ops` (Idempotency, Canary, Shadow, Manifest), `ha` (MQTT), `admin`, `settings` (UI-Allowlist), `toolcall_rescue` (Tool-Calls, die Ollamas Parser als Text verliert, werden zurückgeholt), `wol`, `posture`, `process_view` (was der laufende Router ändern könnte), `setup_init` (`--init`) |
+| `router/router.py`, `router/skirnir_router/` | Dienst: `app`, `config` (Schema), `proxy` (Ollama-API), `openai_api`, `anthropic_api`, `shape` (Antwortformate: nativ, OpenAI, Anthropic; ADR-0120), `request` (routing-Block), `scheduler`, `admission`, `nodes`, `poll` (Zustandsautomat, Prewarm), `registry` (Agenten-Register), `tunnel`, `auth`, `cloud`, `decision/` (Engines), `metrics`, `perf`, `ops` (Idempotency, Canary, Shadow, Manifest), `ha` (MQTT), `admin`, `settings` (UI-Allowlist), `toolcall_rescue` (Tool-Calls, die Ollamas Parser als Text verliert, werden zurückgeholt), `wol` (Magic Packet), `wakers` (offline Knoten wecken: `wol`, `http_webhook`), `posture`, `process_view` (was der laufende Router ändern könnte), `setup_init` (`--init`) |
 | `router/ui.html`, `router/skirnir.png`, `router/favicon.png` | Web-UI und Logo |
 | `router/install.sh` | Router unter Debian/Ubuntu installieren oder aktualisieren |
 | `router/config.minimal.yaml`, `router/config.example.yaml` | Minimale erste Konfiguration (Vorlage für `--init`) und volle Referenz |

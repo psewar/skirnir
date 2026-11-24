@@ -7,7 +7,7 @@
 | Datei | Zweck |
 |---|---|
 | `/etc/skirnir-router/config.yaml` | Die Konfiguration (root, 0640: der Router liest sie über seine Gruppe `skirnir-router`, ADR-0086). Ausgangspunkt ist [router/config.minimal.yaml](../router/config.minimal.yaml) (ein kleiner, sicherer Start: eine Rolle, ein Client; `router.py --init` füllt sie aus, siehe [install-router.de.md](install-router.de.md#erste-konfiguration)) oder [router/config.example.yaml](../router/config.example.yaml) (die volle Referenz mit jeder Option und ihrem Kommentar). |
-| `/var/lib/skirnir-router/roles.yaml` | Overrides, die die Web-UI in den Zustandsordner des Routers schreibt (`router.state_dir`); überlebt Deploys und Aktualisierungen. Der Router schreibt alle eigenen Dateien dorthin - `roles.yaml`, `nodes.json`, Journale, Metriken - und nichts in `/etc/skirnir-router` (ADR-0086). Ohne `state_dir` liegen sie neben der `config.yaml`, was nur für die Entwicklung taugt: das Konto des Dienstes kann `/etc/skirnir-router` nicht schreiben. |
+| `/var/lib/skirnir-router/roles.yaml` | Overrides, die die Web-UI in den Zustandsordner des Routers schreibt (`router.state_dir`); überlebt Deploys und Aktualisierungen. Der Router schreibt alle eigenen Dateien dorthin - `roles.yaml`, `nodes.json`, Journale, Metriken, einen SQLite-Session-Store, den eine relative `sqlite:///`-URL nennt (ADR-0114) - und nichts in `/etc/skirnir-router` (ADR-0086). Ohne `state_dir` liegen sie neben der `config.yaml`, was nur für die Entwicklung taugt: das Konto des Dienstes kann `/etc/skirnir-router` nicht schreiben. |
 | `/etc/skirnir-router/secrets.env` | Secrets als Umgebung (root, 0640 für die Gruppe des Routers; [install-router.de.md](install-router.de.md#secrets)). |
 
 Rollen, Katalog und die meisten Laufzeit-Einstellungen sind in der UI editierbar; die UI schreibt sie in die `roles.yaml`.
@@ -197,6 +197,52 @@ roles:
   Wartezeit, Token, Denken, Zahl der Werkzeuge, Client, Rolle, Ergebnis - keine Prompt-Inhalte. Eigene Datei, damit das
   Entscheidungslog sein Fenster behält; sie rotiert bei 20 MB. Die Antwort wartet nie auf die Einordnung.
 
+## Knoten wecken
+
+Bleibt für eine Anfrage kein Kandidat übrig, darf der Router einen offline Knoten wecken, der das Modell kannte, und die
+Anfrage danach neu verteilen (Router 0.41.0, ADR-0117). Mit dabei ist ein Knoten, dessen Policy oder statischer Eintrag
+`wol: true` sagt (der Name stammt aus der Zeit, als es nur Wake-on-LAN gab); `waker` sagt, wie. Das Warten ist für jeden
+Wecker gleich: Der Router fragt den Knoten alle 2 s ab, höchstens `router.wol.wait_up_s` (90 s) lang, und versucht
+denselben Knoten erst nach `router.wol.cooldown_s` (300 s) wieder. Meldet ein Wecker *gesendet*, heisst das nur, dass das
+Signal den Router verlassen hat; ob der Knoten hochkommt, entscheidet die Abfrage.
+
+| Wecker | Was er tut | Braucht |
+|---|---|---|
+| `wol` (eingebaut, Standard) | UDP-Magic-Packet an jede Adresse in `router.wol.broadcast_addresses`, Port 9, während des Wartens alle `retry_interval_s` erneut | die MAC des Knotens (vom Agenten oder aus der Policy), Router in derselben Broadcast-Domäne |
+| `http_webhook` | je Versuch ein `POST` mit dem festen JSON-Körper `{"event": "wake", "node": "<name>", "mac": "<mac oder null>"}` | eine konfigurierte endgültige URL; optional ein Bearer-Token |
+
+```yaml
+router:
+  wakers:
+    plug:                                  # beliebiger Name ausser wol
+      kind: http_webhook
+      url: https://automation.example.net/api/webhook/skirnir-wake
+      token_env: SKIRNIR_WAKE_TOKEN        # optional; das Token kommt aus der Umgebung (secrets.env)
+      timeout_s: 10                        # ganzer Aufruf, 1-60 s
+      repeat: false                        # true = alle router.wol.retry_interval_s erneut senden
+nodes:
+  pc-example: { wol: true, waker: plug }   # ein registrierter Knoten nimmt das als Grundlage; der Policy-Schlüssel waker überschreibt es
+```
+
+- **Wohin der Webhook geht:** ein Home-Assistant-Webhook-Auslöser (`/api/webhook/<id>`), der einen Smart-Plug schaltet oder
+  `wake_on_lan.send_magic_packet` in einem anderen Subnetz aufruft, eine ioBroker- oder openHAB-Regel hinter einem
+  HTTP-Endpunkt oder eine eigene Steuerung. Der Körper nennt den Knoten, ein Endpunkt kann also mehrere Knoten bedienen.
+- **Transportregeln** (ADR-0124, dieselben wie für Cloud-Anbieter in ADR-0048): HTTPS, einfaches HTTP nur an das wörtliche
+  `127.0.0.1` oder `::1`; keine Zugangsdaten, keine Query und kein Fragment in der URL; eine Umleitung wird abgelehnt, nicht
+  befolgt (die endgültige URL eintragen); `timeout_s` begrenzt den ganzen Aufruf, und ein langsamer Empfänger verzögert nur die
+  Anfrage, die auf diesen Knoten wartet. Das Token geht als `Authorization: Bearer ...` mit; ist `token_env` gesetzt, die
+  Variable aber leer, wird nichts gesendet. Das Log nennt nur den Host des Empfängers, nie den URL-Pfad (eine
+  Home-Assistant-Webhook-ID ist ein Geheimnis).
+- **`repeat`** bleibt aus bei allem, was umschaltet: ein zweites „Einschaltknopf drücken“ würde den Rechner wieder
+  ausschalten. Für gleichbleibende Aufrufe („Steckdose ein“) einschalten, wenn der Empfänger den ersten verpassen kann.
+- **Wahl je Knoten:** `nodes.<name>.waker` in der Konfigurationsdatei oder der Policy-Schlüssel `waker` über die Admin-API
+  (`POST /admin/nodes/<fp>/policy {"waker": "plug"}`, `null` führt zurück zu `wol`). Die Policy nimmt nur `wol` oder einen
+  Namen aus `router.wakers` an; Ziele und Verweise auf Geheimnisse stehen nur in der Konfigurationsdatei. Ein unbekannter
+  Name in der Konfiguration wird beim Laden abgelehnt.
+- **Kein Befehls-Wecker:** Der Router läuft ohne Rechte und führt nichts aus, was die Konfiguration nennt (ADR-0118).
+  Einschalten über einen BMC (IPMI, Redfish) oder eine Cloud-API läuft über einen Webhook-Empfänger, der diese Zugangsdaten
+  hält; ein eigener `ipmi`-Wecker ist noch nicht umgesetzt.
+
 ## Auto-Rolle: die Decision Engine
 
 Ein Client, der nicht weiß, welche Rolle passt, fragt `auto:latest`. Eine Kette von Engines wählt eine der konfigurierten
@@ -269,6 +315,7 @@ Schranken (`router.cloud`):
   `refusal` als Antwort. Bevor eine erlaubte Anfrage hinausgeht, werden Werkzeugergebnisse geschwärzt: Einträge des
   Home-Assistant-Live-Kontexts aus `redact_domains` (person, device_tracker, todo, lock, camera, …),
   `redact_device_classes` (motion, presence, door, window, …) und `redact_names`, und das ganze Ergebnis der `redact_tools`.
+  Muster und Texte für andere Länder und andere Werkzeugformate: [unten](#inhaltsprüfung-länderpakete-und-schwärzer).
   Das Journal hält `privacy_check` mit Ergebnis, Regel oder Wahrscheinlichkeit und Anzahl geschwärzter Einträge fest, nie
   den Text. Eine deklarierte `routing.data_class` wird nie übergangen.
 - **Credential-Scan** (`block`): Prompts mit erkennbaren Schlüsseln (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
@@ -341,6 +388,43 @@ models:
 - **Feld- und Metriknamen** behalten die Endung `_chf` (`spend_month_chf`, `budget_month_chf`, `cost_chf`,
   `skirnir_cloud_*_chf*`), damit Dashboards, Alarme und Home-Assistant-Entitäten weiterlaufen; ihre Werte stehen in der
   eingestellten Währung. Der Home-Assistant-Kostensensor hat weiterhin die Einheit `CHF`.
+
+### Inhaltsprüfung: Länderpakete und Schwärzer
+
+Router 0.42.0 ([ADR-0119](adr/0119-privacy-redaction-per-tool-format-and-locale-pack.md), [ADR-0125](adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md)).
+Ohne die neuen Schlüssel verhält sich die Inhaltsprüfung genau wie bisher (Schweizer und deutsche Muster,
+Home-Assistant-Schwärzung, unerkannte Werkzeugergebnisse gehen durch). Alle stehen nur in `config.yaml`; die Web-UI kann
+sie nicht ändern.
+
+| Schlüssel unter `router.cloud.privacy_check` | Vorgabe | Bedeutung |
+|---|---|---|
+| `locale` | `ch-de` | Länderpaket: die Muster und Stichwortgruppen, die die Regeln prüfen, der vorgegebene `refusal` und die Markierung, die ein ganzes Werkzeugergebnis ersetzt. `ch-de`: E-Mail, Schweizer Telefonnummern, IBAN, AHV-Nummer, Straßenadressen mit deutschen Endungen, deutsche und englische Wortanfänge, deutsche Ablehnung. `en`: E-Mail, Telefonnummern (international mit `+`/`00`, nordamerikanisch, national mit führender 0), IBAN, englische Wortanfänge, englische Ablehnung; keine nationale Kennnummer und keine Straßenadresse. Eigene `terms` und `refusal` gelten bei beiden zusätzlich. |
+| `redactors` | `[ha_assist]` | Geschwärzte Werkzeugformate, in dieser Reihenfolge. `ha_assist`: Live-Kontext von Home Assistant (Einträge aus `redact_domains`, `redact_device_classes`, `redact_names`). `generic_json`: eingestellte Pfade und Schlüssel von JSON-Werkzeugergebnissen (unten). Mindestens einer; `redact_tools` gilt unabhängig von der Liste. |
+| `generic_json` | – | Nötig mit dem Schwärzer `generic_json`, ohne ihn abgelehnt. `tools` ordnet einem Werkzeugnamen, oder `*` für jedes JSON-Ergebnis, Pfade mit Punkten zu, die entfernt werden (`events.*.attendees`: `*` steht für jeden Schlüssel eines Objekts oder jedes Element einer Liste); eine leere Liste kennzeichnet ein Werkzeug als erkannt, ohne etwas zu entfernen. `keys` entfernt Schlüssel dieser Namen in jeder Tiefe dieser Ergebnisse. Ist das Ergebnis eines in `tools` genannten Werkzeugs kein JSON, bleibt die Anfrage lokal. |
+| `unrecognised_tool_results` | `pass` | `keep_local`: Ein Werkzeugergebnis, das kein Schwärzer erkennt, hält die Anfrage lokal. Erkannt werden das JSON von Home Assistant mit einem `result`-Text, Text mit Live-Kontext-Einträgen, ein Werkzeug aus `redact_tools` und ein JSON-Ergebnis eines Werkzeugs aus `generic_json.tools`. Bei Home Assistant sind Intent-Ergebnisse wie `HassTurnOn` kein Live-Kontext; solche Werkzeuge mit `[]` unter `generic_json.tools` eintragen, wenn sie durchgehen dürfen. |
+
+```yaml
+router:
+  cloud:
+    privacy_check:
+      enabled: true
+      locale: en
+      redactors: [ha_assist, generic_json]
+      generic_json:
+        tools: {calendar_events: ["events.*.attendees", owner], HassTurnOn: []}
+        keys: [email, phone]
+      unrecognised_tool_results: keep_local
+```
+
+Eine Anfrage, die die Schwärzung lokal hält, bekommt die Ablehnung wie jede andere; das Journal hält `result: unredacted`
+mit `by: redaction:generic_json` oder `redaction:unrecognised` fest. JSON, das tiefer als 512 Ebenen verschachtelt ist
+(100 bei `generic_json`), wird nicht geprüft und hält die Anfrage ebenfalls lokal.
+`/admin/state` zeigt Länderpaket, Schwärzer, Modus
+und für `generic_json` nur die Anzahl Werkzeuge und Schlüssel. Mit `unrecognised_tool_results: pass` (Vorgabe) gehen
+Werkzeugergebnisse in Formaten, die kein Schwärzer kennt, unverändert hinaus: Die Inhaltsprüfung schützt, was der Nutzer
+geschrieben hat, und den Hauskontext in bekannten Formaten. Schwärzer für openHAB oder ioBroker gibt es noch nicht; sie
+kommen zusammen mit Testdaten ihrer echten Formate. Länderpakete kommen nur zusammen mit Testsätzen für ihre Muster. Der
+Datenschutz-Klassifikator ist auf deutschen und englischen Sätzen trainiert; ein anderes Länderpaket ändert daran nichts.
 
 ### Institutionelle Anbieter
 

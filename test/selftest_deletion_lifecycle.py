@@ -77,13 +77,14 @@ check(request.headers_for(info).get("X-Skirnir-Memory-Operation") == str(op1), "
 check("X-Skirnir-Memory-Operation" not in request.headers_for({**info, "memory_operation": None}), "no operation, no header")
 
 
-class FakeClient:
+class FakeBackend:
+    """memory_backend.MemoryBackend.delete_document: None once deleted (or already gone), else a Problem."""
     def __init__(self):
         self.deleted = []
 
     async def delete_document(self, bank, document_id):
         self.deleted.append((bank, document_id))
-        return unavailable("down") if bank == "down" else {"deleted": True}
+        return unavailable("down") if bank == "down" else None
 
 
 class FakeOutbox:
@@ -96,7 +97,7 @@ class FakeOutbox:
 
 ids = sorted(uuid4() for _ in range(3))
 service = types.SimpleNamespace(outbox=FakeOutbox([(ids[0], "bank-a"), (ids[1], "down"), (ids[2], None)]),
-                                client=FakeClient(), active=lambda: True)
+                                backend=FakeBackend(), active=lambda: True)
 
 
 class FakeRequest(dict):
@@ -128,7 +129,7 @@ check(status == 200 and body == {"checked": 2, "deleted": 1, "unavailable": 1, "
 status, body = call({"after": str(ids[1]), "limit": 2})
 check(status == 200 and body == {"checked": 1, "deleted": 0, "unavailable": 1, "next": None},
       f"reconcile: last page, a row without bank counts as unreachable ({body})")
-check(service.client.deleted == [("bank-a", str(ids[0])), ("down", str(ids[1]))], "reconcile deletes by operation id")
+check(service.backend.deleted == [("bank-a", str(ids[0])), ("down", str(ids[1]))], "reconcile deletes by operation id")
 check(call({"limit": 0})[0] == 400 and call({"after": "x"})[0] == 400, "reconcile: invalid input refused")
 service.outbox = None
 check(call(None)[0] == 404, "reconcile without a durable outbox: 404")

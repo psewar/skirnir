@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Disposable PostgreSQL + synthetic loopback Hindsight and inference integration."""
+"""Durable outbox, shared memory and handoffs on every session store engine (ADR-0114): SQLite always, PostgreSQL against
+a disposable database; synthetic loopback Hindsight and inference. The relay tests are PostgreSQL's pool only."""
 import asyncio
 import os
 import unittest
@@ -22,14 +23,13 @@ from skirnir_router.outcome import Problem
 from skirnir_router.reliability_store import OPERATION_NOT_FOUND
 from skirnir_router.session_store import PostgresSessionStore
 from skirnir_router.session_types import NOT_FOUND, UNAVAILABLE
+from store_engines import DSN, POSTGRES_ONLY, PostgresEngine, SqliteEngine, prepare
 
-DSN = os.environ.get("SKIRNIR_TEST_SESSION_DSN")
 
-
-@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
-class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
+class DurableStoreContract:
     async def asyncSetUp(self):
-        self.store = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
+        prepare(self)
+        self.store = await self.engine.open(SessionConfig(enabled=True))
         self.owner = "test-" + uuid4().hex
         self.other = "test-" + uuid4().hex
         self.operation = uuid4()
@@ -38,7 +38,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         self.payload = {"content": "Synthetic knowledge", "confirmed": False, "provenance": {"kind": "assistant_derivation"}}
 
     async def asyncTearDown(self):
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("DELETE FROM skirnir_sessions.memory_outbox WHERE owner=ANY($1::text[])", [self.owner, self.other])
             await conn.execute("DELETE FROM skirnir_sessions.sessions WHERE owner=ANY($1::text[])", [self.owner, self.other])
         await self.store.close()
@@ -85,7 +85,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_restart_persistence_replay_conflict_and_capacity(self):
         first = await self.put()
         await self.store.close()
-        self.store = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
+        self.store = await self.engine.open(SessionConfig(enabled=True))
         self.assertEqual((await self.store.outbox_get(self.owner, self.operation))["payload"], self.payload)
         self.assertEqual((await self.put())["operation_id"], first["operation_id"])
         self.assertEqual((await self.put(fingerprint="changed")).status, 409)
@@ -97,7 +97,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         claims = await asyncio.gather(*(self.store.outbox_claim(120, 5) for _ in range(5)))
         self.assertEqual(sum(v is not None for v in claims), 1)
         first = next(v for v in claims if v)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET lease_until=clock_timestamp()-interval '1 second' WHERE operation_id=$1", self.operation)
         second = await self.store.outbox_claim(120, 5)
         self.assertNotEqual(first["lease"], second["lease"])
@@ -108,7 +108,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_expired_attempt_limit_becomes_dead_letter(self):
         await self.put()
         await self.store.outbox_claim(120, 1)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET lease_until=clock_timestamp()-interval '1 second' WHERE operation_id=$1", self.operation)
         self.assertIsNone(await self.store.outbox_claim(120, 1))
         self.assertEqual((await self.store.outbox_get(self.owner, self.operation))["state"], "dead")
@@ -146,15 +146,15 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         await self.put()
         claim = await self.store.outbox_claim(120, 5)
         await self.store.outbox_finish(self.operation, UUID(claim["lease"]), "accepted", 3600)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET updated_at=clock_timestamp()-interval '20 days' WHERE operation_id=$1", self.operation)
         # Accepted but unverified: the payload may still be resubmitted, retention must keep it.
         self.assertEqual((await self.store.cleanup(0, 0, 10))["outbox_payloads"], 0)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET available_at=clock_timestamp() WHERE operation_id=$1", self.operation)
         claim = await self.store.outbox_claim(120, 5)
         await self.store.outbox_finish(self.operation, UUID(claim["lease"]), "completed")
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET updated_at=clock_timestamp()-interval '20 days' WHERE operation_id=$1", self.operation)
         value = await self.store.cleanup(0, 0, 10)
         self.assertEqual(value["outbox_payloads"], 1)
@@ -191,7 +191,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         # Driver encoding failure occurs after inserting the session and messages.
         self.assertEqual(await self.store.import_session(self.owner, "invalid", "x", PROJECT, "personal", "skirnir-managed", {}, messages,
                                                          {"schema_version": 1, "invalid": object()}), UNAVAILABLE)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             self.assertEqual(await conn.fetchval("SELECT count(*) FROM skirnir_sessions.handoff_imports WHERE owner=$1", self.owner), 1)
 
     async def test_auto_checkpoint_is_atomic_deduplicated_and_versioned(self):
@@ -215,7 +215,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         archived_id, active_id = UUID(archived["id"]), UUID(active["id"])
         await self.store.update(self.owner, archived_id, "archived", None)
         turn = await self.store.claim(self.owner, active_id, "one", "one", [{"role": "user", "content": "Synthetic"}], ContextConfig(enabled=True))
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.sessions SET updated_at=clock_timestamp()-interval '20 days' WHERE owner=$1", self.owner)
         result = await self.store.cleanup(10, 5, 0)
         self.assertEqual(result["sessions"], 1)
@@ -259,7 +259,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         await self.store.outbox_finish(self.operation, UUID(claim['lease']), 'dead')
         self.assertEqual(await self.store.outbox_retry(self.other, self.operation, 'one', self.scope, 10), OPERATION_NOT_FOUND)
         self.assertEqual((await self.store.outbox_retry(self.owner, self.operation, 'one', {**self.scope, '__bank': 'changed'}, 10)).status, 409)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET payload=NULL WHERE operation_id=$1", self.operation)
         self.assertEqual((await self.store.outbox_retry(self.owner, self.operation, 'one', self.scope, 10)).status, 409)
 
@@ -268,7 +268,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(await self.store.outbox_oldest(), 0)
         claim = await self.store.outbox_claim(120, 5)
         self.assertEqual((await self.store.outbox_counts())['processing'], 1)
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             transaction = conn.transaction()
             await transaction.start()
             await conn.execute("DELETE FROM skirnir_sessions.memory_outbox WHERE operation_id=$1", self.operation)
@@ -282,7 +282,7 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_compacted_tombstone_keeps_binding_and_deletion_is_not_unsent(self):
         await self.put()
         await self.complete()
-        async with self.store.pool.acquire() as conn:
+        async with self.store.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET updated_at=clock_timestamp()-interval '20 days' WHERE operation_id=$1", self.operation)
         await self.store.cleanup(0, 0, 10)
         row = await self.store.outbox_get(self.owner, self.operation)
@@ -294,20 +294,29 @@ class DurableStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row['retry_base'], 1)
 
 
-@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
-class DurableHttpTests(MemoryHarness):
+@POSTGRES_ONLY
+class DurableStorePostgresTests(DurableStoreContract, unittest.IsolatedAsyncioTestCase):
+    engine_class = PostgresEngine
+
+
+class DurableStoreSqliteTests(DurableStoreContract, unittest.IsolatedAsyncioTestCase):
+    engine_class = SqliteEngine
+
+
+class DurableHttpContract:
     async def asyncSetUp(self):
+        prepare(self)
         await super().asyncSetUp()
         shared_fixture.SharedGatewayTests.shared(self)
         self.service.worker.cancel()
         await asyncio.gather(self.service.worker, return_exceptions=True)
         self.service.worker = None
-        self.real = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
+        self.real = await self.engine.open(SessionConfig(enabled=True))
         self.service.outbox = self.real
         self.service.cfg = state.CFG.hindsight = replace(self.service.cfg, outbox_enabled=True)
 
     async def asyncTearDown(self):
-        async with self.real.pool.acquire() as conn:
+        async with self.real.connection() as conn:
             await conn.execute("DELETE FROM skirnir_sessions.memory_outbox WHERE owner=ANY($1::text[])", ["client-a", "client-b"])
         await super().asyncTearDown()
         await self.real.close()
@@ -325,7 +334,7 @@ class DurableHttpTests(MemoryHarness):
         self.assertTrue(value["durable"])
         operation = UUID(value["operation_id"])
         await self.real.close()
-        self.real = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
+        self.real = await self.engine.open(SessionConfig(enabled=True))
         self.service.outbox = self.real
         self.assertEqual((await self.real.outbox_get("client-a", operation))["state"], "pending")
         await memory_outbox.step(self.service)
@@ -346,7 +355,7 @@ class DurableHttpTests(MemoryHarness):
         await memory_outbox.step(self.service)
         self.assertEqual((await self.real.outbox_get("client-a", operation))["state"], "pending")
         self.assertFalse(await memory_outbox.step(self.service))
-        async with self.real.pool.acquire() as conn:
+        async with self.real.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET available_at=clock_timestamp() WHERE operation_id=$1", operation)
         await memory_outbox.step(self.service)
         self.assertEqual((await self.real.outbox_get("client-a", operation))["state"], "dead")
@@ -378,7 +387,7 @@ class DurableHttpTests(MemoryHarness):
         self.assertEqual(self.deleted_documents, [])
         self.assertEqual((await self.real.outbox_get("client-a", UUID(operation)))["state"], "delete_pending")
         self.operation_state = "completed"
-        async with self.real.pool.acquire() as conn:
+        async with self.real.connection() as conn:
             await conn.execute("UPDATE skirnir_sessions.memory_outbox SET available_at=clock_timestamp() WHERE operation_id=$1", UUID(operation))
         await memory_outbox.step(self.service)
         row = await self.real.outbox_get("client-a", UUID(operation))
@@ -401,10 +410,19 @@ class DurableHttpTests(MemoryHarness):
         self.assertEqual(item["metadata"]["kind"], "assistant_derivation")
 
 
-@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
-class ExchangeHttpTests(ManagedHarness):
+@POSTGRES_ONLY
+class DurableHttpPostgresTests(DurableHttpContract, MemoryHarness):
+    engine_class = PostgresEngine
+
+
+class DurableHttpSqliteTests(DurableHttpContract, MemoryHarness):
+    engine_class = SqliteEngine
+
+
+class ExchangeHttpContract:
     async def asyncSetUp(self):
-        self.real = await PostgresSessionStore.open(DSN, SessionConfig(enabled=True))
+        prepare(self)
+        self.real = await self.engine.open(SessionConfig(enabled=True))
         await super().asyncSetUp()
         state.CFG.session_store = replace(state.CFG.session_store, handoff_enabled=True)
         state.CFG.context_manager = replace(state.CFG.context_manager, auto_checkpoints=True)
@@ -416,7 +434,7 @@ class ExchangeHttpTests(ManagedHarness):
         self.client.server.app[session_api.STORE_KEY] = self.real
 
     async def asyncTearDown(self):
-        async with self.real.pool.acquire() as conn:
+        async with self.real.connection() as conn:
             await conn.execute("DELETE FROM skirnir_sessions.sessions WHERE owner=ANY($1::text[])", ["client-a", "client-b"])
         await super().asyncTearDown()
         self.key_env.stop()
@@ -460,6 +478,15 @@ class ExchangeHttpTests(ManagedHarness):
         self.assertEqual(len(checkpoints), 2)
         self.assertIn("unverified", checkpoints[-1]["payload"]["last_result"])
         self.assertTrue(checkpoints[-1]["payload"]["open_steps"])
+
+
+@POSTGRES_ONLY
+class ExchangeHttpPostgresTests(ExchangeHttpContract, ManagedHarness):
+    engine_class = PostgresEngine
+
+
+class ExchangeHttpSqliteTests(ExchangeHttpContract, ManagedHarness):
+    engine_class = SqliteEngine
 
 
 RESET = "Resetting connection with an active transaction"
@@ -532,7 +559,7 @@ class RelayedStoreCase(unittest.IsolatedAsyncioTestCase):
         return [message for message in self.reports if message.startswith(RESET)]
 
 
-@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
+@POSTGRES_ONLY
 class InterruptedBeginTests(RelayedStoreCase):
     """A store call interrupted while its BEGIN is on the way must not return the connection to the pool with asyncpg's
     transaction marker on it. Stopping the router no longer does that (OrderedShutdownTests); two causes remain: aiohttp
@@ -584,7 +611,7 @@ class InterruptedBeginTests(RelayedStoreCase):
         await self.assert_store_usable()
 
 
-@unittest.skipUnless(DSN, "set SKIRNIR_TEST_SESSION_DSN to a disposable PostgreSQL database")
+@POSTGRES_ONLY
 class OrderedShutdownTests(RelayedStoreCase):
     """Stopping the router must not cut a transaction off. A task cancelled while its BEGIN was on the way left asyncpg's
     transaction marker on the connection, and returning it to the pool logged 'Resetting connection with an active

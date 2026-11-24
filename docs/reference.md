@@ -46,11 +46,12 @@ problems to Home Assistant (`modes.gpu_guard`, per-node policy in the agent regi
 
 ## Optional persistent session API
 
-The router can persist explicit client events in PostgreSQL using an opt-in session
-API at `/v1/skirnir/sessions`. It is **disabled by default** and adds no dependency
-or service requirement to existing installations. Enable `router.session_store`,
-install `router/requirements-session.txt` (`install.sh` does), supply the DSN through the configured
-environment variable, and grant `session_projects` to individual authenticated clients.
+The router can persist explicit client events using an opt-in session API at `/v1/skirnir/sessions`. It is
+**disabled by default** and adds no dependency or service requirement to existing installations. Enable
+`router.session_store`, supply the store's URL through the configured environment variable, and grant
+`session_projects` to individual authenticated clients. The URL picks the engine (ADR-0114): `postgresql://...` for a
+PostgreSQL database (install `router/requirements-session.txt`; `install.sh` does), or `sqlite:///sessions.db` for a file
+in the state folder on a single host, without a database server or extra package.
 
 The API supports session metadata/status, append-only messages, idempotent event IDs,
 paginated history, versioned task checkpoints and explicit session deletion. Owner
@@ -77,6 +78,13 @@ Hermes clients with their own memory provider keep `memory.owner: client` to pre
 double processing. See [configuration, API contract and limitations](../design/hindsight-memory.md).
 Memory states in responses: [troubleshooting.md](troubleshooting.md#memory-states).
 
+The router reaches memory through a backend interface; Hindsight is its only adapter
+(`hindsight.backend: hindsight`, the default). Grants, the content filter, recall budgets,
+the outbox and the deletion lifecycle apply to every backend alike, and the
+Hindsight-compatible gateway keeps its format. Further adapters (for example mem0 or
+pgvector) would come as pull requests with the same contract tests
+([backend interface](../design/hindsight-memory.md#backend-interface)).
+
 Public changes are checked for common identifying/secret patterns in CI, with manual
 privacy review required by [repository guidance](../AGENTS.md). Examples/tests use only
 synthetic data; connection values and real memory data must stay outside the repository.
@@ -98,7 +106,7 @@ limits and migration/rollback](../design/managed-context.md).
 
 ## Optional shared memory and agent interoperability
 
-Server-controlled shared scopes, a durable PostgreSQL memory outbox, signed agent
+Server-controlled shared scopes, a durable memory outbox in the session store, signed agent
 handoffs and session discovery extend the existing optional context gateway. New
 strategies, tool-result reduction, automatic checkpoints and retention remain off
 by default. Private bank IDs and existing inference clients stay compatible.
@@ -242,7 +250,7 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 
 | Path | Content |
 |---|---|
-| `router/router.py`, `router/skirnir_router/` | Service: `app`, `config` (schema), `proxy` (Ollama API), `openai_api`, `anthropic_api`, `shape` (response formats: native, OpenAI, Anthropic; ADR-0120), `request` (routing block), `scheduler`, `admission`, `nodes`, `poll` (state machine, prewarm), `registry` (agent registry), `tunnel`, `auth`, `cloud`, `decision/` (engines), `metrics`, `perf`, `ops` (idempotency, canary, shadow, manifest), `ha` (MQTT), `admin`, `settings` (UI allowlist), `toolcall_rescue` (tool calls that Ollama's parser loses as text are recovered), `wol`, `posture`, `process_view` (what the running router could change), `setup_init` (`--init`) |
+| `router/router.py`, `router/skirnir_router/` | Service: `app`, `config` (schema), `proxy` (Ollama API), `openai_api`, `anthropic_api`, `shape` (response formats: native, OpenAI, Anthropic; ADR-0120), `request` (routing block), `scheduler`, `admission`, `nodes`, `poll` (state machine, prewarm), `registry` (agent registry), `tunnel`, `auth`, `cloud`, `decision/` (engines), `metrics`, `perf`, `ops` (idempotency, canary, shadow, manifest), `ha` (MQTT), `admin`, `settings` (UI allowlist), `toolcall_rescue` (tool calls that Ollama's parser loses as text are recovered), `wol` (magic packet), `wakers` (waking offline nodes: `wol`, `http_webhook`), `posture`, `process_view` (what the running router could change), `setup_init` (`--init`) |
 | `router/ui.html`, `router/skirnir.png`, `router/favicon.png` | Web UI and logo |
 | `router/install.sh` | Install or upgrade the router on Debian/Ubuntu |
 | `router/config.minimal.yaml`, `router/config.example.yaml` | Minimal first configuration (template for `--init`) and full reference |

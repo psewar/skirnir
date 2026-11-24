@@ -13,7 +13,7 @@ Podman, Unraid, TrueNAS oder Synology: siehe [Container](#container). GPU-Knoten
 |---|---|
 | Betriebssystem | Debian 12 oder Ubuntu (oder vergleichbar; `install.sh` unterstützt Debian und Ubuntu, sonst [Installation von Hand](#installation-von-hand)). Ein Systemcontainer (LXC) genügt; für Docker oder Podman das Router-Image ([Container](#container)). Unter Windows läuft der Router mit dem Standard-Event-Loop (Entwicklung). |
 | Python | 3.11 oder neuer |
-| Pakete | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installiert fehlende). `python3-paho-mqtt` braucht es nur für Home Assistant über MQTT (`install.sh --without-mqtt` lässt es weg). Was die Distribution nicht oder zu alt mitbringt (unter Debian 12: `asyncpg` für den Session-Store), kommt nur aus der hash-gesperrten `router/requirements-lock.txt` ins venv (ADR-0074). |
+| Pakete | `python3`, `python3-venv`, `python3-aiohttp`, `python3-yaml`, `python3-cryptography`, `python3-paho-mqtt`, `python3-uvloop`, `curl`, `jq` (`install.sh` installiert fehlende). `python3-paho-mqtt` braucht es nur für Home Assistant über MQTT (`install.sh --without-mqtt` lässt es weg). Was die Distribution nicht oder zu alt mitbringt (unter Debian 12: `asyncpg` für einen PostgreSQL-Session-Store), kommt nur aus der hash-gesperrten `router/requirements-lock.txt` ins venv (ADR-0074). Ein SQLite-Session-Store (`sqlite:///...`, ADR-0114) nutzt das `sqlite3` von Python und braucht SQLite 3.37 oder neuer (Debian 12 hat 3.40). |
 | Ports | **11434** für Clients (Ollama-, OpenAI- und Anthropic-API), **11435** für den Tunnel der Agenten, die Web-UI, `/admin/*` und `/metrics` |
 | Name und Zertifikat | Ein DNS-Name, den Clients und Knoten verwenden (`<name>`, z. B. `router.example.net`), und ein TLS-Zertifikat dafür, siehe [TLS-Zertifikat](#tls-zertifikat) |
 
@@ -298,6 +298,8 @@ fügt PostgreSQL für `router.session_store` hinzu (Passwort in einer eigenen `p
 `session_store_unverified_tls`, bis PostgreSQL TLS hat), `--profile decision` den Embedding-Entscheidungsdienst (vorher
 `docker build -t skirnir-embed decision-embed/`, Endpunkt `http://embed:8082`). Agenten bleiben native Programme auf den
 GPU-Knoten und verbinden sich wie bei jedem Router mit `https://<name>:11435`.
+
+Auf einem einzelnen Host braucht der Session-Store kein PostgreSQL: `SKIRNIR_SESSION_DSN=sqlite:///sessions.db` in `secrets.env` legt ihn als nur für den Besitzer lesbare Datei im Volume `state` ab (ADR-0114, das Image hat das `sqlite3` von Python); gesichert wird er wie `sessions.db` in [Betrieb](operations.de.md#was-sichern).
 
 ## Sicherheits-Checkliste
 

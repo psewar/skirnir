@@ -7,7 +7,7 @@
 | File | Purpose |
 |---|---|
 | `/etc/skirnir-router/config.yaml` | The configuration (root, 0640: the router reads it through its group `skirnir-router`, ADR-0086). Start from [router/config.minimal.yaml](../router/config.minimal.yaml) (a small, safe start: one role, one client; `router.py --init` fills it in, see [install-router.md](install-router.md#first-configuration)) or [router/config.example.yaml](../router/config.example.yaml) (the full reference with every option and its comment). |
-| `/var/lib/skirnir-router/roles.yaml` | Overrides written by the web UI into the router's state folder (`router.state_dir`); survives deploys and upgrades. The router writes all its own files there - `roles.yaml`, `nodes.json`, journals, metrics - and nothing in `/etc/skirnir-router` (ADR-0086). Without `state_dir` they lie next to `config.yaml`, which only suits development: the service's account cannot write `/etc/skirnir-router`. |
+| `/var/lib/skirnir-router/roles.yaml` | Overrides written by the web UI into the router's state folder (`router.state_dir`); survives deploys and upgrades. The router writes all its own files there - `roles.yaml`, `nodes.json`, journals, metrics, a SQLite session store named by a relative `sqlite:///` URL (ADR-0114) - and nothing in `/etc/skirnir-router` (ADR-0086). Without `state_dir` they lie next to `config.yaml`, which only suits development: the service's account cannot write `/etc/skirnir-router`. |
 | `/etc/skirnir-router/secrets.env` | Secrets as environment (root, 0640 for the router's group; [install-router.md](install-router.md#secrets)). |
 
 Roles, catalogue and most runtime settings are editable in the UI; the UI writes them to `roles.yaml`. Ports, TLS, Basic Auth,
@@ -194,6 +194,50 @@ roles:
   duration, waiting time, tokens, thinking, tool count, client, role, outcome - no prompt contents. A separate file, so the
   decision log keeps its window; it rotates at 20 MB. The response never waits for the classification.
 
+## Waking nodes
+
+When no candidate is left for a request, the router may wake one offline node that knew the model and then route the
+request again (router 0.41.0, ADR-0117). A node takes part when its policy or static entry says `wol: true` (the name stays
+from the Wake-on-LAN-only days); `waker` says how. The waiting is the same for every waker: the router polls the node every
+2 s for up to `router.wol.wait_up_s` (90 s), and tries the same node again only after `router.wol.cooldown_s` (300 s). A
+waker that reports *sent* only means the signal left the router; the poll decides whether the node came up.
+
+| Waker | What it does | Needs |
+|---|---|---|
+| `wol` (built in, default) | UDP magic packet to each of `router.wol.broadcast_addresses`, port 9, again every `retry_interval_s` while waiting | the node's MAC (from the agent or the policy), the router in the same broadcast domain |
+| `http_webhook` | one `POST` with the fixed JSON body `{"event": "wake", "node": "<name>", "mac": "<mac or null>"}` per attempt | a configured final URL; optional bearer token |
+
+```yaml
+router:
+  wakers:
+    plug:                                  # any name except wol
+      kind: http_webhook
+      url: https://automation.example.net/api/webhook/skirnir-wake
+      token_env: SKIRNIR_WAKE_TOKEN        # optional; the token comes from the environment (secrets.env)
+      timeout_s: 10                        # whole call, 1-60 s
+      repeat: false                        # true = send again every router.wol.retry_interval_s
+nodes:
+  pc-example: { wol: true, waker: plug }   # a registered node takes this as its base; the policy key waker overrides it
+```
+
+- **Where the webhook goes:** a Home Assistant webhook trigger (`/api/webhook/<id>`) that switches a smart plug or calls
+  `wake_on_lan.send_magic_packet` in another subnet, an ioBroker or openHAB rule behind an HTTP endpoint, or a controller
+  of your own. The body names the node, so one endpoint can serve several nodes.
+- **Transport rules** (ADR-0124, the same as for cloud providers in ADR-0048): HTTPS, plain HTTP only to literal
+  `127.0.0.1` or `::1`; no credentials, query or fragment in the URL; a redirect is refused, not followed (enter the final
+  URL); `timeout_s` bounds the whole call, and a slow receiver only delays the request that waits for this node. The token is
+  sent as `Authorization: Bearer ...`; if `token_env` is set but the variable is empty, nothing is sent. The log names only
+  the receiver's host, never the URL path (a Home Assistant webhook ID is a secret).
+- **`repeat`** stays off for anything that toggles: a second "press the power button" would switch the machine off again.
+  Turn it on for idempotent calls ("plug on") if the receiver may miss the first one.
+- **Choosing per node:** `nodes.<name>.waker` in the configuration file, or the policy key `waker` through the admin API
+  (`POST /admin/nodes/<fp>/policy {"waker": "plug"}`, `null` returns to `wol`). The policy accepts only `wol` or a name
+  from `router.wakers`; destinations and secret references live only in the configuration file. An unknown name in the
+  configuration is refused at load.
+- **No command waker:** the router runs unprivileged and executes nothing that the configuration names (ADR-0118). Power-on
+  through a BMC (IPMI, Redfish) or a cloud API goes through a webhook receiver that holds those credentials; a native `ipmi`
+  waker is not implemented yet.
+
 ## Auto role: the decision engine
 
 A client that does not know which role fits asks `auto:latest`. A chain of engines picks one of the configured roles; uncertain
@@ -265,6 +309,7 @@ Limits (`router.cloud`):
   local and gets the configured `refusal` sentence as its answer. Before an allowed request leaves, tool results are redacted:
   Home Assistant live-context entries of `redact_domains` (person, device_tracker, todo, lock, camera, ...),
   `redact_device_classes` (motion, presence, door, window, ...) and `redact_names`, and the whole result of `redact_tools`.
+  Patterns and texts for other countries and other tool formats: [below](#content-check-locale-packs-and-redactors).
   The journal records `privacy_check` with outcome, rule or probability and the number of redacted entries, never the text.
   A declared `routing.data_class` is never overruled.
 - **Credential scan** (`block`): prompts with recognisable keys (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
@@ -335,6 +380,41 @@ models:
 - **Field and metric names** keep the suffix `_chf` (`spend_month_chf`, `budget_month_chf`, `cost_chf`,
   `skirnir_cloud_*_chf*`), so dashboards, alerts and Home Assistant entities keep working; their values are in the
   configured currency. The Home Assistant cost sensor still has the unit `CHF`.
+
+### Content check: locale packs and redactors
+
+Router 0.42.0 ([ADR-0119](adr/0119-privacy-redaction-per-tool-format-and-locale-pack.md), [ADR-0125](adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md)).
+Without the new keys the content check behaves exactly as before (Swiss and German patterns, Home Assistant redaction,
+unrecognised tool results pass). All of them are set in `config.yaml` only; the web UI cannot change them.
+
+| Key under `router.cloud.privacy_check` | Default | Meaning |
+|---|---|---|
+| `locale` | `ch-de` | Locale pack: the patterns and keyword groups the rules check, the default `refusal` and the marker that replaces a whole tool result. `ch-de`: e-mail, Swiss phone numbers, IBAN, AHV number, street addresses with German suffixes, German and English keyword starts, German refusal. `en`: e-mail, phone numbers (international `+`/`00`, North American, national with a leading 0), IBAN, English keyword starts, English refusal; no national identifier and no street address. Your own `terms` and `refusal` apply on top of either. |
+| `redactors` | `[ha_assist]` | Tool formats redacted, in this order. `ha_assist`: Home Assistant's live context (entries of `redact_domains`, `redact_device_classes`, `redact_names`). `generic_json`: configured paths and keys of JSON tool results (below). At least one; `redact_tools` applies independently of the list. |
+| `generic_json` | – | Required with the redactor `generic_json`, refused without it. `tools` maps a tool name, or `*` for every JSON result, to dotted paths to remove (`events.*.attendees`: `*` stands for every key of an object or element of a list); an empty list marks a tool as recognised with nothing to remove. `keys` removes keys of these names at any depth in those results. A result of a tool named in `tools` that is not JSON keeps the request local. |
+| `unrecognised_tool_results` | `pass` | `keep_local`: a tool result that no redactor recognises keeps the request local. Recognised are Home Assistant's JSON with a `result` text, text with live-context entries, a tool in `redact_tools` and a JSON result of a tool in `generic_json.tools`. With Home Assistant, intent results such as `HassTurnOn` are not live context; list such tools under `generic_json.tools` with `[]` if they may pass. |
+
+```yaml
+router:
+  cloud:
+    privacy_check:
+      enabled: true
+      locale: en
+      redactors: [ha_assist, generic_json]
+      generic_json:
+        tools: {calendar_events: ["events.*.attendees", owner], HassTurnOn: []}
+        keys: [email, phone]
+      unrecognised_tool_results: keep_local
+```
+
+A request kept local by the redaction gets the refusal like any other; the journal records `result: unredacted` with
+`by: redaction:generic_json` or `redaction:unrecognised`. JSON nested deeper than 512 levels (100 for `generic_json`) is not
+inspected and also keeps the request local. `/admin/state` shows the locale, the redactors, the mode and,
+for `generic_json`, only the number of tools and keys. With `unrecognised_tool_results: pass` (the default), tool results
+of formats no redactor knows are sent as they are: the content check protects what the user wrote and the house context
+in known formats. Redactors for openHAB or ioBroker are not built yet; they will be added together with test data of
+their real formats. Locale packs are added only together with test sentences for their patterns. The privacy classifier
+is trained on German and English sentences; another locale pack does not change that.
 
 ### Institutional providers
 

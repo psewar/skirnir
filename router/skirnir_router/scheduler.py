@@ -6,7 +6,7 @@ expired open breaker moving to half_open) is the caller's step, probe_breakers()
 
 import time
 
-from . import admission, cloud, perf
+from . import admission, cloud, perf, wakers
 from . import request as request_mod
 from . import state
 from .nodes import empty_room_gib
@@ -234,7 +234,7 @@ def choose(role, tiers, client_ctx, now, exclude=(), req=None):
 def wakeable_for(tiers):
     for t in tiers:
         for n in state.NODES.values():
-            if n.state == "offline" and n.wol and n.mac and t["model"] in n.last_known_models:
+            if n.state == "offline" and wakers.can_wake(n) and t["model"] in n.last_known_models:
                 if time.time() - n.last_wake >= state.CFG.wol_cooldown_s:
                     return n
     return None

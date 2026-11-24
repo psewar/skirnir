@@ -42,6 +42,8 @@ router:
     retry_interval_s: 2
     cooldown_s: 30
     broadcast_addresses: ["127.0.0.1"]
+  wakers:                       # ADR-0117: only chosen through the policy check, never called in the suite
+    e2e-hook: { kind: http_webhook, url: "http://127.0.0.1:21010/wake" }
 
 modes:
   busy_enter: { gpu_util_pct: 40, sustain_s: 2, or_foreign_vram_gib: 3.0, util_requires_foreign_gib: 1.0, foreign_sustain_s: 2, game: true, game_sustain_s: 1 }

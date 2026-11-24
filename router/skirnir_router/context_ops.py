@@ -27,7 +27,7 @@ async def poll(api):
         STATUS["session_store"] = "unavailable" if failed(await store.health()) else "available"
     service = api.get(memory.SERVICE_KEY)
     if service is not None and service.active():
-        healthy = await service.client.health()   # probed on every pass, not inferred from the last client call
+        healthy = await service.backend.health()   # probed on every pass, not inferred from the last client call
         STATUS["hindsight"] = "unknown" if healthy is None else ("available" if healthy else "unavailable")
         if service.outbox is not None:
             counts, age = await service.outbox.outbox_counts(), await service.outbox.outbox_oldest()
@@ -64,8 +64,7 @@ async def handle_reconcile_deletions(request):
         return web.json_response({"error": "session store unavailable"}, status=503)
     deleted = unavailable = 0
     for operation, bank in rows:
-        result = await service.client.delete_document(bank, str(operation)) if bank else None
-        if result is None or failed(result):
+        if not bank or failed(await service.backend.delete_document(bank, str(operation))):   # None = deleted or already gone
             unavailable += 1
         else:
             deleted += 1
