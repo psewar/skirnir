@@ -34,7 +34,7 @@ ROUTER_REQS = "router/requirements-session.txt"
 CONTAINER_LOCK = "router/requirements-container-lock.txt"
 CI_LOCK = "requirements-ci-lock.txt"
 CI_REQS = ("requirements-dev.txt", "test/requirements-hindsight.txt", "router/requirements-session.txt")
-PYTHONS = ("3.11", "3.12", "3.13", "3.14")
+PYTHONS = ("3.11", "3.12", "3.13", "3.14", "3.15")
 CI_PYTHON = "3.11"
 
 

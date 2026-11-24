@@ -2,79 +2,71 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "76d32f79fad63dbfd2d4128f6b2d7ce4608d77bc",
- "change_digest": "f735759428955cef7c39f852bd8e61db8d1702d31b16b3031b942cea16c4b010",
+ "base_sha": "937f6cf25df19fe8520c269c0d09df09df633dff",
+ "change_digest": "ddca0ddb7ef48dd32d3b329edf4816e4383af21b3f385ff0903d693f3b2d460a",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "design/privacy-check.md",
-  "docs/adr/0125-unrecognised-tool-results-pass-unless-the-operator-keeps-them-local.md",
-  "docs/adr/README.md",
-  "docs/configuration.de.md",
-  "docs/configuration.md",
-  "docs/security/reviews/current.json",
-  "docs/security/risk-register.json",
-  "docs/security/threat-model.de.md",
-  "docs/security/threat-model.md",
-  "router/config.example.yaml",
-  "router/skirnir_router/admin.py",
+  "design/router-container.md",
+  "docs/adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md",
+  "docs/install-router.de.md",
+  "docs/install-router.md",
+  "requirements-ci-lock.txt",
+  "router/Dockerfile",
+  "router/requirements-container-lock.txt",
   "router/skirnir_router/common.py",
+  "tools/security/lock_requirements.py",
+  "docs/security/reviews/current.json",
+  ".github/workflows/ci.yml",
   "router/skirnir_router/config.py",
-  "router/skirnir_router/privacy.py",
-  "router/skirnir_router/privacy_locale.py",
-  "router/skirnir_router/redactors.py",
-  "test/privacy_default_corpus.json",
-  "test/selftest_privacy_redactors.py"
+  "router/skirnir_router/pydeps.py",
+  "router/container/healthcheck.py",
+  "router/requirements-lock.txt",
+  "test/selftest_container_image.py",
+  "test/smoke_container.sh"
  ],
  "risk_ids": [
-  "TM-05"
+  "TM-16"
  ],
  "boundaries": [
-  "B6",
-  "B7"
+  "B9"
  ],
- "summary": "Refreshed after merging main at 76d32f7 (#175: only the security gate's action pin and its review record changed; nothing in this PR's paths). Router 0.42.0: the content check before a cloud tier (privacy.py, called only from proxy._Relay._via_cloud when cloud.needs_privacy_check holds) gets context redactors per tool format (redactors.py: ha_assist = the previous Home Assistant code moved unchanged, generic_json = configured dotted paths/keys) and locale packs (privacy_locale.py: ch-de = the previous patterns, keywords, refusal and marker, default; en = e-mail/phone/IBAN, English keywords). Merged with origin/main (all other portability PRs, incl. #179 Shape protocol in proxy.py and #183 cost keys in cloud.py; neither touches privacy.py, and the cloud path still calls privacy.check before cloud.run and answers a refusal through the shape). Implements ADR-0119 (now on main, proposed) and adds ADR-0125 (unrecognised tool results pass by default; keep_local is an explicit switch). Traced B6: the verdict body is still what cloud.run sends; a refused or unredacted verdict returns the refusal before cloud.run; the redaction runs on a deep copy; redact_tools is applied before any redactor, so choosing other redactors cannot drop it. B7 unchanged: classifier call, loopback endpoint check and fail-closed handling are untouched. Default behaviour verified byte-identical (recorded corpus of 35 synthetic payloads from the base commit's privacy.py and re-recorded identically on the current main c69cfa1; 12,000 randomized synthetic payloads compared against the current origin/main privacy.py, 0 differences). The new keys are config.yaml only (not in settings.EDITABLE, asserted by test). Load-time refusals prevent configurations that look configured but redact nothing (empty/unknown/duplicate redactors, generic_json without its redactor and vice versa, malformed paths, unknown locale or mode). /admin/state shows generic_json only as counts. Found and fixed during the review: generic_json walks JSON recursively, so a deeply nested tool result could exhaust the stack; it now checks depth iteratively (limit 100) and treats deeper JSON as unredactable (request stays local). Before parsing, every tool result that starts like a JSON container has its nesting counted on the text (strings removed by a linear regex, brackets accumulated, no recursion); deeper than 512 levels it is not parsed and is unredactable, so the request stays local. This replaces relying on json.loads raising RecursionError, which the container CI showed to be interpreter-dependent: on Python 3.14 (C-stack based recursion check) a 100,000-level array parsed with a large stack, and ha_assist then passed it as plain text (reproduced locally in the 3.14 image with a 64 MiB stack against the previous head; fixed code passes with the default and the large stack). Before router 0.42.0 such a payload failed the request with a 500 or, on 3.14 with a large stack, passed; no live-context entries were hidden in it either way. Regexes of the en pack use only bounded quantifiers. No secrets, hostnames or personal data added; test data is synthetic (example domains, published example IBANs, fictional UK/NANP numbers).",
+ "summary": "Dependabot #190 moves the router image's base from python:3.14-slim-trixie to python:3.15-slim-trixie (digest 65a65fc7...; checked that the official docker.io/library/python:3.15-slim-trixie tag currently resolves to this manifest-list digest, Python 3.15.2 on Debian trixie). The bump alone could not build: PyYAML 6.0.3 has no wheel for CPython 3.15 and the Dockerfile installs wheels only, and test/selftest_container_image.py requires the image's Python to be one the locks are checked for. Changes on top, after merging origin/main 937f6cf: (1) tools/security/lock_requirements.py adds 3.15 to PYTHONS; this only widens what the checker demands (the container lock must cover the requirements and their markers on 3.15 as well; needed_deps also considers 3.15), it removes no check. (2) PyYAML 6.0.3 -> 6.0.4 in router/requirements-container-lock.txt (lock_requirements.py pin) and requirements-ci-lock.txt (lock_requirements.py resolve on Linux, run in the pinned 3.15 base image with PIP_CONSTRAINT holding every other entry at its locked version, so only PyYAML moved; header unchanged). Both locks list the same 75 sha256 values for PyYAML 6.0.4, verify-pypi confirms every hash is PyPI's and nothing is yanked. PyYAML 6.0.4 (2026-11-20, yaml/pyyaml release notes) adds Python 3.15, drops 3.8/3.9, fixes exponential merge-key expansion and bundles libyaml 0.2.6. Hosts are unaffected: router/requirements-lock.txt has no PyYAML (hosts use the distribution's python3-yaml). The router parses YAML only from the operator's config.yaml and roles.yaml (config.load_yaml, CSafeLoader, mounted read-only in the image) and the healthcheck reads config.yaml; no request data reaches a YAML parser. (3) Router VERSION 0.42.1, CHANGELOG row v0.47.1, docs/design and the still proposed ADR-0121 name 3.15. The Dockerfile's controls are unchanged: --require-hashes --no-deps --only-binary=:all:, pydeps verify, pip check, imports, pip removed, uid/gid 10001, read-only program files. No new endpoint, configuration key, secret or trust boundary.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_privacy_redactors.py",
+   "command": "bash test/smoke_container.sh --engine podman --image <local 3.15 image> --no-build --selftests (inside the rootful Podman machine)",
    "result": "passed",
-   "evidence": "121 checks ALL OK on Python 3.12.10 and inside the router image on Python 3.14.10 with the default and with a 64 MiB stack (the previous head fails there with the large stack: the 100,000-level case passed); new checks: 513 levels not parsed at all (json.loads not called) and kept local, 512 levels parsed as before, brackets inside JSON strings not counted, plain text with many brackets passes as before. After the merge (relay test now uses OllamaShape like the other privacy tests, since #179): default corpus byte-identical (35 cases, re-recorded on current main c69cfa1 with an identical file), every ch-de pattern and keyword group blocks, every default domain/device class/listed tool redacted, too-deep JSON stays local, en hits and non-hits, generic_json paths/keys/*/depth limit, named non-JSON stays local, keep_local mode, 13 refused configurations, nothing editable from the web UI, proxy refusal without provider call. Fault injection (AHV pattern removed; default mode flipped to keep_local) made it fail with 3 and 9 failures."
+   "evidence": "71 router self-tests pass inside the image built from this tree (Python 3.15.2, PyYAML 6.0.4), STATE: passed."
   },
   {
-   "command": "python test/selftest_privacy_check.py",
+   "command": "bash test/smoke_container.sh --engine podman --image <local 3.15 image> (build with Git Bash, start checks inside the Podman machine)",
    "result": "passed",
-   "evidence": "unchanged file, ALLE OK."
+   "evidence": "Image builds on the 3.15 base with the container lock (hashes, wheels only, pydeps verify, pip check, imports). Passed: uid/gid 10001, no secret in the environment, --check of config.example.yaml, --init writes config.yaml (root:10001 0640), healthcheck.py reports HEALTH: ok router0.42.1, router runs as uid 10001 without capabilities, configuration and program folders read-only, state_dir writable, no errors in the log. Two checks failed in this machine only: /api/version on the published port and the POSTURE line at start; the 3.14 image from main fails both identically in the same machine, so they come from the local environment (systemd unreachable in the Podman machine, containers started with --no-healthcheck through a local shim). CI's container job runs the full script with Docker."
   },
   {
-   "command": "differential script outside the repository: origin/main privacy.py vs branch, default and 4 more configurations, 3 classifier outcomes",
+   "command": "python test/selftest_container_image.py",
    "result": "passed",
-   "evidence": "compared 12000 synthetic payloads, 0 differences (redacted body, rule hit, verdict journal, verdict body)."
+   "evidence": "17 tests OK (fails without the PYTHONS change: '3.15' not found in the locked Pythons, as in the Dependabot CI run)."
   },
   {
-   "command": "every python command of the python job in .github/workflows/ci.yml on Windows except PostgreSQL integrations, run_tests.py and check_public_changes (separate entries)",
+   "command": "python tools/security/lock_requirements.py check ; python tools/security/lock_requirements.py verify-pypi",
    "result": "passed",
-   "evidence": "85 commands, 0 failed, on the final tree (after the depth fix); check_adr_index reports ADR index ok: 125 ADRs."
+   "evidence": "Python locks: 0 problem(s); PyPI verification: 0 problem(s)."
   },
   {
-   "command": "python C:/<ops>/e2e/run_locked.py <worktree> (end-to-end suite through the lock wrapper)",
+   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/check_adr_index.py ; python test/check_pinned_references.py ; python test/selftest_control_flow.py && python test/check_control_flow.py",
    "result": "passed",
-   "evidence": "STATE: passed, 0 failures, 337 PASS lines, on the merged tree (origin/main c69cfa1 + this change), before the depth fix; not rerun after it (the fix is confined to redactors.py, which the suite does not reach). The suite does not exercise the privacy path."
+   "evidence": "All checks passed; configuration ok; ADR index ok: 125 ADRs; pinned references 0 findings; control flow ok, 0 findings."
   },
   {
-   "command": "bash test/smoke_container.sh --engine podman --image <local 3.14 router image> --no-build --selftests",
+   "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "71 router self-tests pass inside the image (Python 3.14.10), STATE: passed; the image was built earlier from main by the smoke script, the checkout is mounted read-only."
+   "evidence": "0 finding(s); added lines reviewed by hand: versions, hashes, image names and public release facts only."
   },
   {
-   "command": "ruff check . ; python router/router.py --check router/config.example.yaml --pure ; python test/selftest_control_flow.py && python test/check_control_flow.py",
-   "result": "passed",
-   "evidence": "All checks passed; configuration ok; control flow ok, 0 findings."
-  },
-  {
-   "command": "python test/check_public_changes.py --base <merge-base>",
-   "result": "passed",
-   "evidence": "0 finding(s)."
+   "command": "python test/run_tests.py",
+   "result": "not_run",
+   "evidence": "No router code changed besides VERSION; the end-to-end suite runs on the host's Python, not the image's, and runs nightly in CI."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -83,10 +75,9 @@
   }
  ],
  "limitations": [
-  "With the default unrecognised_tool_results: pass, tool results in formats no redactor knows still reach the provider unredacted (pre-existing; now documented, keep_local available).",
-  "No openHAB or ioBroker redactor: their tool-result formats could not be verified with real data.",
-  "The privacy classifier stays German/English (ADR-0077); the en pack's patterns are heuristics checked by test sentences, not a DLP guarantee.",
-  "The end-to-end suite does not cover the privacy path; it is covered by self-tests with fakes for classifier and provider.",
-  "ADR-0119 (on main, proposed) is implemented here; one deviation is recorded in ADR-0125 for the maintainer to decide."
+  "Trust in PyYAML 6.0.4 rests on PyPI's published hashes, the yaml/pyyaml release and CI's pip-audit; the wheels and the bundled libyaml 0.2.6 were not audited.",
+  "The base image is trusted by digest from Docker Official Images; its Debian packages were not scanned in this review.",
+  "Locally the published-port and start-posture checks could not run (Podman machine without systemd); they rely on CI's container job.",
+  "decision-embed stays on python:3.14-slim (#173): onnxruntime 1.32.0 has no wheel for Python 3.15; not part of this change."
  ]
 }

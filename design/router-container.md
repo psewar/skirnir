@@ -26,7 +26,7 @@ The image contains the same files `router/install.sh` puts into `/opt/skirnir-ro
 
 `router/Dockerfile`, build context `router/`:
 
-1. `FROM python:3.14-slim-trixie@sha256:…` - digest-pinned (ADR-0055), updated by Dependabot.
+1. `FROM python:3.15-slim-trixie@sha256:…` - digest-pinned (ADR-0055), updated by Dependabot.
 2. `pip install --require-hashes --no-deps --only-binary=:all: -r requirements-container-lock.txt`: every package of the
    router's dependency closure at an exact version, each file checked against its SHA-256, no build from source, no
    resolution (ADR-0074, ADR-0121). Then `pydeps.py verify` against `requirements-session.txt`, `pip check` and an import

@@ -43,7 +43,7 @@ Chosen option: "official Python slim image plus a separate complete lock", becau
 package version is fixed by the repository: apt installs whatever the archive serves on the build day, and a full
 closure in the host lock would change what hosts may install from pip instead of from their distribution.
 
-* Base image `python:3.14-slim-trixie@sha256:…` (`router/Dockerfile`); its Python must be one that
+* Base image `python:3.15-slim-trixie@sha256:…` (`router/Dockerfile`); its Python must be one that
   `tools/security/lock_requirements.py` checks the locks for (`PYTHONS`), which `test/selftest_container_image.py`
   enforces.
 * `router/requirements-container-lock.txt`: the router's requirements (`requirements-session.txt`) with every transitive
@@ -63,7 +63,7 @@ closure in the host lock would change what hosts may install from pip instead of
 * Good, because hosts are untouched: `requirements-lock.txt`, `pydeps.py plan` and `install.sh` work as before.
 * Bad, because there is a third lock to refresh; a version bump in `requirements-ci-lock.txt` now also needs a `pin`
   run for the container lock, or the self-test fails.
-* Bad, because a host on Debian 12 runs Python 3.11 while the image runs 3.14; CI's self-tests run on 3.11, so the
+* Bad, because a host on Debian 12 runs Python 3.11 while the image runs 3.15; CI's self-tests run on 3.11, so the
   container job also runs the router self-tests inside the image.
 * Bad, because uid 10001 is a convention operators must use for bind mounts (`chown`); named volumes get it
   automatically.
