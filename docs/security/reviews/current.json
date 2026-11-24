@@ -2,8 +2,8 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "04c6e8d6e8a43fd6daad968fb81d6f3ea5327e42",
- "change_digest": "dff7844ea146ee7db2ad789f2b68d40a893bbc632ff1a6f55200304a7f131a26",
+ "base_sha": "53314d27fe821c257a7b9e07995547d9ce4ec45f",
+ "change_digest": "6ba80b2aad7316c7b4625c2606955242db1c759f78295d509fc1b860a4bdf559",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   ".github/workflows/decision-images.yml",
@@ -33,7 +33,7 @@
  "boundaries": [
   "B9"
  ],
- "summary": "CI and tooling only; router, agent, the decision services and their images are unchanged. New workflow .github/workflows/decision-images.yml builds the decision-embed and decision-jevlike images (the directories besides router/ whose base images Dependabot updates) with the new test/smoke_decision_images.sh, on pull_request when a file that goes into an image changes, weekly and on workflow_dispatch (ADR-0127, proposed). Traced B9: trigger is pull_request (not pull_request_target), so candidate code runs with the read-only GITHUB_TOKEN and without secrets, as in ci.yml's container job; workflow permissions contents: read; checkout pinned to the same commit SHA as ci.yml with persist-credentials: false; the matrix value reaches the script through env (SERVICE) and is quoted, not interpolated into the shell; nothing is pushed or published; the import check runs with --network none. The script refuses an unknown service name and a missing Dockerfile before acting, builds with the build context of the service directory only, and inside the image only compiles the program files and imports modules (no service code runs, no model, no network). The build itself fetches packages from PyPI, the PyTorch CPU index and a pinned jevlike archive, exactly what the Dockerfiles already do on a host; the images stay local to the runner. The trusted security gate (workflow_run on CI) and the required checks are unchanged; the new workflow is path-filtered and therefore not a required check, which ADR-0127 states. ci.yml gains one step (test/selftest_service_images.py), nothing removed. AGENTS.md gains the check command and a rule; nothing weakened. The new self-test also guards the workflow's read-only permissions.",
+ "summary": "Refreshed after merging main at 53314d2 (#192: test/smoke_container.sh refuses under Git Bash, MSYS2 and Cygwin; it changed the smoke_container.sh line in AGENTS.md and added a changelog section, both kept beside this PR's lines; none of this PR's other paths). The merged tree was checked again; this PR's own content is unchanged. CI and tooling only; router, agent, the decision services and their images are unchanged. New workflow .github/workflows/decision-images.yml builds the decision-embed and decision-jevlike images (the directories besides router/ whose base images Dependabot updates) with the new test/smoke_decision_images.sh, on pull_request when a file that goes into an image changes, weekly and on workflow_dispatch (ADR-0127, proposed). Traced B9: trigger is pull_request (not pull_request_target), so candidate code runs with the read-only GITHUB_TOKEN and without secrets, as in ci.yml's container job; workflow permissions contents: read; checkout pinned to the same commit SHA as ci.yml with persist-credentials: false; the matrix value reaches the script through env (SERVICE) and is quoted, not interpolated into the shell; nothing is pushed or published; the import check runs with --network none. The script refuses an unknown service name and a missing Dockerfile before acting, builds with the build context of the service directory only, and inside the image only compiles the program files and imports modules (no service code runs, no model, no network). The build itself fetches packages from PyPI, the PyTorch CPU index and a pinned jevlike archive, exactly what the Dockerfiles already do on a host; the images stay local to the runner. The trusted security gate (workflow_run on CI) and the required checks are unchanged; the new workflow is path-filtered and therefore not a required check, which ADR-0127 states. ci.yml gains one step (test/selftest_service_images.py), nothing removed. AGENTS.md gains the check command and a rule; nothing weakened. The new self-test also guards the workflow's read-only permissions.",
  "findings": [],
  "tests": [
   {
@@ -64,7 +64,7 @@
   {
    "command": "ruff check . ; check_adr_index.py ; selftest_pinned_references.py && check_pinned_references.py ; selftest_threat_review.py ; selftest_trusted_gate.py ; selftest_dependency_audit.py ; selftest_container_image.py ; selftest_english_names.py",
    "result": "passed",
-   "evidence": "All checks passed; ADR index ok: 127 ADRs; pinned references 0 findings; 26 + gate + audit + 17 tests OK; english names ok."
+   "evidence": "All checks passed; ADR index ok: 127 ADRs; pinned references 0 findings; 26 + gate + audit + 17 tests OK; english names ok. Rerun on the merged tree (main 53314d2): ruff, ADR index, pinned references, selftest_service_images (11 OK), selftest_container_image (20 OK, 3 skipped on Windows, from #192), selftest_threat_review (26 OK), selftest_trusted_gate, public-data scan: all pass."
   },
   {
    "command": "python test/check_public_changes.py",
@@ -72,9 +72,9 @@
    "evidence": "0 finding(s); added lines reviewed by hand: no hostnames, paths of the own environment or personal data."
   },
   {
-   "command": ".github/workflows/decision-images.yml on GitHub",
-   "result": "not_run",
-   "evidence": "Runs when the pull request is opened (it changes the workflow and the script); its result belongs to the PR checks."
+   "command": ".github/workflows/decision-images.yml on GitHub (PR #193, head dfb3839 before the merge)",
+   "result": "passed",
+   "evidence": "Decision service image (decision-embed) pass, Decision service image (decision-jevlike) pass; all other PR checks passed as well. The workflow runs again on the merged head."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
