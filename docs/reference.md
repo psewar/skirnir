@@ -251,7 +251,7 @@ requests/s and the actual limit is `OLLAMA_NUM_PARALLEL`.
 | Path | Content |
 |---|---|
 | `router/router.py`, `router/skirnir_router/` | Service: `app`, `config` (schema), `proxy` (Ollama API), `openai_api`, `anthropic_api`, `shape` (response formats: native, OpenAI, Anthropic; ADR-0120), `request` (routing block), `scheduler`, `admission`, `nodes`, `poll` (state machine, prewarm), `registry` (agent registry), `tunnel`, `auth`, `cloud`, `decision/` (engines), `metrics`, `perf`, `ops` (idempotency, canary, shadow, manifest), `ha` (MQTT), `admin`, `settings` (UI allowlist), `toolcall_rescue` (tool calls that Ollama's parser loses as text are recovered), `wol` (magic packet), `wakers` (waking offline nodes: `wol`, `http_webhook`), `posture`, `process_view` (what the running router could change), `setup_init` (`--init`) |
-| `router/ui.html`, `router/skirnir.png`, `router/favicon.png` | Web UI and logo |
+| `router/ui.html`, `router/ui.js`, `router/skirnir.png`, `router/favicon.png` | Web UI (page and its script, ADR-0128) and logo |
 | `router/install.sh` | Install or upgrade the router on Debian/Ubuntu |
 | `router/config.minimal.yaml`, `router/config.example.yaml` | Minimal first configuration (template for `--init`) and full reference |
 | `router/*.service`, `*.timer`, `*.path`, `render-env.sh`, `render-env.conf.example` | systemd units, secrets renderer |

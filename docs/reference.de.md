@@ -247,7 +247,7 @@ und die eigentliche Grenze `OLLAMA_NUM_PARALLEL` ist.
 | Pfad | Inhalt |
 |---|---|
 | `router/router.py`, `router/skirnir_router/` | Dienst: `app`, `config` (Schema), `proxy` (Ollama-API), `openai_api`, `anthropic_api`, `shape` (Antwortformate: nativ, OpenAI, Anthropic; ADR-0120), `request` (routing-Block), `scheduler`, `admission`, `nodes`, `poll` (Zustandsautomat, Prewarm), `registry` (Agenten-Register), `tunnel`, `auth`, `cloud`, `decision/` (Engines), `metrics`, `perf`, `ops` (Idempotency, Canary, Shadow, Manifest), `ha` (MQTT), `admin`, `settings` (UI-Allowlist), `toolcall_rescue` (Tool-Calls, die Ollamas Parser als Text verliert, werden zurückgeholt), `wol` (Magic Packet), `wakers` (offline Knoten wecken: `wol`, `http_webhook`), `posture`, `process_view` (was der laufende Router ändern könnte), `setup_init` (`--init`) |
-| `router/ui.html`, `router/skirnir.png`, `router/favicon.png` | Web-UI und Logo |
+| `router/ui.html`, `router/ui.js`, `router/skirnir.png`, `router/favicon.png` | Web-UI (Seite und ihr Skript, ADR-0128) und Logo |
 | `router/install.sh` | Router unter Debian/Ubuntu installieren oder aktualisieren |
 | `router/config.minimal.yaml`, `router/config.example.yaml` | Minimale erste Konfiguration (Vorlage für `--init`) und volle Referenz |
 | `router/*.service`, `*.timer`, `*.path`, `render-env.sh`, `render-env.conf.example` | systemd-Einheiten, Secrets-Renderer |

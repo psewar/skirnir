@@ -2,79 +2,89 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "53314d27fe821c257a7b9e07995547d9ce4ec45f",
- "change_digest": "6ba80b2aad7316c7b4625c2606955242db1c759f78295d509fc1b860a4bdf559",
+ "base_sha": "fe84eb7d8f9ab3d4958fa9276b1a9817d75d66cd",
+ "change_digest": "a7f13d884a1ac79a910e1ae47b8e233b29f510e60f9b5b841a020438e7e0cdc1",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
-  ".github/workflows/decision-images.yml",
-  "AGENTS.md",
   "CHANGELOG.md",
-  "design/decision-engine.md",
-  "docs/adr/0127-ci-builds-the-decision-service-images-when-they-change-and-weekly.md",
+  "deploy/deploy.py",
+  "docs/adr/0065-browser-headers-and-handler-escaping-for-the-control-ui.md",
+  "docs/adr/0128-the-control-ui-runs-no-inline-script.md",
   "docs/adr/README.md",
-  "test/selftest_service_images.py",
-  "test/smoke_decision_images.sh",
+  "docs/install-router.de.md",
+  "docs/install-router.md",
+  "docs/operations.de.md",
+  "docs/operations.md",
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "docs/security/risk-register.json",
+  "docs/security/threat-model.de.md",
+  "docs/security/threat-model.md",
+  "router/Dockerfile",
+  "router/install.sh",
+  "router/skirnir_router/admin.py",
+  "router/skirnir_router/app.py",
+  "router/skirnir_router/browser_headers.py",
+  "router/skirnir_router/common.py",
+  "router/ui.html",
+  "router/ui.js",
+  "test/selftest_browser.py",
+  "test/selftest_install.py",
   "docs/security/reviews/current.json",
-  ".github/dependabot.yml",
-  ".github/workflows/trusted-security-gate.yml",
-  ".github/workflows/security.yml",
-  "decision-embed/Dockerfile",
-  "decision-embed/compose.yaml",
-  "decision-embed/server.py",
-  "decision-embed/embedder.py",
-  "decision-jevlike/Dockerfile",
-  "decision-jevlike/compose.yaml",
-  "decision-jevlike/server.py",
-  "test/smoke_container.sh"
+  "router/skirnir_router/auth.py",
+  "test/dev_env.py",
+  "test/selftest_container_image.py"
  ],
  "risk_ids": [
-  "TM-16"
+  "TM-03"
  ],
  "boundaries": [
-  "B9"
+  "B1",
+  "B2"
  ],
- "summary": "Refreshed after merging main at 53314d2 (#192: test/smoke_container.sh refuses under Git Bash, MSYS2 and Cygwin; it changed the smoke_container.sh line in AGENTS.md and added a changelog section, both kept beside this PR's lines; none of this PR's other paths). The merged tree was checked again; this PR's own content is unchanged. CI and tooling only; router, agent, the decision services and their images are unchanged. New workflow .github/workflows/decision-images.yml builds the decision-embed and decision-jevlike images (the directories besides router/ whose base images Dependabot updates) with the new test/smoke_decision_images.sh, on pull_request when a file that goes into an image changes, weekly and on workflow_dispatch (ADR-0127, proposed). Traced B9: trigger is pull_request (not pull_request_target), so candidate code runs with the read-only GITHUB_TOKEN and without secrets, as in ci.yml's container job; workflow permissions contents: read; checkout pinned to the same commit SHA as ci.yml with persist-credentials: false; the matrix value reaches the script through env (SERVICE) and is quoted, not interpolated into the shell; nothing is pushed or published; the import check runs with --network none. The script refuses an unknown service name and a missing Dockerfile before acting, builds with the build context of the service directory only, and inside the image only compiles the program files and imports modules (no service code runs, no model, no network). The build itself fetches packages from PyPI, the PyTorch CPU index and a pinned jevlike archive, exactly what the Dockerfiles already do on a host; the images stay local to the runner. The trusted security gate (workflow_run on CI) and the required checks are unchanged; the new workflow is path-filtered and therefore not a required check, which ADR-0127 states. ci.yml gains one step (test/selftest_service_images.py), nothing removed. AGENTS.md gains the check command and a rule; nothing weakened. The new self-test also guards the workflow's read-only permissions.",
- "findings": [],
+ "summary": "Router 0.42.2 implements the TM-03 next action (ADR-0128, proposed, supersedes ADR-0065): the control UI runs no inline script. The page's script moved unchanged from ui.html into router/ui.js (served at /ui.js), and its 68 inline event handlers (20 in ui.html, 48 built by the script with js()) became named actions: elements carry data-click/data-change/data-input and data-args (a JSON array built by args() = esc(JSON.stringify(...)) or data-arg (one fixed string in static markup); one listener per event type, capture phase on the document, walks ev.composedPath() from the target and calls ACTIONS[name](el, ...args), only for names ACTIONS owns (Object.hasOwn; 'constructor', 'toString', '__proto__' are refused, checked in a browser). The control port's CSP is script-src 'self' (no 'unsafe-inline', no 'unsafe-eval'); style-src keeps 'unsafe-inline' (47 style attributes; documented as residual). Traced B1/B2: /ui.js is a fixed path to a fixed file (no name from the request, no traversal), registered on the control app behind basic_auth_middleware like '/' (only /v1/ is exempt; refused without login, tested), Cache-Control no-store and the control headers. Values from node, model, role, client and setting data reach handlers only as JSON values parsed from an HTML-escaped attribute; nothing is concatenated into code. Mechanical equivalence was checked: all 44 changed script lines are identical to the old ones apart from the handler attributes, the other differences are the header comment, args() replacing js(), the dispatcher and a removed unused variable; static handlers in ui.html were replaced by exact matches. One deliberate behaviour difference: settings actions pass the raw setting path instead of the HTML-escaped one (identical for all existing paths, which contain no &<>\"'; before, listToggle would have failed for such a path). Residual: injected markup (should an escape be missed) can still name one of the fixed actions, which then needs an operator click (and the confirmation for revoking); before, it could run arbitrary script without a click. install.sh refuses a source folder without ui.js; deploy.py and the Dockerfile ship it; selftest_container_image derives the image's files from install.sh. No configuration key, API field, secret or data path changes.",
+ "findings": [
+  {
+   "id": "CSP-ACTION-PROTOTYPE",
+   "evidence": "The first version of the dispatcher looked up ACTIONS[name] directly, so data-click=\"constructor\" or \"toString\" reached inherited Object methods (harmless calls, but not the listed actions).",
+   "resolution": "The dispatcher accepts only Object.hasOwn(ACTIONS, name) and logs anything else; selftest_browser.py asserts the guard; in a browser 'constructor', 'toString' and '__proto__' were refused while the real actions still ran.",
+   "disposition": "fixed"
+  }
+ ],
  "tests": [
   {
-   "command": "bash test/smoke_decision_images.sh --engine podman (current main)",
+   "command": "python test/selftest_browser.py",
    "result": "passed",
-   "evidence": "decision-embed builds on python:3.14-slim, Python 3.14.10, loaded numpy, onnxruntime, tokenizers; decision-jevlike builds on python:3.15-slim, Python 3.15.2, loaded jevlike.data, jevlike.model, jevlike.train, torch; STATE: passed."
+   "evidence": "10 tests OK: script-src exactly 'self'; /ui.js 200 with login, text/javascript, no-store, control headers; /ui.js and /admin/state 401 without login (rejected case); no inline handler or inline script in ui.html or in the markup ui.js builds (the same patterns find all 68 handlers and the inline script in origin/main's ui.html); every data-args is ${args(...)}; every named action exists and every action is named; capture-phase listener and the hasOwn guard present; nothing evaluated as code; nothing loaded from elsewhere."
   },
   {
-   "command": "bash test/smoke_decision_images.sh --engine podman decision-embed, with decision-embed/Dockerfile temporarily on the base image of #173 (python:3.15-slim@sha256:65a65fc7...)",
+   "command": "browser (built-in pane) against python test/dev_env.py, CSP and rejected cases",
    "result": "passed",
-   "evidence": "Rejected as intended: 'No matching distribution found for onnxruntime', FAIL decision-embed: the image does not build on python:3.15-slim, STATE: failed, exit 1. Dockerfile restored afterwards (git checkout)."
+   "evidence": "Served CSP default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; ... Injected <img onerror>, a button with onclick and an inline <script> did not run (window.__pwned stayed 0); the browser reported script-src-attr and script-src-elem violations. A fresh tab through all six tabs and the decision filters: no console message, no policy violation."
   },
   {
-   "command": "import check of the script against a synthetic /app/zz_missing.py (import doesnotexist_pkg; from numpy import no_such_name) in the decision-embed image",
+   "command": "browser against test/dev_env.py, every UI action",
    "result": "passed",
-   "evidence": "Rejected as intended: 'missing: doesnotexist_pkg, numpy.no_such_name', exit 1."
+   "evidence": "66 checks: 39 with the called functions replaced by recorders (each click action's arguments; setChange for numOrNull, checked, textOrNull, boolOrNull with their conversions; all nine nodePolicy fields; modelField, listToggle, setDecN, renderDecisions on change and input), 16 on CFG (tier model with re-render, num_ctx, busy_ok; latency_first 1/0/empty; priority; moveTier; canary add, fields, remove; addTier, delTier; the #roles listener still marks the roles dirty after the action), 11 with real calls (pending setting then reset; rotate secret then copy; approve node then revoke with cancel and confirm; update, delete and client actions with arguments containing \\\"'<& intact). Language switch to German and back works."
   },
   {
-   "command": "bash test/smoke_decision_images.sh --engine podman decision-nope ; --help",
+   "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "'unknown service decision-nope (known: decision-embed decision-jevlike)', STATE: refused; help prints the header."
+   "evidence": "end-to-end suite: 337 PASS, 0 failures (before the hasOwn guard, which touches only ui.js)."
   },
   {
-   "command": "python test/selftest_service_images.py",
+   "command": "every python command of the python job in .github/workflows/ci.yml (Windows), except pip install, run_tests.py and check_public_changes",
    "result": "passed",
-   "evidence": "11 tests OK, among them rejected cases: a new Dependabot docker directory without a build, a COPY source outside the trigger paths, a service missing from the script, no schedule, wider permissions, the router without its ci.yml job."
+   "evidence": "94 commands, 0 failed (before the hasOwn guard; selftest_browser.py rerun afterwards: OK). selftest_install.py skips its Linux-only cases on Windows; CI runs them."
   },
   {
-   "command": "ruff check . ; check_adr_index.py ; selftest_pinned_references.py && check_pinned_references.py ; selftest_threat_review.py ; selftest_trusted_gate.py ; selftest_dependency_audit.py ; selftest_container_image.py ; selftest_english_names.py",
+   "command": "node --check router/ui.js",
    "result": "passed",
-   "evidence": "All checks passed; ADR index ok: 127 ADRs; pinned references 0 findings; 26 + gate + audit + 17 tests OK; english names ok. Rerun on the merged tree (main 53314d2): ruff, ADR index, pinned references, selftest_service_images (11 OK), selftest_container_image (20 OK, 3 skipped on Windows, from #192), selftest_threat_review (26 OK), selftest_trusted_gate, public-data scan: all pass."
+   "evidence": "syntax ok after every change."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "0 finding(s); added lines reviewed by hand: no hostnames, paths of the own environment or personal data."
-  },
-  {
-   "command": ".github/workflows/decision-images.yml on GitHub (PR #193, head dfb3839 before the merge)",
-   "result": "passed",
-   "evidence": "Decision service image (decision-embed) pass, Decision service image (decision-jevlike) pass; all other PR checks passed as well. The workflow runs again on the merged head."
+   "evidence": "run after staging this record; added lines reviewed by hand: code, synthetic test values, documentation."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -83,9 +93,10 @@
   }
  ],
  "limitations": [
-  "Pre-existing (TM-16 baseline, not introduced here): the decision images install unpinned packages; ADR-0127 leaves hash locks for them undecided. The check makes a breaking release visible, it does not make builds reproducible.",
-  "The check neither starts a service nor loads a model; runtime incompatibilities of a model are not covered.",
-  "A path-filtered workflow cannot be a required check; it gates by the rule not to merge with failing CI.",
-  "Weekly failures show in the Actions tab and its notification, not on a pull request."
+  "'unsafe-inline' remains for styles: injected markup can still change how the page looks.",
+  "Injected markup could still name one of the fixed UI actions; it would need an operator click (and the confirmation for revoking).",
+  "The browser checks ran in the built-in Chromium-based pane only, not in Firefox or Safari; Object.hasOwn and composedPath need a browser from 2021 or later.",
+  "The node update buttons (agent and Ollama) were checked with elements built by args() as the template does, since the development environment has no pending update; their template lines are mechanically identical to the old ones apart from the attributes.",
+  "No design document covers the control UI; ADR-0128 and browser_headers.py describe the mechanism."
  ]
 }

@@ -18,12 +18,21 @@ from .common import VERSION, GIB, log, read_json, split_listen
 
 
 UI_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui.html")   # ui.html sits next to router.py, one level above the package
+UI_SCRIPT_PATH = os.path.join(os.path.dirname(UI_PATH), "ui.js")   # the page's script (ADR-0128: no inline script)
 
 
 async def handle_ui(request):
     if not os.path.exists(UI_PATH):
         return web.Response(text="ui.html missing", status=404)
     return web.FileResponse(UI_PATH, headers={"Cache-Control": "no-store"})
+
+
+async def handle_ui_script(request):
+    """The UI's script, uncached like the page, so page and script always come from the same installation."""
+    if not os.path.exists(UI_SCRIPT_PATH):
+        return web.Response(text="ui.js missing", status=404)
+    return web.FileResponse(UI_SCRIPT_PATH, headers={"Content-Type": "text/javascript; charset=utf-8",
+                                                     "Cache-Control": "no-store"})
 
 
 ASSETS = {"skirnir.png": "skirnir.png", "favicon.png": "favicon.png", "favicon.ico": "favicon.png"}   # Operator logo (tile since 2026-09-16; previously Raven) cut out + icon with tile

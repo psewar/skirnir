@@ -49,14 +49,14 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Cross-site admin request or same-origin compromise.",
-      "controls": "Non-simple header and Fetch Metadata checks. Since router 0.22.2 (ADR-0065) inline-handler values go through js() (JSON string literal, HTML-escaped), esc() escapes the single quote, the control port sends a CSP (connect-src 'self', frame-ancestors 'none', no foreign code) and X-Frame-Options DENY, both ports nosniff and no referrer, and no CORS header.",
-      "next_action": "Move inline handlers to addEventListener and drop 'unsafe-inline'; segment admin access.",
+      "controls": "Non-simple header and Fetch Metadata checks. Since router 0.22.2 (ADR-0065) inline-handler values go through js() (JSON string literal, HTML-escaped), esc() escapes the single quote, the control port sends a CSP (connect-src 'self', frame-ancestors 'none', no foreign code) and X-Frame-Options DENY, both ports nosniff and no referrer, and no CORS header. Since router 0.42.2 (ADR-0128) the UI runs no inline script: its script is /ui.js, elements name actions in data-* attributes with JSON arguments built by args(), and the policy is script-src 'self' (no 'unsafe-inline', no 'unsafe-eval').",
+      "next_action": "Segment admin access; consider dropping 'unsafe-inline' for styles (style attributes in the UI).",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_browser.py",
         "test/selftest_security.py"
       ],
-      "validation_gap": "V3: headers, CORS and handler escaping are tested in CI and were checked once in a real browser; inline markup injection under 'unsafe-inline' is not excluded."
+      "validation_gap": "V3: headers, CORS, the script policy and the absence of inline handlers are tested in CI; that injected inline handlers and scripts are blocked and every UI action still works was checked in a real browser (2026-11-25), not in CI. Injected markup can still change styles."
     },
     {
       "id": "TM-04",
