@@ -88,7 +88,7 @@ from skirnir_router import proxy   # noqa: E402
 n.model_details = {STRATA: {"name": STRATA, "size": 1}}
 roles = state.CFG.roles
 state.CFG.roles = {"assistant": {"name": "assistant", "tiers": [dict(TIER)]}}
-tags = proxy.tags_list()
+tags = proxy.tags_list({})   # a request without identity (observe) lists everything (ADR-0131)
 state.CFG.roles = roles
 entry = next((t for t in tags if t["name"] == "assistant"), None)
 check("api/tags: role with a standby-only first model is listed with placeholder details",

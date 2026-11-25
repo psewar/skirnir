@@ -281,15 +281,15 @@ ISO_SECONDS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
 async def handle_oa_models(request):
     if anthropic_api.wants_anthropic(request):   # same path, Anthropic format for Claude Code etc.
-        return anthropic_api.models_response(proxy.tags_list())
-    return web.json_response({"object": "list", "data": [oa_model_entry(t) for t in proxy.tags_list()]})
+        return anthropic_api.models_response(proxy.tags_list(request))
+    return web.json_response({"object": "list", "data": [oa_model_entry(t) for t in proxy.tags_list(request)]})
 
 
 async def handle_oa_model(request):
     mid = request.match_info["model"]
     if anthropic_api.wants_anthropic(request):
-        return anthropic_api.model_response(proxy.tags_list(), mid)
-    for t in proxy.tags_list():
+        return anthropic_api.model_response(proxy.tags_list(request), mid)
+    for t in proxy.tags_list(request):
         if t["name"] == mid or t["name"] == f"{mid}:latest":
             return web.json_response(oa_model_entry(t))
     return openai_error(404, f"model '{mid}' not found")

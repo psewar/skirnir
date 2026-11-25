@@ -987,14 +987,21 @@ class _Relay:
 # --- Auskunft: tags, show, ps, version -------------------------------------------------------------------------------
 
 async def handle_tags(request):
-    return web.json_response({"models": tags_list()})
+    return web.json_response({"models": tags_list(request)})
 
 
-def tags_list():
-    """Model list like /api/tags: roles (with details of their tier-1 model) + optional specific models of all nodes."""
+def tags_list(request):
+    """Model list like /api/tags: roles (with details of their tier-1 model) + optional specific models of all nodes,
+    each only when the request's client may use it (ADR-0131: the roles it is granted, concrete names only with
+    models:true; unauthenticated observe requests see everything, as they may use everything)."""
     out = []
     seen = set()
+    roles_listed = 0
     for exposed, role in state.CFG.roles.items():
+        seen.add(exposed)   # also for a role the client does not see: no concrete model is listed under its name
+        if auth.client_grant(request, role, concrete=False) is not None:
+            continue
+        roles_listed += 1
         first = role["tiers"][0]["model"]
         n = scheduler.any_online_node_with(first)
         # A node also offers a model it can only serve after switching to its standby Ollama (Node.standby_switch);
@@ -1003,15 +1010,14 @@ def tags_list():
         out.append({"name": exposed, "model": exposed, "modified_at": d.get("modified_at", "2026-01-01T00:00:00Z"),
                     "size": d.get("size", 0), "digest": d.get("digest", "router-" + role["name"]),
                     "details": d.get("details", {})})
-        seen.add(exposed)
-    if state.CFG.expose_concrete:
+    if state.CFG.expose_concrete and auth.client_grant(request, None, concrete=True) is None:
         for n in state.NODES.values():
             for m, d in n.model_details.items():
                 if m not in seen:
                     seen.add(m)
                     out.append(d)
     decider = decision.active()
-    if decider:   # the auto role is a model to clients like any role
+    if decider and roles_listed:   # the auto role is a model to clients like any role; it routes into roles only
         out.append({"name": decider.exposed, "model": decider.exposed, "modified_at": "2026-01-01T00:00:00Z", "size": 0,
                     "digest": "router-decision", "details": {"family": "router-decision", "options": decider.options}})
     return out
