@@ -2,8 +2,8 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "83a9feea5ec085ed20c293d8daa5ecb9ec8645ca",
- "change_digest": "68f077899b602845320b19441877488f85903985bb6fc19bf87e8486ade90025",
+ "base_sha": "821cd2bc5591e8f59cad1b14e21aec2cbde4ae29",
+ "change_digest": "0bf87afa89d3ca39d6f4d777e8a0abf38ef8b039592162073e967839aafd13b5",
  "reviewed_paths": [
   "CHANGELOG.md",
   "design/privacy-check.md",
@@ -49,12 +49,12 @@
   {
    "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "93 commands, 0 failed; includes selftest_privacy_redactors (default corpus byte-identical), selftest_privacy_check, selftest_institutional_provider, selftest_security, check_control_flow."
+   "evidence": "93 commands, 0 failed (also after merging main); includes selftest_privacy_redactors (default corpus byte-identical), selftest_privacy_check, selftest_institutional_provider, selftest_security, check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "337 PASS, 0 failures."
+   "evidence": "337 PASS, 0 failures (base 83a9fee)."
   },
   {
    "command": "python test/check_public_changes.py",
@@ -71,6 +71,6 @@
   "The client's tools definitions and format schema are forwarded to providers and not scanned.",
   "Secret patterns themselves are unchanged; a key format they do not know passes, as before.",
   "No end-to-end no-egress test against a real provider; classifier quality remains TM-05's open action.",
-  "Router 0.42.6 / v0.47.7 follow the open #197 (0.42.5 / v0.47.6); the PR merged second takes main and keeps or moves its number."
+  "Re-reviewed after merging main with #197 (router 0.42.5, control UI styles, no overlap with cloud.py): the end-to-end suite ran before that merge on base 83a9fee; after it the workflow commands ran again."
  ]
 }
