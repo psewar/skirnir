@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-test (TM-08, ADR-0063, ADR-0128): per-client bounds for authenticated traffic.
+"""Self-test (TM-08, ADR-0063, ADR-0129): per-client bounds for authenticated traffic.
 
 A configured client may have at most `max_concurrent` requests in progress (default 4); the next one is answered 429 with
 Retry-After at once, before any work. A declared request body above `max_body_mib` (default 16) is answered 413; so is a

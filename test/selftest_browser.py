@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Self-test (TM-03, ADR-0065): browser-facing protections of the control UI.
+"""Self-test (TM-03, ADR-0065, ADR-0128): browser-facing protections of the control UI.
 
-Headers: the UI, admin JSON and refusals carry the Content-Security-Policy (no foreign code, connect-src 'self',
-frame-ancestors 'none', ...), X-Frame-Options DENY, nosniff and no referrer; the API port carries nosniff and no referrer.
+Headers: the UI, its script, admin JSON and refusals carry the Content-Security-Policy (scripts only from the router: no
+'unsafe-inline', no 'unsafe-eval'; no foreign code, connect-src 'self', frame-ancestors 'none', ...), X-Frame-Options
+DENY, nosniff and no referrer; the API port carries nosniff and no referrer. /ui.js needs the control login like the page.
 CORS: no answer carries Access-Control-Allow-*, also not for a foreign Origin or a preflight.
-UI escaping (static, ui.html): esc() escapes the single quote, js() makes a JSON string literal and HTML-escapes it, every
-interpolation inside an inline event handler goes through js() (or is a loop index / a fixed property kind), no handler
-puts an interpolation between quotes, and the UI loads nothing from another origin (which the CSP would block).
+UI (static, ui.html and ui.js): no inline event handler and no inline script anywhere, also not in markup the script
+builds; every data-args value goes through args() (esc() of a JSON array; esc() escapes the single quote); every action an
+element names exists in ACTIONS; nothing is evaluated as code; the UI loads nothing from another origin.
 Synthetic values only."""
 import base64
 import os
@@ -21,6 +22,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "router"))
 from skirnir_router import app, auth, browser_headers, config, state  # noqa: E402
 
 UI = os.path.join(HERE, "..", "router", "ui.html")
+UI_JS = os.path.join(HERE, "..", "router", "ui.js")
 PASSWORD = "synthetic-operator-password"
 FOREIGN = "https://foreign.example.invalid"
 
@@ -60,16 +62,31 @@ class HeaderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_control_port_headers(self):
         auth_header = {"Authorization": basic("operator", PASSWORD), "Origin": FOREIGN}
-        for path in ("/", "/admin/state"):
+        for path in ("/", "/ui.js", "/admin/state"):
             r = await self.ctl.get(path, headers=auth_header)
             await r.read()
             self.assertEqual(r.status, 200, path)
             self.assert_control_headers(r, path)
-        r = await self.ctl.get("/admin/state", headers={"Origin": FOREIGN})
-        self.assertEqual(r.status, 401)
-        self.assert_control_headers(r, "refusal")
+        for path in ("/admin/state", "/ui.js"):   # rejected: no login, no script either
+            r = await self.ctl.get(path, headers={"Origin": FOREIGN})
+            self.assertEqual(r.status, 401, path)
+            self.assert_control_headers(r, f"refusal {path}")
         r = await self.ctl.options("/admin/state", headers={"Origin": FOREIGN, "Access-Control-Request-Method": "POST"})
         self.assert_control_headers(r, "preflight")
+
+    async def test_script_is_served_as_a_file_without_cache(self):
+        r = await self.ctl.get("/ui.js", headers={"Authorization": basic("operator", PASSWORD)})
+        body = await r.text()
+        self.assertEqual(r.status, 200)
+        self.assertTrue(r.headers.get("Content-Type", "").startswith("text/javascript"), r.headers.get("Content-Type"))
+        self.assertEqual(r.headers.get("Cache-Control"), "no-store", "page and script always from the same installation")
+        self.assertIn("const ACTIONS = {", body)
+
+    def test_policy_runs_only_the_routers_own_scripts(self):
+        directives = dict(d.strip().split(" ", 1) for d in browser_headers.CONTROL_CSP.split(";"))
+        self.assertEqual(directives["script-src"], "'self'", "no 'unsafe-inline', no 'unsafe-eval', no other source")
+        self.assertEqual(directives["default-src"], "'self'")
+        self.assertNotIn("'unsafe-eval'", browser_headers.CONTROL_CSP)
 
     async def test_api_port_headers(self):
         r = await self.api.post("/api/chat", json={"model": "x", "messages": []}, headers={"Origin": FOREIGN})
@@ -79,33 +96,59 @@ class HeaderTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Content-Security-Policy", r.headers, "the API port serves no UI")
 
 
-class UiEscapingTests(unittest.TestCase):
+# onclick=, onerror="...", oninput = '...' as an attribute; not a variable such as `const onNodes = ...`
+INLINE_HANDLER = re.compile(r"\son[a-z]+=|\son[a-z]+\s*=\s*[\"']")
+
+
+class UiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with open(UI, encoding="utf-8") as f:
             cls.ui = f.read()
+        with open(UI_JS, encoding="utf-8") as f:
+            cls.js = f.read()
+        body = re.search(r"\nconst ACTIONS = \{\n(.*?)\n\};\n", cls.js, re.S)
+        cls.actions = set(re.findall(r"^  (\w+): ", body.group(1), re.M)) if body else set()
 
-    def test_esc_and_js_helpers(self):
-        esc = re.search(r"const esc = s => (.*);", self.ui)
+    def test_esc_and_args_helpers(self):
+        esc = re.search(r"const esc = s => (.*);", self.js)
         self.assertIsNotNone(esc)
         self.assertIn("'", esc.group(1).split(".replace(", 1)[1].split(",")[0], "esc() matches the single quote")
         self.assertIn("&#39;", esc.group(1))
-        self.assertRegex(self.ui, r"const js = s => esc\(JSON\.stringify\(String\(s \?\? ''\)\)\);")
+        self.assertIn("const args = (...xs) => esc(JSON.stringify(xs));", self.js)
 
-    def test_inline_handlers_take_values_only_through_js(self):
-        handlers = re.findall(r'\bon(?:click|change|input)="([^"]*)"', self.ui)
-        self.assertGreater(len(handlers), 50, "instrument: handlers found")
-        bad = []
-        for js in handlers:
-            if "'${" in js:
-                bad.append(("quoted interpolation", js[:90]))
-            for expr in re.findall(r"\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}", js):
-                if not (expr.startswith("js(") or expr in ("i", "kind", "x")):
-                    bad.append((expr, js[:90]))
-        self.assertEqual(bad, [], "every value inside an inline handler goes through js()")
+    def test_no_inline_script_and_no_inline_handler(self):
+        self.assertEqual(INLINE_HANDLER.findall(self.ui), [], "ui.html: no inline event handler")
+        self.assertEqual(re.findall(r"<script(?![^>]*\ssrc=)[^>]*>", self.ui), [], "ui.html: no inline script")
+        self.assertEqual(re.findall(r'<script src="([^"]+)"', self.ui), ["ui.js"])
+        self.assertEqual(INLINE_HANDLER.findall(self.js), [], "ui.js builds no markup with an inline handler")
+        self.assertNotIn("<script", self.js, "ui.js builds no script element")
+        for code in ("eval(", "new Function", "javascript:", "setTimeout('", 'setTimeout("', "setTimeout(`"):
+            self.assertNotIn(code, self.js, f"nothing is evaluated as code: {code}")
+
+    def test_data_args_go_through_args(self):
+        values = re.findall(r'data-args="([^"]*)"', self.js)
+        self.assertGreater(len(values), 40, "instrument: action arguments found")
+        bad = [v for v in values if not re.fullmatch(r"\$\{args\([^`]*\)\}", v)]
+        self.assertEqual(bad, [], "every data-args value is ${args(...)}, i.e. an escaped JSON array")
+        self.assertEqual(re.findall(r'data-args="', self.ui), [], "static markup passes one string with data-arg")
+
+    def test_every_named_action_exists(self):
+        self.assertGreater(len(self.actions), 30, "instrument: ACTIONS parsed")
+        named = set(re.findall(r'data-(?:click|change|input)="(\w+)"', self.ui + self.js))
+        self.assertGreater(len(named), 30, "instrument: actions named in the markup")
+        self.assertEqual(sorted(named - self.actions), [], "an element names an action that does not exist")
+        self.assertEqual(sorted(self.actions - named), [], "ACTIONS holds an action no element names")
+
+    def test_one_capturing_listener_per_event_type(self):
+        self.assertIn("for (const type of ['click', 'change', 'input'])", self.js)
+        self.assertIn("ev.composedPath()", self.js)
+        self.assertIn("if (!Object.hasOwn(ACTIONS, name))", self.js, "only listed actions, nothing inherited")
+        self.assertRegex(self.js, r"\}, true\);\n\}", "the listener runs in the capture phase")
 
     def test_ui_loads_nothing_from_elsewhere(self):
-        self.assertEqual(re.findall(r'(?:src|href)="https?://', self.ui), [], "the CSP allows only the router's own origin")
+        for name, text in (("ui.html", self.ui), ("ui.js", self.js)):
+            self.assertEqual(re.findall(r'(?:src|href)="https?://', text), [], f"{name}: only the router's own origin")
         self.assertNotIn("connect-src 'self' https:", browser_headers.CONTROL_CSP)
 
 

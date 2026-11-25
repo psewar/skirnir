@@ -219,7 +219,7 @@ async def client_auth_middleware(request, handler):
     st["peak_inflight"] = max(st["peak_inflight"], st["inflight"])
     try:
         if request.content_length is None and request.body_exists:
-            # ADR-0128: a chunked body declares no size, so read it here, within the client's limit and inside its
+            # ADR-0129: a chunked body declares no size, so read it here, within the client's limit and inside its
             # concurrency slot (a client cannot hold more than max_concurrent bodies in memory). The handler gets the
             # request with the body already read, and the fact that it was (BODY_PREREAD).
             request = with_body_limit(request, max_body)

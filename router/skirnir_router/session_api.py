@@ -143,7 +143,7 @@ def parse_json(data):
 
 async def body(request):
     if request.get(BODY_PREREAD):
-        # ADR-0128: the client middleware already read this chunked body within the client's limit; the stream is used
+        # ADR-0129: the client middleware already read this chunked body within the client's limit; the stream is used
         # up and the bytes are on the request.
         data = await request.read()
         return BODY_TOO_LARGE if len(data) > MAX_BODY_BYTES else parse_json(data)

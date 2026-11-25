@@ -71,7 +71,7 @@ if command -v python3 >/dev/null 2>&1; then
 elif [ -n "$ROOT" ] || [ "$CHECK_ONLY" -eq 1 ]; then
   refuse "python3 is missing."
 fi
-for f in router.py skirnir_router/app.py skirnir-router.service router-layout.sh config.minimal.yaml requirements.txt requirements-session.txt ui.html; do
+for f in router.py skirnir_router/app.py skirnir-router.service router-layout.sh config.minimal.yaml requirements.txt requirements-session.txt ui.html ui.js; do
   [ -e "$SRC/$f" ] || refuse "Incomplete source folder $SRC: $f is missing. Run install.sh from the router/ folder of a release."
 done
 # ADR-0086: the new unit runs the router under its own account and needs router.state_dir in an existing configuration.
@@ -124,7 +124,7 @@ mkdir -p "$DEST" "$UNITS" || refuse "cannot create $DEST or $UNITS"
 STAGE="$(mktemp -d "$DEST/.install.XXXXXX")" || refuse "cannot stage in $DEST"
 cp -R "$SRC/skirnir_router" "$STAGE/skirnir_router" && find "$STAGE/skirnir_router" -name '__pycache__' -prune -exec rm -rf {} + \
   || refuse "copying the package failed"
-for f in router.py ui.html skirnir.png favicon.png config.example.yaml config.minimal.yaml decision-tfidf.json \
+for f in router.py ui.html ui.js skirnir.png favicon.png config.example.yaml config.minimal.yaml decision-tfidf.json \
          render-env.sh router-layout.sh render-env.conf.example requirements.txt requirements-session.txt requirements-lock.txt install.sh; do
   [ -e "$SRC/$f" ] && cp "$SRC/$f" "$STAGE/$f"
 done
