@@ -16,7 +16,7 @@ from .context_config import ContextConfig, parse_context_config
 from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
 from .waker_config import FIELDS as WAKER_FIELDS, check_choice as check_waker_choice, parse_wakers
-from .values import egress_url, ip_network, model_grant
+from .values import LOOPBACK_HOSTS, egress_url, in_networks, ip_network, model_grant
 from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
 from . import cost_keys
 from . import settings as settings_mod
@@ -84,7 +84,7 @@ SCHEMA = {
         "listen": None, "control_listen": None, "public_url": None, "state_dir": None, "control_tls": {"cert": None, "key": None},
         "ollama_poll_s": None, "heartbeat_interval_s": None, "heartbeat_stale_s": None, "offline_after_misses": None,
         "agent_missing_problem_s": None, "ram_spill_problem_gib": None, "problem_language": None, "expose_concrete_models": None,
-        "request_timeout_s": None, "agent_enrollment_networks": None,
+        "request_timeout_s": None, "agent_enrollment_networks": None, "admin_networks": None,
         "toolcall_rescue": None,
         # since 0.37.0: the warm benchmark's prompt (perf.py); tok/s depends on its language, so measurements are comparable
         # only with the same prompt
@@ -444,6 +444,21 @@ class Config:
         if type(ctl_auth.get("allow_unauthenticated_loopback", False)) is not bool:
             return invalid("router.control_auth.allow_unauthenticated_loopback must be true or false")
         self.control_open_loopback = ctl_auth.get("allow_unauthenticated_loopback", False)
+        # ADR-0143 (TM-03): networks the web UI, /admin/* and /metrics answer; empty or absent = any address, as before.
+        # The agents' paths (/v1/...) keep their own checks. Not in settings.EDITABLE: a stolen admin login must not widen it.
+        nets = r.get("admin_networks") or []
+        if not isinstance(nets, list):
+            return invalid("router.admin_networks must be a list of IP networks (CIDR)")
+        self.admin_networks = []
+        for i, raw in enumerate(nets):
+            if failed(net := ip_network(raw, f"router.admin_networks[{i}]")):
+                return net
+            self.admin_networks.append(net)
+        listen_host = str(self.control_listen).rpartition(":")[0].strip("[]")
+        if self.admin_networks and listen_host in (*LOOPBACK_HOSTS, "localhost") \
+                and not any(in_networks(host, self.admin_networks) for host in LOOPBACK_HOSTS):
+            return invalid("router.admin_networks lists no loopback address, but control_listen is on loopback: every "
+                           "admin request would be refused (add 127.0.0.1/32, where a local reverse proxy connects from)")
         # TLS for the Control port: {cert: <fullchain.pem>, key: <key.pem>}; missing block -> plaintext (tests only)
         tls = r.get("control_tls") or {}
         self.control_tls = (tls.get("cert"), tls.get("key")) if tls.get("cert") and tls.get("key") else None

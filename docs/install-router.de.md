@@ -140,6 +140,13 @@ Das Startlog listet die Befunde der Posture-Prüfung (Zeilen `posture …`). Dan
 - **11434**: von den Clients (Home Assistant, Node-RED, Arbeitsplätze).
 - Ohne Eintrag in der Konfiguration ist `control_listen` `127.0.0.1:11435` ([ADR-0040](adr/0040-authentication-fails-closed-control-port-on-loopback-by-default.md));
   für entfernte Agenten und Browser setzen (`0.0.0.0:11435` in `config.minimal.yaml`).
+- **Admin-Teil von 11435**: Die Agenten brauchen den Port, Web-UI, `/admin/*` und `/metrics` müssen ihren Netzen aber
+  nicht antworten. Admin-Rechner, Prometheus und die Adresse eines Reverse-Proxys in `router.admin_networks` eintragen
+  (CIDR, z. B. `[192.0.2.0/24, 127.0.0.1/32]`). Jede andere Adresse bekommt dann 403 vor der Anmeldung, `/v1/` (Tunnel,
+  Agent-Binary, Heartbeat) bleibt erreichbar. `127.0.0.1/32` aufnehmen, wenn `deploy.py` oder ein lokaler Reverse-Proxy
+  vom Router-Host aus fragt; hinter einem Proxy sieht der Router dessen Adresse, dann dort segmentieren. Leer oder
+  fehlend heißt jede Adresse, wie bisher. Ein `control_listen` auf Loopback braucht einen Loopback-Eintrag, sonst wird
+  die Konfiguration abgelehnt. In `config.yaml` setzen; die Web-UI kann es nicht ändern ([ADR-0143](adr/0143-the-admin-part-of-the-control-port-answers-only-configured-networks.md), TM-03).
 
 ## Secrets
 
@@ -202,7 +209,7 @@ der nächsten Engine weiter. Ohne beides `enabled: false` setzen oder eine kürz
 | `router.py --help` | Befehle auflisten |
 | `router.py --init <dir> [--public-url URL] [--user NAME] [--client NAME] [--cert PEM] [--key PEM]` | Erste, sichere Konfiguration schreiben (siehe oben) |
 | `router.py --check <config> [--pure] [--files]` | Konfiguration prüfen; unbekannte Schlüssel kommen mit Vorschlag. `--files`: die genannten Dateien sind lesbar. Exit-Code 0 = in Ordnung, 2 = ungültig |
-| `router.py --posture <config> [--pure]` | Was die Konfiguration erlaubt, das das Bedrohungsmodell als riskant führt (observe-Modus, entsperrte Policy, geteilte oder Beispiel-Tokens, Clients nur per Adresse, Steuer-Port ohne Login oder TLS, API-Port ohne TLS, Klartext-Backends …), je mit Schwere und nächstem Schritt ([ADR-0064](adr/0064-report-the-security-posture-as-facts.md)). Exit-Code 0 auch mit Befunden. Das Startlog meldet zusätzlich TLS-Dateien, die der laufende Router ändern oder ersetzen könnte (`tls_files_changeable`, [ADR-0083](adr/0083-router-reports-tls-files-it-could-change.md)); der Befehl läuft außerhalb der Unit und sieht das nicht |
+| `router.py --posture <config> [--pure]` | Was die Konfiguration erlaubt, das das Bedrohungsmodell als riskant führt (observe-Modus, entsperrte Policy, geteilte oder Beispiel-Tokens, Clients nur per Adresse, Steuer-Port ohne Login oder TLS oder mit einem Admin-Teil, der jedem Netz antwortet, API-Port ohne TLS, Klartext-Backends …), je mit Schwere und nächstem Schritt ([ADR-0064](adr/0064-report-the-security-posture-as-facts.md)). Exit-Code 0 auch mit Befunden. Das Startlog meldet zusätzlich TLS-Dateien, die der laufende Router ändern oder ersetzen könnte (`tls_files_changeable`, [ADR-0083](adr/0083-router-reports-tls-files-it-could-change.md)); der Befehl läuft außerhalb der Unit und sieht das nicht |
 | `router.py --hash` | PBKDF2-Hash für `control_auth.users`; fragt ohne Echo |
 
 `--pure` ignoriert eine danebenliegende `roles.yaml` (Änderungen aus der Web-UI). Die Befehle mit dem Python des venv

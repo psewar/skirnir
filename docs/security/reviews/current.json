@@ -2,59 +2,69 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "42e2c75fc4f2932bb9981ca84165a57167f79be7",
- "change_digest": "52d5adf9166f97d995d0f2a9b80db5bea02c7299f205822fab6b4388303c3757",
+ "base_sha": "2cc7b95ac3234eb98f666b7d0cd7f10bb834c92d",
+ "change_digest": "56bc40c08a1a1631c985d66371ac38356b21f9e4012d3d248a9dad05631b75b5",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0142-agent-reports-are-checked-against-each-other-and-the-routers-observation.md",
+  "design/router-container.md",
+  "docs/adr/0143-the-admin-part-of-the-control-port-answers-only-configured-networks.md",
   "docs/adr/README.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
+  "docs/install-router.de.md",
+  "docs/install-router.md",
+  "docs/reference.de.md",
+  "docs/reference.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
+  "docs/troubleshooting.de.md",
+  "docs/troubleshooting.md",
+  "router/config.example.yaml",
+  "router/skirnir_router/auth.py",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/nodes.py",
-  "router/skirnir_router/poll.py",
-  "router/skirnir_router/problems.py",
-  "router/skirnir_router/proxy.py",
-  "test/selftest_problems.py",
-  "test/selftest_report_crosscheck.py",
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/posture.py",
+  "test/selftest_admin_networks.py",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/tunnel.py",
-  "router/skirnir_router/metrics.py",
-  "router/skirnir_router/ha.py",
-  "docs/adr/0137-the-router-uses-only-plausible-gpu-numbers-from-an-agent.md"
+  "router/skirnir_router/app.py",
+  "router/skirnir_router/settings.py",
+  "router/skirnir_router/values.py",
+  "router/skirnir_router/registry.py",
+  "router/skirnir_router/agentupdate.py",
+  "router/skirnir_router/browser_headers.py",
+  "deploy/deploy.py",
+  "docs/adr/0053-control-port-requires-users-even-on-loopback.md",
+  "docs/adr/0136-new-agents-enroll-only-from-configured-networks.md"
  ],
  "risk_ids": [
-  "TM-07"
+  "TM-03",
+  "TM-01"
  ],
  "boundaries": [
-  "B3"
+  "B2"
  ],
- "summary": "Router 0.42.17 implements TM-07's cross-check of plausible but false reports, as kay asked (ADR-0142, proposed). Traced B3: an approved agent's heartbeat goes through poll.apply_heartbeat (ADR-0137 range checks first); after the GPU facts it now calls note_report_contradictions. report_contradictions compares (1) the reported free VRAM with total minus the size_vram of the models the same agent reports loaded (node.loaded, GiB), plus 1 GiB slack, only when loaded <= total (a second GPU the agent does not report would otherwise look like a lie), and (2) the reported GPU utilisation (<= 2 %) with Node.last_output_at, which the relay stamps in its native stream loop when a non-empty output line arrives from the node - the router's own observation, not an agent value - within two heartbeat intervals plus 2 s; not for gpu_present false. A contradiction counts after 3 consecutive heartbeats (load/unload tails and sampling lag do not), then Node.report_mismatch (snapshot), problems agent_free_vram_mismatch / agent_idle_while_generating (catalogue with de/en templates; parameters are numbers, the node name goes through the existing make/format path), one log warning and one audit line agent_report_mismatch (bounded: once per contradiction, cleared with the first agreeing heartbeat). Routing and node state are untouched (operator decides; revoke). No new exception path; heartbeats of unapproved tunnels never reach apply_heartbeat.",
+ "summary": "Router 0.42.18 implements TM-03's next action 'Segment admin access' (ADR-0143, proposed). Traced B2: the control port app (app.build_apps) runs unexpected_error_middleware, then auth.basic_auth_middleware, for every route. The middleware passed /v1/ paths through before and still does (tunnel identity/approval, ADR-0136 enrollment networks, heartbeat token, one-time binary token). New: for every other path (UI and its files, /admin/*, /metrics) a non-empty router.admin_networks refuses a source address outside every network with 403 before the Basic Auth check, the ADR-0053 loopback switch and the failure counter. The address is request.remote, the TCP peer; aiohttp does not read X-Forwarded-For here, so a header cannot spoof it. values.in_networks maps IPv4-mapped IPv6 to IPv4 and puts non-addresses and None outside. Bypass via the /v1/ prefix was probed with a real aiohttp server (3.14.4): /v1/../admin/state, %2e%2e, %2F and mixed forms keep path.startswith('/v1/') true but resolve to 404, because aiohttp matches the literal path without dot-segment folding; the new test pins this against the real control app and pins the /v1/ routes to the three agent paths. The key is not in settings.EDITABLE; settings.coerce refuses it ('cannot be changed in the UI'), and Config.merged applies UI overrides only through roles, models, expose_concrete_models, clients and settings, so a stolen admin login cannot widen it. Config refuses non-CIDR lists and a list without loopback for a literal loopback control_listen (lockout). The agent calls only /v1/ on the control port (agent/*.go checked); deploy.py asks /admin/state over loopback on the router host, documented (include 127.0.0.1/32). Posture adds admin_from_any_network (info like control_on_network, so --init still writes no medium finding, ADR-0067; TM-03) for a network listener without the list. Default off, existing configurations unchanged. No new exception path.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_report_crosscheck.py (new, added to ci.yml)",
+   "command": "python test/selftest_admin_networks.py (new, added to ci.yml)",
    "result": "passed",
-   "evidence": "5 tests: free VRAM above the room next to the loaded models found, within slack not, loaded > card (second GPU) and nothing loaded not; idle GPU while output arrived 1 s ago found, busy GPU, no recent output and gpu_present false not; persistence: nothing after 2 heartbeats, fact + one warning + one audit line on the 3rd, no second audit line on the 4th, problem and node view present, node state unchanged, cleared by an agreeing heartbeat (rejected cases); both kinds raise their own problem with the English text; the relay stamps last_output_at in its stream loop. With poll.py, nodes.py, proxy.py and problems.py from origin/main: 1 failure, 4 errors."
+   "evidence": "10 tests. Rejected cases: outside addresses (plain, IPv4-mapped, other IPv6, None, non-address) get 403 on /, /ui.js, /ui.css, /favicon.ico, /admin/state, /admin/config, /metrics, /admin/ha and a PUT, also with valid credentials, reach no handler and leave _BASIC_SRC/_BASIC_FAIL/_BASIC_OK empty; the unauthenticated loopback switch does not open it; /v1/ dot-segment and encoded-slash paths resolve to 404 in the real control app, whose /v1/ routes are exactly the three agent paths; settings.apply refuses router.admin_networks; config refuses non-lists, invalid networks and a loopback listener without loopback. Accepted cases: no list = login decides as before; inside addresses (IPv4, mapped, IPv6) go on to the login; /v1/ paths pass; posture finding present/absent as intended. With auth.py, config.py and posture.py from origin/main: 47 failures, 1 error (the UI-settings case passes there too: it guards that the existing EDITABLE lock covers the new key)."
   },
   {
-   "command": "python test/selftest_problems.py",
+   "command": "python test/selftest_posture.py and python test/selftest_security.py",
    "result": "passed",
-   "evidence": "scenario raises both new codes; catalogue checks (de/en, severity) pass."
+   "evidence": "unchanged expectations still hold (clean configuration is loopback, no new finding)."
   },
   {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes; plus ruff check . and router.py --check router/config.example.yaml --pure",
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes; plus ruff check ., router.py --check router/config.example.yaml --pure and node --check router/ui.js",
    "result": "passed",
-   "evidence": "101 commands, 0 failed."
+   "evidence": "102 commands, 0 failed."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "337 PASS, 0 failures; no contradiction raised by its heartbeats."
+   "evidence": "337 PASS, 0 failures (the suite runs without router.admin_networks)."
   },
   {
    "command": "python test/check_public_changes.py",
@@ -68,8 +78,8 @@
   }
  ],
  "limitations": [
-  "A consistent liar passes: free VRAM that fits its own false loaded list, or a false utilisation while generating.",
-  "A node whose Ollama works on a second GPU the agent does not report raises agent_idle_while_generating.",
-  "Only the native stream path stamps last_output_at; unary answers and OpenAI-compatible nodes are not observed this way."
+  "Behind a reverse proxy or a container runtime's userland proxy the router sees the proxy's address; segmentation then belongs to the proxy (documented).",
+  "Stolen admin credentials used from inside a listed network are not affected (out of scope for TM-03).",
+  "Not exercised against a live router with TLS in a browser; the middleware and the real control app's routing are tested in-process, the end-to-end suite runs without the key."
  ]
 }

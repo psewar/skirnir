@@ -2,7 +2,8 @@
 
 `router.py --posture <config.yaml>` and the start of the router report what the configuration allows that the threat
 model calls risky: an API port that serves unknown callers, a client policy changeable from the UI, clients recognised
-only by their source address or sharing one token, a control port open without login, plaintext transport to a node's
+only by their source address or sharing one token, a control port open without login or whose admin part answers every
+network (ADR-0143), plaintext transport to a node's
 Ollama, the session store, or an API port without TLS. Each finding names its code, severity, the risk it maps to and
 the next step; no secret, token, hash or connection string is printed. The check reads the configuration and, for the
 session store, the sslmode of the DSN in the environment (never the DSN itself), or for a SQLite URL the file's location
@@ -102,6 +103,14 @@ def findings(cfg, environ=None, view=None):
         out.append(Finding("control_on_network", INFO, "TM-03",
                            "control port listens on a network address (needed for remote agents and the web UI).",
                            "firewall it to your GPU nodes and admin machines"))
+    if not _loopback(control_host) and not getattr(cfg, "admin_networks", None):
+        # ADR-0143: the agents need the control port, the admin part need not answer their networks. Information like
+        # control_on_network: --init cannot know the admin networks and writes no medium finding (ADR-0067).
+        out.append(Finding("admin_from_any_network", INFO, "TM-03",
+                           "the web UI, /admin/* and /metrics answer every address that reaches the control port, "
+                           "including the networks of the agents.",
+                           "set router.admin_networks to your admin machines, Prometheus and a reverse proxy's address; "
+                           "agents keep reaching /v1/"))
     if getattr(cfg, "control_open_loopback", False):
         out.append(Finding("control_open_loopback", MEDIUM, "TM-03", "control port is open without login from loopback.",
                            "remove router.control_auth.allow_unauthenticated_loopback (development only)"))

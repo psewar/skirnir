@@ -23,6 +23,7 @@ Was der Router selbst für falsch hält, steht in der Web-UI *Übersicht* unter 
 | **503** auf jeder Seite, auch über Loopback | Keine `control_auth.users`. Bei einer Neuinstallation `router.py --init` ausführen, sonst einen Benutzer mit einem Hash aus `router.py --hash` eintragen ([ADR-0053](adr/0053-control-port-requires-users-even-on-loopback.md)). |
 | **401** | Falscher Benutzer oder falsches Passwort. Nach wiederholten Fehlversuchen von einer Adresse antwortet der Router eine Minute lang mit **429**. |
 | **403** „CSRF protection“ | Eine Nicht-GET-Anfrage an `/admin/*` ohne den Header `X-Skirnir-UI: 1` ([ADR-0042](adr/0042-admin-writes-require-a-custom-header.md)); Skripte müssen ihn senden, die Web-UI tut es. |
+| **403** „admin access is not allowed from this address“ | Die Adresse liegt außerhalb von `router.admin_networks` ([ADR-0143](adr/0143-the-admin-part-of-the-control-port-answers-only-configured-networks.md)). In `config.yaml` ergänzen (die Web-UI kann die Liste nicht ändern) und neu laden; hinter einem Reverse-Proxy sieht der Router dessen Adresse. |
 | Von einem anderen Rechner nicht erreichbar | `control_listen` ist nicht gesetzt (Standard `127.0.0.1:11435`), oder eine Firewall sperrt 11435. |
 
 ## API-Port (11434)

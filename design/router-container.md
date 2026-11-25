@@ -59,7 +59,9 @@ No secret, configuration or certificate is in the image; `.dockerignore` keeps l
 - **Posture** (ADR-0064, ADR-0083): `ProcessView` reads `/proc/self/mountinfo` and `CapEff` as on a host. A
   configuration folder mounted read-only is a read-only mount, so certificates there are not reported as changeable;
   with no capabilities and uid 10001 nothing above them is writable either. The container itself adds no finding; the
-  usual `control_on_network` (info) appears because the router listens on all addresses inside the container.
+  usual `control_on_network` (info) appears because the router listens on all addresses inside the container, and
+  `admin_from_any_network` (info, ADR-0143) until `router.admin_networks` is set. Where the runtime forwards the
+  published port through a userland proxy, the router sees the proxy's address; then segment at the published port.
 
 ## What the systemd install has and the container leaves to the operator
 
