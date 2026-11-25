@@ -99,7 +99,7 @@ SCHEMA = {
         "client_auth": {"mode": None, "audit_log": None, "audit_log_max_mib": None, "audit_log_keep": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
                                           "max_concurrent": None, "max_body_mib": None,
-                                          "cloud": None, "data_class": None, "privacy_check": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
+                                          "cloud": None, "cloud_budget_month": None, "data_class": None, "privacy_check": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
         "cloud": {"enabled": None, "data_classes": None, "default_data_class": None, "max_cloud_data_class": None, "credential_scan": None,
                   # since 0.42.0: locale, redactors, generic_json (tool names are free), unrecognised_tool_results
                   "egress_allow": None, "privacy_check": {**dict.fromkeys(PRIVACY_FIELDS), "generic_json": {"tools": None, "keys": None}},
@@ -494,6 +494,10 @@ class Config:
             for key, low, high in (("max_concurrent", 1, 256), ("max_body_mib", 1, 64)):
                 if spec.get(key) is not None and (type(spec[key]) is not int or not low <= spec[key] <= high):
                     return invalid(f"client_auth.clients.{name}.{key} must be an integer between {low} and {high}")
+            # ADR-0135 (TM-08): the client's monthly spend on cloud tiers, in the catalogue currency; 0/absent = no limit
+            budget = spec.get("cloud_budget_month")
+            if budget is not None and (type(budget) not in (int, float) or not 0 <= budget <= 100_000):
+                return invalid(f"client_auth.clients.{name}.cloud_budget_month must be a number between 0 and 100000")
             if spec.get("max_priority") is not None and spec["max_priority"] not in PRIORITIES:   # Stage 3: Class truncation
                 return invalid(f"client_auth.clients.{name}.max_priority must be one of {PRIORITIES}")
             clients[str(name)] = spec

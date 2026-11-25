@@ -2,60 +2,50 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "28967618f01334b5706efff377b7beb73b4b8678",
- "change_digest": "8a01febba407e45fc978f074b1c07add9e12bd3fd7d2f660a88c52e37e1bee85",
+ "base_sha": "89d92a9f574d0fc111f5dbfbbde93d3b850a4eb1",
+ "change_digest": "1aa82efe4436f2fbce2a7ff0c380621fecc89b225556ad8ea264b113e389f0cc",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0134-refusal-audit-lines-of-identified-clients-are-throttled.md",
+  "docs/adr/0135-a-client-can-have-its-own-monthly-cloud-budget.md",
   "docs/adr/README.md",
   "docs/configuration.de.md",
   "docs/configuration.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
+  "router/config.example.yaml",
   "router/skirnir_router/auth.py",
+  "router/skirnir_router/cloud.py",
   "router/skirnir_router/common.py",
-  "test/selftest_client_limits.py",
-  "test/selftest_hostile_load.py",
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/settings.py",
+  "test/selftest_client_cloud_budget.py",
   "docs/security/reviews/current.json",
   "router/skirnir_router/metrics.py",
   "router/skirnir_router/proxy.py",
-  "docs/adr/0057-bound-unauthenticated-statistics-and-audit-volume.md",
-  "docs/adr/0132-the-router-rotates-its-audit-log-by-size.md"
+  "router/skirnir_router/request.py",
+  "docs/adr/0014-cloud-as-a-role-tier-with-declared-data-classes.md"
  ],
  "risk_ids": [
-  "TM-08",
-  "TM-15"
+  "TM-08"
  ],
  "boundaries": [
   "B1",
-  "B9"
+  "B6"
  ],
- "summary": "Router 0.42.11 works on TM-08's next action 'hostile-load test'. Writing it found a real gap: ADR-0057 bounds audit lines of unauthenticated requests, but every refusal of an identified client (client_auth_middleware: rate_limited, forbidden by inference_refusal, body_too_large declared and chunked, concurrency_limited; client_allows: forbidden role or concrete name) called audit() directly, i.e. one audit-log write plus one journal line per refused request. A client with a valid token that keeps sending while its max_concurrent slots are busy is refused cheaply and immediately, so it could grow the audit log and the journal at its sending rate (disk, journal noise, and with ADR-0132's rotation older evidence rotated out). Now (ADR-0134, proposed) all six call sites go through auth._audit_client: one line per client and event kind per CLIENT_AUDIT_EVERY_S (60 s), withheld lines counted per kind in the client's statistics (audit_suppressed) and reported with the next line (suppressed); the per-client counters (rate_limited, forbidden, too_large, concurrency_limited) and their metrics still count every refusal. The client's last_audit field (a vestigial float, unused) is now the per-kind time map. State per client is bounded by the event kinds (four). Configured clients are few and known, so no global budget is added (one client's flood cannot hide another's line). The refusal paths themselves are unchanged (status, message, order, Retry-After, no body read before the slot check). Unauthenticated handling (ADR-0057) unchanged. No exception or error-text path added.",
- "findings": [
-  {
-   "id": "CLIENT-REFUSAL-AUDIT-FLOOD",
-   "evidence": "test_a_flood_is_bounded_and_does_not_starve_another_client with auth.py from origin/main: 200 concurrency refusals wrote 200 audit lines (and journal lines); rate-limited and forbidden floods likewise one line per refusal. Pre-existing since the per-client limits (ADR-0063) and the role check; found by this test.",
-   "resolution": "_audit_client throttles per client and kind; the four hostile-load tests fail without it and pass with it.",
-   "disposition": "fixed"
-  }
- ],
+ "summary": "Router 0.42.12 closes TM-08's next action 'per-client cost bounds for cloud' (ADR-0135, proposed). New optional client_auth.clients.<c>.cloud_budget_month (int or float 0-100000, not bool; 0/absent = no limit); config refuses other values, settings.EDITABLE gets the same bounds for the web UI (Clients). Traced B6: proxy sets req.cloud_block = cloud.request_block_reason(req, body, request.get('client')) before tier selection; request.py reports it as the skip reason of every cloud tier (provider_block_reason only when it is None), so a reached budget closes all cloud tiers of the request and local tiers continue. The check runs after the client's cloud:false opt-out and before data-class and credential checks; it only adds a refusal reason, it never opens a tier. Spend source: cloud.client_spend_month sums days[YYYY-MM-*].clients[client].cost_chf in state.USAGE, which metrics.usage_add increments in observe_request for every finished request with its cost (proxy._finish -> metrics.observe_request with info['client']); usage_save keeps 90 days. The client name comes from the authenticated identity (request['client'] set by client_auth_middleware), so a client cannot spend under another's name; unidentified observe requests have no client budget (as before). Client view adds budget and spend (auth.client_auth_view, late import of cloud to avoid a cycle). Overshoot: requests already in flight finish and are charged, like the provider budget. No exception path added.",
+ "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_hostile_load.py (new, added to ci.yml)",
+   "command": "python test/selftest_client_cloud_budget.py (new, added to ci.yml)",
    "result": "passed",
-   "evidence": "4 tests over the real client middleware with a held handler: 200 concurrent requests of a client whose 4 slots are busy -> all 429, at most 4 inside, only the 4 admitted bodies read, another client served meanwhile, counter 200, one audit line, after the interval the next line reports 199 withheld, slots free afterwards; 60 requests at 5/min -> 55 refused, one line; 100 requests for a role the client may not use -> all 403, one line; two clients' floods throttled apart. All four fail with auth.py from origin/main."
-  },
-  {
-   "command": "python test/selftest_client_limits.py",
-   "result": "passed",
-   "evidence": "12 tests; the chunked-refusal audit line now carries suppressed 0."
+   "evidence": "4 tests: spend sums only this month's cost of this client (another month and another client excluded); below the budget cloud stays open, at the budget request_block_reason names the exhausted budget (rejected case), no budget / 0 / unidentified unchanged; client view shows budget and spend; configuration refuses -1, 100001, '5', True, [5]. With cloud.py, config.py and auth.py from origin/main 6 failures and 2 errors."
   },
   {
    "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "96 commands, 0 failed; includes selftest_security (unauthenticated budget unchanged), selftest_model_listing, selftest_rerank, check_control_flow."
+   "evidence": "97 commands, 0 failed; includes selftest_security, selftest_institutional_provider, selftest_locale_neutral (settings texts), check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
@@ -65,7 +55,7 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; synthetic client names only."
+   "evidence": "run after staging this record; synthetic client names and amounts only."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -74,7 +64,8 @@
   }
  ],
  "limitations": [
-  "In-process flood only (one event loop, loopback); no measurement on the real router hardware or under network load; per-client cloud cost bounds remain open.",
-  "A second refusal of the same kind within a minute for another path or role is visible only as a count."
+  "Requests in flight when the budget is reached still finish and are charged (overshoot by what is in flight).",
+  "The spend is what usage.json holds; deleting it resets the month (and the usage view).",
+  "The web UI shows the budget field in the client settings; the spend is in /admin/state, not yet drawn in the client card."
  ]
 }

@@ -216,6 +216,9 @@ def request_block_reason(req, body, client_name):
     cc = ((state.CFG.client_auth.get("clients") or {}).get(client_name or "") or {})
     if cc.get("cloud") is False:
         return f"client {client_name}: cloud: false (opt-out)"
+    budget = cc.get("cloud_budget_month") or 0   # ADR-0135: the client's own monthly limit over all providers
+    if budget and client_spend_month(client_name) >= budget:
+        return f"client {client_name}: monthly cloud budget {budget:.2f} exhausted"
     # ADR-0043: a class configured for the client is a floor its requests cannot go below (they may raise it). Without
     # one the client declares its class per request, as ADR-0014 intends; undeclared falls back to default_data_class.
     floor = cc.get("data_class")
@@ -348,6 +351,15 @@ def request_cost(model, prompt_tokens, completion_tokens):
     e = state.CFG.models.get(model) or {}
     p = _neutral(e, cost_keys.MODEL_ALIASES, "price_per_m") or {}
     return (prompt_tokens or 0) / 1e6 * float(p.get("input", 0)) + (completion_tokens or 0) / 1e6 * float(p.get("output", 0))
+
+
+def client_spend_month(client, month=None):
+    """What the client spent on cloud tiers in the calendar month (default: this one), in the catalogue currency
+    (ADR-0135): the sum of its daily cost in usage.json (metrics.usage_add, kept longer than a month)."""
+    month = month or month_key()
+    days = state.USAGE.get("days") or {}
+    return round(sum(((d.get("clients") or {}).get(client) or {}).get("cost_chf", 0.0)
+                     for day, d in days.items() if day.startswith(month)), 6)
 
 
 def add_spend(provider, amount):

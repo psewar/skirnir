@@ -313,6 +313,7 @@ def client_auth_view():
     cfg, now = client_auth_cfg(), time.time()
     out = {"mode": client_auth_mode(), "configured_mode": cfg.get("mode", "observe"), "audit_log": cfg.get("audit_log"),
            "clients": {}, "unauthenticated": {}}
+    from . import cloud   # late: cloud imports modules that import this one
     listed = dict(cfg.get("clients") or {})
     listed.setdefault(state.INTERNAL_CLIENT, {"roles": ["*"], "models": True, "internal": True})
     for name, c in listed.items():
@@ -324,6 +325,7 @@ def client_auth_view():
             "last_seen_s": round(now - s["last_seen"], 1) if s and s["last_seen"] else None,
             "last_minute": sum(1 for t in s["recent"] if t > now - 60) if s else 0,
             "rate_limited": s["rate_limited"] if s else 0, "forbidden": s["forbidden"] if s else 0,
+            "cloud_budget_month": c.get("cloud_budget_month") or 0, "cloud_spend_month": cloud.client_spend_month(name),
         }
     for ip, u in state.CLIENT_STATS["unauth"].items():
         out["unauthenticated"][ip] = {"total": u["total"], "bad_token": u["bad_token"], "last_seen_s": round(now - u["last_seen"], 1),

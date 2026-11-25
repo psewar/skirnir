@@ -52,6 +52,7 @@ client_auth:
 | `max_body_mib` | Body size, default 16; above it 413: a declared size before any work, a chunked body while it is read (ADR-0063, ADR-0129) |
 | `max_priority` | Highest admission priority the client may claim |
 | `cloud`, `data_class` | Cloud tiers allowed, declared data class ([below](#cloud-as-a-tier-in-roles)) |
+| `cloud_budget_month` | The client's spend on cloud tiers per calendar month over all providers, in the catalogue currency; exhausted = its cloud tiers are skipped, local tiers continue; 0 or missing = no limit ([ADR-0135](adr/0135-a-client-can-have-its-own-monthly-cloud-budget.md)) |
 
 The audit log (`audit_log`) rotates by size when `audit_log_max_mib` is set (1-4096): before a line goes into a file that reached the limit, the file becomes `audit.jsonl.1`, older generations move up to `audit_log_keep` (1-100, default 5) and the oldest is removed. `0` or no setting means no rotation, as before router 0.42.9; then an external tool such as logrotate has to bound the file ([ADR-0132](adr/0132-the-router-rotates-its-audit-log-by-size.md)).
 Refusals of an identified client (`rate_limited`, `concurrency_limited`, `body_too_large`, `forbidden`) are written at most once a minute per client and kind; the next line carries `suppressed` with the number withheld, and the client's counters in the UI and the metrics count every refusal (since router 0.42.11, [ADR-0134](adr/0134-refusal-audit-lines-of-identified-clients-are-throttled.md)).
@@ -324,7 +325,8 @@ Limits (`router.cloud`):
   0.42.6; before, content parts and tool call arguments were not read).
 - **Budget** per provider and month (`budget_month`), in the currency of the catalogue prices (`price_per_m`, per million
   tokens); exhausted = the provider drops out as a tier, from `warn_at_percent` on a Home Assistant problem is raised. Cost
-  per request in usage and metrics. See [currency](#currency-of-prices-and-budgets).
+  per request in usage and metrics. See [currency](#currency-of-prices-and-budgets). A client can also have its own
+  monthly limit over all providers (`client_auth.clients.<c>.cloud_budget_month`, since router 0.42.12, ADR-0135).
 - **Egress allowlist** for `base_url` (+ `egress_allow`), keys only from `secrets.env`, never in the log; circuit breaker as
   with nodes; shadow runs never go to the cloud.
 - **Transport:** providers require the final HTTPS endpoint. HTTP is supported only for explicitly allowlisted literal
