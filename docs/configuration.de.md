@@ -35,6 +35,8 @@ client_auth:
   mode: enforce
   locked: true
   audit_log: /var/log/skirnir-router/audit.jsonl
+  audit_log_max_mib: 64   # bei 64 MiB rotieren, 5 Generationen behalten (ADR-0132)
+  audit_log_keep: 5
   clients:
     home-assistant: { token_sha256: "…", roles: ["*"], models: true, requests_per_minute: 120 }
     node-red:       { token_sha256: "…", ip: ["192.0.2.20"], roles: ["*"], models: true }
@@ -50,6 +52,8 @@ client_auth:
 | `max_body_mib` | Body-Größe, Standard 16; darüber 413: eine angegebene Größe vor jeder Arbeit, ein Chunked-Body beim Lesen (ADR-0063, ADR-0129) |
 | `max_priority` | Höchste Admission-Priorität, die der Client beanspruchen darf |
 | `cloud`, `data_class` | Cloud-Stufen erlaubt, deklarierte Datenklasse ([unten](#cloud-als-stufe-in-rollen)) |
+
+Das Audit-Log (`audit_log`) rotiert nach Größe, wenn `audit_log_max_mib` gesetzt ist (1-4096): Bevor eine Zeile in eine Datei geht, die die Grenze erreicht hat, wird die Datei zu `audit.jsonl.1`, ältere Generationen rücken bis `audit_log_keep` nach (1-100, Vorgabe 5), die älteste wird gelöscht. `0` oder keine Einstellung heißt keine Rotation, wie vor Router 0.42.9; dann muss ein externes Werkzeug wie logrotate die Datei begrenzen ([ADR-0132](adr/0132-the-router-rotates-its-audit-log-by-size.md)).
 | `privacy_check` | Inhaltsprüfung vor einer Cloud-Stufe (unten) |
 | `rerank` | Recht auf den [Rerank-Endpunkt](reference.de.md#optionaler-rerank-endpunkt) |
 | `inference` | `false` = nur der Rerank-Endpunkt, alles andere 403 |

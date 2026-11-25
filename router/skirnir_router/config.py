@@ -20,7 +20,7 @@ from .values import egress_url
 from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
 from . import cost_keys
 from . import settings as settings_mod
-from .common import DATA_CLASSES_DEFAULT, GIB, PRIORITIES, REASONING_OFF, THINK_MODES, TRUST_LEVELS, log, open_private, tls_fingerprint
+from .common import AUDIT_LOG_KEEP_DEFAULT, DATA_CLASSES_DEFAULT, GIB, PRIORITIES, REASONING_OFF, THINK_MODES, TRUST_LEVELS, log, open_private, tls_fingerprint
 from .outcome import Problem, failed, invalid
 from .problems import LANGUAGES as PROBLEM_LANGUAGES
 
@@ -96,7 +96,7 @@ SCHEMA = {
         "rerank": {k: None for k in RerankConfig.__dataclass_fields__},
         "limits": {"max_images": None, "max_tools": None, "max_messages": None}, "session_affinity_ttl_s": None,
         "idempotency_ttl_s": None, "control_auth": {"users": None, "allow_unauthenticated_loopback": None}, "heartbeat_token": None, "api_tls": None,
-        "client_auth": {"mode": None, "audit_log": None, "locked": None,
+        "client_auth": {"mode": None, "audit_log": None, "audit_log_max_mib": None, "audit_log_keep": None, "locked": None,
                         "clients": {"*": {"token_sha256": None, "ip": None, "roles": None, "models": None, "requests_per_minute": None, "max_priority": None,
                                           "max_concurrent": None, "max_body_mib": None,
                                           "cloud": None, "data_class": None, "privacy_check": None, "rerank": None, "inference": None, "session_projects": None, "session_handoff_from": None, "memory": _MEMORY_SCHEMA, "note": None, "token_rotated": None, "created": None}}},
@@ -500,8 +500,14 @@ class Config:
         # locked (Audit 2026-09-16): true = mode changeable ONLY via config.yaml + Deploy; UI setting and
         # POST /admin/client_auth are rejected (403/400 + audit entry). A compromised UI account cannot then
         # switch Client Auth to observe via a click.
+        # ADR-0132 (TM-15): size rotation of the audit log; 0 or absent = no rotation, as before.
+        for key, low, high in (("audit_log_max_mib", 0, 4096), ("audit_log_keep", 1, 100)):
+            if ca.get(key) is not None and (type(ca[key]) is not int or not low <= ca[key] <= high):
+                return invalid(f"client_auth.{key} must be an integer between {low} and {high}")
         self.client_auth = {"mode": mode, "clients": clients, "locked": bool(ca.get("locked", False)),
-                            "audit_log": ca.get("audit_log", "/var/log/skirnir-router/audit.jsonl")}
+                            "audit_log": ca.get("audit_log", "/var/log/skirnir-router/audit.jsonl"),
+                            "audit_log_max_mib": ca.get("audit_log_max_mib") or 0,
+                            "audit_log_keep": ca.get("audit_log_keep") or AUDIT_LOG_KEEP_DEFAULT}
 
     def _parse_cloud(self, cl):
         # Stage 5: Cloud providers as tiers in roles (cloud.py). No per-client opt-in: the role allows it, the client can

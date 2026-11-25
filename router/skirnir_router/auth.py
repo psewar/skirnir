@@ -12,7 +12,7 @@ from collections import deque
 from aiohttp import web
 
 from . import state
-from .common import (BODY_PREREAD, BODY_READ, BODY_TOO_LARGE, anthropic_error, basic_credentials, log, ollama_error,
+from .common import (AUDIT_LOG_KEEP_DEFAULT, BODY_PREREAD, BODY_READ, BODY_TOO_LARGE, anthropic_error, basic_credentials, log, ollama_error,
                      open_private, openai_error, read_body_bounded, with_body_limit)
 from .outcome import Problem
 
@@ -42,17 +42,33 @@ def client_auth_mode():
     return state.CLIENT_AUTH_MODE or client_auth_cfg().get("mode", "observe")
 
 
+def rotate_audit_log(path, max_bytes, keep):
+    """Size rotation of the audit log (ADR-0132, TM-15): once the file reached max_bytes it becomes path.1, older
+    generations move up to path.<keep>, and the oldest beyond that is removed. max_bytes 0 = no rotation (the default)."""
+    if not max_bytes or not os.path.exists(path) or os.path.getsize(path) < max_bytes:
+        return
+    if os.path.exists(f"{path}.{keep}"):
+        os.remove(f"{path}.{keep}")
+    for generation in range(keep - 1, 0, -1):
+        if os.path.exists(f"{path}.{generation}"):
+            os.replace(f"{path}.{generation}", f"{path}.{generation + 1}")
+    os.replace(path, f"{path}.1")
+
+
 def audit(event, **fields):
     """Security-relevant event as a JSON line to the audit log (config: client_auth.audit_log) and the journal.
     No prompts, no tokens - only who, what, why. If writing fails, the router continues."""
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "event": event, **fields}
     line = json.dumps(rec, ensure_ascii=False)
-    path = client_auth_cfg().get("audit_log")
+    cfg = client_auth_cfg()
+    path = cfg.get("audit_log")
     if path:
         try:
             d = os.path.dirname(path)
             if d:
                 os.makedirs(d, exist_ok=True)
+            rotate_audit_log(path, (cfg.get("audit_log_max_mib") or 0) * MIB,
+                             cfg.get("audit_log_keep") or AUDIT_LOG_KEEP_DEFAULT)
             with open_private(path, "a") as f:
                 f.write(line + "\n")
         except OSError as e:  # exception-ok: file system boundary; the event still goes to the journal below

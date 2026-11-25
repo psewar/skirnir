@@ -2,58 +2,68 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "5d992c1b11db979ccda4b3dca962339717d05fc5",
- "change_digest": "d70f9d51cb12d631d5f2000de23f11e0b1a006fddc188497d2a4a25cc64bc84a",
+ "base_sha": "4be0079999c03ea89a28cac59de041584649a7cb",
+ "change_digest": "1cbd6cb97d809d5dc6f2101b6b198dd3fe9fa0ea3315467557d1fc47894e2504",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0131-model-listings-follow-the-clients-grants.md",
+  "docs/adr/0132-the-router-rotates-its-audit-log-by-size.md",
   "docs/adr/README.md",
   "docs/configuration.de.md",
   "docs/configuration.md",
+  "docs/operations.de.md",
+  "docs/operations.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
+  "router/config.example.yaml",
+  "router/config.minimal.yaml",
   "router/skirnir_router/auth.py",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/openai_api.py",
-  "router/skirnir_router/proxy.py",
-  "test/selftest_model_listing.py",
-  "test/selftest_standby_switch.py",
+  "router/skirnir_router/config.py",
+  "test/selftest_audit_rotation.py",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/anthropic_api.py",
-  "router/skirnir_router/app.py",
-  "router/skirnir_router/scheduler.py",
-  "docs/adr/0052-concrete-model-names-need-an-explicit-grant.md"
+  "router/skirnir_router/state.py",
+  "router/skirnir_router/fallback_observation.py",
+  "router/skirnir_router/deletion_journal.py",
+  "router/skirnir_router/settings.py",
+  "docs/adr/0056-owner-only-router-files-and-log-canaries.md",
+  "docs/adr/0057-bound-unauthenticated-statistics-and-audit-volume.md"
  ],
  "risk_ids": [
-  "TM-04"
+  "TM-15",
+  "TM-08"
  ],
  "boundaries": [
-  "B1"
+  "B9"
  ],
- "summary": "Router 0.42.8 closes TM-04's validation gap 'model listings still show concrete names to role-only clients' (ADR-0131, proposed, extends ADR-0052). auth.client_allows is split: client_grant is the grant check without side effects (same logic: no client -> allowed; concrete needs models:true or the internal UI client; a role needs '*', its name or its exposed name in roles), client_allows calls it and counts forbidden and audits a refusal exactly as before (same reason texts, same audit fields). Traced B1: both request-path call sites in proxy.py still call client_allows, so access is unchanged; the API middleware sets request['client'] before handlers run, so the listing sees the same identity. proxy.tags_list(request) is behind /api/tags (proxy.handle_tags), /v1/models and /v1/models/{model} (openai_api, OpenAI and Anthropic form); all four call sites pass the request. It now lists a role only when client_grant allows it, concrete names only when expose_concrete is on and the client may use concrete names, and the decision router's auto entry only when a role is listed. Role exposed names stay in 'seen' for hidden roles, so no concrete model can appear under a hidden role's name. Observe mode without identity sees everything (client_grant returns None), as before. /api/ps and /api/show are unchanged; /api/ps names loaded concrete models and nodes to any client (noted in TM-04). No exception or error-text path added.",
+ "summary": "Router 0.42.9 addresses TM-15's next action 'log rotation and retention' for the one router file that grew without bound (ADR-0132, proposed). Inspected every append-only writer: state.decisions_append compacts, fallback_observation rotates at FILE_MAX_BYTES, deletion_journal is a small journal that must stay complete (re-applied at start; not rotated, unchanged), auth.audit appended to client_auth.audit_log forever. New optional client_auth.audit_log_max_mib (int 0-4096, 0/absent = no rotation as before) and audit_log_keep (int 1-100, default 5, constant in common.py); _parse_client_auth refuses other types and ranges (bool is not int). auth.rotate_audit_log runs inside audit()'s existing try/except OSError (file system boundary, event still goes to the journal): it checks existence and size first, removes <path>.<keep>, shifts generations with os.replace and renames the full file to .1; the new line opens the file with open_private (0600). Paths come only from the operator's configuration; the log folder belongs to the router account (ADR-0086), so os.replace/os.remove act on names in a folder only the router and root can write; a symlink planted there would be replaced or removed as a link, not followed. Not editable from the web UI (settings.EDITABLE unchanged), so a UI account cannot shrink the audit trail. Opt-in keeps existing installations unchanged; config.example.yaml and config.minimal.yaml set 64 MiB. Residual (TM-08/TM-15): whoever produces many audit lines rotates older ones out sooner; ADR-0057 caps the unauthenticated volume and every line also reaches the journal.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_model_listing.py (new, added to ci.yml)",
+   "command": "python test/selftest_audit_rotation.py (new, added to ci.yml)",
    "result": "passed",
-   "evidence": "5 tests OK over the real API app with an enforce configuration: one-role client sees only that role; all-roles client with models:false sees no concrete name; models:true adds it; /v1/models OpenAI and Anthropic form filter alike; /v1/models/{concrete} 404 for the role-only client, 200 for models:true; observe without identity sees everything; the UI client keeps concrete names; listing counts no forbidden request and writes no audit line; a hidden role requested with /api/chat is refused 403 and audited (rejected case). With proxy.py, auth.py and openai_api.py from origin/main 3 of 5 fail."
+   "evidence": "4 tests (1 POSIX-only, skipped on Windows, runs in CI on Linux): without a limit no rotation; with 1 MiB / keep 3 five fills leave audit.jsonl and .1-.3, .1 newest, oldest removed, each new line in a new file; 0600 for new and rotated files; the configuration refuses -1, 4097, '64', 1.5, True, keep 0, 101 and '5' (rejected cases) and defaults to 0/5. With auth.py, config.py and common.py from origin/main the rotation and configuration tests fail."
   },
   {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
+   "command": "router.py --check router/config.example.yaml --pure; router.py --check router/config.minimal.yaml --pure",
    "result": "passed",
-   "evidence": "94 commands, 0 failed; includes selftest_security (client_allows grant cases) and check_control_flow."
+   "evidence": "both configurations with the new keys load."
+  },
+  {
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check .",
+   "result": "passed",
+   "evidence": "95 commands, 0 failed; includes selftest_init (the init configuration), selftest_log_hygiene and check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "337 PASS, 0 failures on base 5d992c1; its /api/tags checks run unauthenticated in observe mode and with the tester client (roles *, models true), which still see roles, concrete names and auto."
+   "evidence": "337 PASS, 0 failures."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; synthetic tokens and model names only."
+   "evidence": "run after staging this record; synthetic events only."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -62,8 +72,8 @@
   }
  ],
  "limitations": [
-  "/api/ps still lists loaded concrete models and node names to any client; /api/show answers for any name the client asks about, as before.",
-  "Per-client model allowlists (TM-04's other idea) are not added.",
-  "test/selftest_standby_switch.py called tags_list() without a request; it now passes an identity-less request (observe), which lists everything as before."
+  "Existing installations stay unbounded until audit_log_max_mib is set (or logrotate bounds the file).",
+  "No independent audit retention or backup is added; rotated generations are deleted beyond keep.",
+  "The 0600 check runs only on POSIX (CI); locally on Windows it is skipped."
  ]
 }
