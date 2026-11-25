@@ -5,7 +5,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-from . import agentupdate, nodes, ollamaupdate, openai_node, perf, quiet, state
+from . import agentupdate, auth, nodes, ollamaupdate, openai_node, perf, quiet, state
 from .common import GIB, log, read_json
 
 NODE_FAULTS = (ClientError, asyncio.TimeoutError, OSError, ValueError)   # Netz, Tunnel, Ollamas JSON (ValueError)
@@ -755,6 +755,46 @@ def plausible_gpu_facts(b):
     return facts, dropped
 
 
+MISMATCH_HEARTBEATS = 3             # consecutive heartbeats before a contradiction counts (ADR-0142)
+FREE_VRAM_SLACK_GIB = 1.0           # rounding, driver bookkeeping and the CUDA context next to the loaded models
+IDLE_UTIL_PCT = 2                   # "GPU idle": at most this utilisation
+
+
+def report_contradictions(node, now):
+    """What an approved agent's latest report contradicts (ADR-0142): {kind: params}. free_vram: more free VRAM than the
+    card can have next to the models the same agent reports loaded (only when they fit the reported card, so a second
+    GPU does not count). gpu_idle: GPU utilisation at about zero while the router is receiving generated output from
+    this node (its own observation, not the agent's)."""
+    found = {}
+    total, free = node.vram_total_reported_gib, node.vram_free_gib
+    loaded = sum(node.loaded.values()) if node.loaded else 0.0
+    if total and free is not None and 0 < loaded <= total and free > total - loaded + FREE_VRAM_SLACK_GIB:
+        found["free_vram"] = {"free": round(free, 1), "loaded": round(loaded, 1), "room": round(max(0.0, total - loaded), 1)}
+    window = 2 * state.CFG.hb_interval_s + 2
+    if node.gpu_present is not False and node.gpu_util is not None and node.gpu_util <= IDLE_UTIL_PCT \
+            and node.last_output_at and now - node.last_output_at <= window:
+        found["gpu_idle"] = {"util": node.gpu_util}
+    return found
+
+
+def note_report_contradictions(node, now):
+    """Count contradictions over consecutive heartbeats; one that persists for MISMATCH_HEARTBEATS becomes a fact on the
+    node (problem, view, metric) and one audit line; it clears when the reports agree again. Routing is not changed:
+    the operator decides (revoke the node in the UI)."""
+    found = report_contradictions(node, now)
+    node.report_streak = {k: node.report_streak.get(k, 0) + 1 for k in found}
+    for kind, params in found.items():
+        if node.report_streak[kind] >= MISMATCH_HEARTBEATS and kind not in node.report_mismatch:
+            node.report_mismatch[kind] = {"since": round(now), **params}
+            log.warning("node %s: agent report contradicts observation (%s): %s", node.name, kind, params)
+            auth.audit("agent_report_mismatch", node=node.name, kind=kind, **params)
+        elif kind in node.report_mismatch:
+            node.report_mismatch[kind].update(params)
+    for kind in [k for k in node.report_mismatch if k not in found]:
+        del node.report_mismatch[kind]
+        log.info("node %s: agent report agrees again (%s)", node.name, kind)
+
+
 def apply_heartbeat(node, b, now):
     """Adopt GPU facts from a heartbeat, run state machine, learn baseline."""
     node.hb_ts = now
@@ -785,6 +825,7 @@ def apply_heartbeat(node, b, now):
     node.ollama_proc_gib = op / 1024 if op is not None else None
     kv = facts["children_vram_mib"]   # Agent >= 0.13.0: {kind: MiB} without Ollama; if field is missing, no such children
     node.children_vram_gib = sum(kv.values()) / 1024 if kv is not None else 0.0
+    note_report_contradictions(node, now)   # ADR-0142: reports against each other and against the router's observation
     note_game_memory(node, b, now)   # Agent >= 0.17.0: game and RAM as fact
     node.routes = route_health(b.get("routes"))   # Tunnel routes next to Ollama (Reranker); older agents report none
     sens = b.get("sensors")   # Agent >= 0.6.0: temperature, power, throttling, GPU-Z values (passed through unchanged)
