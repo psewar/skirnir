@@ -5,6 +5,10 @@ name: Release provenance
 # published assets (ADR-0075). Equal: GitHub attests the build provenance of exactly those bytes and their SBOMs, and the
 # CycloneDX SBOMs of the agent binaries and the router's Python requirements are attached to the release. Different: the
 # job fails with both hashes, and nothing is attested. Verify:  gh attestation verify <file> --repo psewar/skirnir
+# A release that ships the agent of an earlier release is rebuilt from the release that first published that agent
+# version when the tag itself does not reproduce it (agent/ changed without a new agent, e.g. a dependency bump;
+# ADR-0141). tools/security/rebuild_agent.sh does the rebuild and comparison; it comes from the workflow's own commit,
+# so a manual run for an older tag works too.
 # The router is released as source: the job router-source attaches skirnir-router-<version>.tar.gz, the router/ folder
 # of the tag as git archive writes it, and attests its build provenance (ADR-0139), independent of the agent rebuild.
 
@@ -33,6 +37,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0        # earlier release tags, to rebuild an agent first published there (ADR-0141)
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:                   # the rebuild script of the workflow's own commit, also for tags older than the script
+          path: .workflow-tools
+          sparse-checkout: tools/security/rebuild_agent.sh
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Download the published agent binaries
         run: |
@@ -58,30 +69,33 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ steps.meta.outputs.go }}
-      - name: Rebuild from the tag
+      - name: Release that first published this agent version
+        id: origin
         env:
           V: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
-          export GOFLAGS=-mod=mod CGO_ENABLED=0 GOTOOLCHAIN=local
-          go version
-          work=$(mktemp -d)
-          git archive HEAD agent | tar -x -C "$work"
-          mkdir -p "$GITHUB_WORKSPACE/rebuilt"
-          cd "$work/agent"
-          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$V" -o "$GITHUB_WORKSPACE/rebuilt/skirnir-agent-$V-windows-amd64.exe" .
-          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$V" -o "$GITHUB_WORKSPACE/rebuilt/skirnir-agent-$V-linux-amd64" .
-      - name: Compare with the published binaries byte for byte
+          origin=""
+          for t in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,createdAt --jq 'sort_by(.createdAt) | .[].tagName'); do
+            case "$t" in v[0-9]*.[0-9]*.[0-9]*) ;; *) continue ;; esac
+            case "$t" in *[!v0-9.]*) continue ;; esac
+            if gh release view "$t" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "skirnir-agent-$V-linux-amd64"; then
+              origin=$t; break
+            fi
+          done
+          echo "agent $V first published in ${origin:-this release}"
+          echo "tag=${origin:-$TAG}" >> "$GITHUB_OUTPUT"
+      - name: Rebuild and compare byte for byte (the tag, then the release that first published this agent version)
+        env:
+          V: ${{ steps.meta.outputs.version }}
+          ORIGIN: ${{ steps.origin.outputs.tag }}
         run: |
           set -euo pipefail
-          status=0
-          for f in published/skirnir-agent-*; do
-            n=$(basename "$f")
-            a=$(sha256sum "$f" | cut -d' ' -f1)
-            b=$(sha256sum "rebuilt/$n" 2>/dev/null | cut -d' ' -f1 || true)
-            if [ "$a" = "$b" ]; then echo "identical $n $a"; else echo "DIFFERENT $n published=$a rebuilt=${b:-missing}"; status=1; fi
-          done
-          exit $status
+          go version
+          refs=(HEAD)
+          [ "$ORIGIN" = "$TAG" ] || refs+=("$ORIGIN")
+          bash .workflow-tools/tools/security/rebuild_agent.sh published rebuilt "$V" "${refs[@]}" | tee rebuild.log
+          echo "Agent $V: $(tail -1 rebuild.log) (release $TAG)" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"

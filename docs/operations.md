@@ -152,8 +152,10 @@ When a release is published, the workflow *Release provenance* rebuilds the agen
 `agent/`, the Go toolchain recorded in the published binary, CGO off, `-trimpath`) and compares them byte for byte with
 the release assets. Only if they are identical does GitHub attest their build provenance, and the release gets CycloneDX
 SBOMs: one per agent binary (Go toolchain, modules with `go.sum` hashes, build settings) and one for the router's Python
-requirements (`skirnir-router-<version>.cdx.json`). A difference fails the workflow with both hashes (ADR-0075). To check
-a downloaded binary:
+requirements (`skirnir-router-<version>.cdx.json`). A difference fails the workflow with both hashes (ADR-0075). A release
+that ships the agent of an earlier release is rebuilt from the release that first published that agent version when its
+own tag does not reproduce it (for example after a dependency bump in `agent/` without a new agent); the run's summary
+names the source (ADR-0141). To check a downloaded binary:
 
 ```bash
 gh attestation verify skirnir-agent-<version>-windows-amd64.exe --repo psewar/skirnir

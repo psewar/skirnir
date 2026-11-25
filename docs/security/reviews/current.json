@@ -2,74 +2,65 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "b74584d95a3a2ea6d8e94849cb8fcca7bb589b4c",
- "change_digest": "9ab0f6ca675e916ed94e0992aeb47263a05898f2558a9e80153c788d60f441e0",
+ "base_sha": "d3379f7d92fe39c2cc6f2c746b47234b6abb85b3",
+ "change_digest": "5dddd99724298013b064b80b0a811f4cd6855f71b560a6bf8b17113986e47302",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
+  ".github/workflows/release-provenance.yml",
   "CHANGELOG.md",
-  "docs/adr/0052-concrete-model-names-need-an-explicit-grant.md",
-  "docs/adr/0140-a-client-may-be-granted-a-list-of-concrete-models.md",
+  "docs/adr/0141-an-agent-shipped-again-is-rebuilt-from-the-release-that-first-published-it.md",
   "docs/adr/README.md",
-  "docs/configuration.de.md",
-  "docs/configuration.md",
+  "docs/operations.de.md",
+  "docs/operations.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
-  "router/config.example.yaml",
-  "router/skirnir_router/admin.py",
-  "router/skirnir_router/auth.py",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/proxy.py",
-  "router/skirnir_router/settings.py",
-  "router/skirnir_router/values.py",
-  "router/ui.js",
-  "test/selftest_model_allowlist.py",
+  "tools/security/rebuild_agent.sh",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/scheduler.py",
-  "router/skirnir_router/openai_api.py",
-  "docs/adr/0131-model-listings-follow-the-clients-grants.md",
-  "docs/adr/0133-the-running-model-list-follows-the-clients-grants.md"
+  "tools/security/sbom.py",
+  "test/check_pinned_references.py",
+  "docs/adr/0075-release-provenance-by-reproducible-rebuild.md"
  ],
  "risk_ids": [
-  "TM-04"
+  "TM-16"
  ],
  "boundaries": [
-  "B1",
-  "B2"
+  "B8",
+  "B9"
  ],
- "summary": "Router 0.42.16 implements TM-04's per-client model allowlist as kay asked (ADR-0140, proposed, supersedes ADR-0052 whose status becomes 'superseded by ADR-0140'). client_auth.clients.<c>.models: true | false | list of concrete names. One parser, values.model_grant (bool as is; list of at most 200 names matching [A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}, trimmed, deduplicated, empty = false; anything else a Problem naming the key) used by config.py, settings.coerce (new type modelgrant: '*' = true, '' = false, comma list) and admin._client_spec (UI API client creation; before it did bool(value), so 'yes' meant true - now refused). values.model_granted normalises a missing tag to :latest on both sides (Ollama's resolution; scheduler.known_concrete returns the tagged name). Traced B1: both proxy call sites call auth.client_allows(request, role, concrete=True) with the concrete role whose name is the resolved model; client_grant now checks that name against the grant (true, the internal UI client, or listed); the refusal text names the model and the allowlist, counting and audit unchanged. Listings: tags_list checks each concrete name (so /v1/models/{model} 404s for an unlisted one), handle_ps checks each loaded model (listed -> with model and node; unlisted but its role granted -> role entry without model/node; else hidden). Observe without identity and the internal client unchanged. B2: the UI renders the grant as text via data-change/setChange with the existing 'text' conversion (no inline handler, CSP unchanged); the server validates every value. A listed name no node offers is accepted (documented); no patterns (deliberately).",
- "findings": [],
+ "summary": "TM-16's 'extend the rebuild to releases whose agent came from an earlier commit' (ADR-0141, proposed). CI and tooling only. The release-provenance job rebuild-and-attest keeps its permissions and its rule (attest only bytes a rebuild reproduces). Changes: checkout with fetch-depth 0 (earlier tags); a second checkout (same pinned action, persist-credentials false, sparse) of the workflow's own commit for tools/security/rebuild_agent.sh, so a manual run for an older tag runs the reviewed script, not the tag's; a step that finds the oldest release whose assets include skirnir-agent-<version>-linux-amd64 via gh (tag names filtered to v<digits>.<digits>.<digits>; the version comes from the published file name already validated to digits and dots); the rebuild step runs the script with HEAD and that tag. The script: set -euo pipefail, refuses a missing binary and a non-numeric version, skips refs that are not commits, builds from git archive of the ref (no working tree), compares only the two binaries (SBOMs next to them ignored, which also fixes manual re-runs where SBOMs were already attached), keeps the binaries only for the reproducing ref and clears them otherwise. Inputs reaching the shell: the release tag (env, argument only, as before), tag names from the repository's own releases (filtered), asset names (compared, not executed). The attestation still names the workflow run at the release tag; the step summary records which ref reproduced the bytes (documented consequence).",
+ "findings": [
+  {
+   "id": "PROVENANCE-EARLIER-AGENT",
+   "evidence": "Release provenance run for v0.35.1 (2026-11-16) failed: the Windows binary of agent 0.35.1, published unchanged from v0.34.1, was not reproduced from the v0.35.1 tag after a golang.org/x/sys bump in agent/; the release has no attestation or SBOMs. Pre-existing.",
+   "resolution": "rebuild from the release that first published the version when the tag does not reproduce it; reproduced locally (tag alone fails as in CI, tag then origin succeeds). A manual run for v0.35.1 after the merge would attest it (needs the maintainer's go-ahead: it writes to a published release).",
+   "disposition": "fixed"
+  }
+ ],
  "tests": [
   {
-   "command": "python test/selftest_model_allowlist.py (new, added to ci.yml)",
+   "command": "local reproduction: agent 0.35.1 built from v0.35.0's agent/ as 'published'; rebuild_agent.sh with v0.35.1, then with v0.35.1 v0.35.0",
    "result": "passed",
-   "evidence": "6 tests: parser (true/false/list, trim, dedupe, empty=false; refuses 'yes', 1, None, bad names, '' entry, numbers, 201 names, a dict - key named); tag normalisation; settings.coerce and admin._client_spec use it ('*', '', comma list; 'yes' refused); configuration list accepted, 'yes' refused; request path: listed model allowed, unlisted refused with the allowlist reason and audited (rejected case), roles-only refused, UI client and unidentified unchanged; /api/tags, /v1/models and /api/ps show only the listed concrete model. With the six changed modules from origin/main: 4 failures, 8 errors."
+   "evidence": "tag alone: Windows DIFFERENT, Linux identical, exit 1, nothing left in out (as the CI run); tag then v0.35.0: both identical, 'REBUILT FROM v0.35.0', exit 0; an SBOM file next to the binaries ignored; refused: missing binary (exit 2), version '0.35.1;x' (exit 2), unknown ref skipped then exit 1."
   },
   {
-   "command": "python test/selftest_security.py; python test/selftest_model_listing.py; python test/selftest_browser.py",
+   "command": "origin search (read-only gh release list/view against the real releases)",
    "result": "passed",
-   "evidence": "ADR-0052's cases (missing setting, true, non-boolean string), the ADR-0131/0133 listing tests and the UI's no-inline-handler/CSP checks unchanged."
+   "evidence": "agent 0.35.1 -> v0.34.1 (agent/ identical to v0.35.0's), agent 0.35.2 -> v0.36.0."
   },
   {
-   "command": "browser (built-in pane) against test/dev_env.py",
+   "command": "yaml parse of release-provenance.yml; python test/check_pinned_references.py; selftest_pinned_references; bash -n tools/security/rebuild_agent.sh",
    "result": "passed",
-   "evidence": "Client fields show '*' for models true and empty for false (type text, placeholder 'keine'); typing 'granite4.2:8b, qwen3-coder:30b' for a client and saving through the UI's own change action stored the list (overridden, value as list); no CSP violation; with that client's token /api/tags listed only granite4.2:8b among concrete names and /api/chat for it passed the grant check (503 only for the unavailable test node)."
+   "evidence": "steps in order; 0 pin findings; 0 failures; syntax ok."
   },
   {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes; plus ruff check ., router.py --check router/config.example.yaml --pure and node --check router/ui.js",
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes; plus ruff check .",
    "result": "passed",
    "evidence": "100 commands, 0 failed."
   },
   {
-   "command": "python test/run_tests.py",
-   "result": "passed",
-   "evidence": "337 PASS, 0 failures."
-  },
-  {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; synthetic model names only."
+   "evidence": "run after staging this record."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -78,7 +69,7 @@
   }
  ],
  "limitations": [
-  "Exact names only, no patterns; a name no node offers yet is accepted and grants nothing until it appears.",
-  "/api/show answers model details for any name a client asks about, as before."
+  "The workflow itself runs only on a published release or a manual run; the local test used the local Go toolchain, not the one recorded in the published binaries, so it proves the logic, not the real hashes.",
+  "The attestation's workflow reference is the release tag even when the bytes were rebuilt from an earlier release."
  ]
 }
