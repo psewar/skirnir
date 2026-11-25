@@ -35,6 +35,8 @@ client_auth:
   mode: enforce
   locked: true
   audit_log: /var/log/skirnir-router/audit.jsonl
+  audit_log_max_mib: 64   # rotate at 64 MiB, keep 5 generations (ADR-0132)
+  audit_log_keep: 5
   clients:
     home-assistant: { token_sha256: "…", roles: ["*"], models: true, requests_per_minute: 120 }
     node-red:       { token_sha256: "…", ip: ["192.0.2.20"], roles: ["*"], models: true }
@@ -50,6 +52,8 @@ client_auth:
 | `max_body_mib` | Body size, default 16; above it 413: a declared size before any work, a chunked body while it is read (ADR-0063, ADR-0129) |
 | `max_priority` | Highest admission priority the client may claim |
 | `cloud`, `data_class` | Cloud tiers allowed, declared data class ([below](#cloud-as-a-tier-in-roles)) |
+
+The audit log (`audit_log`) rotates by size when `audit_log_max_mib` is set (1-4096): before a line goes into a file that reached the limit, the file becomes `audit.jsonl.1`, older generations move up to `audit_log_keep` (1-100, default 5) and the oldest is removed. `0` or no setting means no rotation, as before router 0.42.9; then an external tool such as logrotate has to bound the file ([ADR-0132](adr/0132-the-router-rotates-its-audit-log-by-size.md)).
 | `privacy_check` | Content check before a cloud tier (below) |
 | `rerank` | Right to use the [rerank endpoint](reference.md#optional-rerank-endpoint) |
 | `inference` | `false` = only the rerank endpoint, everything else 403 |

@@ -187,6 +187,8 @@ router:
     mode: enforce                # observe = alles bedienen, Unbekannte zaehlen (UI/State) und ins Audit-Log;
                                  # enforce = 401 ohne gueltige Identitaet. Umschalten zur Laufzeit: POST /admin/client_auth.
     audit_log: /var/log/skirnir-router/audit.jsonl
+    audit_log_max_mib: 64        # ADR-0132: bei 64 MiB rotieren (audit.jsonl.1 ...), 0/fehlend = nie (wie vor 0.42.9)
+    audit_log_keep: 5            # so viele rotierte Generationen bleiben (1-100, Vorgabe 5)
     clients:
       # Memory grants are independent of session_projects. Default owner: client (no router memory).
       # example-client:

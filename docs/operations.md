@@ -254,7 +254,7 @@ Skirnir has no backup function of its own; back up these files with the tool you
 | State folder (`router.state_dir`) | `/var/lib/skirnir-router/` | Everything the router writes itself, see the next table. Without `state_dir` these files lie next to `config.yaml`. |
 | Session database (optional) | the PostgreSQL database or the SQLite file that `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) names (ADR-0114) | Sessions (events, managed turns, compactions, handoff imports) and the memory outbox. PostgreSQL: back it up with its own tools. SQLite: see `sessions.db` below. |
 | Memory backend (optional) | outside Skirnir (Hindsight) | The long-term memory lives there; back it up as that service documents. |
-| Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), if you need the audit trail. |
+| Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`) and, with `audit_log_max_mib`, its rotated generations `audit.jsonl.1` ... (ADR-0132), if you need the audit trail. |
 
 Files in the state folder:
 

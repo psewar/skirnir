@@ -10,8 +10,9 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.42.8"
+VERSION = "0.42.9"
 GIB = 2 ** 30
+AUDIT_LOG_KEEP_DEFAULT = 5   # rotated audit log generations kept when client_auth.audit_log_max_mib is set (ADR-0132)
 log = logging.getLogger("router")
 
 PROXY_METHODS = ("POST",)

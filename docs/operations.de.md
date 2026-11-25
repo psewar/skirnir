@@ -266,7 +266,7 @@ verschiebt sie.
 | Zustandsordner (`router.state_dir`) | `/var/lib/skirnir-router/` | Alles, was der Router selbst schreibt, siehe nächste Tabelle. Ohne `state_dir` liegen diese Dateien neben der `config.yaml`. |
 | Session-Datenbank (optional) | die PostgreSQL-Datenbank oder die SQLite-Datei, die `SKIRNIR_SESSION_DSN` (`session_store.dsn_env`) nennt (ADR-0114) | Sessions (Ereignisse, verwaltete Turns, Verdichtungen, Übergabe-Importe) und die Memory-Outbox. PostgreSQL: mit dessen eigenen Werkzeugen sichern. SQLite: siehe `sessions.db` unten. |
 | Gedächtnis-Backend (optional) | ausserhalb von Skirnir (Hindsight) | Dort liegt das Langzeitgedächtnis; sichern, wie dieser Dienst es beschreibt. |
-| Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`), falls der Audit-Verlauf gebraucht wird. |
+| Logs | `/var/log/skirnir-router/` | `audit.jsonl` (`client_auth.audit_log`) und, mit `audit_log_max_mib`, seine rotierten Generationen `audit.jsonl.1` ... (ADR-0132), falls der Audit-Verlauf gebraucht wird. |
 
 Dateien im Zustandsordner:
 

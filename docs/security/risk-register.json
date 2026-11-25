@@ -297,15 +297,15 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Metadata/secrets leak or local audit is altered.",
-      "controls": "Audit omits prompts and tokens; router-written files are owner-only (common.open_private, unit UMask=0077, ADR-0056); a CI canary test covers client and control authentication, inference paths and token rotation. Since router 0.21.1 the canaries also cover memory recall and retention, memory and inference backend errors and the session API, and an unexpected exception is logged by type and code location only (ADR-0062).",
-      "next_action": "Log rotation and retention, backup controls for these files, independent audit retention.",
+      "controls": "Audit omits prompts and tokens; router-written files are owner-only (common.open_private, unit UMask=0077, ADR-0056); a CI canary test covers client and control authentication, inference paths and token rotation. Since router 0.21.1 the canaries also cover memory recall and retention, memory and inference backend errors and the session API, and an unexpected exception is logged by type and code location only (ADR-0062). Since router 0.42.9 (ADR-0132) the audit log rotates by size with client_auth.audit_log_max_mib (example and init configuration: 64 MiB, 5 generations; absent = no rotation as before).",
+      "next_action": "Set audit_log_max_mib on existing installations (or bound the file with logrotate); backup controls for these files; independent audit retention.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/check_public_changes.py",
         "test/selftest_log_hygiene.py",
         "test/selftest_log_hygiene_paths.py"
       ],
-      "validation_gap": "V14: canaries cover authentication, inference, memory, session and backend error paths; rotation and backups are not covered."
+      "validation_gap": "V14: canaries cover authentication, inference, memory, session and backend error paths; audit log rotation is unit-tested (test/selftest_audit_rotation.py); backups and retention outside the router are not covered."
     },
     {
       "id": "TM-16",
