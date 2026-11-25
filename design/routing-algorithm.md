@@ -268,6 +268,10 @@ Die Zahlen im Modellkatalog sind Platzhalter. Messvorschrift pro Modell, pro GPU
    weights_gb   = A - kv_gb_per_1k * 8
 3. Gegenprobe bei 65536 (auf der größten Karte): Vorhersage vs. size_vram, Abweichung < 5 %?
 ```
+Heute misst der Router selbst (`POST /admin/measure`, seit 0.3.5 mit den GPU-Werten des Agenten per nvidia-smi statt
+`size_vram`): je Kontext alles entladen, laden, den echten Zuwachs lesen, bei 8k, 32k, jedem Kontext einer Rolle und seit
+0.43.1 den angefragten `contexts` ([ADR-0146](../docs/adr/0146-a-measurement-takes-the-contexts-the-caller-names.md)),
+damit ein Kandidat ohne vorübergehende Rolle dort gemessen wird, wo er liefe. Ergebnis im Katalog: `vram_real_gib` je Kontext.
 Vorbedingung auf allen Knoten identisch: OLLAMA_KV_CACHE_TYPE=q8_0, OLLAMA_FLASH_ATTENTION=1.
 Wenn `size_vram` kleiner als `size` ist, läuft Partial-Offload -> Tier passt NICHT, auch
 wenn Ollama es lädt. Deshalb Fit-Prüfung im Router, nicht Ollama entscheiden lassen.

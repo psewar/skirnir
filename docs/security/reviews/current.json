@@ -2,80 +2,58 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "e9256f084bc6e5da04fa076cbc8f575f9bb7721a",
- "change_digest": "0c65392d73b5928c859e16ec017f808a15ef2365525f63ce82dddee8a4fdec33",
+ "base_sha": "8aded0aecbdd27d9e3021ea3562767f858025ebb",
+ "change_digest": "6df87314397130604587c2ed516cbe3e9bd4e4bebabf3ad2e980d291b6b7e063",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "design/memory-reliability.de.md",
-  "design/memory-reliability.md",
-  "design/shared-memory-interoperability.de.md",
-  "design/shared-memory-interoperability.md",
-  "docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md",
+  "design/routing-algorithm.md",
+  "docs/adr/0146-a-measurement-takes-the-contexts-the-caller-names.md",
+  "docs/adr/0147-a-read-only-admin-endpoint-lists-each-role-as-model-at-context.md",
   "docs/adr/README.md",
-  "docs/security/risk-register.json",
-  "docs/security/threat-model.de.md",
-  "docs/security/threat-model.md",
-  "docs/troubleshooting.de.md",
-  "docs/troubleshooting.md",
-  "router/config.example.yaml",
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "router/skirnir_router/admin.py",
+  "router/skirnir_router/app.py",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/context_ops.py",
-  "router/skirnir_router/memory.py",
-  "router/skirnir_router/memory_gateway.py",
-  "router/skirnir_router/memory_outbox.py",
-  "router/skirnir_router/memory_review.py",
-  "router/skirnir_router/metrics.py",
-  "router/skirnir_router/reliability_store.py",
-  "router/skirnir_router/session_migrations.py",
-  "router/skirnir_router/session_store.py",
-  "router/skirnir_router/shared_config.py",
-  "router/skirnir_router/sqlite_migrations.py",
-  "test/selftest_memory_review.py",
-  "tools/memory_review.py",
+  "router/skirnir_router/perf.py",
+  "test/selftest_bench_api.py",
   "docs/security/reviews/current.json",
   "router/skirnir_router/auth.py",
-  "router/skirnir_router/session_api.py",
-  "router/skirnir_router/sqlite_store.py",
-  "router/skirnir_router/memory_config.py",
-  "docs/adr/0059-no-automatic-recall-into-requests-with-tools.md",
-  "docs/adr/0060-shared-memory-scopes-name-their-writers.md",
-  "docs/adr/0076-deletion-lifecycle-across-stores-and-restores.md"
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/poll.py",
+  "docs/adr/0143-the-admin-part-of-the-control-port-answers-only-configured-networks.md"
  ],
  "risk_ids": [
-  "TM-10",
-  "TM-08",
-  "TM-11",
-  "TM-12"
+  "TM-03",
+  "TM-08"
  ],
  "boundaries": [
-  "B1",
-  "B4",
-  "B5"
+  "B2",
+  "B3"
  ],
- "summary": "Implements ADR-0145 (accepted by the maintainer 2026-11-25) for TM-10/V9: a shared scope with review: true holds every write of a writer that is not a reviewer in the durable outbox as awaiting_review until a reviewer approves it. Write paths traced: REST retain, gateway retain (async and sync) and automatic retention all go through MemoryService.submit -> memory_outbox.submit -> outbox_put(held=...); the in-memory enqueue path refuses a reviewed scope (loading already refuses review without outbox_enabled). outbox_claim selects only pending, delete_pending, processing and accepted, so a held row is never delivered. New routes (B1): POST /v1/skirnir/memory/review needs an authenticated client whose scope is in reviewer_scopes (listed reviewer with read on the scope, re-derived per request), else 403; approve/reject need the same for the row's bank, else 404 for everyone else including the writer, so held operations are not revealed; unknown tokens get 401 (the existing every-route identity test covers the new routes). Approval re-checks the writer with service.current(write=True) and the bank binding and turns a writer that lost its right into revoked; the worker's delivery check stays as a second gate. Store (B4): outbox_review runs under the outbox advisory lock with SELECT ... FOR UPDATE and changes only a row still awaiting_review in the reviewer's bank; approval passes the delivery capacity check. Payload lifetime (TM-12): rejection, expiry and revocation set payload NULL at once; session deletion and curator deletion turn a never-sent held row into deleted with payload NULL; held text stays at most review_expire_days. Bound (TM-08): held rows are excluded from outbox_capacity and limited per writer and bank by review_max_held (429 for that writer only), so one writer cannot block other clients' writes. The review list applies the content filter with the reviewer's private_addresses flag and withholds by id. Logs and metrics carry reviewer, writer, scope and fixed outcomes, never content; /admin/context gets counts per scope only. SQLite migration 2 rebuilds the outbox table (copy, drop, rename, indexes, triggers; DROP's implicit delete fires no trigger, so outbox_totals stay exact); PostgreSQL migration 7 swaps the CHECK constraint. Tool tools/memory_review.py reads URL and token from the environment only, verifies TLS by default and refuses http to non-loopback hosts. Finding fixed before publication: a synchronous gateway retain of a held write would have held one of the bounded sync slots until sync_wait_s and then answered a misleading 504; it now answers 202 with state awaiting_review at once (tested). Direct backend access bypasses review as it bypasses every grant (TM-11, documented).",
+ "summary": "Two admin-only control API additions for the model test bench (ADR-0146, ADR-0147, proposed). B2: GET /admin/roles is registered on the control app only; basic_auth_middleware covers every path outside /v1/, so it needs the admin login and router.admin_networks like /admin/config (tested: 401 before the handler without a login); GET only, no PUT. It returns a strict subset of GET /admin/config's roles (exposed_as, tier model, num_ctx, cloud provider name), no system_append prompts, options, canary, shadow, clients or nodes, with Cache-Control no-store; no data that /admin/config did not already give the same caller. POST /admin/measure: the optional contexts list is validated before a node is chosen or anything is spawned (1-6 distinct ints, bool excluded, 2048..1048576; 400 otherwise); on a node without GPU values a request with contexts is refused (409) instead of silently measuring only 8k/32k. B3/TM-08: each listed context is one more unload+load on the chosen free node under the existing single-measurement lock (state.MEASURING) and node.inflight, so measurements stay serialized; a very large context may spill into RAM, which the catalog marks as partial_offload as before - the admin asks for it explicitly, as when setting a role's num_ctx. Requests without contexts follow the previous path unchanged (tested). No new dependency, configuration key or protocol field.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_memory_review.py (new, in ci.yml python and sessions-postgres jobs)",
+   "command": "python test/selftest_bench_api.py (new, in ci.yml)",
    "result": "passed",
-   "evidence": "22 tests, 9 PostgreSQL ones skipped locally without a DSN: config parse/load rules (incl. unknown reviewer, reviewer without read, review without outbox); SQLite migration 2 keeps rows and counts and the CHECK still refuses unknown states; HTTP: held -> listed -> approved -> delivered, reviewer's own write direct, reject/expiry/replay never deliver and drop text, gateway async and sync and automatic retention held, writer withdraws, held survives store restart, tool lists/shows/approves; rejected cases: writer/other writer/other-scope reviewer get 404, non-reviewer list 403, unknown token 401, revoked writer never delivered, review_max_held gives 429 while another writer is admitted, tool refuses clear text, credentials in URL, missing settings and CA."
+   "evidence": "5 tests: contexts join fixed and role contexts, cloud tiers excluded, no-contexts unchanged; malformed lists (empty, duplicate, out of range, strings, floats, bools, scalar, too many) refused with 400 and nothing spawned; node without GPU values refused for contexts (409), measured by /api/ps without; roles listing equals /admin/config roles reduced, no prompts/options; GET-only route; 401 without login before the handler. Without the router change: 1 failure, 13 errors."
   },
   {
-   "command": "selftest_memory, selftest_interoperability, selftest_reliability, selftest_verified_delivery, selftest_sessions, selftest_memory_backend, selftest_context, integration_sessions, integration_interoperability, integration_deletion_lifecycle, integration_context (SQLite), selftest_control_flow, check_control_flow, ruff, router.py --check --pure, check_adr_index, check_pinned_references",
+   "command": "selftest_vram_real, selftest_admin_networks, selftest_memory, ruff, check_control_flow, check_adr_index",
    "result": "passed",
    "evidence": "all green; control flow 0 findings."
   },
   {
    "command": "every python test/... and tools/... command of all workflows (Windows)",
    "result": "passed",
-   "evidence": "106 commands, 2 failed, neither a real failure: lock_requirements.py outdated refuses Windows by design (passes on Linux, PR 213); the new CI step failed only because the local runner passed its trailing YAML comment as unittest arguments (YAML drops it in CI); the comment now has its own line and the step passes (22 tests, 9 PostgreSQL skipped)."
+   "evidence": "106 commands, 1 failed: lock_requirements.py outdated refuses Windows by design (passes on Linux)."
   },
   {
    "command": "python test/run_tests.py (end-to-end suite)",
    "result": "passed",
-   "evidence": "337 PASS, 0 failures; run before the final sync-gateway change, which E2E does not exercise (the review and gateway self-tests were rerun after it)."
+   "evidence": "337 PASS, 0 failures."
   },
   {
    "command": "python test/check_public_changes.py",
@@ -86,17 +64,10 @@
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
    "result": "passed",
    "evidence": "run after staging this record."
-  },
-  {
-   "command": "PostgreSQL half of selftest_memory_review (migration 7, new statements)",
-   "result": "not_run",
-   "evidence": "no disposable PostgreSQL locally; CI's sessions-postgres job runs it on this push."
   }
  ],
  "limitations": [
-  "PostgreSQL migration 7 and the new statements on PostgreSQL run only in CI (sessions-postgres).",
-  "No real Hindsight or Hermes: the synthetic backend records deliveries.",
-  "The router container image runs the new self-test only in CI.",
-  "A reviewer's approval is judgement, not proof of truth; facts already in a bank before review was enabled stay until a curator deletes them."
+  "Not measured on a real GPU node: the measurement path itself (_measure_real) is unchanged apart from the extra contexts and is covered by selftest_vram_real; the test bench's own switch to the new options is not part of this repository.",
+  "The model test bench's wish for a fact 'model unloaded and process RAM freed' is not addressed here: it needs the agent to report runner process memory (protocol change) and is proposed separately."
  ]
 }

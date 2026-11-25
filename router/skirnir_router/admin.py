@@ -56,6 +56,20 @@ async def handle_asset(request):
     return web.FileResponse(path, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
 
 
+def roles_lean():
+    """ADR-0147: which model each role runs at which context, in tier order - the same shape as `roles` in
+    GET /admin/config, reduced to exposed_as and per tier model, num_ctx and (for a cloud tier) cloud. No prompts
+    (system_append), options, canary or shadow, nothing else of the configuration."""
+    return {r["name"]: {"exposed_as": r["exposed"],
+                        "tiers": [{"model": t["model"], "num_ctx": t["num_ctx"], **({"cloud": t["cloud"]} if t.get("cloud") else {})}
+                                  for t in r["tiers"]]} for r in state.CFG.roles.values()}
+
+
+async def handle_roles(request):
+    """GET /admin/roles: the roles as role -> model@context, read only (ADR-0147)."""
+    return web.json_response({"version": VERSION, "roles": roles_lean()}, headers={"Cache-Control": "no-store"})
+
+
 async def handle_config_get(request):
     ov = config.read_overrides()
     base_models = set((state.CFG.base().get("models") or {}))
