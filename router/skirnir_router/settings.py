@@ -264,7 +264,8 @@ C = "router.client_auth.clients.*."
 _e(C + "ip", "iplist", "Quell-IPs", "Identitaet ueber die Absenderadresse fuer Clients, die keinen Header schicken koennen (Komma-getrennt); leer = nur Secret", "Clients", [], nullable=True,
    label_en="Source IPs", help_en="identity via the sender address for clients that cannot send a header (comma-separated); empty = secret only")
 _e(C + "roles", "list", "Rollen", "erlaubte Rollen, * = alle", "Clients", ["*"], choices="roles", label_en="Roles", help_en="allowed roles, * = all")
-_e(C + "models", "bool", "konkrete Modelle", "darf konkrete Modellnamen rufen", "Clients", True, label_en="concrete models", help_en="may call concrete model names")
+_e(C + "models", "modelgrant", "konkrete Modelle", "* = alle konkreten Modellnamen, leer = keine, sonst Komma-Liste der erlaubten (ADR-0140)",
+   "Clients", False, label_en="concrete models", help_en="* = every concrete model name, empty = none, else a comma list of the allowed ones (ADR-0140)")
 _e(C + "requests_per_minute", "int", "Anfragen/min", "leer = unbegrenzt", "Clients", None, min=1, max=100000, nullable=True, label_en="Requests/min", help_en="empty = unlimited")
 _e(C + "max_concurrent", "int", "gleichzeitige Anfragen", "hoechstens so viele Anfragen dieses Clients gleichzeitig, weitere bekommen 429 (leer = 4)", "Clients", None,
    min=1, max=256, nullable=True, label_en="Concurrent requests", help_en="at most this many requests of this client at a time, more get 429 (empty = 4)")
@@ -382,6 +383,11 @@ def coerce(path, value, c):
             if bad:
                 return invalid(f"settings.{path}: unknown role(s) {bad}")
         return [x.strip() for x in value] or spec.get("default") or []
+    if t == "modelgrant":   # ADR-0140: "*" = true, "" = false, "a, b" = allowlist; JSON true/false/list as they are
+        if isinstance(value, str):
+            text = value.strip()
+            value = True if text == "*" else [x.strip() for x in text.split(",") if x.strip()] if text else False
+        return values.model_grant(value, f"settings.{path}")
     if t == "iplist":
         if isinstance(value, str):
             value = [x.strip() for x in value.replace(";", ",").split(",") if x.strip()]

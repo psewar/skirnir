@@ -104,7 +104,7 @@ def clients_view():
         th = c.get("token_sha256") or ""
         out[name] = {"source": "config.yaml" if name in base else "ui", "has_token": bool(th), "token_prefix": th[:8],
                      "token_rotated": (ov.get(name) or {}).get("token_rotated") or c.get("token_rotated"), "created": c.get("created"),
-                     "ip": c.get("ip") or [], "roles": c.get("roles") or ["*"], "models": c.get("models") is True,
+                     "ip": c.get("ip") or [], "roles": c.get("roles") or ["*"], "models": c.get("models", False),
                      "requests_per_minute": c.get("requests_per_minute"), "max_priority": c.get("max_priority"),
                      "max_concurrent": c.get("max_concurrent"), "max_body_mib": c.get("max_body_mib"),
                      "cloud": c.get("cloud", True), "data_class": c.get("data_class"), "note": c.get("note"),
@@ -128,9 +128,12 @@ def _client_spec(name, v):
             return problem
     if v.get("roles"):
         spec["roles"] = [str(x).strip() for x in (v["roles"] if isinstance(v["roles"], list) else str(v["roles"]).split(",")) if str(x).strip()]
-    for k in ("models", "cloud"):
-        if v.get(k) is not None:
-            spec[k] = bool(v[k])
+    if v.get("models") is not None:   # ADR-0140: true, false or an allowlist of concrete model names
+        spec["models"] = values.model_grant(v["models"], f"client {name}: models")
+        if failed(spec["models"]):
+            return spec["models"]
+    if v.get("cloud") is not None:
+        spec["cloud"] = bool(v["cloud"])
     for k in ("requests_per_minute", "max_concurrent", "max_body_mib"):
         if v.get(k) is not None:
             spec[k] = values.number(v[k], f"client {name}: {k}", integer=True)

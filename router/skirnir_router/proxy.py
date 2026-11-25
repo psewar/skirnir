@@ -1010,10 +1010,10 @@ def tags_list(request):
         out.append({"name": exposed, "model": exposed, "modified_at": d.get("modified_at", "2026-01-01T00:00:00Z"),
                     "size": d.get("size", 0), "digest": d.get("digest", "router-" + role["name"]),
                     "details": d.get("details", {})})
-    if state.CFG.expose_concrete and auth.client_grant(request, None, concrete=True) is None:
+    if state.CFG.expose_concrete:
         for n in state.NODES.values():
-            for m, d in n.model_details.items():
-                if m not in seen:
+            for m, d in n.model_details.items():   # ADR-0140: each concrete name the client may use (true or allowlist)
+                if m not in seen and auth.client_grant(request, {"name": m, "exposed": m}, concrete=True) is None:
                     seen.add(m)
                     out.append(d)
     decider = decision.active()
@@ -1066,12 +1066,12 @@ async def handle_ps(request):
     for exposed, role in state.CFG.roles.items():
         for t in role["tiers"]:
             concrete_to_role.setdefault(t["model"], exposed)
-    concrete = auth.client_grant(request, None, concrete=True) is None
     out = []
     for n in state.NODES.values():
         for m, gib in n.loaded.items():
             role = concrete_to_role.get(m) or next((r for c, r in concrete_to_role.items() if n.same_blob(m, c)), m)
             granted = role in state.CFG.roles and auth.client_grant(request, state.CFG.roles[role], concrete=False) is None
+            concrete = auth.client_grant(request, {"name": m, "exposed": m}, concrete=True) is None   # ADR-0140: per model
             size = {"size_vram": int(gib * GIB), "size": int(gib * GIB)}
             if concrete:   # a role the client may not use is not named; the concrete model is
                 out.append({"name": role if granted or role not in state.CFG.roles else m, "model": m, "node": n.name, **size})

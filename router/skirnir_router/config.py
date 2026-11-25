@@ -16,7 +16,7 @@ from .context_config import ContextConfig, parse_context_config
 from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
 from .waker_config import FIELDS as WAKER_FIELDS, check_choice as check_waker_choice, parse_wakers
-from .values import egress_url, ip_network
+from .values import egress_url, ip_network, model_grant
 from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
 from . import cost_keys
 from . import settings as settings_mod
@@ -480,8 +480,11 @@ class Config:
             spec["roles"] = [str(x) for x in (spec.get("roles") or ["*"])]
             # ADR-0052: concrete model names only with an explicit grant. A missing key used to mean true (ADR-0046);
             # warn so an operator sees which clients lost concrete names with this release.
-            if "models" in spec and type(spec["models"]) is not bool:
-                return invalid(f"client_auth.clients.{name}.models must be true or false")
+            if "models" in spec:   # ADR-0140: true, false or an allowlist of concrete model names
+                grant = model_grant(spec["models"], f"client_auth.clients.{name}.models")
+                if failed(grant):
+                    return grant
+                spec["models"] = grant
             if "models" not in spec and spec.get("inference", True) is not False:
                 log.warning("client_auth.clients.%s: no 'models' setting - concrete model names are denied (ADR-0052); "
                             "set models: true to keep them", name)

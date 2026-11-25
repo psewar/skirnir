@@ -11,7 +11,7 @@ from collections import deque
 
 from aiohttp import web
 
-from . import state
+from . import state, values
 from .common import (AUDIT_LOG_KEEP_DEFAULT, BODY_PREREAD, BODY_READ, BODY_TOO_LARGE, anthropic_error, basic_credentials, log, ollama_error,
                      open_private, openai_error, read_body_bounded, with_body_limit)
 from .outcome import Problem
@@ -280,17 +280,21 @@ def inference_refusal(spec, request):
 
 
 def client_grant(request, role, concrete):
-    """None when the request's client may use this role (concrete=False) or concrete model names (concrete=True; role
-    is then not read), else the reason. No side effects: model listings filter with it (ADR-0131). Unauthenticated
-    requests (observe) have no restrictions."""
+    """None when the request's client may use this role (concrete=False) or this concrete model (concrete=True: role is
+    the concrete model's role, its name the model), else the reason. No side effects: model listings filter with it
+    (ADR-0131). Unauthenticated requests (observe) have no restrictions."""
     name = request.get("client")
     if not name:
         return None
     c = (client_auth_cfg().get("clients") or {}).get(name) or {}
     if concrete:
-        # ADR-0052: concrete names need an explicit grant; the router's own UI client keeps them.
-        if name == state.INTERNAL_CLIENT or c.get("models", False) is True:
+        # ADR-0140 (supersedes ADR-0052): concrete names need an explicit grant, all (true) or listed ones; the router's
+        # own UI client keeps them all.
+        grant = True if name == state.INTERNAL_CLIENT else c.get("models", False)
+        if values.model_granted(role["name"] if role else None, grant):
             return None
+        if isinstance(grant, list):
+            return f"client {name}: concrete model {role['name'] if role else ''} not in its models allowlist"
         return f"client {name}: concrete model names not allowed (roles only)"
     roles = c.get("roles") or ["*"]
     if "*" in roles or role["name"] in roles or role["exposed"] in roles:

@@ -4,6 +4,7 @@ The only places where the reference parsers for numeric text and IP addresses ma
 checks are explicit tests (AGENTS.md "Explicit control flow")."""
 import ipaddress
 import math
+import re
 
 from yarl import URL
 
@@ -38,6 +39,42 @@ def ip_address(value, what):
         return str(ipaddress.ip_address(str(value).strip()))
     except ValueError:  # exception-ok: ipaddress is the reference parser for IPv4/IPv6 text
         return invalid(f"{what}: {value!r} is not an IP address")
+
+
+MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}")   # a concrete model name as Ollama and the catalogue write it
+MAX_MODEL_GRANT = 200
+
+
+def model_grant(value, what):
+    """clients.<c>.models (ADR-0140): true (every concrete name), false (none) or a list of concrete model names (an
+    allowlist; an empty list is false). Returns that value or a Problem 400."""
+    if value is True or value is False:
+        return value
+    if not isinstance(value, list):
+        return invalid(f"{what} must be true, false or a list of concrete model names")
+    if len(value) > MAX_MODEL_GRANT:
+        return invalid(f"{what}: at most {MAX_MODEL_GRANT} model names")
+    names = []
+    for item in value:
+        if not isinstance(item, str) or not MODEL_NAME.fullmatch(item.strip()):
+            return invalid(f"{what}: {item!r} is not a concrete model name")
+        if item.strip() not in names:
+            names.append(item.strip())
+    return names or False
+
+
+def _tagged(name):
+    return name if ":" in name.rsplit("/", 1)[-1] else name + ":latest"
+
+
+def model_granted(model, grant):
+    """Whether a concrete model name is covered by a grant (true, false or an allowlist); a name without a tag means
+    :latest on both sides, as Ollama resolves it."""
+    if grant is True:
+        return True
+    if not isinstance(grant, list) or not isinstance(model, str):
+        return False
+    return _tagged(model) in {_tagged(g) for g in grant}
 
 
 def ip_network(value, what):

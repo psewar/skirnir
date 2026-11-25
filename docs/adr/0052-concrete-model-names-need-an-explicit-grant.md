@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0140
 date: 2026-11-08
 decision-makers: operator
 ---
