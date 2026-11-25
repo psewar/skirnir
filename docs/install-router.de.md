@@ -29,7 +29,7 @@ sudo bash router/install.sh --check    # nur melden, was fehlt oder falsch ist, 
 Bevor es etwas ändert, prüft das Skript: root, Debian/Ubuntu, Python 3.11 oder neuer, ein vollständiger Quellordner. Dann
 
 1. installiert es fehlende Pakete mit `apt`,
-2. ersetzt es die Programmdateien in `/opt/skirnir-router` (`router.py`, das Paket `skirnir_router/`, `ui.html` und `ui.js`, die
+2. ersetzt es die Programmdateien in `/opt/skirnir-router` (`router.py`, das Paket `skirnir_router/`, `ui.html`, `ui.js` und `ui.css`, die
    Beispielkonfigurationen, `decision-tfidf.json`, `render-env.sh` …),
 3. legt es das venv `/opt/skirnir-router/venv` an (`--system-site-packages`); `skirnir_router/pydeps.py` nennt die
    Anforderungen aus `requirements-session.txt`, die die Distribution nicht erfüllt, und pip installiert genau diese aus

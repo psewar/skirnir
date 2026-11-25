@@ -35,7 +35,7 @@ RUN python -m pip install --no-cache-dir --require-hashes --no-deps --only-binar
 
 # Program files as router/install.sh copies them; owned by root, so the router cannot change its own code.
 COPY skirnir_router /opt/skirnir-router/skirnir_router
-COPY router.py ui.html ui.js skirnir.png favicon.png config.example.yaml config.minimal.yaml decision-tfidf.json \
+COPY router.py ui.html ui.js ui.css skirnir.png favicon.png config.example.yaml config.minimal.yaml decision-tfidf.json \
      /opt/skirnir-router/
 COPY --chmod=0755 container/entrypoint.sh container/healthcheck.py /opt/skirnir-router/container/
 

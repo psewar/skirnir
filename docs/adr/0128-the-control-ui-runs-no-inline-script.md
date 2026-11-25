@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: superseded by ADR-0130
 date: 2026-11-25
 decision-makers: maintainer (proposed by Claude)
 ---

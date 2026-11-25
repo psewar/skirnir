@@ -8,7 +8,7 @@
 
 *Overview in the local development environment (`test/dev_env.py`) with two fake nodes and synthetic traffic. The UI is available in English and German (toggle in the header).*
 
-`https://<name>:11435/`, login with a user from `control_auth.users`. One page ([router/ui.html](../router/ui.html) with its script [router/ui.js](../router/ui.js), no inline script), no
+`https://<name>:11435/`, login with a user from `control_auth.users`. One page ([router/ui.html](../router/ui.html) with its script [router/ui.js](../router/ui.js) and styles [router/ui.css](../router/ui.css), no inline script or style), no
 external libraries, six tabs:
 
 - **Overview:** the active **problems** (severity, code and text in the UI language, [below](#problems));

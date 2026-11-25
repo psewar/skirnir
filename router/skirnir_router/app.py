@@ -72,6 +72,7 @@ def build_apps():
     ctl.router.add_post("/admin/memory/reconcile-deletions", context_ops.handle_reconcile_deletions)   # ADR-0076
     ctl.router.add_get("/", admin.handle_ui)
     ctl.router.add_get("/ui.js", admin.handle_ui_script)   # ADR-0128: the UI's script is a file, not inline
+    ctl.router.add_get("/ui.css", admin.handle_ui_style)   # ADR-0130: so are its styles
     ctl.router.add_get(r"/{name:(skirnir\.png|favicon\.png|favicon\.ico)}", admin.handle_asset)
     ctl.router.add_post("/v1/heartbeat/{node}", poll.handle_heartbeat)   # Heartbeat injection with heartbeat_token (tests, diagnostics)
     ctl.router.add_get("/v1/tunnel", registry.handle_tunnel_v2)

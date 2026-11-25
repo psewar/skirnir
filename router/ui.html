@@ -5,81 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Skirnir</title>
 <link rel="icon" type="image/png" href="/favicon.png">
-<style>
-  :root { --bg:#0f1419; --card:#161c24; --line:#273241; --fg:#e6edf3; --muted:#8b98a8; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --acc:#58a6ff; --cloud:#c084fc; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, Segoe UI, sans-serif; }
-  header { padding:12px 22px; border-bottom:1px solid var(--line); display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; }
-  header h1 { margin:0; font-size:22px; } header .muted { color:var(--muted); }
-  header .lang { display:flex; gap:4px; align-items:center; align-self:center; color:var(--muted); } header .lang button.active { color:var(--acc); border-color:var(--acc); }
-  main { padding:18px 22px; display:grid; gap:18px; grid-template-columns: 1fr 1fr; }
-  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
-  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
-  section h2 { margin:0 0 10px; font-size:15px; }
-  .wide { grid-column: 1 / -1; }
-  table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
-  .badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; border:1px solid var(--line); color:var(--muted); margin:1px 2px 1px 0; }
-  .badge.cap { color:var(--fg); } .badge.cloud { color:var(--cloud); border-color:var(--cloud); }
-  .badge.open { color:var(--bad); border-color:var(--bad); } .badge.half_open { color:var(--warn); border-color:var(--warn); }
-  .state { font-weight:700; } .state.free { color:var(--ok); } .state.busy { color:var(--warn); } .state.offline { color:var(--bad); }
-  .loaded { color:var(--ok); } .cloudc { color:var(--cloud); }
-  .role { border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-bottom:10px; }
-  .role h3 { margin:0 0 6px; font-size:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .role h3 code { color:var(--acc); }
-  .tier { display:grid; grid-template-columns: 28px 1fr 110px 90px 90px; gap:6px; align-items:center; margin:3px 0; }
-  .exp { display:grid; grid-template-columns: 90px 1fr 110px 80px; gap:6px; align-items:center; margin:4px 0; font-size:12px; }
-  select, input[type=number], input[type=text], textarea { background:#0b0f14; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:4px 6px; font:inherit; }
-  input[type=number] { width:100%; } select { width:100%; }
-  button { background:#1f2a37; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:4px 10px; cursor:pointer; font:inherit; }
-  button:hover { border-color:var(--acc); } button.primary { background:#1f6feb; border-color:#1f6feb; } button.small { padding:1px 6px; font-size:12px; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
-  .muted { color:var(--muted); } .warn { color:var(--warn); } .bad { color:var(--bad); } .ok { color:var(--ok); }
-  pre { background:#0b0f14; border:1px solid var(--line); border-radius:4px; padding:8px; white-space:pre-wrap; max-height:260px; overflow:auto; font-size:12px; }
-  ul.problems { list-style:none; margin:0; padding:0; } ul.problems li { padding:2px 0; } ul.problems code { margin-right:6px; }
-  .decisions { max-height:60vh; overflow:auto; }
-  .decisions div { font-family: ui-monospace, Consolas, monospace; font-size:12px; padding:2px 0; border-bottom:1px dashed var(--line); }
-  .dec-ctl { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:4px 0 8px; font-size:13px; }
-  .dec-ctl input[type=text] { width:220px; }
-  #msg { min-height:18px; }
-  .tiles { display:grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap:12px; }
-  .tile { border:1px solid var(--line); border-radius:6px; padding:10px 12px; } .tile h4 { margin:0 0 6px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
-  .big { font-size:20px; font-weight:700; }
-  .bar { height:6px; background:#0b0f14; border:1px solid var(--line); border-radius:3px; overflow:hidden; margin-top:4px; } .bar i { display:block; height:100%; background:var(--acc); }
-  .bar.warn i { background:var(--warn); } .bar.bad i { background:var(--bad); }
-  header img { height:60px; width:auto; align-self:center; margin:-4px 0 -4px 0; border-radius:14px; }   /* Kachel-Logo (Skirnir, 2026-09-16): eigener dunkler Grund, keine helle Kachel mehr noetig */
-  nav.tabs { display:flex; gap:4px; padding:8px 22px 0; border-bottom:1px solid var(--line); background:var(--card); }
-  nav.tabs button { background:transparent; border:1px solid transparent; border-bottom:none; border-radius:6px 6px 0 0; padding:7px 14px; color:var(--muted); font-size:14px; }
-  nav.tabs button:hover { color:var(--fg); border-color:transparent; } nav.tabs button.active { color:var(--fg); background:var(--bg); border-color:var(--line); margin-bottom:-1px; padding-bottom:8px; }
-  nav.tabs button .dot { color:var(--warn); margin-left:4px; }
-  main section[data-tab] { display:none; } main[data-active="uebersicht"] section[data-tab="uebersicht"], main[data-active="rollen"] section[data-tab="rollen"],
-  main[data-active="katalog"] section[data-tab="katalog"], main[data-active="einstellungen"] section[data-tab="einstellungen"],
-  main[data-active="clients"] section[data-tab="clients"], main[data-active="agenten"] section[data-tab="agenten"] { display:block; }
-  .settings { display:grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap:12px; }
-  .srow { display:grid; grid-template-columns: 1fr 150px 26px; gap:6px; align-items:center; padding:3px 0; border-bottom:1px dashed var(--line); font-size:13px; }
-  .srow:last-child { border-bottom:none; } .srow .lbl { color:var(--fg); } .srow .base { color:var(--muted); font-size:11px; }
-  .srow.over .lbl { color:var(--acc); } .srow input[type=text] { width:100%; }
-  .srow .chk { display:flex; flex-wrap:wrap; gap:6px; font-size:12px; } .srow .chk label { white-space:nowrap; }
-  .sub { margin:8px 0 2px; font-size:12px; color:var(--cloud); font-weight:600; }
-  .charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:12px; margin-top:12px; }
-  canvas.spark { width:100%; height:46px; display:block; margin-top:4px; } canvas.chart { width:100%; height:190px; display:block; }
-  .legend span { margin-right:12px; font-size:12px; } .legend b { color:var(--fg); }
-  .client { border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
-  .client h3 { margin:0 0 6px; font-size:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .client .srow { grid-template-columns: 1fr 190px 26px; }
-  .tok { background:#0b0f14; border:1px solid var(--warn); border-radius:4px; padding:8px; margin:6px 0; font-size:12px; }
-  .tok code { font-family: ui-monospace, Consolas, monospace; word-break: break-all; color:var(--fg); font-size:13px; }
-  .newclient { display:grid; grid-template-columns: 1.2fr 1.4fr 1fr auto; gap:6px; align-items:center; margin-bottom:12px; }
-  .newmodel { display:grid; grid-template-columns: 1.4fr 1fr 1fr 80px 80px 90px auto; gap:6px; align-items:center; margin-top:8px; font-size:12px; }
-  .inl { width:70px !important; padding:2px 4px; font-size:12px; }
-</style>
+<link rel="stylesheet" href="ui.css">
 </head>
 <body>
 <header>
   <img src="/skirnir.png" alt="Skirnir">
   <h1>Skirnir</h1>
   <span class="muted" id="hdr">…</span>
-  <span class="muted" style="margin-left:auto">HA spricht <code>https://router.example.net:11434</code> · Rollen erscheinen dort als <code>&lt;rolle&gt;:latest</code></span>
+  <span class="muted ml-auto">HA spricht <code>https://router.example.net:11434</code> · Rollen erscheinen dort als <code>&lt;rolle&gt;:latest</code></span>
   <span class="lang" id="lang" title="Sprache / Language"><button class="small" data-lang="de" data-click="setLang" data-arg="de">DE</button>|<button class="small" data-lang="en" data-click="setLang" data-arg="en">EN</button></span>
 </header>
 <nav class="tabs" id="tabs">
@@ -92,13 +25,13 @@
 </nav>
 <main id="main" data-active="uebersicht">
   <section class="wide" data-tab="uebersicht">
-    <h2>Probleme <span class="muted" style="font-weight:normal">– dieselben wie das HA-Attribut problems und skirnir_problem in /metrics</span></h2>
+    <h2>Probleme <span class="muted fw-normal">– dieselben wie das HA-Attribut problems und skirnir_problem in /metrics</span></h2>
     <ul class="problems" id="problems"><li class="muted">–</li></ul>
   </section>
   <section class="wide" data-tab="uebersicht">
     <h2>Context Gateway / Memory</h2>
     <div class="tiles" id="context-services"><span class="muted">Status wird geladen / loading status</span></div>
-    <h2>Live <span class="muted" style="font-weight:normal">– aus <code>/metrics</code> alle 3 s; Verläufe der letzten 10 Minuten entstehen im Browser, „gesamt“ = seit Beginn der Aufzeichnung (metrics.json, überlebt Neustarts), Tage aus usage.json</span></h2>
+    <h2>Live <span class="muted fw-normal">– aus <code>/metrics</code> alle 3 s; Verläufe der letzten 10 Minuten entstehen im Browser, „gesamt“ = seit Beginn der Aufzeichnung (metrics.json, überlebt Neustarts), Tage aus usage.json</span></h2>
     <div class="tiles" id="live">
       <div class="tile"><h4>Anfragen / min</h4><div class="big" id="lv-rpm">–</div><canvas class="spark" id="sp-rpm"></canvas></div>
       <div class="tile"><h4>Antwort-Tokens / s</h4><div class="big" id="lv-tps">–</div><canvas class="spark" id="sp-tps"></canvas></div>
@@ -113,7 +46,7 @@
       <div class="tile"><h4>… nach Rolle</h4><canvas class="chart" id="ch-role"></canvas></div>
       <div class="tile"><h4>… nach Client</h4><canvas class="chart" id="ch-client"></canvas></div>
       <div class="tile"><h4>Tempo je Modell <span class="muted">– EWMA tok/s, Modell @ Knoten</span></h4><canvas class="chart" id="ch-tps"></canvas></div>
-      <div class="tile" style="grid-column:1 / -1"><h4>Effektiv genutzte Modelle <span class="muted">– Anfragen/min je konkretem Modell, letzte 10 Minuten, gestapelt; Legende = Anteil im 30-s-Fenster</span></h4><div class="legend" id="lv-models">–</div><canvas class="chart" id="ch-models"></canvas></div>
+      <div class="tile span-all"><h4>Effektiv genutzte Modelle <span class="muted">– Anfragen/min je konkretem Modell, letzte 10 Minuten, gestapelt; Legende = Anteil im 30-s-Fenster</span></h4><div class="legend" id="lv-models">–</div><canvas class="chart" id="ch-models"></canvas></div>
       <div class="tile"><h4>Anfragen gesamt nach Modell</h4><canvas class="chart" id="ch-model-share"></canvas></div>
       <div class="tile"><h4>Antwort-Tokens gesamt nach Modell</h4><canvas class="chart" id="ch-model-tokens"></canvas></div>
     </div>
@@ -122,24 +55,24 @@
   <section class="wide" data-tab="uebersicht">
     <h2>Knoten</h2>
     <table id="nodes"><thead><tr><th>Knoten</th><th>Zustand</th><th>GPU</th><th>VRAM frei / fremd</th><th title="laufende Anfragen / Admission-Grenze · wartende">Last</th><th>Geladen</th><th>Modelle (grün = geladen)</th></tr></thead><tbody></tbody></table>
-    <h2 style="margin-top:14px">Cloud-Anbieter <span class="muted" style="font-weight:normal">– Modelle im Katalog (<span class="cloudc">☁</span>), Stufe nur in Rollen, die es erlauben; Datenklasse, Credential-Scan und Budget begrenzen (README „Cloud")</span></h2>
+    <h2 class="mt-14">Cloud-Anbieter <span class="muted fw-normal">– Modelle im Katalog (<span class="cloudc">☁</span>), Stufe nur in Rollen, die es erlauben; Datenklasse, Credential-Scan und Budget begrenzen (README „Cloud")</span></h2>
     <table id="cloud"><thead><tr><th>Anbieter</th><th>Status</th><th>Modelle</th><th>Ausgaben Monat / Budget</th><th>Breaker</th><th>Region · Datenklasse max.</th></tr></thead><tbody></tbody></table>
   </section>
 
   <section class="wide" data-tab="agenten">
-    <h2>Registrierte Agenten <span class="muted" style="font-weight:normal">– jeder Agent meldet sich mit seinem Schlüssel; neue warten hier auf Freigabe. Fakten (GPU, VRAM, MAC) kommen vom Agenten, Policy (WOL, Gewicht, MQTT, gleichzeitige Anfragen) setzt du hier</span></h2>
-    <div class="muted" id="agentUpdate" style="margin:4px 0 6px"></div>
-    <div class="muted" id="ollamaUpdate" style="margin:4px 0 6px"></div>
+    <h2>Registrierte Agenten <span class="muted fw-normal">– jeder Agent meldet sich mit seinem Schlüssel; neue warten hier auf Freigabe. Fakten (GPU, VRAM, MAC) kommen vom Agenten, Policy (WOL, Gewicht, MQTT, gleichzeitige Anfragen) setzt du hier</span></h2>
+    <div class="muted m-4-0-6" id="agentUpdate"></div>
+    <div class="muted m-4-0-6" id="ollamaUpdate"></div>
     <table id="registry"><thead><tr><th>Knoten</th><th>Status</th><th>Rechner</th><th>GPU / VRAM</th><th>MAC (WOL)</th><th title="Desktop-Grundverbrauch ohne Ollama: gelernter Median; Policy-Wert überschreibt">Baseline</th><th>Policy</th><th></th></tr></thead><tbody></tbody></table>
   </section>
 
   <section data-tab="rollen">
-    <h2>Rollen <span class="muted" style="font-weight:normal">– Rangliste für Kaltstarts und Qualitätsobergrenze; ein geladenes Modell der Liste gewinnt (<em>warm zuerst</em>), Rang-1 wird nach einer Spielphase wieder vorgeladen; <em>busy_ok</em> darf auf einem Spiel-Rechner laufen; <span class="cloudc">☁</span> = Cloud-Stufe</span></h2>
+    <h2>Rollen <span class="muted fw-normal">– Rangliste für Kaltstarts und Qualitätsobergrenze; ein geladenes Modell der Liste gewinnt (<em>warm zuerst</em>), Rang-1 wird nach einer Spielphase wieder vorgeladen; <em>busy_ok</em> darf auf einem Spiel-Rechner laufen; <span class="cloudc">☁</span> = Cloud-Stufe</span></h2>
     <div id="roles"></div>
     <div class="row">
-      <input type="text" id="newRole" placeholder="neue Rolle, z. B. vision" style="width:200px">
+      <input type="text" id="newRole" placeholder="neue Rolle, z. B. vision" class="w-200">
       <button data-click="addRole">+ Rolle</button>
-      <label style="margin-left:auto"><input type="checkbox" id="exposeConcrete"> konkrete Modellnamen auch in HA anbieten</label>
+      <label class="ml-auto"><input type="checkbox" id="exposeConcrete"> konkrete Modellnamen auch in HA anbieten</label>
     </div>
     <div class="row">
       <button class="primary" data-click="save">Speichern &amp; live schalten</button>
@@ -150,20 +83,20 @@
   <section data-tab="rollen">
     <h2>Ausprobieren</h2>
     <div class="row">
-      <select id="tryModel" style="width:220px"></select>
-      <input type="number" id="tryCtx" placeholder="num_ctx (optional)" style="width:140px">
-      <select id="tryExec" style="width:150px" title="routing.execution: auto = Rollenreihenfolge, local = nie Cloud, cloud = Cloud-Stufen zuerst"><option value="">execution: auto</option><option value="local">execution: local</option><option value="cloud">execution: cloud</option></select>
-      <select id="tryClass" style="width:170px" title="routing.data_class: Deklaration; Cloud nur bis zur konfigurierten Grenze"></select>
-      <select id="tryPrio" style="width:150px" title="routing.priority"><option value="">Priorität: Rolle</option><option value="interactive">interactive</option><option value="normal">normal</option><option value="batch">batch</option></select>
+      <select id="tryModel" class="w-220"></select>
+      <input type="number" id="tryCtx" placeholder="num_ctx (optional)" class="w-140">
+      <select id="tryExec" class="w-150" title="routing.execution: auto = Rollenreihenfolge, local = nie Cloud, cloud = Cloud-Stufen zuerst"><option value="">execution: auto</option><option value="local">execution: local</option><option value="cloud">execution: cloud</option></select>
+      <select id="tryClass" class="w-170" title="routing.data_class: Deklaration; Cloud nur bis zur konfigurierten Grenze"></select>
+      <select id="tryPrio" class="w-150" title="routing.priority"><option value="">Priorität: Rolle</option><option value="interactive">interactive</option><option value="normal">normal</option><option value="batch">batch</option></select>
       <label class="muted" title="thinking-Modelle (glm, qwen3.6, gpt-oss, granite) erzeugen sonst hunderte unsichtbare Denk-Token vor der Antwort"><input type="checkbox" id="tryThink"> Nachdenken (think)</label>
       <button class="primary" data-click="tryIt">Senden</button>
     </div>
-    <textarea id="tryPrompt" rows="3" style="width:100%">Antworte in einem Satz: Was ist ein Router?</textarea>
+    <textarea id="tryPrompt" rows="3" class="w-full">Antworte in einem Satz: Was ist ein Router?</textarea>
     <pre id="tryOut" class="muted">Ergebnis erscheint hier: gewählter Knoten, Stufe, Modell, Kontext, Dauer, übersprungene Stufen mit Grund, Antwort.</pre>
-    <h2 style="margin-top:14px">Lasttest <span class="muted" style="font-weight:normal">– Modell und Prompt von oben, n Anfragen mit Parallelität c durch den Router; Sonden mit Priorität <em>interactive</em> alle 2 s zeigen, ob Sprachbefehle den Stau überholen</span></h2>
+    <h2 class="mt-14">Lasttest <span class="muted fw-normal">– Modell und Prompt von oben, n Anfragen mit Parallelität c durch den Router; Sonden mit Priorität <em>interactive</em> alle 2 s zeigen, ob Sprachbefehle den Stau überholen</span></h2>
     <div class="row">
-      <label class="muted">n <input type="number" id="ltN" value="60" min="1" max="300" style="width:70px"></label>
-      <label class="muted">parallel <input type="number" id="ltC" value="6" min="1" max="16" style="width:60px"></label>
+      <label class="muted">n <input type="number" id="ltN" value="60" min="1" max="300" class="w-70"></label>
+      <label class="muted">parallel <input type="number" id="ltC" value="6" min="1" max="16" class="w-60"></label>
       <label class="muted" title="alle 2 s eine Anfrage mit routing.priority interactive - ihre Wartezeit im Vergleich zeigt die Prioritätswirkung"><input type="checkbox" id="ltProbe" checked> Priorität prüfen</label>
       <button class="primary" id="ltBtn" data-click="loadTest">Lasttest starten</button>
       <span class="muted" id="ltMsg"></span>
@@ -172,7 +105,7 @@
   </section>
 
   <section class="wide" data-tab="clients">
-    <h2>Clients <span class="muted" style="font-weight:normal">– wer den API-Port 11434 rufen darf. Identität über Secret (Bearer) und/oder Quell-IP; Rollen, Datenklasse und Cloud-Freigabe je Client. Ein neues Secret zeigt der Router genau einmal im Klartext, gespeichert wird nur der Hash</span></h2>
+    <h2>Clients <span class="muted fw-normal">– wer den API-Port 11434 rufen darf. Identität über Secret (Bearer) und/oder Quell-IP; Rollen, Datenklasse und Cloud-Freigabe je Client. Ein neues Secret zeigt der Router genau einmal im Klartext, gespeichert wird nur der Hash</span></h2>
     <div class="newclient">
       <input type="text" id="ncName" placeholder="neuer Client, z. B. pi-voice (a-z, 0-9, -, _)">
       <input type="text" id="ncIp" placeholder="Quell-IP(s), optional, Komma-getrennt">
@@ -180,15 +113,15 @@
       <button class="primary" data-click="addClient">+ Client anlegen &amp; Secret erzeugen</button>
     </div>
     <div class="settings" id="clients"></div>
-    <div class="row" style="margin-top:10px">
+    <div class="row mt-10">
       <button class="primary" data-click="save">Speichern &amp; live schalten</button>
       <span id="cmsg" class="muted"></span>
     </div>
   </section>
 
   <section class="wide" data-tab="katalog">
-    <h2>Modellkatalog <span class="muted" style="font-weight:normal">– lokale Modelle messen und benchmarken, Cloud-Modelle mit Preisen pflegen</span></h2>
-    <p class="muted" style="margin:0 0 8px">
+    <h2>Modellkatalog <span class="muted fw-normal">– lokale Modelle messen und benchmarken, Cloud-Modelle mit Preisen pflegen</span></h2>
+    <p class="muted m-0-0-8">
       <b>VRAM-Bedarf = Gewichte + Kontext-Kosten × Kontextgröße + <span id="ovh">0.8</span> GiB Reserve</b>. Gemessen wird bei 8k und 32k Kontext auf einem freien Knoten.
       Cloud-Modelle (<span class="cloudc">☁</span>) brauchen kein VRAM; ihre Preise (je 1 Mio. Tokens) speisen Budget und Usage.
     </p>
@@ -206,21 +139,21 @@
   </section>
 
   <section class="wide" data-tab="einstellungen">
-    <h2>Einstellungen <span class="muted" style="font-weight:normal">– alles, was der Router zur Laufzeit liest; <span style="color:var(--acc)">blau</span> = in der UI geändert (roles.yaml), ↺ = zurück auf config.yaml. Ports, TLS, Logins, MQTT, Identitäten (Tokens/IP) und Anbieter-Endpunkte bleiben Deploy-Sache</span></h2>
+    <h2>Einstellungen <span class="muted fw-normal">– alles, was der Router zur Laufzeit liest; <span class="acc">blau</span> = in der UI geändert (roles.yaml), ↺ = zurück auf config.yaml. Ports, TLS, Logins, MQTT, Identitäten (Tokens/IP) und Anbieter-Endpunkte bleiben Deploy-Sache</span></h2>
     <div class="settings" id="settings"></div>
-    <div class="row" style="margin-top:10px">
+    <div class="row mt-10">
       <button class="primary" data-click="save">Speichern &amp; live schalten</button>
       <span id="smsg" class="muted"></span>
     </div>
   </section>
 
   <section class="wide" data-tab="uebersicht">
-    <h2>Betrieb <span class="muted" style="font-weight:normal">– Nutzung heute, Warteschlange, Scheduler, Build</span></h2>
+    <h2>Betrieb <span class="muted fw-normal">– Nutzung heute, Warteschlange, Scheduler, Build</span></h2>
     <div class="tiles" id="ops"></div>
   </section>
 
   <section class="wide" data-tab="uebersicht">
-    <h2>Letzte Entscheidungen <span class="muted" style="font-weight:normal">– <span class="cloudc">☁</span> Cloud · 🐤 Canary · 👥 Client · Grund: warm-first / rank / affinity / canary / cloud</span></h2>
+    <h2>Letzte Entscheidungen <span class="muted fw-normal">– <span class="cloudc">☁</span> Cloud · 🐤 Canary · 👥 Client · Grund: warm-first / rank / affinity / canary / cloud</span></h2>
     <div class="dec-ctl">
       <label>Umfang <select id="decN" data-change="setDecN"><option>50</option><option>200</option><option>500</option><option>1000</option><option>2000</option></select></label>
       <label><input type="checkbox" id="decEventsOnly" data-change="renderDecisions"> nur Ereignisse (ohne Routen)</label>

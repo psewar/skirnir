@@ -19,6 +19,7 @@ from .common import VERSION, GIB, log, read_json, split_listen
 
 UI_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui.html")   # ui.html sits next to router.py, one level above the package
 UI_SCRIPT_PATH = os.path.join(os.path.dirname(UI_PATH), "ui.js")   # the page's script (ADR-0128: no inline script)
+UI_STYLE_PATH = os.path.join(os.path.dirname(UI_PATH), "ui.css")   # the page's styles (ADR-0130: no inline style)
 
 
 async def handle_ui(request):
@@ -33,6 +34,14 @@ async def handle_ui_script(request):
         return web.Response(text="ui.js missing", status=404)
     return web.FileResponse(UI_SCRIPT_PATH, headers={"Content-Type": "text/javascript; charset=utf-8",
                                                      "Cache-Control": "no-store"})
+
+
+async def handle_ui_style(request):
+    """The UI's style sheet, uncached like the page and its script, for the same reason."""
+    if not os.path.exists(UI_STYLE_PATH):
+        return web.Response(text="ui.css missing", status=404)
+    return web.FileResponse(UI_STYLE_PATH, headers={"Content-Type": "text/css; charset=utf-8",
+                                                    "Cache-Control": "no-store"})
 
 
 ASSETS = {"skirnir.png": "skirnir.png", "favicon.png": "favicon.png", "favicon.ico": "favicon.png"}   # Operator logo (tile since 2026-09-16; previously Raven) cut out + icon with tile
