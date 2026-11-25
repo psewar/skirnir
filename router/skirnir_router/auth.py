@@ -414,9 +414,16 @@ def _basic_fail_src(remote, note):
 
 @web.middleware
 async def basic_auth_middleware(request, handler):
-    """UI and /admin/* require Basic Auth; the agent heartbeat (/v1/...) stays on the token."""
+    """UI, /admin/* and /metrics require Basic Auth and, with router.admin_networks, an address from those networks
+    (ADR-0143). The agents' paths (/v1/...) keep their own checks: tunnel identity, enrollment networks, heartbeat token.
+    aiohttp matches routes on the literal path (no dot-segment folding), so no /v1/ path reaches an admin handler."""
     if request.path.startswith("/v1/"):
         return await handler(request)
+    networks = getattr(state.CFG, "admin_networks", None) or []
+    if networks and not values.in_networks(request.remote, networks):
+        # before any login check: an address outside gets no password attempt and uses no failure slot
+        return web.json_response({"error": "admin access is not allowed from this address (router.admin_networks)"},
+                                 status=403)
     if not state.CFG.control_users:
         # ADR-0053: a local reverse proxy also arrives from loopback, so loopback alone is no identity. Unauthenticated
         # development access needs control_auth.allow_unauthenticated_loopback and a literal loopback listener.

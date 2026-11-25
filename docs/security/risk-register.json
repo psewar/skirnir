@@ -49,12 +49,14 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Cross-site admin request or same-origin compromise.",
-      "controls": "Non-simple header and Fetch Metadata checks. Since router 0.22.2 (ADR-0065) inline-handler values go through js() (JSON string literal, HTML-escaped), esc() escapes the single quote, the control port sends a CSP (connect-src 'self', frame-ancestors 'none', no foreign code) and X-Frame-Options DENY, both ports nosniff and no referrer, and no CORS header. Since router 0.42.2 (ADR-0128) the UI runs no inline script: its script is /ui.js, elements name actions in data-* attributes with JSON arguments built by args(), and the policy is script-src 'self' (no 'unsafe-inline', no 'unsafe-eval'). Since router 0.42.5 (ADR-0130) the UI uses no inline style either: its styles are /ui.css, style attributes became utility classes, computed sizes are set through CSSOM, and the policy is style-src 'self'.",
-      "next_action": "Segment admin access.",
+      "controls": "Non-simple header and Fetch Metadata checks. Since router 0.22.2 (ADR-0065) inline-handler values go through js() (JSON string literal, HTML-escaped), esc() escapes the single quote, the control port sends a CSP (connect-src 'self', frame-ancestors 'none', no foreign code) and X-Frame-Options DENY, both ports nosniff and no referrer, and no CORS header. Since router 0.42.2 (ADR-0128) the UI runs no inline script: its script is /ui.js, elements name actions in data-* attributes with JSON arguments built by args(), and the policy is script-src 'self' (no 'unsafe-inline', no 'unsafe-eval'). Since router 0.42.5 (ADR-0130) the UI uses no inline style either: its styles are /ui.css, style attributes became utility classes, computed sizes are set through CSSOM, and the policy is style-src 'self'. Since router 0.42.18 (ADR-0143) router.admin_networks limits the web UI, /admin/* and /metrics to the listed networks, refused with 403 before the login and outside the UI's reach, while the agents keep /v1/; the posture report names an admin part that answers every network (admin_from_any_network).",
+      "next_action": "Set router.admin_networks in the deployment to the admin machines, Prometheus and a reverse proxy's address (127.0.0.1/32 for deploy.py and a local proxy).",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_browser.py",
-        "test/selftest_security.py"
+        "test/selftest_security.py",
+        "test/selftest_posture.py",
+        "test/selftest_admin_networks.py"
       ],
       "validation_gap": "V3: headers, CORS, the script policy and the absence of inline handlers are tested in CI; the style policy and the absence of style attributes and elements likewise; that injected inline handlers, scripts and styles are blocked, every UI action still works and every element looks as before was checked in a real browser (2026-11-25), not in CI."
     },

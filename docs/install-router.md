@@ -138,6 +138,13 @@ The start log lists the posture findings (lines `posture …`). Then open `https
 - **11434**: from the clients (Home Assistant, Node-RED, workstations).
 - The default `control_listen` without a configuration entry is `127.0.0.1:11435` ([ADR-0040](adr/0040-authentication-fails-closed-control-port-on-loopback-by-default.md));
   set it (`0.0.0.0:11435` in `config.minimal.yaml`) for remote agents and browsers.
+- **Admin part of 11435**: the agents need the port, but the web UI, `/admin/*` and `/metrics` need not answer their
+  networks. List the admin machines, Prometheus and a reverse proxy's address in `router.admin_networks` (CIDR, for
+  example `[192.0.2.0/24, 127.0.0.1/32]`). Every other address then gets 403 before the login, while `/v1/` (tunnel,
+  agent binary, heartbeat) stays reachable. Include `127.0.0.1/32` when `deploy.py` or a local reverse proxy asks from
+  the router host; behind a proxy the router sees the proxy's address, so segment there. Empty or absent means any
+  address, as before. A loopback `control_listen` needs a loopback entry, otherwise the configuration is refused. Set
+  it in `config.yaml`; the web UI cannot change it ([ADR-0143](adr/0143-the-admin-part-of-the-control-port-answers-only-configured-networks.md), TM-03).
 
 ## Secrets
 
@@ -198,7 +205,7 @@ decision engine.
 | `router.py --help` | List the commands |
 | `router.py --init <dir> [--public-url URL] [--user NAME] [--client NAME] [--cert PEM] [--key PEM]` | Write a first, safe configuration (see above) |
 | `router.py --check <config> [--pure] [--files]` | Validate a configuration; unknown keys are reported with a suggestion. `--files`: the files it names are readable. Exit code 0 = ok, 2 = invalid |
-| `router.py --posture <config> [--pure]` | What the configuration allows that the threat model calls risky (observe mode, unlocked policy, shared or example tokens, address-only clients, control port without login or TLS, API port without TLS, plaintext backends …), each with severity and next step ([ADR-0064](adr/0064-report-the-security-posture-as-facts.md)). Exit code 0 also with findings. The start log additionally reports TLS files the running router could change or replace (`tls_files_changeable`, [ADR-0083](adr/0083-router-reports-tls-files-it-could-change.md)); the command runs outside the unit and cannot see that |
+| `router.py --posture <config> [--pure]` | What the configuration allows that the threat model calls risky (observe mode, unlocked policy, shared or example tokens, address-only clients, control port without login or TLS or with an admin part open to every network, API port without TLS, plaintext backends …), each with severity and next step ([ADR-0064](adr/0064-report-the-security-posture-as-facts.md)). Exit code 0 also with findings. The start log additionally reports TLS files the running router could change or replace (`tls_files_changeable`, [ADR-0083](adr/0083-router-reports-tls-files-it-could-change.md)); the command runs outside the unit and cannot see that |
 | `router.py --hash` | PBKDF2 hash for `control_auth.users`; asks without echo |
 
 `--pure` ignores an adjacent `roles.yaml` (changes made in the web UI). Run the commands with the venv's Python
