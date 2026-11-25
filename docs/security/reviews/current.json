@@ -3,7 +3,7 @@
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
  "base_sha": "8583271dc778564e821aa6bd027cd0fd221b3415",
- "change_digest": "7183379083d90ee328c6e21e2a56b6f1f2946e7df18f30769c60b35951c1fa16",
+ "change_digest": "148e1dd8daed22559336e5010cfaa8cc3b6832c91bd74bae5d57a5f6e80e4c1e",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   ".github/workflows/security.yml",
@@ -15,6 +15,7 @@
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
   "test/selftest_lock_freshness.py",
+  "test/smoke_container.sh",
   "tools/security/lock_requirements.py",
   "docs/security/reviews/current.json",
   "router/skirnir_router/pydeps.py",
@@ -31,7 +32,7 @@
  "boundaries": [
   "B9"
  ],
- "summary": "CI/tooling change, router and agent unchanged: implements TM-16's next action 'Refresh the Python locks regularly' as a check (ADR-0144, proposed). Reviewed against the previous trusted versions of tools/security/lock_requirements.py and .github/workflows/security.yml (flagged for explicit maintainer review). lock_requirements.py: cmd_resolve's pip invocation moved unchanged into pip_resolve (same flags: --dry-run, --only-binary=:all: so no sdist build code runs, CPython 3.11, manylinux x86_64; only the Linux refusal text is reworded); resolve's output is byte-for-byte the same path. New read-only command outdated: pip_resolve of CI_REQS, compares router, container and CI lock entries by canonical name, released() reads the first upload time from PyPI's JSON API (urllib, 30 s timeout, failures surface as before in pypi()), fails only for versions older than --grace-days (default 30, negative refused before any network). It writes no file. security.yml: new job python-lock-freshness only on schedule and workflow_dispatch (never push or pull_request, so PR code never runs in it and upstream releases cannot block PRs), workflow-level permissions contents: read, actions pinned to the same SHAs (check_pinned_references: 0 findings), installs nothing. No existing check, audit, trigger or condition removed; selftest_dependency_audit still passes. AGENTS.md gains one sentence on the weekly run. The risk register drops the done v0.35.1 provenance action (run 45630953077, 2026-11-25).",
+ "summary": "CI/tooling change, router and agent unchanged: implements TM-16's next action 'Refresh the Python locks regularly' as a check (ADR-0144, proposed). Reviewed against the previous trusted versions of tools/security/lock_requirements.py and .github/workflows/security.yml (flagged for explicit maintainer review). lock_requirements.py: cmd_resolve's pip invocation moved unchanged into pip_resolve (same flags: --dry-run, --only-binary=:all: so no sdist build code runs, CPython 3.11, manylinux x86_64; only the Linux refusal text is reworded); resolve's output is byte-for-byte the same path. New read-only command outdated: pip_resolve of CI_REQS, compares router, container and CI lock entries by canonical name, released() reads the first upload time from PyPI's JSON API (urllib, 30 s timeout, failures surface as before in pypi()), fails only for versions older than --grace-days (default 30, negative refused before any network). It writes no file. security.yml: new job python-lock-freshness only on schedule and workflow_dispatch (never push or pull_request, so PR code never runs in it and upstream releases cannot block PRs), workflow-level permissions contents: read, actions pinned to the same SHAs (check_pinned_references: 0 findings), installs nothing. No existing check, audit, trigger or condition removed; selftest_dependency_audit still passes. test/smoke_container.sh lists the new self-test under TOOLING (repository tooling the router image cannot run: the lock tool needs packaging or pip, which the image lacks), like selftest_pydeps; the first CI run failed exactly there and nowhere else. AGENTS.md gains one sentence on the weekly run. The risk register drops the done v0.35.1 provenance action (run 45630953077, 2026-11-25).",
  "findings": [],
  "tests": [
   {
@@ -48,6 +49,11 @@
    "command": "every python test/... and tools/... command of all workflows in .github/workflows/ (Windows), plus ruff check ., router.py --check --pure, check_pinned_references, selftest_dependency_audit",
    "result": "passed",
    "evidence": "104 commands, 1 failed: the new 'lock_requirements.py outdated' step itself, which refuses Windows by design ('pip resolution runs on Linux only'); it passed in WSL (above)."
+  },
+  {
+   "command": "CI job 'Router container image' (smoke_container.sh --selftests) with this fix",
+   "result": "not_run",
+   "evidence": "Not run locally (needs a rootful container engine); CI runs it on this push. On the first push (541a7da) it reported 81 of 82 passed: selftest_lock_freshness.py failed inside the image with 'pydeps: neither `packaging` nor pip's vendored copy is importable'. Fixed by listing it under TOOLING; bash -n test/smoke_container.sh and test/selftest_container_image.py (20 tests, 3 skipped) pass locally."
   },
   {
    "command": "python test/check_public_changes.py",
