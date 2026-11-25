@@ -71,6 +71,7 @@ def build_apps():
     ctl.router.add_get("/admin/context", context_ops.handle)
     ctl.router.add_post("/admin/memory/reconcile-deletions", context_ops.handle_reconcile_deletions)   # ADR-0076
     ctl.router.add_get("/", admin.handle_ui)
+    ctl.router.add_get("/ui.js", admin.handle_ui_script)   # ADR-0128: the UI's script is a file, not inline
     ctl.router.add_get(r"/{name:(skirnir\.png|favicon\.png|favicon\.ico)}", admin.handle_asset)
     ctl.router.add_post("/v1/heartbeat/{node}", poll.handle_heartbeat)   # Heartbeat injection with heartbeat_token (tests, diagnostics)
     ctl.router.add_get("/v1/tunnel", registry.handle_tunnel_v2)
@@ -98,7 +99,7 @@ def build_apps():
     ctl.router.add_get("/metrics", admin.handle_metrics)     # Stage 4: Prometheus (Basic Auth like /admin)
     ctl.router.add_post("/admin/measure", perf.handle_measure)
     ctl.router.add_post("/admin/bench", perf.handle_bench)
-    browser_headers.install(api, ctl)   # ADR-0065 (TM-03)
+    browser_headers.install(api, ctl)   # ADR-0065, ADR-0128 (TM-03)
     return api, ctl
 
 

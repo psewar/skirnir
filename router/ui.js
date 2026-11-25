@@ -1,0 +1,1192 @@
+// Control UI script (ADR-0128): served as /ui.js, so the Content-Security-Policy needs no 'unsafe-inline' for script.
+// Elements name their action in data-click / data-change / data-input (arguments as JSON in data-args); the
+// delegated listeners at the end of this file call ACTIONS. No inline handler, no string evaluated as code.
+// ---- Sprache: skirnir.lang im Browser, sonst navigator.language. Quelltexte bleiben deutsch; t() ist fuer Deutsch die Identitaet ----
+let LANG = '';
+try { LANG = localStorage.getItem('skirnir.lang') || ''; } catch {}
+if (LANG !== 'de' && LANG !== 'en') LANG = String(navigator.language || 'de').toLowerCase().startsWith('de') ? 'de' : 'en';
+document.documentElement.lang = LANG;
+const LOCALE = LANG === 'de' ? 'de-CH' : 'en-GB';
+const I18N_EN = {   // deutscher Quelltext -> Englisch; 'tag>Text' = nur fuer Textknoten in diesem Element (Knoten: Abschnitt vs. Spalte)
+  // -- statisches Markup (translateDom) --
+  "HA spricht": "HA talks to",
+  "· Rollen erscheinen dort als": "· roles appear there as",
+  "Übersicht": "Overview",
+  "Agenten": "Agents",
+  "Rollen": "Roles",
+  "Modellkatalog": "Model catalog",
+  "Einstellungen": "Settings",
+  "– aus": "– from",
+  "alle 3 s; Verläufe der letzten 10 Minuten entstehen im Browser, „gesamt“ = seit Beginn der Aufzeichnung (metrics.json, überlebt Neustarts), Tage aus usage.json": "every 3 s; the last 10 minutes of history are built in the browser, “total” = since recording began (metrics.json, survives restarts), days from usage.json",
+  "Anfragen / min": "Requests / min",
+  "Antwort-Tokens / s": "Response tokens / s",
+  "GPU-Auslastung %": "GPU utilisation %",
+  "VRAM frei GiB": "VRAM free GiB",
+  "Laufend · wartend": "Running · waiting",
+  "Anfragen je Tag": "Requests per day",
+  "– 30 Tage, Fehler rot, Linie = Tokens (k)": "– 30 days, errors red, line = tokens (k)",
+  "Antwortzeiten gesamt": "Response times, total",
+  "– Sekunden je Anfrage": "– seconds per request",
+  "Anfragen gesamt nach Knoten": "Requests, total, by node",
+  "… nach Rolle": "… by role",
+  "… nach Client": "… by client",
+  "Tempo je Modell": "Speed per model",
+  "– EWMA tok/s, Modell @ Knoten": "– EWMA tok/s, model @ node",
+  "Effektiv genutzte Modelle": "Models actually used",
+  "– Anfragen/min je konkretem Modell, letzte 10 Minuten, gestapelt; Legende = Anteil im 30-s-Fenster": "– requests/min per concrete model, last 10 minutes, stacked; legend = share in the 30-s window",
+  "Anfragen gesamt nach Modell": "Requests, total, by model",
+  "Antwort-Tokens gesamt nach Modell": "Response tokens, total, by model",
+  "h2>Knoten": "Nodes",
+  "Knoten": "Node",
+  "Zustand": "State",
+  "VRAM frei / fremd": "VRAM free / foreign",
+  "Last": "Load",
+  "Geladen": "Loaded",
+  "Modelle (grün = geladen)": "Models (green = loaded)",
+  "laufende Anfragen / Admission-Grenze · wartende": "running requests / admission limit · waiting",
+  "Cloud-Anbieter": "Cloud providers",
+  "– Modelle im Katalog (": "– models in the catalog (",
+  "), Stufe nur in Rollen, die es erlauben; Datenklasse, Credential-Scan und Budget begrenzen (README „Cloud\")": "), tier only in roles that allow it; data class, credential scan and budget limit it (README “Cloud”)",
+  "Anbieter": "Provider",
+  "Modelle": "Models",
+  "Ausgaben Monat / Budget": "Spend month / budget",
+  "Region · Datenklasse max.": "Region · data class max.",
+  "Registrierte Agenten": "Registered agents",
+  "– jeder Agent meldet sich mit seinem Schlüssel; neue warten hier auf Freigabe. Fakten (GPU, VRAM, MAC) kommen vom Agenten, Policy (WOL, Gewicht, MQTT, gleichzeitige Anfragen) setzt du hier": "– every agent registers with its key; new ones wait here for approval. Facts (GPU, VRAM, MAC) come from the agent, policy (WOL, weight, MQTT, concurrent requests) is set here",
+  "Rechner": "Machine",
+  "Desktop-Grundverbrauch ohne Ollama: gelernter Median; Policy-Wert überschreibt": "desktop base VRAM use without Ollama: learned median; policy value overrides",
+  "– Rangliste für Kaltstarts und Qualitätsobergrenze; ein geladenes Modell der Liste gewinnt (": "– ranking for cold starts and quality ceiling; a loaded model from the list wins (",
+  "warm zuerst": "warm first",
+  "), Rang-1 wird nach einer Spielphase wieder vorgeladen;": "), rank 1 is preloaded again after a gaming phase;",
+  "darf auf einem Spiel-Rechner laufen;": "may run on a gaming machine;",
+  "= Cloud-Stufe": "= cloud tier",
+  "neue Rolle, z. B. vision": "new role, e.g. vision",
+  "+ Rolle": "+ role",
+  "konkrete Modellnamen auch in HA anbieten": "also offer concrete model names in HA",
+  "Speichern & live schalten": "Save & go live",
+  "Ausprobieren": "Try it",
+  "routing.execution: auto = Rollenreihenfolge, local = nie Cloud, cloud = Cloud-Stufen zuerst": "routing.execution: auto = role order, local = never cloud, cloud = cloud tiers first",
+  "routing.data_class: Deklaration; Cloud nur bis zur konfigurierten Grenze": "routing.data_class: declaration; cloud only up to the configured limit",
+  "Priorität: Rolle": "Priority: role",
+  "thinking-Modelle (glm, qwen3.6, gpt-oss, granite) erzeugen sonst hunderte unsichtbare Denk-Token vor der Antwort": "thinking models (glm, qwen3.6, gpt-oss, granite) otherwise produce hundreds of invisible thinking tokens before the answer",
+  "Nachdenken (think)": "Thinking (think)",
+  "Senden": "Send",
+  "Antworte in einem Satz: Was ist ein Router?": "Answer in one sentence: What is a router?",
+  "Ergebnis erscheint hier: gewählter Knoten, Stufe, Modell, Kontext, Dauer, übersprungene Stufen mit Grund, Antwort.": "Result appears here: chosen node, tier, model, context, duration, skipped tiers with reason, answer.",
+  "Lasttest": "Load test",
+  "– Modell und Prompt von oben, n Anfragen mit Parallelität c durch den Router; Sonden mit Priorität": "– model and prompt from above, n requests with concurrency c through the router; probes with priority",
+  "alle 2 s zeigen, ob Sprachbefehle den Stau überholen": "every 2 s show whether voice commands overtake the jam",
+  "alle 2 s eine Anfrage mit routing.priority interactive - ihre Wartezeit im Vergleich zeigt die Prioritätswirkung": "one request with routing.priority interactive every 2 s - its wait time in comparison shows the priority effect",
+  "Priorität prüfen": "Check priority",
+  "Lasttest starten": "Start load test",
+  "Durchsatz, Latenz (Median / p95 / max), Wartezeit normal vs. interactive, Modellzeit, Verteilung auf Knoten.": "Throughput, latency (median / p95 / max), wait normal vs. interactive, model time, distribution across nodes.",
+  "– wer den API-Port 11434 rufen darf. Identität über Secret (Bearer) und/oder Quell-IP; Rollen, Datenklasse und Cloud-Freigabe je Client. Ein neues Secret zeigt der Router genau einmal im Klartext, gespeichert wird nur der Hash": "– who may call API port 11434. Identity via secret (Bearer) and/or source IP; roles, data class and cloud permission per client. The router shows a new secret exactly once in plain text, only the hash is stored",
+  "neuer Client, z. B. pi-voice (a-z, 0-9, -, _)": "new client, e.g. pi-voice (a-z, 0-9, -, _)",
+  "Quell-IP(s), optional, Komma-getrennt": "source IP(s), optional, comma-separated",
+  "Notiz, optional": "note, optional",
+  "+ Client anlegen & Secret erzeugen": "+ create client & generate secret",
+  "– lokale Modelle messen und benchmarken, Cloud-Modelle mit Preisen pflegen": "– measure and benchmark local models, maintain cloud models with prices",
+  "VRAM-Bedarf = Gewichte + Kontext-Kosten × Kontextgröße +": "VRAM need = weights + context cost × context size +",
+  "GiB Reserve": "GiB reserve",
+  ". Gemessen wird bei 8k und 32k Kontext auf einem freien Knoten. Cloud-Modelle (": ". Measured at 8k and 32k context on a free node. Cloud models (",
+  ") brauchen kein VRAM; ihre Preise (je 1 Mio. Tokens) speisen Budget und Usage.": ") need no VRAM; their prices (per 1M tokens) feed budget and usage.",
+  "Cloud-Modell in den Katalog aufnehmen: Name im Router (z. B. openai:gpt-5.4), Anbieter, Name beim Anbieter (leer = Teil nach dem Doppelpunkt), Preise je 1 Mio. Tokens, Kontext": "Add a cloud model to the catalog: name in the router (e.g. openai:gpt-5.4), provider, name at the provider (empty = part after the colon), prices per 1M tokens, context",
+  "☁ neues Cloud-Modell, z. B. openai:gpt-5.4": "☁ new cloud model, e.g. openai:gpt-5.4",
+  "Name beim Anbieter (optional)": "name at the provider (optional)",
+  "Kontext": "Context",
+  "+ aufnehmen": "+ add",
+  "Modell": "Model",
+  "Gewichte": "Weights",
+  "Kontext-Kosten": "Context cost",
+  "Quelle": "Source",
+  "Tempo (warm)": "Speed (warm)",
+  "Speicher des Modells ohne Kontext": "memory of the model without context",
+  "Zuwachs pro 1000 Token Kontext (KV-Cache)": "growth per 1000 tokens of context (KV cache)",
+  "Gewichte + Kontext + Reserve; bei Cloud: Preis in / out": "weights + context + reserve; for cloud: price in / out",
+  "Benchmark: gen tok/s · prompt tok/s · TTFT | passiv: EWMA der letzten Anfragen · Fehlerrate": "benchmark: gen tok/s · prompt tok/s · TTFT | passive: EWMA of recent requests · error rate",
+  "– alles, was der Router zur Laufzeit liest;": "– everything the router reads at runtime;",
+  "blau": "blue",
+  "= in der UI geändert (roles.yaml), ↺ = zurück auf config.yaml. Ports, TLS, Logins, MQTT, Identitäten (Tokens/IP) und Anbieter-Endpunkte bleiben Deploy-Sache": "= changed in the UI (roles.yaml), ↺ = back to config.yaml. Ports, TLS, logins, MQTT, identities (tokens/IP) and provider endpoints remain a deploy matter",
+  "Betrieb": "Operations",
+  "– Nutzung heute, Warteschlange, Scheduler, Build": "– usage today, queue, scheduler, build",
+  "Letzte Entscheidungen": "Recent decisions",
+  "Cloud · 🐤 Canary · 👥 Client · Grund: warm-first / rank / affinity / canary / cloud": "Cloud · 🐤 Canary · 👥 Client · reason: warm-first / rank / affinity / canary / cloud",
+  "Umfang": "Scope",
+  "nur Ereignisse (ohne Routen)": "events only (no routes)",
+  "z. B. gpu_guard, busy, gpu-desktop": "e.g. gpu_guard, busy, gpu-desktop",
+  // -- Laufzeit-Strings (t) --
+  "aus": "off",
+  "an": "on",
+  "gemessen": "measured",
+  "geschaetzt": "estimated",
+  "geschätzt": "estimated",
+  "intern": "internal",
+  "kein Agent": "no agent",
+  "GPU-Schutz": "GPU guard",
+  "GPU-Schutz normal, Ziel {w} W": "GPU guard normal, target {w} W",
+  "wartend": "waiting",
+  "erst nach Umschalten: der Router hält den OpenAI-Server an und der Standby-Ollama übernimmt (1–3 min)": "only after switching: the router holds the OpenAI server and the standby Ollama takes over (1–3 min)",
+  "kein Knoten kann dieses Modell gerade bedienen": "no node can serve this model right now",
+  "schläft": "asleep",
+  "schläft seit {t} (vom Agenten gemeldet)": "asleep since {t} (reported by the agent)",
+  "Messruhe": "quiet",
+  "Messruhe bis {u} ({r}): kein Entladen, kein Vorwärmen": "quiet until {u} ({r}): no unloading, no prewarming",
+  "KEIN TLS": "NO TLS",
+  "Client-Auth": "Client auth",
+  "keine Cloud-Anbieter konfiguriert (router.cloud)": "no cloud providers configured (router.cloud)",
+  "deaktiviert": "disabled",
+  "kein Schlüssel": "no key",
+  "aktiv": "active",
+  "Cloud global aus": "cloud globally off",
+  "institutionell": "institutional",
+  "institutionell (ADR-0099): eigene Datenklassen-Grenze statt der globalen": "institutional (ADR-0099): own data class limit instead of the global one",
+  "kein Budget": "no budget",
+  "kein Benchmark": "no benchmark",
+  "Fehler": "errors",
+  "{ph} je 1 Mio. Tokens": "{ph} per 1M tokens",
+  "aus der UI": "from the UI",
+  "Katalog": "Catalog",
+  "aus dem Katalog entfernen (nur Einträge aus der UI)": "remove from the catalog (UI entries only)",
+  "unbekannt → Dateigröße +20 %": "unknown → file size +20 %",
+  "auf {n}": "on {n}",
+  "Messen": "Measure",
+  "neu messen": "re-measure",
+  "lädt das Modell bei 8k und 32k Kontext auf einem freien Knoten (~1 Min.)": "loads the model at 8k and 32k context on a free node (~1 min)",
+  "standardisierter Warm-Benchmark (~30 s)": "standardised warm benchmark (~30 s)",
+  "Token": "tokens",
+  "Tokens": "tokens",
+  "Anteil der Anfragen läuft auf diesem Modell (auch kalt), Ergebnis geht an den Client - Kandidat mit echtem Verkehr messen": "a share of requests runs on this model (even cold), the result goes to the client - measure a candidate with real traffic",
+  "Anteil der Anfragen läuft NACH der Antwort noch einmal auf diesem Modell; der Client merkt nichts, Tempo/Fehler/Usage (Client shadow) zeigen den Kandidaten": "a share of requests is run again on this model AFTER the answer; the client notices nothing, speed/errors/usage (client shadow) show the candidate",
+  "+ einrichten": "+ set up",
+  "Prozent der Anfragen": "percent of requests",
+  "entfernen": "remove",
+  "HA-Voice/AI-Task brauchen tools": "HA Voice/AI Task need tools",
+  "⚠ eine Stufe ohne tools": "⚠ one tier without tools",
+  "Cloud-Stufe(n): greift, wenn kein lokaler Knoten kann, eine Fähigkeit fehlt oder der Client execution: cloud verlangt - Datenklasse, Scan und Budget begrenzen": "cloud tier(s): used when no local node can, a capability is missing or the client demands execution: cloud - data class, scan and budget limit it",
+  "Cloud-Stufe": "cloud tier",
+  "Cloud-Stufen": "cloud tiers",
+  "leer = globale Einstellung (warm_first={v})": "empty = global setting (warm_first={v})",
+  "warm zuerst: global ({v})": "warm first: global ({v})",
+  "warm zuerst: an": "warm first: on",
+  "warm zuerst: aus (strikt nach Rang)": "warm first: off (strictly by rank)",
+  "Prioritätsklasse beim Warten auf einen vollen Knoten: interactive vor normal vor batch (Alterung verhindert Verhungern)": "priority class when waiting for a full node: interactive before normal before batch (aging prevents starvation)",
+  "Priorität": "Priority",
+  "Rolle löschen": "Delete role",
+  "Cloud: kein busy, kein VRAM": "cloud: no busy, no VRAM",
+  "+ Stufe": "+ tier",
+  "Rolle": "Role",
+  "Datenklasse": "Data class",
+  "ungespeicherte Änderungen": "unsaved changes",
+  "Name und Anbieter angeben": "enter name and provider",
+  "Name als anbieter:modell, z. B. openai:gpt-5.4": "name as provider:model, e.g. openai:gpt-5.4",
+  "{n} vorgemerkt – Speichern nicht vergessen": "{n} queued – remember to save",
+  "{m} aus dem Katalog entfernen? Rollen, die es benutzen, blockieren das Speichern.": "Remove {m} from the catalog? Roles that use it will block saving.",
+  "leer": "empty",
+  "{n} Änderung(en), noch nicht gespeichert": "{n} change(s), not saved yet",
+  "zurück auf config.yaml": "back to config.yaml",
+  "keine Einstellungen": "no settings",
+  "vor {n} s": "{n} s ago",
+  "vor {n} min": "{n} min ago",
+  "noch nie gesehen": "never seen",
+  "Start-Zufall im Speicher": "random at start, in memory only",
+  "rotiert": "rotated",
+  "kein Secret": "no secret",
+  "Neues Secret – nur jetzt sichtbar:": "New secret – visible only now:",
+  "kopiert": "copied",
+  "kopieren": "copy",
+  "In den Client eintragen (HA: API-Key im Ollama-Eintrag „Skirnir“, Node-RED: apiKey der llm-config, sonst <code>Authorization: Bearer …</code>) und in Secret-Store ablegen. Der Router kennt nur den Hash; das alte Secret ist ab sofort ungültig.": "Enter it in the client (HA: API key in the Ollama entry “Skirnir”, Node-RED: apiKey of the llm-config, otherwise <code>Authorization: Bearer …</code>) and put it in a secret store. The router only knows the hash; the old secret is invalid from now on.",
+  "Anfragen": "requests",
+  "verboten": "forbidden",
+  "neues zufälliges Secret; das alte gilt sofort nicht mehr": "new random secret; the old one stops working immediately",
+  "🔑 Secret erneuern": "🔑 Renew secret",
+  "🔑 Secret erzeugen": "🔑 Generate secret",
+  "Client löschen": "Delete client",
+  "Identität": "Identity",
+  "keine Clients konfiguriert (client_auth.clients)": "no clients configured (client_auth.clients)",
+  "Neues Secret für {n} erzeugen? Das bisherige gilt sofort nicht mehr – der Client muss danach umgestellt werden.": "Generate a new secret for {n}? The current one stops working immediately – the client must be reconfigured afterwards.",
+  "Secret für {n} erzeugt – jetzt kopieren": "Secret for {n} generated – copy it now",
+  "Name: a-z, 0-9, - und _": "name: a-z, 0-9, - and _",
+  "gibt es schon": "already exists",
+  "{n} angelegt – Secret jetzt kopieren; Rollen/Datenklasse unten anpassen und speichern": "{n} created – copy the secret now; adjust roles/data class below and save",
+  "Client {n} löschen? Sein Secret und seine Einstellungen verfallen.": "Delete client {n}? Its secret and settings will be lost.",
+  "{n} gelöscht": "{n} deleted",
+  "noch keine Anfragen im Fenster": "no requests in the window yet",
+  "sammelt …": "collecting …",
+  "noch keine Daten": "no data yet",
+  "noch keine Anfragen": "no requests yet",
+  "noch keine Messung": "no measurement yet",
+  "laufend": "running",
+  "noch keine Anfragen im 30-s-Fenster": "no requests in the 30-s window yet",
+  "Nutzung heute": "Usage today",
+  "Cloud im Monat": "Cloud this month",
+  "Warteschlange": "Queue",
+  "niemand wartet": "nobody waiting",
+  "Score: warm {warm} · Anfrage −{inflight} · voll −{saturated} · VRAM ×{vram} · Gewicht ×{weight} · Tempo ×{speed} · Fehler −{errors}": "Score: warm {warm} · request −{inflight} · full −{saturated} · VRAM ×{vram} · weight ×{weight} · speed ×{speed} · errors −{errors}",
+  "Breaker: {f} Fehler / {w} s → {o} s offen": "Breaker: {f} failures / {w} s → {o} s open",
+  "Admission: {n} je Knoten · Alterung {a} s · max. Wartezeit {w} s": "Admission: {n} per node · aging {a} s · max. wait {w} s",
+  "{n} Dateien (SHA-256)": "{n} files (SHA-256)",
+  "kein Manifest": "no manifest",
+  "{n} Modelle": "{n} models",
+  "{a} von {b} Einträgen": "{a} of {b} entries",
+  "seit": "since",
+  "kalt": "cold",
+  "{n} übersprungen": "{n} skipped",
+  "übersprungen": "skipped",
+  "kein Knoten verfügbar": "no node available",
+  "keine Stufe kann": "no tier can",
+  "Agent-Update": "Agent update",
+  "Warteschlange: {r} ({p}) wartet auf {n} ({i} aktiv)": "Queue: {r} ({p}) waiting for {n} ({i} active)",
+  "{r} wartet, bis {n} {m} geladen hat": "{r} waiting until {n} has loaded {m}",
+  "Deadline: {r} ({p}) nach {ms} ms abgewiesen": "Deadline: {r} ({p}) rejected after {ms} ms",
+  "🌒 Shadow {r} → {m} auf {n}: {s}": "🌒 Shadow {r} → {m} on {n}: {s}",
+  "prewarm {m} auf {n} ({r})": "prewarm {m} on {n} ({r})",
+  "🧪 Lasttest {n} × {c} parallel: {s} s, {tp} Anfragen/s": "🧪 Load test {n} × {c} parallel: {s} s, {tp} requests/s",
+  "Auto-Rolle": "Auto role",
+  "Abstand": "margin",
+  "noch keine": "none yet",
+  "Rolle {r} löschen? HA-Subentries, die sie nutzen, bekommen dann 404.": "Delete role {r}? HA subentries that use it will then get 404.",
+  "gespeichert ({r} Rollen{s}), Router neu konfiguriert": "saved ({r} roles{s}), router reconfigured",
+  "{n} Einstellung(en)": "{n} setting(s)",
+  "gespeichert – {n} Einstellung(en) weichen von config.yaml ab": "saved – {n} setting(s) differ from config.yaml",
+  "(davon Laden {s} s)": "(of which loading {s} s)",
+  "Router/Netz": "Router/network",
+  "Dauer": "Duration",
+  "… läuft": "… running",
+  "(davon unsichtbares Nachdenken: ~{tok} Token ≈ {s} s)": "(of which invisible thinking: ~{tok} tokens ≈ {s} s)",
+  "Stufe": "Tier",
+  "Kaltstart": "cold start",
+  "Grund": "Reason",
+  "Tempo": "Speed",
+  "Fehler: {e}": "Error: {e}",
+  "{n} Anfragen mit {c} parallel an {m} schicken? Das belegt die GPU für einige Sekunden.": "Send {n} requests with {c} in parallel to {m}? This occupies the GPU for a few seconds.",
+  "… läuft ({n} Anfragen, {c} parallel)": "… running ({n} requests, {c} parallel)",
+  "{l}: {ok}/{n} ok   Latenz p50 {p50} · p95 {p95} · max {max}   Wartezeit ∅ {qm} · max {qx}   Modell ∅ {mm}": "{l}: {ok}/{n} ok   latency p50 {p50} · p95 {p95} · max {max}   wait ∅ {qm} · max {qx}   model ∅ {mm}",
+  "{n} Anfragen, {c} parallel, {m}: {s} s gesamt → {tp} Anfragen/s": "{n} requests, {c} parallel, {m}: {s} s total → {tp} requests/s",
+  "→ interactive wartete im Mittel {d} {cmp} als normal": "→ interactive waited {d} {cmp} than normal on average",
+  "kürzer": "less",
+  "länger": "longer",
+  " – Priorität wirkt": " – priority works",
+  " – kein messbarer Unterschied (Schlange zu kurz?)": " – no measurable difference (queue too short?)",
+  " – ⚠ Priorität wirkt nicht": " – ⚠ priority has no effect",
+  "Benchmark von {m} läuft auf {n} …": "Benchmark of {m} running on {n} …",
+  "Messung von {m} läuft auf {n} …": "Measurement of {m} running on {n} …",
+  "Agent-Update hinterlegt": "Agent update staged",
+  "signiert": "signed",
+  "unsigniert": "unsigned",
+  "Kanarienvogel {c}, danach {h} h warten": "canary {c}, then wait {h} h",
+  "kein Kanarienvogel": "no canary",
+  "kein Agent-Update hinterlegt (deploy.py --agent legt Binaries und Manifest auf den Router)": "no agent update staged (deploy.py --agent puts binaries and manifest on the router)",
+  "noch kein Agent registriert": "no agent registered yet",
+  "wartet auf Freigabe": "awaiting approval",
+  "gesperrt": "revoked",
+  "Gewicht": "Weight",
+  "gleichzeitige Anfragen (Admission); leer = Default aus der Konfiguration; sollte OLLAMA_NUM_PARALLEL des Rechners entsprechen": "concurrent requests (admission); empty = default from the configuration; should match the machine's OLLAMA_NUM_PARALLEL",
+  "gleichzeitig": "concurrent",
+  "busy ab dieser GPU-Auslastung in % (mit >= 1 GiB fremdem VRAM); leer = global (Einstellungen › Busy-Erkennung)": "busy from this GPU utilisation in % (with >= 1 GiB foreign VRAM); empty = global (Settings › Busy detection)",
+  "busy ab GPU": "busy from GPU",
+  "busy ab so viel fremdem VRAM über der Baseline in GiB; leer = global. Kleine Karten brauchen kleinere Werte: auf 16 GiB neben 8 GiB Ollama bleibt einem Spiel nie 6 GiB": "busy from this much foreign VRAM above the baseline in GiB; empty = global. Small cards need smaller values: on 16 GiB next to 8 GiB of Ollama a game never gets 6 GiB",
+  "busy ab fremd": "busy from foreign",
+  "Router beachtet den GPU-Schutz-Status dieses Agenten: Deckel 1 in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA. Aus z. B. für Karten ohne 12V-2x6-Stecker; der Agent setzt sein Power-Limit trotzdem": "router honours this agent's GPU guard status: cap 1 in stage 2, score penalty under high load, problems to HA. Off e.g. for cards without a 12V-2x6 connector; the agent still sets its power limit",
+  "GPU-Schutz beachten": "Honour GPU guard",
+  "MQTT-Gerät in HA": "MQTT device in HA",
+  "Router bringt diesen Agenten selbsttätig auf die hinterlegte Version (Kanarienvogel zuerst, dann die anderen nach der Wartezeit); nur im Leerlauf": "router updates this agent automatically to the staged version (canary first, then the others after the waiting time); only when idle",
+  "Auto-Update": "Auto-update",
+  "auf {v} aktualisieren": "update to {v}",
+  "Ollama-Auto-Update": "Ollama auto-update",
+  "Nicht verfügbar: Ollama läuft hier als Tray-App unter dem Benutzer und aktualisiert sich selbst": "Not available: Ollama runs here as a tray app under the user and updates itself",
+  "Router bringt Ollama auf diesem Knoten selbsttätig auf die neueste Version: nur im Nachtfenster, Kanarienvogel zuerst, nur im Leerlauf. Voraussetzung: Ollama läuft als Kind des Agenten": "router updates Ollama on this node automatically to the latest release: only in the night window, canary first, only when idle. Requires Ollama running as a child of the agent",
+  "Ollama auf {v} aktualisieren": "update Ollama to {v}",
+  "Ollama auf {v} aktualisieren? Der Agent lädt das Release-Archiv (ca. 1,4 GB), hält Ollama an, tauscht die Dateien und startet es neu. Geladene Modelle gehen dabei verloren.": "Update Ollama to {v}? The agent downloads the release archive (about 1.4 GB), stops Ollama, swaps the files and restarts it. Loaded models are lost.",
+  "Ollama-Update": "Ollama update",
+  "neueste Ollama-Version": "latest Ollama release",
+  "Versionsprüfung fehlgeschlagen: {e}": "version check failed: {e}",
+  "noch nicht geprüft": "not checked yet",
+  "jetzt prüfen": "check now",
+  "Fenster {a}–{b}": "window {a}–{b}",
+  "jederzeit": "any time",
+  "neuere Ollama-Version verfügbar": "newer Ollama release available",
+  "geprüft {t}": "checked {t}",
+  "Tray-App": "tray app",
+  "Agent ≥ 0.12.1 nötig": "agent ≥ 0.12.1 needed",
+  "Der Agent meldet erst ab 0.12.1, ob er Ollama steuert; bis dahin schickt der Router keine Ollama-Updates": "the agent reports from 0.12.1 on whether it controls Ollama; until then the router sends no Ollama updates",
+  "Ollama läuft hier als Tray-App unter dem Benutzer und aktualisiert sich über den eigenen Updater, nicht über den Router": "Ollama runs here as a tray app under the user and updates itself through its own updater, not through the router",
+  "freigeben": "approve",
+  "löschen": "delete",
+  "wieder freigeben": "approve again",
+  "sperren": "revoke",
+  "Knoten {n} sperren? Der Tunnel wird getrennt.": "Revoke node {n}? The tunnel will be disconnected.",
+  "{g} GiB gelernt": "{g} GiB learned",
+  "{n} Proben": "{n} samples",
+  "noch nichts gelernt": "nothing learned yet",
+  "verbunden": "connected",
+  "neue Version hinterlegt": "new version staged",
+  "Agent auf {v} aktualisieren? Der Dienst startet neu, Ollama und STT auf dem Knoten damit auch.": "Update agent to {v}? The service restarts, and so do Ollama and STT on the node.",
+  "Registereintrag löschen?": "Delete registry entry?",
+  "Probleme": "Problems",
+  "– dieselben wie das HA-Attribut problems und skirnir_problem in /metrics": "– the same as the HA attribute problems and skirnir_problem in /metrics",
+  "keine": "none",
+  "kritisch": "critical",
+  "Warnung": "warning",
+  "Probleme nicht abrufbar: {e}": "Problems unavailable: {e}",
+};
+function t(s, vars) {   // Uebersetzung (Fallback: deutscher Text) und {name}-Platzhalter aus vars
+  let r = LANG === 'de' ? s : (I18N_EN[s] ?? s);
+  if (vars) for (const k of Object.keys(vars)) r = r.split('{' + k + '}').join(String(vars[k]));
+  return r;
+}
+// Laufzeitwerte (Zustaende, Gruende, Schritte) kommen seit Router 0.9.0 englisch (design/english-names.md); die deutsche
+// Ansicht zeigt sie deutsch, die englische lesbar ohne Unterstriche.
+const VALUE_DE = {
+  off: 'aus', unavailable: 'nicht verfügbar', normal: 'normal', high_load: 'Hochlast', throttled: 'gedrosselt', recovery: 'Erholung',
+  deselected: 'abgewählt', start: 'Start', warmup: 'aufwärmen', done: 'fertig', error: 'Fehler',
+  game_light: 'Spiel leicht', game_ended: 'Spiel vorbei', fallback: 'ausweichen', cloud_skipped: 'Cloud übersprungen', no_node: 'kein Knoten',
+};
+const STEP_DE = [[/^run (\d+)\/2$/, 'Messlauf $1/2'], [/^unloading for /, 'entlade für '], [/^loading /, 'lade ']];
+function tv(v) {
+  if (v == null || v === '') return '';
+  const s = String(v);
+  if (LANG !== 'de') return s.replace(/_/g, ' ');
+  if (VALUE_DE[s]) return VALUE_DE[s];
+  for (const [re, de] of STEP_DE) if (re.test(s)) return s.replace(re, de);
+  return s;
+}
+function setLang(l) { try { localStorage.setItem('skirnir.lang', l); } catch {} location.reload(); }
+function translateDom() {   // statisches Markup einmalig: Textknoten (getrimmt, Whitespace drumherum bleibt) sowie title/placeholder/value in header, nav, main
+  document.querySelectorAll('#lang button').forEach(b => b.classList.toggle('active', b.dataset.lang === LANG));
+  if (LANG === 'de') return;
+  for (const root of document.querySelectorAll('header, nav, main')) {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (n.nodeType === Node.TEXT_NODE) {
+        const raw = n.nodeValue, key = raw.trim().replace(/\s+/g, ' ');
+        if (!key) continue;
+        const v = I18N_EN[n.parentElement.tagName.toLowerCase() + '>' + key] ?? I18N_EN[key];
+        if (v === undefined) continue;
+        n.nodeValue = raw.slice(0, raw.length - raw.trimStart().length) + v + raw.slice(raw.trimEnd().length);
+      } else {
+        for (const a of ['title', 'placeholder']) if (n.hasAttribute(a)) n.setAttribute(a, t(n.getAttribute(a)));
+        if ((n.tagName === 'BUTTON' || n.tagName === 'INPUT') && n.hasAttribute('value')) n.setAttribute('value', t(n.getAttribute('value')));
+      }
+    }
+  }
+}
+translateDom();
+
+let CFG = null, STATE = null, dirty = false;
+let SET_CHANGES = {}, MODEL_CHANGES = {}, MODEL_DELETES = [];   // Stufe 7: Einstellungen / Katalog-Cloud-Modelle bis zum Speichern
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// args(): the arguments of a data-click / data-change / data-input action (ADR-0128) as a JSON array, HTML-escaped for
+// the attribute. The browser decodes the attribute to plain text and JSON.parse turns it back into values; nothing in it
+// ever runs as code, so a crafted model, role, client or node name stays data (TM-03).
+const args = (...xs) => esc(JSON.stringify(xs));
+const isCloud = m => !!((CFG && CFG.models[m]) || {}).cloud;
+// amounts in the currency of the catalog prices (router.cloud.currency, ADR-0105; the router does not convert)
+const fmtCost = v => (v ?? 0).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + ' ' + esc(((STATE && STATE.cloud_config) || {}).currency || 'CHF');
+
+const TABS = ['uebersicht', 'agenten', 'rollen', 'clients', 'katalog', 'einstellungen'];
+const NEW_TOKENS = {};   // Client -> einmalig gezeigtes Secret (nur im Browser-Speicher dieser Seite)
+const isClientPath = p => p.startsWith('router.client_auth.clients.');
+function showTab(name) {
+  if (!TABS.includes(name)) name = 'uebersicht';
+  $('#main').dataset.active = name;
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  try { localStorage.setItem('skirnir.tab', name); } catch {}
+  if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  if (name === 'uebersicht' && STATE) setTimeout(renderLive, 0);   // Canvas erst zeichnen, wenn der Tab sichtbar ist
+}
+function markDirty() {   // Punkt am Tab, solange etwas nicht gespeichert ist
+  $('nav.tabs button[data-tab=rollen] .dot').hidden = !(dirty && rolesDirty);
+  $('nav.tabs button[data-tab=katalog] .dot').hidden = !(Object.keys(MODEL_CHANGES).length || MODEL_DELETES.length);
+  $('nav.tabs button[data-tab=einstellungen] .dot').hidden = !Object.keys(SET_CHANGES).some(p => !isClientPath(p));
+  $('nav.tabs button[data-tab=clients] .dot').hidden = !Object.keys(SET_CHANGES).some(isClientPath);
+}
+let rolesDirty = false;
+window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
+
+async function api(path, opts) {
+  // Same-origin administrative requests opt into the CSRF guard.
+  if (opts && opts.method && !['GET', 'HEAD', 'OPTIONS'].includes(opts.method.toUpperCase()) && path.startsWith('/admin/')) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), 'X-Skirnir-UI': '1' } };
+  }
+  const r = await fetch(path, opts);
+  const t = await r.text();
+  let j; try { j = JSON.parse(t); } catch { j = { error: t }; }
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+function allModels() {
+  const s = new Set(Object.keys(CFG.models));
+  if (STATE) for (const n of Object.values(STATE.nodes)) for (const m of n.models) s.add(m);
+  return [...s].sort((a, b) => (isCloud(a) - isCloud(b)) || a.localeCompare(b));
+}
+// Router 0.15.0: can a node serve the model now, only after switching to a standby Ollama (OpenAI-compatible server held),
+// or not at all? Shown in the model lists so a choice that cannot be served is visible as such.
+function modelReach(m) {
+  if (!STATE || isCloud(m)) return 'now';
+  const nodes = Object.values(STATE.nodes).filter(n => n.state !== 'offline');
+  if (nodes.some(n => n.models.includes(m))) return 'now';
+  if (nodes.some(n => (n.standby_models || []).includes(m))) return 'switch';
+  return 'none';
+}
+const REACH_MARK = { now: '', switch: ' ↻', none: ' ✕' };
+const modelLabel = m => (isCloud(m) ? '☁ ' : '') + m + REACH_MARK[modelReach(m)];
+const modelTitle = m => ({ now: '', switch: t('erst nach Umschalten: der Router hält den OpenAI-Server an und der Standby-Ollama übernimmt (1–3 min)'),
+                           none: t('kein Knoten kann dieses Modell gerade bedienen') })[modelReach(m)];
+
+function renderNodes() {
+  const tb = $('#nodes tbody'); tb.innerHTML = '';
+  const waiting = (STATE.admission || {}).by_node || {};
+  for (const [name, n] of Object.entries(STATE.nodes)) {
+    const loaded = new Set(Object.keys(n.loaded));
+    const digestLoaded = m => loaded.has(m) || (n.loaded_names_by_digest || []).includes(m);
+    const models = n.models.map(m => `<span class="badge ${digestLoaded(m) ? 'loaded' : ''}">${esc(m)}</span>`).join('');
+    const gpu = n.gpu_known ? `${n.gpu_util} %` : `<span class="muted">${t('kein Agent')}</span>`;
+    const vram = n.gpu_known ? `${(n.vram_free_gib ?? 0).toFixed(1)} GiB / ${n.foreign_vram_gib} GiB` : '–';
+    const brk = n.breaker && n.breaker !== 'closed' ? ` <span class="badge ${n.breaker}" title="Circuit Breaker">${esc(n.breaker)}</span>` : '';
+    const gg = n.gpu_guard || {};
+    const grd = gg.state && gg.state !== 'normal' ? ` <span class="badge ${gg.problem ? 'open' : 'half_open'}" title="${t('GPU-Schutz')}: ${esc(tv(gg.reason) || (gg.warnings || []).join(', ') || tv(gg.state))}${gg.limit_w ? ` · Limit ${gg.limit_w} W` : ''}">${t('GPU-Schutz')} ${esc(tv(gg.state))}</span>`
+      : gg.state === 'normal' && gg.limit_w ? ` <span class="muted" title="${t('GPU-Schutz normal, Ziel {w} W', { w: gg.target_w ?? '?' })}">🛡 ${gg.limit_w} W</span>` : '';
+    const last = `${n.inflight} / ${n.max_inflight ?? '?'}${waiting[name] ? ` · <span class="warn">${waiting[name]} ${t('wartend')}</span>` : ''}`;
+    // Router 0.14.0: sleep as reported by the agent (power.go); nothing shown while the agent never reported it
+    const slp = n.power === 'asleep' ? ` <span class="muted" title="${t('schläft seit {t} (vom Agenten gemeldet)', { t: n.power_since ? new Date(n.power_since * 1000).toLocaleString() : '?' })}">💤 ${t('schläft')}</span>` : '';
+    // Router 0.21.0 (ADR-0061): quiet for a measurement - the router neither unloads nor prewarms on this node
+    const qt = n.quiet ? ` <span class="badge half_open" title="${t('Messruhe bis {u} ({r}): kein Entladen, kein Vorwärmen', { u: new Date(n.quiet.until * 1000).toLocaleString(), r: esc(n.quiet.reason) })}">🔇 ${t('Messruhe')}</span>` : '';
+    tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(name)}</b><div class="muted">${esc(n.gpu || '')} ${n.wol ? '· WOL' : ''}</div></td>
+      <td><span class="state ${n.state}">${n.state}</span>${qt}${slp}${brk}${grd}<div class="muted">${esc(n.busy_reason || '')}</div></td>
+      <td>${gpu}</td><td>${vram}</td><td>${last}</td>
+      <td>${Object.entries(n.loaded).map(([m, g]) => `<div class="loaded">${esc(m)} <span class="muted">${g} GiB</span></div>`).join('') || '<span class="muted">–</span>'}</td>
+      <td>${models}</td></tr>`);
+  }
+  const b = STATE.build || {};
+  const ca = STATE.client_auth || {};
+  $('#hdr').innerHTML = `v${STATE.version}${b.deployed_at ? ' · Deploy ' + esc(b.deployed_at.replace('T', ' ')) : ''} · ${new Date().toLocaleTimeString(LOCALE)}${STATE.public_url ? ' · ' + esc(STATE.public_url) : ''}${location.protocol === 'https:' ? ' · TLS' : ` · <span class="bad">${t('KEIN TLS')}</span>`} · ${t('Client-Auth')} <b>${esc(ca.mode || '?')}</b>`;
+}
+
+function renderCloud() {
+  const tb = $('#cloud tbody'); tb.innerHTML = '';
+  const cc = STATE.cloud_config || {};
+  const entries = Object.entries(STATE.cloud || {});
+  if (!entries.length) { tb.innerHTML = `<tr><td colspan="6" class="muted">${t('keine Cloud-Anbieter konfiguriert (router.cloud)')}</td></tr>`; return; }
+  for (const [name, c] of entries) {
+    const st = !c.enabled ? `<span class="muted">${t('deaktiviert')}</span>` : !c.key ? `<span class="bad">${t('kein Schlüssel')}</span>` : `<span class="ok">${t('aktiv')}</span>`;
+    const pct = c.budget_percent ?? 0;
+    const cls = pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : '';
+    const bar = c.budget_month_chf ? `<div class="bar ${cls}"><i style="width:${Math.min(100, pct)}%"></i></div>` : '';
+    tb.insertAdjacentHTML('beforeend', `<tr><td><b>☁ ${esc(name)}</b><div class="muted">${esc(c.kind)} · ${esc(c.base_url)}</div></td>
+      <td>${st}${cc.enabled === false ? `<div class="muted">${t('Cloud global aus')}</div>` : ''}</td>
+      <td>${(c.models || []).map(m => `<span class="badge cloud">${esc(m)}</span>`).join('') || '<span class="muted">–</span>'}</td>
+      <td><b class="${cls}">${fmtCost(c.spend_month_chf)}</b> <span class="muted">/ ${c.budget_month_chf ? fmtCost(c.budget_month_chf) : t('kein Budget')}${c.budget_percent != null ? ' (' + c.budget_percent + ' %)' : ''}</span>${bar}</td>
+      <td>${c.breaker === 'closed' ? '<span class="ok">closed</span>' : `<span class="badge ${esc(c.breaker)}">${esc(c.breaker)}</span>`}${c.inflight ? ` · ${c.inflight} ${t('aktiv')}` : ''}</td>
+      <td class="muted">${esc(c.region || '–')} · ${esc(c.ceiling || c.max_data_class || cc.max_cloud_data_class || '–')}${c.trust === 'institutional' ? ` · <span title="${t('institutionell (ADR-0099): eigene Datenklassen-Grenze statt der globalen')}">${t('institutionell')}</span>` : ''}</td></tr>`);
+  }
+}
+
+function renderModels() {
+  const tb = $('#models tbody'); tb.innerHTML = '';
+  const onNodes = m => Object.entries(STATE.nodes).filter(([, n]) => n.models.includes(m)).map(([k]) => k).join(', ');
+  const ovh = STATE.fit_overhead_gib ?? 0.8; $('#ovh').textContent = ovh;
+  const measuring = STATE.measuring || {};
+  const capsEff = STATE.capabilities_effective || {};
+  for (const m of allModels()) {
+    const c = (STATE.catalog_effective || {})[m] || CFG.models[m] || {};
+    const capList = capsEff[m] || STATE.capabilities[m] || [];
+    const caps = capList.filter(x => x !== 'completion').map(x => `<span class="badge cap">${esc(x)}</span>`).join('') || '<span class="muted">?</span>';
+    const perf = Object.values(STATE.perf || {}).filter(p => p.model === m);
+    const tempo = perf.length ? perf.map(p => {
+      const b = p.bench, a = p.passive, e = p.ewma, o = p.outcomes || {};
+      const n = (o.recent || []).length, err = n ? Math.round(100 * (o.recent || []).filter(x => x !== 'ok').length / n) : 0;
+      const bt = b ? `<b>${b.gen_tps}</b> tok/s · ${b.prompt_tps ?? '–'} prompt · ${b.ttft_ms} ms` : (e ? `<b>${e.gen_tps}</b> tok/s <span class="muted">(EWMA)</span>` : `<span class="muted">${t('kein Benchmark')}</span>`);
+      const at = a ? `<div class="muted">∅ ${a.n}: ${a.gen_tps} tok/s · ${a.prompt_tps || '–'} prompt · ${a.ttft_ms} ms${n ? ` · <span class="${err ? 'warn' : ''}">${err} % ${t('Fehler')}</span>` : ''}</div>` : '';
+      return `<div title="${esc(p.node)}${b ? ', Benchmark ' + esc(b.at) + ' @' + b.num_ctx : ''}">${perf.length > 1 ? '<span class="muted">' + esc(p.node) + ':</span> ' : ''}${bt}</div>${at}`;
+    }).join('') : '<span class="muted">–</span>';
+    if (isCloud(m)) {
+      const pr = c.price_per_m || c.price_chf_per_m || {};   // price_chf_per_m: the old name (ADR-0105)
+      const uiModel = (CFG.ui_models || []).includes(m);
+      const ed = (k, v, ph) => `<input class="inl" type="number" step="0.01" min="0" value="${v ?? ''}" placeholder="${ph}" title="${t('{ph} je 1 Mio. Tokens', { ph })}" data-change="modelField" data-args="${args(m, k)}">`;
+      tb.insertAdjacentHTML('beforeend', `<tr><td><span class="cloudc">☁</span> ${esc(m)}${c.provider_model ? `<div class="muted">${esc(c.provider_model)}</div>` : ''}${uiModel ? `<div class="muted">${t('aus der UI')}</div>` : ''}</td><td class="muted">–</td><td class="muted">–</td>
+        <td><span class="cloudc">${ed('input', pr.input, 'in')} / ${ed('output', pr.output, 'out')}</span><div class="muted">${t('Kontext')} <input class="inl" type="number" step="1000" min="1000" value="${c.context_tokens ?? ''}" data-change="modelField" data-args="${args(m, 'context_tokens')}"></div></td>
+        <td class="muted">${t('Katalog')}</td><td>${tempo}</td><td>${caps}</td><td class="cloudc">cloud:${esc(c.cloud)}</td>
+        <td>${uiModel ? `<button class="small" title="${t('aus dem Katalog entfernen (nur Einträge aus der UI)')}" data-click="delCloudModel" data-args="${args(m)}">✕</button>` : ''}</td></tr>`);
+      continue;
+    }
+    const known = c.weights_gib != null;
+    const need = k => known ? (c.weights_gib + (c.kv_gib_per_1k || 0) * k + ovh).toFixed(1) : '?';
+    let src;
+    if (!known) src = `<span class="warn">${t('unbekannt → Dateigröße +20 %')}</span>`;
+    else if ((c.source || '').startsWith('measured')) src = `<span class="ok">${t('gemessen')}</span><span class="muted"> ${esc(c.measured_at || '')}${c.measured_on ? ' ' + t('auf {n}', { n: esc(c.measured_on) }) : ''}${c.partial_offload ? ' <span class="bad">⚠ partial offload</span>' : ''}</span>`;
+    else if ((c.source || '').startsWith('Alias')) src = `<span class="muted">${esc(c.source)}</span>`;
+    else src = `<span class="warn">${t('geschätzt')}</span>`;
+    const mst = measuring[m], bst = (STATE.benching || {})[m];
+    const busyAny = Object.keys(measuring).length || Object.keys(STATE.benching || {}).length;
+    const btn = mst ? `<span class="warn">${esc(tv(mst.step))}${mst.error ? ': ' + esc(mst.error) : ''}</span>`
+      : bst ? `<span class="warn">Benchmark: ${esc(tv(bst.step))}${bst.error ? ': ' + esc(bst.error) : ''}</span>`
+      : (busyAny ? `<button class="small" disabled>${t('Messen')}</button> <button class="small" disabled>Benchmark</button>`
+        : `<button class="small" data-click="measure" data-args="${args(m)}" title="${t('lädt das Modell bei 8k und 32k Kontext auf einem freien Knoten (~1 Min.)')}">${t((c.source || '').startsWith('measured') ? 'neu messen' : 'Messen')}</button>
+           <button class="small" data-click="bench" data-args="${args(m)}" title="${t('standardisierter Warm-Benchmark (~30 s)')}">Benchmark</button>`);
+    tb.insertAdjacentHTML('beforeend', `<tr><td>${esc(m)}</td><td>${known ? c.weights_gib + ' GiB' : '–'}</td>
+      <td>${known ? ((c.kv_gib_per_1k || 0) * 1000 < 10 ? '≈ 0' : (c.kv_gib_per_1k * 1024).toFixed(0) + ' MiB') + ' / 1k ' + t('Token') : '–'}</td>
+      <td>${need(8)} / ${need(32)} / ${need(64)} GiB</td><td>${src}</td><td>${tempo}</td><td>${caps}</td><td class="muted">${esc(onNodes(m)) || '–'}</td><td>${btn}</td></tr>`);
+  }
+}
+
+function expEditor(rname, kind, r) {
+  const v = r[kind];
+  const label = kind === 'canary' ? '🐤 Canary' : '🌒 Shadow';
+  const tip = t(kind === 'canary' ? 'Anteil der Anfragen läuft auf diesem Modell (auch kalt), Ergebnis geht an den Client - Kandidat mit echtem Verkehr messen'
+    : 'Anteil der Anfragen läuft NACH der Antwort noch einmal auf diesem Modell; der Client merkt nichts, Tempo/Fehler/Usage (Client shadow) zeigen den Kandidaten');
+  if (!v) return `<div class="exp"><span class="muted" title="${tip}">${label}</span><span><button class="small" data-click="expAdd" data-args="${args(rname, kind)}">${t('+ einrichten')}</button></span><span></span><span></span></div>`;
+  const opts = allModels().map(m => `<option value="${esc(m)}" title="${esc(modelTitle(m))}" ${m === v.model ? 'selected' : ''}>${esc(modelLabel(m))}</option>`).join('');
+  return `<div class="exp"><span class="muted" title="${tip}">${label}</span>
+    <select data-change="expField" data-args="${args(rname, kind, 'model', 'text')}">${opts}</select>
+    <input type="number" value="${v.num_ctx}" step="1024" min="1024" title="num_ctx" data-change="expField" data-args="${args(rname, kind, 'num_ctx', 'num')}">
+    <span style="display:flex;gap:4px;align-items:center"><input type="number" value="${v.percent}" min="0" max="100" style="width:56px" title="${t('Prozent der Anfragen')}" data-change="expField" data-args="${args(rname, kind, 'percent', 'num')}">%
+      <button class="small" title="${t('entfernen')}" data-click="expDel" data-args="${args(rname, kind)}">✕</button></span></div>`;
+}
+
+function renderRoles() {
+  const box = $('#roles'); box.innerHTML = '';
+  const opts = sel => allModels().map(m => `<option value="${esc(m)}" title="${esc(modelTitle(m))}" ${m === sel ? 'selected' : ''}>${esc(modelLabel(m))}</option>`).join('');
+  const capsEff = STATE.capabilities_effective || {};
+  for (const [rname, r] of Object.entries(CFG.roles)) {
+    const caps = r.tiers.map(t => capsEff[t.model] || STATE.capabilities[t.model]);
+    const toolsWarn = caps.some(c => c && !c.includes('tools')) ? `<span class="warn" title="${t('HA-Voice/AI-Task brauchen tools')}">${t('⚠ eine Stufe ohne tools')}</span>` : '';
+    const cloudTiers = r.tiers.filter(t => isCloud(t.model)).length;
+    const cloudInfo = cloudTiers ? `<span class="cloudc" title="${t('Cloud-Stufe(n): greift, wenn kein lokaler Knoten kann, eine Fähigkeit fehlt oder der Client execution: cloud verlangt - Datenklasse, Scan und Budget begrenzen')}">☁ ${cloudTiers} ${t(cloudTiers > 1 ? 'Cloud-Stufen' : 'Cloud-Stufe')}</span>` : '';
+    const lf = r.latency_first;
+    const prio = r.priority || 'normal';
+    let html = `<div class="role" data-role="${esc(rname)}"><h3><code>${esc(rname)}:latest</code>
+      <label class="muted" title="${t('leer = globale Einstellung (warm_first={v})', { v: CFG.warm_first })}"><select data-change="roleField" data-args="${args(rname, 'latency_first', 'flagOrNull')}" style="width:auto">
+        <option value="" ${lf === null || lf === undefined ? 'selected' : ''}>${t('warm zuerst: global ({v})', { v: t(CFG.warm_first ? 'an' : 'aus') })}</option>
+        <option value="1" ${lf === true ? 'selected' : ''}>${t('warm zuerst: an')}</option>
+        <option value="0" ${lf === false ? 'selected' : ''}>${t('warm zuerst: aus (strikt nach Rang)')}</option></select></label>
+      <label class="muted" title="${t('Prioritätsklasse beim Warten auf einen vollen Knoten: interactive vor normal vor batch (Alterung verhindert Verhungern)')}"><select data-change="roleField" data-args="${args(rname, 'priority', 'text')}" style="width:auto">
+        ${['interactive', 'normal', 'batch'].map(p => `<option value="${p}" ${p === prio ? 'selected' : ''}>${t('Priorität')}: ${p}</option>`).join('')}</select></label>
+      ${toolsWarn} ${cloudInfo}<button class="small" style="margin-left:auto" data-click="delRole" data-args="${args(rname)}">${t('Rolle löschen')}</button></h3>
+      <div class="tier muted" style="font-size:11px"><span></span><span>${t('Modell')}</span><span>num_ctx max</span><span>busy_ok</span><span></span></div>`;
+    r.tiers.forEach((tr, i) => {
+      html += `<div class="tier"><span class="muted">${i + 1}.</span>
+        <select data-change="tierField" data-args="${args(rname, i, 'model', 'text', true)}">${opts(tr.model)}</select>
+        <input type="number" value="${tr.num_ctx}" step="1024" min="1024" data-change="tierField" data-args="${args(rname, i, 'num_ctx', 'num', false)}">
+        ${isCloud(tr.model) ? `<span class="cloudc" title="${t('Cloud: kein busy, kein VRAM')}">☁ Cloud</span>` : `<input type="checkbox" ${tr.busy_ok ? 'checked' : ''} data-change="tierField" data-args="${args(rname, i, 'busy_ok', 'checked', false)}">`}
+        <span><button class="small" data-click="moveTier" data-args="${args(rname, i, -1)}">↑</button> <button class="small" data-click="moveTier" data-args="${args(rname, i, 1)}">↓</button> <button class="small" data-click="delTier" data-args="${args(rname, i)}">✕</button></span></div>`;
+    });
+    html += `<div class="row"><button class="small" data-click="addTier" data-args="${args(rname)}">${t('+ Stufe')}</button></div>`;
+    html += expEditor(rname, 'canary', r) + expEditor(rname, 'shadow', r) + `</div>`;
+    box.insertAdjacentHTML('beforeend', html);
+  }
+  $('#exposeConcrete').checked = !!CFG.expose_concrete_models;
+  const sel = $('#tryModel'); const cur = sel.value;
+  sel.innerHTML = Object.keys(CFG.roles).map(r => `<option value="${esc(r)}:latest">${t('Rolle')} ${esc(r)}</option>`).join('') + allModels().filter(m => !isCloud(m)).map(m => `<option value="${esc(m)}" title="${esc(modelTitle(m))}">${esc(modelLabel(m))}</option>`).join('');
+  if (cur) sel.value = cur;
+  const cc = STATE.cloud_config || {}; const cls = $('#tryClass'); const curc = cls.value;
+  cls.innerHTML = `<option value="">${t('Datenklasse')}: Default (${esc(cc.default_data_class || 'personal')})</option>` + (cc.data_classes || []).map(d => `<option value="${esc(d)}">${t('Datenklasse')}: ${esc(d)}</option>`).join('');
+  if (curc) cls.value = curc;
+}
+
+function modelField(m, k, v) {
+  const c = CFG.models[m] || {};
+  const e = MODEL_CHANGES[m] || { cloud: c.cloud, provider_model: c.provider_model, price_per_m: { ...(c.price_per_m || c.price_chf_per_m || {}) }, context_tokens: c.context_tokens, reasoning: c.reasoning, reasoning_off: c.reasoning_off, capabilities: c.capabilities };
+  if (k === 'context_tokens') e.context_tokens = v ? +v : undefined; else e.price_per_m[k] = +v;
+  MODEL_CHANGES[m] = e; dirty = true; $('#kmsg').innerHTML = `<span class="warn">${t('ungespeicherte Änderungen')}</span>`; markDirty();
+}
+function addCloudModel() {
+  const name = $('#nmName').value.trim(), prov = $('#nmProv').value;
+  if (!name || !prov) { $('#kmsg').innerHTML = `<span class="bad">${t('Name und Anbieter angeben')}</span>`; return; }
+  if (!name.includes(':')) { $('#kmsg').innerHTML = `<span class="bad">${t('Name als anbieter:modell, z. B. openai:gpt-5.4')}</span>`; return; }
+  MODEL_CHANGES[name] = { cloud: prov, provider_model: $('#nmPM').value.trim() || undefined, price_per_m: { input: +$('#nmIn').value || 0, output: +$('#nmOut').value || 0 },
+    context_tokens: +$('#nmCtx').value || undefined, reasoning: $('#nmReason').checked, capabilities: { tools: true, vision: true, structured: prov !== 'anthropic', thinking: false } };
+  CFG.models[name] = { ...MODEL_CHANGES[name] }; dirty = true; renderModels(); renderRoles();
+  $('#kmsg').innerHTML = `<span class="warn">${t('{n} vorgemerkt – Speichern nicht vergessen', { n: esc(name) })}</span>`; markDirty();
+  ['nmName', 'nmPM', 'nmIn', 'nmOut', 'nmCtx'].forEach(i => $('#' + i).value = '');
+}
+function delCloudModel(m) {
+  if (!confirm(t('{m} aus dem Katalog entfernen? Rollen, die es benutzen, blockieren das Speichern.', { m }))) return;
+  MODEL_DELETES.push(m); delete MODEL_CHANGES[m]; delete CFG.models[m]; dirty = true; renderModels(); renderRoles(); markDirty();
+}
+
+function fmtVal(it, v) {
+  if (v === null || v === undefined) return it.nullable ? t('leer') : String(it.default ?? '–');
+  if (Array.isArray(v)) return v.join(', ');
+  return String(v);
+}
+function setChange(path, v) {
+  SET_CHANGES[path] = v; dirty = true; markDirty();
+  if (isClientPath(path)) $('#cmsg').innerHTML = `<span class="warn">${t('ungespeicherte Änderungen')}</span>`;
+  $('#smsg').innerHTML = `<span class="warn">${t('{n} Änderung(en), noch nicht gespeichert', { n: Object.keys(SET_CHANGES).length })}</span>`;
+}
+function resetSetting(path) { setChange(path, null); renderSettings(); renderClients(); }
+function settingInput(it) {
+  let v = it.path in SET_CHANGES ? SET_CHANGES[it.path] : (it.set ? it.value : null);
+  const pending = it.path in SET_CHANGES;
+  if (pending && v === null) v = it.base_set ? it.base : null;   // Reset vorgemerkt: Basiswert zeigen
+  const shown = v === null || v === undefined ? (it.nullable ? null : it.default) : v;
+  const num = () => `<input type="number" value="${shown ?? ''}" ${it.min != null ? `min="${it.min}"` : ''} ${it.max != null ? `max="${it.max}"` : ''} step="${it.step ?? (it.type === 'int' ? 1 : 'any')}" placeholder="${it.nullable ? t('leer') : ''}" data-change="setChange" data-args="${args(it.path, 'numOrNull')}">`;
+  switch (it.type) {
+    case 'bool': return `<label><input type="checkbox" ${shown ? 'checked' : ''} data-change="setChange" data-args="${args(it.path, 'checked')}"> ${t(shown ? 'an' : 'aus')}</label>`;
+    case 'int': case 'float': return num();
+    case 'choice': return `<select data-change="setChange" data-args="${args(it.path, 'textOrNull')}">${it.nullable ? `<option value="" ${shown == null ? 'selected' : ''}>${t('leer')}</option>` : ''}${(it.choices || []).map(c => `<option value="${esc(c)}" ${c === shown ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
+    case 'tristate': return `<select data-change="setChange" data-args="${args(it.path, 'boolOrNull')}"><option value="false" ${shown === false ? 'selected' : ''}>false</option><option value="true" ${shown === true ? 'selected' : ''}>true</option><option value="" ${shown == null ? 'selected' : ''}>${t('leer')}</option></select>`;
+    case 'list': { const cur = new Set(shown || []); return `<div class="chk">${(it.choices || []).map(c => `<label><input type="checkbox" ${cur.has(c) ? 'checked' : ''} data-change="listToggle" data-args="${args(it.path, c)}"> ${esc(c)}</label>`).join('')}</div>`; }
+    default: return `<input type="text" value="${esc(shown ?? '')}" placeholder="${it.nullable ? t('leer') : ''}" data-change="setChange" data-args="${args(it.path, 'textOrNull')}">`;
+  }
+}
+function listToggle(path, item, on) {
+  const it = (CFG.settings.items || []).find(x => x.path === path);
+  const cur = new Set(path in SET_CHANGES && SET_CHANGES[path] ? SET_CHANGES[path] : (it.set ? it.value : it.default) || []);
+  if (on) cur.add(item); else cur.delete(item);
+  if (item === '*' && on) { cur.clear(); cur.add('*'); } else if (on) cur.delete('*');
+  setChange(path, [...cur]); renderSettings(); renderClients();
+}
+function renderSettings() {
+  const box = $('#settings'); const s = CFG.settings || { groups: [], items: [] };
+  const byGroup = {}; for (const it of s.items) (byGroup[it.group] = byGroup[it.group] || []).push(it);
+  box.innerHTML = s.groups.filter(g => g !== 'Clients' && byGroup[g]).map(g => {
+    const items = byGroup[g].slice().sort((a, b) => (a.entity || '').localeCompare(b.entity || ''));   // je Anbieter/Client zusammen (stabil: Reihenfolge der Allowlist bleibt)
+    let html = `<div class="tile"><h4>${esc(g)}</h4>`;
+    let lastEntity = undefined;
+    for (const it of items) {
+      if (it.entity !== lastEntity) { lastEntity = it.entity; if (it.entity) html += `<div class="sub">${g === 'Clients' ? '👥' : '☁'} ${esc(it.entity)}</div>`; }
+      const pending = it.path in SET_CHANGES, over = it.overridden || (pending && SET_CHANGES[it.path] !== null);
+      const baseTxt = `config.yaml: ${esc(fmtVal(it, it.base_set ? it.base : null))}${it.note ? ' · ' + esc(it.note) : ''}`;
+      html += `<div class="srow ${over ? 'over' : ''}" title="${esc(it.help || '')}"><div><span class="lbl">${esc(it.label)}</span>${pending ? ' <span class="warn">●</span>' : ''}<div class="base">${baseTxt}</div></div>
+        <div>${settingInput(it)}</div><div>${it.overridden || pending ? `<button class="small" title="${t('zurück auf config.yaml')}" data-click="resetSetting" data-args="${args(it.path)}">↺</button>` : ''}</div></div>`;
+    }
+    return html + '</div>';
+  }).join('') || `<span class="muted">${t('keine Einstellungen')}</span>`;
+  const sel = $('#nmProv'); sel.innerHTML = (CFG.cloud_providers || []).map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+}
+
+function renderClients() {
+  const box = $('#clients'); const cls = CFG.clients || {}; const stats = (STATE.client_auth || {}).clients || {};
+  const items = (CFG.settings?.items || []).filter(it => it.group === 'Clients');
+  box.innerHTML = Object.entries(cls).map(([name, c]) => {
+    const s = stats[name] || {};
+    const seen = s.last_seen_s != null ? (s.last_seen_s < 90 ? t('vor {n} s', { n: Math.round(s.last_seen_s) }) : t('vor {n} min', { n: Math.round(s.last_seen_s / 60) })) : t('noch nie gesehen');
+    const ident = [c.source === 'intern' ? t('Start-Zufall im Speicher') : c.has_token ? `Secret <span class="muted">(sha256 ${esc(c.token_prefix)}…${c.token_rotated ? ', ' + t('rotiert') + ' ' + esc(c.token_rotated.replace('T', ' ')) : ''})</span>` : `<span class="warn">${t('kein Secret')}</span>`,
+                   (c.ip || []).length ? `IP ${esc((c.ip || []).join(', '))}` : ''].filter(Boolean).join(' · ');
+    const tok = NEW_TOKENS[name] ? `<div class="tok"><b class="warn">${t('Neues Secret – nur jetzt sichtbar:')}</b> <code id="tok-${esc(name)}">${esc(NEW_TOKENS[name])}</code>
+        <button class="small" data-click="copyToken" data-args="${args(name, t('kopiert'))}">${t('kopieren')}</button>
+        <div class="muted">${t('In den Client eintragen (HA: API-Key im Ollama-Eintrag „Skirnir“, Node-RED: apiKey der llm-config, sonst <code>Authorization: Bearer …</code>) und in Secret-Store ablegen. Der Router kennt nur den Hash; das alte Secret ist ab sofort ungültig.')}</div></div>` : '';
+    const internal = c.source === 'intern';
+    const rows = internal ? '' : items.filter(it => it.entity === name).map(it => {
+      const pending = it.path in SET_CHANGES, over = it.overridden || (pending && SET_CHANGES[it.path] !== null);
+      return `<div class="srow ${over ? 'over' : ''}" title="${esc(it.help || '')}"><div><span class="lbl">${esc(it.label)}</span>${pending ? ' <span class="warn">●</span>' : ''}<div class="base">config.yaml: ${esc(fmtVal(it, it.base_set ? it.base : null))}</div></div>
+        <div>${settingInput(it)}</div><div>${it.overridden || pending ? `<button class="small" title="${t('zurück auf config.yaml')}" data-click="resetSetting" data-args="${args(it.path)}">↺</button>` : ''}</div></div>`;
+    }).join('');
+    return `<div class="client"><h3>${internal ? '🐦' : '👥'} ${esc(name)} <span class="badge">${internal ? t('intern') : c.source === 'ui' ? t('aus der UI') : 'config.yaml'}</span>
+        <span class="muted" style="font-size:12px">${s.total ?? 0} ${t('Anfragen')} · ${seen}${s.via ? ' · via ' + esc(s.via) : ''}${s.forbidden ? ` · <span class="warn">${s.forbidden} ${t('verboten')}</span>` : ''}${s.rate_limited ? ` · <span class="warn">${s.rate_limited} ${t('gedrosselt')}</span>` : ''}</span>
+        <span style="margin-left:auto">${internal ? '' : `<button class="small" data-click="rotateToken" data-args="${args(name)}" title="${t('neues zufälliges Secret; das alte gilt sofort nicht mehr')}">${t(c.has_token ? '🔑 Secret erneuern' : '🔑 Secret erzeugen')}</button>`}
+        ${c.source === 'ui' ? ` <button class="small" data-click="delClient" data-args="${args(name)}">${t('Client löschen')}</button>` : ''}</span></h3>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">${t('Identität')}: ${ident}${c.note ? ' · ' + esc(c.note) : ''}</div>${tok}${rows}</div>`;
+  }).join('') || `<span class="muted">${t('keine Clients konfiguriert (client_auth.clients)')}</span>`;
+}
+async function rotateToken(name) {
+  if (!confirm(t('Neues Secret für {n} erzeugen? Das bisherige gilt sofort nicht mehr – der Client muss danach umgestellt werden.', { n: name }))) return;
+  try { const r = await api(`/admin/clients/${encodeURIComponent(name)}/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        NEW_TOKENS[name] = r.token; await load(); showTab('clients'); $('#cmsg').innerHTML = `<span class="ok">${t('Secret für {n} erzeugt – jetzt kopieren', { n: esc(name) })}</span>`; }
+  catch (e) { $('#cmsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function addClient() {
+  const name = $('#ncName').value.trim().toLowerCase(), ip = $('#ncIp').value.trim(), note = $('#ncNote').value.trim();
+  if (!/^[a-z0-9][a-z0-9_-]{0,40}$/.test(name)) { $('#cmsg').innerHTML = `<span class="bad">${t('Name: a-z, 0-9, - und _')}</span>`; return; }
+  if (CFG.clients && CFG.clients[name]) { $('#cmsg').innerHTML = `<span class="bad">${t('gibt es schon')}</span>`; return; }
+  const spec = { roles: ['*'] }; if (ip) spec.ip = ip; if (note) spec.note = note;
+  try {
+    await api('/admin/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clients: { [name]: spec } }) });
+    const r = await api(`/admin/clients/${encodeURIComponent(name)}/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    NEW_TOKENS[name] = r.token; ['ncName', 'ncIp', 'ncNote'].forEach(i => $('#' + i).value = '');
+    await load(); showTab('clients'); $('#cmsg').innerHTML = `<span class="ok">${t('{n} angelegt – Secret jetzt kopieren; Rollen/Datenklasse unten anpassen und speichern', { n: esc(name) })}</span>`;
+  } catch (e) { $('#cmsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function delClient(name) {
+  if (!confirm(t('Client {n} löschen? Sein Secret und seine Einstellungen verfallen.', { n: name }))) return;
+  try { await api('/admin/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delete_clients: [name] }) });
+        delete NEW_TOKENS[name]; await load(); showTab('clients'); $('#cmsg').innerHTML = `<span class="ok">${t('{n} gelöscht', { n: esc(name) })}</span>`; }
+  catch (e) { $('#cmsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+
+// ---- Live-Statistik: /metrics parsen, Verlaeufe puffern, mit Canvas zeichnen (keine externe Bibliothek) ----
+const PAL = ['#58a6ff', '#3fb950', '#d29922', '#c084fc', '#f85149', '#79c0ff', '#56d364', '#e3b341'];
+const LIVE = { rpm: [], tps: [], gpu: {}, vram: {}, inflight: [], waiting: [], models: {}, modelHist: [], prevReq: null, prevTok: null, prevT: null };
+let METRICS = null, USAGE = null;
+function parseMetrics(txt) {
+  const out = {};
+  for (const line of txt.split('\n')) {
+    if (!line || line[0] === '#') continue;
+    const m = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{([^}]*)\})?\s+(\S+)/); if (!m) continue;
+    const labels = {};
+    if (m[3]) for (const kv of m[3].match(/[a-zA-Z_][a-zA-Z0-9_]*="(?:[^"\\]|\\.)*"/g) || []) { const i = kv.indexOf('='); labels[kv.slice(0, i)] = kv.slice(i + 2, -1); }
+    (out[m[1]] = out[m[1]] || []).push({ l: labels, v: parseFloat(m[4]) });
+  }
+  return out;
+}
+const msum = (name, pred) => (METRICS?.[name] || []).filter(s => !pred || pred(s.l)).reduce((a, s) => a + (isNaN(s.v) ? 0 : s.v), 0);
+function groupBy(name, key, pred) { const g = {}; for (const s of METRICS?.[name] || []) { if ((pred && !pred(s.l)) || isNaN(s.v)) continue; const k = s.l[key] || '–'; g[k] = (g[k] || 0) + s.v; } return g; }
+const fmtN = v => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(Math.round(v * 10) / 10);
+function sampleLive() {
+  const now = Date.now() / 1000, MAX = 200;
+  const req = msum('skirnir_requests_total'), tok = msum('skirnir_tokens_total', l => l.kind === 'completion');
+  // Raten ueber ein 30-s-Fenster (glatter als Stichprobe zu Stichprobe); Zaehler-Ruecksprung = Router-Neustart
+  LIVE.hist = (LIVE.hist || []).filter(h => now - h.t <= 30).concat([{ t: now, req, tok }]);
+  const base = LIVE.hist[0];
+  if (LIVE.prevT != null && base && now - base.t >= 2) {
+    const dt = now - base.t;
+    let rpm = (req - base.req) * 60 / dt, tps = (tok - base.tok) / dt;
+    if (rpm < 0 || tps < 0) { rpm = 0; tps = 0; LIVE.hist = [{ t: now, req, tok }]; }
+    LIVE.rpm.push(rpm); LIVE.tps.push(tps);
+    for (const [n, node] of Object.entries(STATE.nodes)) {
+      (LIVE.gpu[n] = LIVE.gpu[n] || []).push(node.gpu_known ? node.gpu_util : null);
+      (LIVE.vram[n] = LIVE.vram[n] || []).push(node.gpu_known ? node.vram_free_gib : null);
+    }
+    LIVE.inflight.push(Object.values(STATE.nodes).reduce((a, n) => a + (n.inflight || 0), 0));
+    LIVE.waiting.push((STATE.admission || {}).waiting || 0);
+    sampleModels(now, dt);
+    for (const k of ['rpm', 'tps', 'inflight', 'waiting']) LIVE[k] = LIVE[k].slice(-MAX);
+    for (const o of [LIVE.gpu, LIVE.vram, LIVE.models]) for (const k in o) o[k] = o[k].slice(-MAX);
+  } else {
+    LIVE.modelHist = LIVE.modelHist.filter(h => now - h.t <= 30).concat([{ t: now, per: groupBy('skirnir_requests_total', 'model') }]);
+  }
+  LIVE.prevT = now; LIVE.prevReq = req; LIVE.prevTok = tok;
+}
+// Anfragen/min je konkretem Modell im 30-s-Fenster; neue Modelle bekommen Nullen fuer die Vergangenheit, damit alle Reihen gleich lang sind.
+function sampleModels(now, dt) {
+  const per = groupBy('skirnir_requests_total', 'model');
+  LIVE.modelHist = LIVE.modelHist.filter(h => now - h.t <= 30).concat([{ t: now, per }]);
+  const base = LIVE.modelHist[0].per, len = Math.max(0, ...Object.values(LIVE.models).map(a => a.length));
+  for (const m of new Set([...Object.keys(per), ...Object.keys(LIVE.models)])) {
+    const arr = LIVE.models[m] || (LIVE.models[m] = new Array(len).fill(0));
+    const rate = Math.max(0, ((per[m] || 0) - (base[m] || 0)) * 60 / dt);
+    arr.push(Number.isFinite(rate) ? rate : 0);
+  }
+}
+function stacked(id, series) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x;
+  const n = Math.max(2, ...series.map(s => s.v.length)); const tot = Array.from({ length: n }, (_, i) => series.reduce((a, s) => a + (s.v[i] || 0), 0));
+  const max = Math.max(1e-9, ...tot);
+  if (!series.length || !tot.some(v => v > 0)) { g.fillStyle = '#8b98a8'; g.fillText(t('noch keine Anfragen im Fenster'), 8, h / 2); return; }
+  const X = i => 1 + (i / (n - 1)) * (w - 2), Y = v => h - 2 - (v / max) * (h - 16);
+  const acc = new Array(n).fill(0);
+  for (const s of series) {
+    const lo = acc.slice(); for (let i = 0; i < n; i++) acc[i] += s.v[i] || 0;
+    g.beginPath(); for (let i = 0; i < n; i++) g.lineTo(X(i), Y(acc[i])); for (let i = n - 1; i >= 0; i--) g.lineTo(X(i), Y(lo[i]));
+    g.closePath(); g.fillStyle = s.c + 'cc'; g.fill();
+  }
+  g.fillStyle = '#8b98a8'; g.fillText(fmtN(max) + ' /min', 2, 10);
+}
+function cv(id) {
+  const c = $(id); if (!c) return null; const r = c.getBoundingClientRect(); if (!r.width || !r.height) return null;
+  const dpr = window.devicePixelRatio || 1; c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, r.width, r.height); g.font = '11px system-ui, sans-serif'; g.textBaseline = 'alphabetic';
+  return { g, w: r.width, h: r.height };
+}
+function spark(id, series, opts = {}) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x;
+  const all = series.flatMap(s => s.v).filter(v => v != null && !isNaN(v));
+  if (!all.length) { g.fillStyle = '#8b98a8'; g.fillText(t('sammelt …'), 4, h / 2 + 4); return; }
+  const min = opts.min ?? 0, max = Math.max(opts.max ?? 0, ...all, min + 1e-9);
+  const n = Math.max(2, ...series.map(s => s.v.length));
+  const X = i => 1 + (i / (n - 1)) * (w - 2), Y = v => h - 2 - ((v - min) / (max - min)) * (h - 14);
+  series.forEach(s => {
+    g.strokeStyle = s.c; g.lineWidth = 1.5; g.beginPath(); let on = false;
+    s.v.forEach((v, i) => { if (v == null || isNaN(v)) { on = false; return; } on ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)); on = true; });
+    g.stroke();
+    if (opts.fill && series.length === 1 && s.v.length) { g.lineTo(X(s.v.length - 1), h - 2); g.lineTo(X(0), h - 2); g.closePath(); g.fillStyle = s.c + '33'; g.fill(); }
+  });
+  g.fillStyle = '#8b98a8'; g.fillText(fmtN(max), 2, 10);
+}
+function bars(id, labels, series, opts = {}) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x; const padL = 30, padB = 18, padT = 10, cw = w - padL - 6, ch = h - padB - padT;
+  if (!labels.length) { g.fillStyle = '#8b98a8'; g.fillText(t('noch keine Daten'), padL, h / 2); return; }
+  const totals = labels.map((_, i) => series.reduce((a, s) => a + (s.v[i] || 0), 0)); const max = Math.max(1, ...totals);
+  g.strokeStyle = '#273241'; for (const f of [0, 0.5, 1]) { const y = padT + ch - f * ch; g.beginPath(); g.moveTo(padL, y); g.lineTo(w - 6, y); g.stroke(); g.fillStyle = '#8b98a8'; g.fillText(fmtN(max * f), 0, y + 4); }
+  const bw = cw / labels.length, step = Math.ceil(labels.length / 12);
+  labels.forEach((lab, i) => {
+    let y = padT + ch;
+    for (const s of series) { const v = s.v[i] || 0, bh = v / max * ch; g.fillStyle = s.c; g.fillRect(padL + i * bw + bw * 0.15, y - bh, Math.max(1, bw * 0.7), bh); y -= bh; }
+    if (i % step === 0) { g.fillStyle = '#8b98a8'; g.textAlign = 'center'; g.fillText(lab, padL + i * bw + bw / 2, h - 4); g.textAlign = 'left'; }
+  });
+  if (opts.line && opts.line.v.some(v => v > 0)) {
+    const lmax = Math.max(1e-9, ...opts.line.v); g.strokeStyle = opts.line.c; g.lineWidth = 1.5; g.beginPath();
+    opts.line.v.forEach((v, i) => { const px = padL + i * bw + bw / 2, py = padT + ch - v / lmax * ch; i ? g.lineTo(px, py) : g.moveTo(px, py); });
+    g.stroke(); g.fillStyle = opts.line.c; g.textAlign = 'right'; g.fillText(fmtN(lmax) + 'k', w - 6, padT + 10); g.textAlign = 'left';
+  }
+}
+function donut(id, parts) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x;
+  const entries = Object.entries(parts).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]); const total = entries.reduce((a, [, v]) => a + v, 0);
+  if (!total) { g.fillStyle = '#8b98a8'; g.fillText(t('noch keine Anfragen'), 8, h / 2); return; }
+  const r = Math.min(h / 2 - 8, 72), cx = r + 10, cy = h / 2; let a0 = -Math.PI / 2;
+  entries.forEach(([, v], i) => { const a1 = a0 + v / total * 2 * Math.PI; g.beginPath(); g.arc(cx, cy, r, a0, a1); g.arc(cx, cy, r * 0.62, a1, a0, true); g.closePath(); g.fillStyle = PAL[i % PAL.length]; g.fill(); a0 = a1; });
+  g.fillStyle = '#e6edf3'; g.textAlign = 'center'; g.font = 'bold 15px system-ui, sans-serif'; g.fillText(fmtN(total), cx, cy + 5); g.font = '11px system-ui, sans-serif'; g.textAlign = 'left';
+  entries.slice(0, 9).forEach(([lab, v], i) => { const y = 16 + i * 17; g.fillStyle = PAL[i % PAL.length]; g.fillRect(cx + r + 14, y - 8, 9, 9); g.fillStyle = '#e6edf3'; g.fillText(`${lab}  ${Math.round(100 * v / total)} %  (${fmtN(v)})`, cx + r + 28, y); });
+}
+function hbars(id, rows) {
+  const x = cv(id); if (!x) return; const { g, w, h } = x;
+  if (!rows.length) { g.fillStyle = '#8b98a8'; g.fillText(t('noch keine Messung'), 8, h / 2); return; }
+  const max = Math.max(1e-9, ...rows.map(r => r.v)), rh = Math.min(24, (h - 4) / rows.length), labW = Math.min(200, w * 0.45);
+  rows.forEach((r, i) => { const y = 2 + i * rh; g.fillStyle = '#8b98a8'; g.fillText(r.label.length > 30 ? r.label.slice(0, 29) + '…' : r.label, 2, y + rh * 0.68);
+    const bw = Math.max(1, (w - labW - 48) * r.v / max); g.fillStyle = r.c; g.fillRect(labW, y + 4, bw, rh - 8); g.fillStyle = '#e6edf3'; g.fillText(fmtN(r.v), labW + bw + 5, y + rh * 0.68); });
+}
+function renderLive() {
+  if ($('#main').dataset.active !== 'uebersicht') return;   // unsichtbare Canvas haben keine Groesse
+  const nodes = Object.keys(STATE.nodes); const last = a => a.length ? a[a.length - 1] : null; const col = i => PAL[i % PAL.length];
+  $('#lv-rpm').textContent = last(LIVE.rpm) != null ? fmtN(last(LIVE.rpm)) : '–'; spark('#sp-rpm', [{ v: LIVE.rpm, c: PAL[0] }], { fill: true });
+  $('#lv-tps').textContent = last(LIVE.tps) != null ? fmtN(last(LIVE.tps)) : '–'; spark('#sp-tps', [{ v: LIVE.tps, c: PAL[1] }], { fill: true });
+  $('#lv-gpu').innerHTML = nodes.map((n, i) => `<span style="color:${col(i)}">● ${esc(n)} <b>${STATE.nodes[n].gpu_known ? STATE.nodes[n].gpu_util + ' %' : '–'}</b></span>`).join('') || '–';
+  spark('#sp-gpu', nodes.map((n, i) => ({ v: LIVE.gpu[n] || [], c: col(i) })), { max: 100 });
+  $('#lv-vram').innerHTML = nodes.map((n, i) => `<span style="color:${col(i)}">● ${esc(n)} <b>${STATE.nodes[n].gpu_known ? (STATE.nodes[n].vram_free_gib ?? 0).toFixed(1) : '–'}</b></span>`).join('') || '–';
+  spark('#sp-vram', nodes.map((n, i) => ({ v: LIVE.vram[n] || [], c: col(i) })), { max: Math.max(1, ...nodes.map(n => STATE.nodes[n].vram_total_gib || 0)) });
+  $('#lv-inflight').innerHTML = `${last(LIVE.inflight) ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">${t('laufend')}</span> · <span class="${last(LIVE.waiting) ? 'warn' : ''}">${last(LIVE.waiting) ?? 0}</span> <span class="muted" style="font-size:12px;font-weight:normal">${t('wartend')}</span>`;
+  spark('#sp-inflight', [{ v: LIVE.inflight, c: PAL[0] }, { v: LIVE.waiting, c: PAL[2] }]);
+  const days = Object.entries((USAGE || {}).days || {}).sort();
+  bars('#ch-days', days.map(([d]) => d.slice(8) + '.' + d.slice(5, 7)), [{ v: days.map(([, d]) => (d.requests || 0) - (d.errors || 0)), c: PAL[0] }, { v: days.map(([, d]) => d.errors || 0), c: PAL[4] }],
+       { line: { v: days.map(([, d]) => ((d.prompt_tokens || 0) + (d.completion_tokens || 0)) / 1000), c: PAL[2] } });
+  const bk = {}; for (const s of METRICS?.skirnir_request_duration_seconds_bucket || []) bk[s.l.le] = (bk[s.l.le] || 0) + s.v;
+  const les = Object.keys(bk).filter(k => k !== '+Inf').sort((a, b) => Number(a) - Number(b)); let prev = 0;
+  const per = les.map(le => { const c = bk[le] - prev; prev = bk[le]; return c; }); if (les.length) per.push((bk['+Inf'] ?? prev) - prev);
+  bars('#ch-dur', les.length ? [...les.map(l => '≤' + l), '>' + les[les.length - 1]] : [], [{ v: per, c: PAL[3] }]);
+  donut('#ch-node', groupBy('skirnir_requests_total', 'node')); donut('#ch-role', groupBy('skirnir_requests_total', 'role')); donut('#ch-client', groupBy('skirnir_requests_total', 'client'));
+  hbars('#ch-tps', (METRICS?.skirnir_perf_gen_tps || []).filter(s => s.v > 0).sort((a, b) => b.v - a.v).slice(0, 8).map((s, i) => ({ label: `${s.l.model} @ ${s.l.node}`, v: s.v, c: col(i) })));
+  renderModelCharts(last, col);
+}
+// Effektiv genutzte Modelle: gestapelter Verlauf (Anfragen/min je Modell), Legende mit aktuellem Anteil, Donuts seit Start
+function renderModelCharts(last, col) {   // hieß renderModels und verdeckte die Katalogtabelle (Review 2026-09-25)
+  const active = Object.entries(LIVE.models).filter(([, a]) => a.some(v => v > 0)).sort((a, b) => (last(b[1]) || 0) - (last(a[1]) || 0) || b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0));
+  const totalNow = active.reduce((a, [, v]) => a + (last(v) || 0), 0);
+  $('#lv-models').innerHTML = active.length ? active.map(([m, v], i) => `<span style="color:${col(i)}">● ${esc(m)} <b>${totalNow ? Math.round(100 * (last(v) || 0) / totalNow) + ' %' : '–'}</b> <span class="muted">${fmtN(last(v) || 0)}/min</span></span>`).join('') : `<span class="muted">${t('noch keine Anfragen im 30-s-Fenster')}</span>`;
+  // Ohne Anfragen in den letzten 10 Minuten nur Ueberschrift + Legendenzeile: die leere Zeichenflaeche belegte sonst eine
+  // ganze Zeile ohne Information (2026-10-04). Erst sichtbar machen, dann zeichnen - cv() misst die Groesse am Element.
+  $('#ch-models').style.display = active.length ? '' : 'none';
+  if (active.length) stacked('#ch-models', active.map(([, v], i) => ({ v, c: col(i) })));
+  donut('#ch-model-share', groupBy('skirnir_requests_total', 'model'));
+  donut('#ch-model-tokens', groupBy('skirnir_tokens_total', 'model', l => l.kind === 'completion'));
+}
+async function loadMetrics() {
+  try { const r = await fetch('/metrics'); if (r.ok) METRICS = parseMetrics(await r.text()); } catch {}
+  try { USAGE = await api('/admin/usage'); } catch {}
+}
+
+function renderOps() {
+  const u = STATE.usage_today || {}, adm = STATE.admission || {}, sch = STATE.scheduler || {}, b = STATE.build || {}, sc = STATE.supply_chain || {};
+  const cloudSpend = Object.values(STATE.cloud || {}).reduce((a, c) => a + (c.spend_month_chf || 0), 0);
+  const q = (adm.entries || []).map(e => `<div class="muted">${esc(e.priority)} · ${esc(e.role)} → ${esc(e.node)} · ${e.waiting_s} s</div>`).join('');
+  const w = sch.score || {};
+  $('#ops').innerHTML = `
+    <div class="tile"><h4>${t('Nutzung heute')}</h4><div class="big">${u.requests ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">${t('Anfragen')}</span></div>
+      <div class="muted">${((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)).toLocaleString(LOCALE)} ${t('Tokens')} · ${u.errors ?? 0} ${t('Fehler')} · <span class="cloudc">${fmtCost(u.cost_chf)}</span> Cloud</div>
+      <div class="muted">${t('Cloud im Monat')}: <b class="cloudc">${fmtCost(cloudSpend)}</b> · Sessions ${STATE.sessions ?? 0} · Idempotency ${(STATE.idempotency || {}).entries ?? 0}</div></div>
+    <div class="tile"><h4>${t('Warteschlange')}</h4><div class="big ${adm.waiting ? 'warn' : ''}">${adm.waiting ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">${t('wartend')}</span></div>${q || `<div class="muted">${t('niemand wartet')}</div>`}</div>
+    <div class="tile"><h4>Scheduler</h4><div class="muted">${t('Score: warm {warm} · Anfrage −{inflight} · voll −{saturated} · VRAM ×{vram} · Gewicht ×{weight} · Tempo ×{speed} · Fehler −{errors}', { warm: w.warm, inflight: w.inflight, saturated: w.saturated, vram: w.vram_free, weight: w.weight, speed: w.speed, errors: w.errors })}</div>
+      <div class="muted">${t('Breaker: {f} Fehler / {w} s → {o} s offen', { f: (sch.breaker || {}).failures, w: (sch.breaker || {}).window_s, o: (sch.breaker || {}).open_s })}</div>
+      <div class="muted">${t('Admission: {n} je Knoten · Alterung {a} s · max. Wartezeit {w} s', { n: (sch.admission || {}).max_inflight_default, a: (sch.admission || {}).aging_s, w: (sch.admission || {}).max_wait_s })}</div></div>
+    <div class="tile"><h4>Build &amp; Supply Chain</h4><div class="muted">${b.present ? `Deploy ${esc((b.deployed_at || '').replace('T', ' '))}${b.router_version ? ' · Router ' + esc(b.router_version) : ''} · ${t('{n} Dateien (SHA-256)', { n: Object.keys(b.files || {}).length })}` : t('kein Manifest')}</div>
+      ${Object.entries(sc).map(([n, v]) => `<div class="muted">${esc(n)}: Ollama ${esc(v.ollama_version || '?')} · ${t('{n} Modelle', { n: Object.keys(v.models || {}).length })}</div>`).join('')}</div>`;
+}
+
+// Umfang des Protokolls: der Router haelt 2000 Eintraege, /admin/state liefert ?decisions=N (Standard 50). Wahl bleibt im Browser.
+let DEC_N = 50;
+try { DEC_N = +localStorage.getItem('skirnir.decN') || 50; } catch (e) {}
+function setDecN(n) { DEC_N = +n; try { localStorage.setItem('skirnir.decN', String(DEC_N)); } catch (e) {} refresh(); }
+function decisionsUrl() { return '/admin/state' + (DEC_N !== 50 ? `?decisions=${DEC_N}` : ''); }
+function renderDecisions() {
+  const sel = $('#decN'); if (sel && +sel.value !== DEC_N) sel.value = String(DEC_N);
+  const onlyEv = $('#decEventsOnly') && $('#decEventsOnly').checked;
+  const q = (($('#decFilter') || {}).value || '').trim().toLowerCase();
+  const all = (STATE.decisions || []);
+  const today = new Date().toISOString().slice(0, 10);
+  const shown = all.slice().reverse().filter(d => !(onlyEv && d.event === 'route')).filter(d => !q || JSON.stringify(d).toLowerCase().includes(q));
+  if ($('#decCount')) $('#decCount').textContent = `${t('{a} von {b} Einträgen', { a: shown.length, b: all.length })}${all.length ? ' · ' + t('seit') + ' ' + all[0].ts.replace('T', ' ') : ''}`;
+  $('#decisions').innerHTML = shown.map(d => {
+    const ts = d.ts.startsWith(today) ? d.ts.slice(11) : d.ts.slice(5, 10) + ' ' + d.ts.slice(11);
+    if (d.event === 'route') return `<div>${ts} <b>${esc(d.role)}</b> → ${d.cloud || String(d.node).startsWith('cloud:') ? '<span class="cloudc">☁ </span>' : ''}${esc(d.node)} · ${esc(d.model)} · tier ${d.tier} · ctx ${d.ctx ?? 'default'} · ${d.warm ? '<span class="ok">warm</span>' : t('kalt')}${d.canary ? ' · 🐤' : ''}${d.reason ? ' · <span class="muted">' + esc(tv(d.reason)) + '</span>' : ''}${d.skipped ? ` · <span class="warn">${t('{n} übersprungen', { n: d.skipped })}</span>` : ''}${d.client ? ' · 👥 ' + esc(d.client) : ''}${d.via && d.via !== 'ollama' ? ' · ' + esc(d.via) : ''}</div>`;
+    // gpu_busy (Spiel, fremdes VRAM) ist gewollt und vergeht von selbst -> gelb statt rot; Grund seit Router 0.3.4
+    if (d.event === 'no_node') return `<div class="${d.code === 'gpu_busy' ? 'warn' : 'bad'}">${ts} <b>${esc(d.role)}</b> → ${t('kein Knoten verfügbar')}${d.code ? ' · <b>' + esc(d.code) + '</b>' : ''}${d.detail ? ' · <span class="muted">' + esc(d.detail) + '</span>' : ''}</div>`;
+    if (d.event === 'unsatisfiable') return `<div class="bad">${ts} <b>${esc(d.role)}</b> → ${t('keine Stufe kann')}: ${esc(d.reasons || '')}</div>`;
+    if (d.event === 'breaker') return `<div class="${d.state === 'closed' ? 'ok' : 'bad'}">${ts} Breaker ${esc(d.node)} → ${esc(d.state)} ${esc(d.reason || '')}</div>`;
+    if (d.event === 'agent_update') return `<div class="${d.state === 'failed' || d.state === 'stalled' ? 'bad' : d.state === 'done' ? 'ok' : 'warn'}">${ts} ${t('Agent-Update')} ${esc(d.node)} → ${esc(d.state)} ${esc(d.version || '')} ${esc(d.reason || '')}</div>`;
+    if (d.event === 'ollama_update') return `<div class="${d.state === 'failed' || d.state === 'stalled' ? 'bad' : d.state === 'done' ? 'ok' : 'warn'}">${ts} ${t('Ollama-Update')} ${esc(d.node)} → ${esc(d.state)} ${esc(d.version || '')} ${esc(d.reason || '')}</div>`;
+    if (d.event === 'gpu_guard') return `<div class="${d.problem ? 'bad' : (d.state === 'normal' ? 'ok' : 'warn')}">${ts} ${t('GPU-Schutz')} ${esc(d.node)} → ${esc(tv(d.state))}${d.limit_w ? ` (${d.limit_w} W)` : ''} ${esc(tv(d.reason))}</div>`;
+    if (d.event === 'queued') return `<div class="warn">${ts} ${t('Warteschlange: {r} ({p}) wartet auf {n} ({i} aktiv)', { r: `<b>${esc(d.role)}</b>`, p: esc(d.priority), n: esc(d.node), i: d.inflight })}</div>`;
+    if (d.event === 'wait_load') return `<div class="warn">${ts} ${t('{r} wartet, bis {n} {m} geladen hat', { r: `<b>${esc(d.role)}</b>`, n: esc(d.node), m: esc(d.model) })}</div>`;
+    if (d.event === 'admission_timeout') return `<div class="bad">${ts} ${t('Deadline: {r} ({p}) nach {ms} ms abgewiesen', { r: `<b>${esc(d.role)}</b>`, p: esc(d.priority), ms: d.waited_ms })}</div>`;
+    if (d.event === 'shadow') return `<div class="muted">${ts} ${t('🌒 Shadow {r} → {m} auf {n}: {s}', { r: `<b>${esc(d.role)}</b>`, m: esc(d.model), n: esc(d.node || '–'), s: esc(tv(d.status)) })}${d.ms ? ' · ' + d.ms + ' ms' : ''}</div>`;
+    if (d.event === 'prewarm') return `<div class="muted">${ts} ${t('prewarm {m} auf {n} ({r})', { m: esc(d.model), n: esc(d.node), r: esc(tv(d.reason)) })}</div>`;
+    if (d.event === 'loadtest') return `<div class="muted">${ts} ${t('🧪 Lasttest {n} × {c} parallel: {s} s, {tp} Anfragen/s', { n: d.n, c: d.concurrency, s: d.seconds, tp: d.throughput })}</div>`;
+    if (d.event === 'decision') return `<div>${ts} 🧭 ${t('Auto-Rolle')}: ${esc(d.engine)} → <b>${esc(d.selected)}</b> <span class="muted">p ${d.top} · ${t('Abstand')} ${d.margin} · ${d.latency_ms} ms${(d.fallback || []).length ? ' · Fallback: ' + esc(d.fallback.join(' | ')) : ''}</span>${d.client ? ' · 👥 ' + esc(d.client) : ''}</div>`;
+    return `<div class="warn">${ts} ${esc(d.event)} ${esc(d.node || '')} ${esc(d.reason || d.state || '')}</div>`;
+  }).join('') || `<span class="muted">${t('noch keine')}</span>`;
+}
+
+function addRole() { const n = $('#newRole').value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, ''); if (!n || CFG.roles[n]) return; CFG.roles[n] = { latency_first: false, priority: 'normal', tiers: [{ model: allModels()[0], num_ctx: 8192, busy_ok: true }] }; dirty = true; $('#newRole').value = ''; renderRoles(); }
+function delRole(r) { if (confirm(t('Rolle {r} löschen? HA-Subentries, die sie nutzen, bekommen dann 404.', { r }))) { delete CFG.roles[r]; dirty = true; renderRoles(); } }
+function addTier(r) { CFG.roles[r].tiers.push({ model: allModels()[0], num_ctx: 8192, busy_ok: true }); dirty = true; renderRoles(); }
+function delTier(r, i) { CFG.roles[r].tiers.splice(i, 1); dirty = true; renderRoles(); }
+function moveTier(r, i, d) { const t = CFG.roles[r].tiers; const j = i + d; if (j < 0 || j >= t.length) return; [t[i], t[j]] = [t[j], t[i]]; dirty = true; renderRoles(); }
+
+async function save() {
+  const roles = {};
+  for (const [n, r] of Object.entries(CFG.roles)) {
+    roles[n] = { tiers: r.tiers, latency_first: r.latency_first, priority: r.priority || 'normal' };
+    if (r.canary) roles[n].canary = r.canary;
+    if (r.shadow) roles[n].shadow = r.shadow;
+  }
+  const body = { roles, expose_concrete_models: $('#exposeConcrete').checked };
+  if (Object.keys(SET_CHANGES).length) body.settings = SET_CHANGES;
+  if (Object.keys(MODEL_CHANGES).length) body.models = MODEL_CHANGES;
+  if (MODEL_DELETES.length) body.delete_models = MODEL_DELETES;
+  try {
+    const r = await api('/admin/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const n = Object.keys(SET_CHANGES).length;
+    SET_CHANGES = {}; MODEL_CHANGES = {}; MODEL_DELETES = [];
+    const ok = `<span class="ok">${t('gespeichert ({r} Rollen{s}), Router neu konfiguriert', { r: r.roles, s: n ? ', ' + t('{n} Einstellung(en)', { n }) : '' })}</span>`;
+    dirty = false; rolesDirty = false; await load();
+    $('#msg').innerHTML = ok; $('#kmsg').innerHTML = ok; $('#cmsg').innerHTML = ok;
+    $('#smsg').innerHTML = `<span class="ok">${t('gespeichert – {n} Einstellung(en) weichen von config.yaml ab', { n: r.settings ?? 0 })}</span>`;
+    markDirty();
+  } catch (e) { for (const id of ['#msg', '#kmsg', '#smsg', '#cmsg']) $(id).innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+
+function durationLine(r) {   // Gesamtdauer aufgeteilt: Warteschlange (Admission) + Modell (Ollama) + Rest (Router, Netz, Tunnel)
+  const total = r.seconds || 0, q = (r.queued_ms || 0) / 1000, m = (r.backend_ms || 0) / 1000, rest = Math.max(0, total - q - m);
+  const f = v => v.toFixed(v < 10 ? 2 : 1) + ' s';
+  const parts = [`${q >= 0.5 ? '⚠ ' : ''}${t('Warteschlange')} ${f(q)}`, `${t('Modell')} ${f(m)}${r.load_ms > 100 ? ' ' + t('(davon Laden {s} s)', { s: (r.load_ms / 1000).toFixed(1) }) : ''}`, `${t('Router/Netz')} ${f(rest)}`];
+  return `${t('Dauer')}: ${f(total)} = ${parts.join(' + ')}`;
+}
+async function tryIt() {
+  const out = $('#tryOut'); out.textContent = t('… läuft'); out.className = '';
+  const body = { model: $('#tryModel').value, prompt: $('#tryPrompt').value, think: $('#tryThink').checked,
+                 routing: { execution: $('#tryExec').value || undefined, data_class: $('#tryClass').value || undefined, priority: $('#tryPrio').value || undefined } };
+  if ($('#tryCtx').value) body.num_ctx = +$('#tryCtx').value;
+  try {
+    const r = await api('/admin/try', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = r.decision || {}, ri = r.routing || {};
+    const think = r.thinking_chars ? ' ' + t('(davon unsichtbares Nachdenken: ~{tok} Token ≈ {s} s)', { tok: Math.round(r.thinking_chars / 4), s: (r.thinking_chars / 4 / (r.perf ? r.perf.gen_tps : 1)).toFixed(1) }) : '';
+    const skipped = (ri.skipped || []).map(s => `  - ${t('Stufe')} ${s.tier} ${s.model}@${s.ctx}: ${s.reason}`).join('\n');
+    out.textContent = (r.status === 200
+      ? `${t('Knoten')}: ${d.node} (${d.node_state})${ri.cloud ? ' ☁ Cloud' : ''}   ${t('Stufe')}: ${d.tier}   ${t('Modell')}: ${d.model}   ctx: ${d.ctx ?? 'default'}   ${d.warm ? 'warm' : t('Kaltstart')}   ${t('Grund')}: ${ri.reason || d.reason || '–'}   ${t('Priorität')}: ${ri.priority || '–'}${ri.data_class ? '   ' + t('Datenklasse') + ': ' + ri.data_class : ''}
+${durationLine(r)}${r.perf ? `\n${t('Tempo')}: ${r.perf.gen_tps} tok/s gen · ${r.perf.prompt_tps ?? '–'} tok/s prompt · ${r.perf.tokens} ${t('Token')}${think}` : ''}${skipped ? '\n' + t('übersprungen') + ':\n' + skipped : ''}
+\n${r.answer}`
+      : `HTTP ${r.status}: ${r.answer}`);
+    await refresh();
+  } catch (e) { out.textContent = t('Fehler: {e}', { e: e.message }); }
+}
+
+async function loadTest() {
+  const out = $('#ltOut'), btn = $('#ltBtn'); const n = +$('#ltN').value || 20, c = +$('#ltC').value || 4;
+  if (!confirm(t('{n} Anfragen mit {c} parallel an {m} schicken? Das belegt die GPU für einige Sekunden.', { n, c, m: $('#tryModel').value }))) return;
+  btn.disabled = true; out.className = ''; out.textContent = t('… läuft ({n} Anfragen, {c} parallel)', { n, c }); $('#ltMsg').textContent = '';
+  const body = { model: $('#tryModel').value, prompt: $('#tryPrompt').value, n, concurrency: c, probe_interactive: $('#ltProbe').checked };
+  if ($('#tryCtx').value) body.num_ctx = +$('#tryCtx').value;
+  const f = v => v == null ? '–' : v.toFixed(2) + ' s';
+  try {
+    const r = await api('/admin/loadtest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const s = r.normal, p = r.interactive;
+    const line = (label, x) => t('{l}: {ok}/{n} ok   Latenz p50 {p50} · p95 {p95} · max {max}   Wartezeit ∅ {qm} · max {qx}   Modell ∅ {mm}', { l: label, ok: x.ok, n: x.count, p50: f(x.wall_p50), p95: f(x.wall_p95), max: f(x.wall_max), qm: f(x.queue_mean), qx: f(x.queue_max), mm: f(x.model_mean) });
+    let txt = t('{n} Anfragen, {c} parallel, {m}: {s} s gesamt → {tp} Anfragen/s', { n: r.n, c: r.concurrency, m: r.model, s: r.seconds, tp: r.throughput }) + '\n' + line('normal     ', s) + `\n${t('Knoten')}: ${Object.entries(s.nodes).map(([k, v]) => k + ' ' + v).join(', ')}`;
+    if (p && p.count) {
+      txt += '\n' + line('interactive', p);
+      const gain = s.queue_mean != null && p.queue_mean != null ? s.queue_mean - p.queue_mean : null;
+      txt += gain != null ? '\n' + t('→ interactive wartete im Mittel {d} {cmp} als normal', { d: f(Math.abs(gain)), cmp: t(gain > 0 ? 'kürzer' : 'länger') }) + t(gain > 0.2 ? ' – Priorität wirkt' : gain > -0.2 ? ' – kein messbarer Unterschied (Schlange zu kurz?)' : ' – ⚠ Priorität wirkt nicht') : '';
+    }
+    if (s.errors && s.errors.length) txt += '\n' + t('Fehler: {e}', { e: s.errors.join(' | ') });
+    out.textContent = txt; await refresh();
+  } catch (e) { out.textContent = t('Fehler: {e}', { e: e.message }); }
+  btn.disabled = false;
+}
+async function bench(m) {
+  try { const r = await api('/admin/bench', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: m }) });
+        $('#msg').innerHTML = `<span class="ok">${t('Benchmark von {m} läuft auf {n} …', { m: esc(m), n: esc(r.node) })}</span>`; await refresh(); }
+  catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function measure(m) {
+  try { const r = await api('/admin/measure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: m }) });
+        $('#msg').innerHTML = `<span class="ok">${t('Messung von {m} läuft auf {n} …', { m: esc(m), n: esc(r.node) })}</span>`; await refresh(); }
+  catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+async function renderRegistry() {
+  const reg = $('#registry');
+  if (document.activeElement && reg.contains(document.activeElement)) return;   // Eingabe in der Policy-Spalte nicht alle 3 s ueberschreiben
+  let r; try { r = await api('/admin/nodes'); } catch (e) { return; }
+  try { const au = await api('/admin/agent-update'); const m = au.manifest;
+    $('#agentUpdate').innerHTML = m ? `${t('Agent-Update hinterlegt')}: <b>${esc(m.version)}</b> (${(m.files || []).map(f => esc(f.os + '/' + f.arch)).join(', ')}${au.signed ? ', ' + t('signiert') : `, <span class="bad">${t('unsigniert')}</span>`})`
+      + ` · Rollout ${t(au.enabled ? 'an' : 'aus')}${au.canary ? ' · ' + t('Kanarienvogel {c}, danach {h} h warten', { c: `<b>${esc(au.canary)}</b>`, h: au.canary_clean_h }) : ' · ' + t('kein Kanarienvogel')}`
+      : t('kein Agent-Update hinterlegt (deploy.py --agent legt Binaries und Manifest auf den Router)'); } catch (e) {}
+  try { const ou = await api('/admin/ollama-update'); const l = ou.latest || {};
+    const win = ou.window_start && ou.window_end ? t('Fenster {a}–{b}', { a: esc(ou.window_start), b: esc(ou.window_end) }) : t('jederzeit');
+    $('#ollamaUpdate').innerHTML = `${t('neueste Ollama-Version')}: ` + (l.version ? `<b>${esc(l.version)}</b> <span class="muted">(${t('geprüft {t}', { t: esc((l.checked_ts || '').replace('T', ' ')) })})</span>`
+      : l.error ? `<span class="bad">${t('Versionsprüfung fehlgeschlagen: {e}', { e: esc(l.error) })}</span>` : t('noch nicht geprüft'))
+      + ` · ${t('Ollama-Update')} ${t(ou.enabled ? 'an' : 'aus')} · ${win}${ou.canary ? ' · ' + t('Kanarienvogel {c}, danach {h} h warten', { c: `<b>${esc(ou.canary)}</b>`, h: ou.canary_clean_h }) : ''}`
+      + ` <button class="small" data-click="ollamaCheck">${t('jetzt prüfen')}</button>`; } catch (e) {}
+  $('nav.tabs button[data-tab=agenten] .dot').hidden = !r.nodes.some(n => n.state === 'pending');   // Punkt am Tab: jemand wartet auf Freigabe
+  const tb = $('#registry tbody'); tb.innerHTML = '';
+  if (!r.nodes.length) { tb.innerHTML = `<tr><td colspan="8" class="muted">${t('noch kein Agent registriert')}</td></tr>`; return; }
+  for (const n of r.nodes) {
+    const f = n.facts || {}, p = n.policy || {};
+    const st = n.state === 'approved' ? `<span class="state ${n.node_state || 'offline'}">${n.node_state || 'offline'}</span>`
+      : n.state === 'pending' ? `<span class="state busy">${t('wartet auf Freigabe')}</span>` : `<span class="state offline">${t('gesperrt')}</span>`;
+    const pol = `<label><input type="checkbox" ${p.wol ? 'checked' : ''} data-change="nodePolicy" data-args="${args(n.fp, 'wol', 'checked')}"> WOL</label><br>
+      <label>${t('Gewicht')} <input type="number" min="1" max="10" value="${p.weight ?? 1}" style="width:48px" data-change="nodePolicy" data-args="${args(n.fp, 'weight', 'num')}"></label><br>
+      <label title="${t('gleichzeitige Anfragen (Admission); leer = Default aus der Konfiguration; sollte OLLAMA_NUM_PARALLEL des Rechners entsprechen')}">${t('gleichzeitig')} <input type="number" min="1" max="32" value="${p.max_inflight ?? ''}" placeholder="def" style="width:48px" data-change="nodePolicy" data-args="${args(n.fp, 'max_inflight', 'numIfSet')}"></label><br>
+      <label title="${t('busy ab dieser GPU-Auslastung in % (mit >= 1 GiB fremdem VRAM); leer = global (Einstellungen › Busy-Erkennung)')}">${t('busy ab GPU')} <input type="number" min="1" max="100" value="${p.busy_gpu_util_pct ?? ''}" placeholder="glob" style="width:48px" data-change="nodePolicy" data-args="${args(n.fp, 'busy_gpu_util_pct', 'numIfSet')}"> %</label><br>
+      <label title="${t('busy ab so viel fremdem VRAM über der Baseline in GiB; leer = global. Kleine Karten brauchen kleinere Werte: auf 16 GiB neben 8 GiB Ollama bleibt einem Spiel nie 6 GiB')}">${t('busy ab fremd')} <input type="number" min="0.1" max="64" step="0.5" value="${p.busy_foreign_gib ?? ''}" placeholder="glob" style="width:48px" data-change="nodePolicy" data-args="${args(n.fp, 'busy_foreign_gib', 'numIfSet')}"> GiB</label><br>
+      <label title="${t('Router beachtet den GPU-Schutz-Status dieses Agenten: Deckel 1 in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA. Aus z. B. für Karten ohne 12V-2x6-Stecker; der Agent setzt sein Power-Limit trotzdem')}"><input type="checkbox" ${p.gpu_guard === false ? '' : 'checked'} data-change="nodePolicy" data-args="${args(n.fp, 'gpu_guard', 'checked')}"> ${t('GPU-Schutz beachten')}</label><br>
+      <label><input type="checkbox" ${p.mqtt === false ? '' : 'checked'} data-change="nodePolicy" data-args="${args(n.fp, 'mqtt', 'checked')}"> ${t('MQTT-Gerät in HA')}</label><br>
+      <label title="${t('Router bringt diesen Agenten selbsttätig auf die hinterlegte Version (Kanarienvogel zuerst, dann die anderen nach der Wartezeit); nur im Leerlauf')}"><input type="checkbox" ${p.auto_update ? 'checked' : ''} data-change="nodePolicy" data-args="${args(n.fp, 'auto_update', 'checked')}"> ${t('Auto-Update')}</label><br>
+      <label class="${(n.ollama_update || {}).unmanaged_reason === 'tray' ? 'muted' : ''}" title="${(n.ollama_update || {}).unmanaged_reason === 'tray' ? t('Nicht verfügbar: Ollama läuft hier als Tray-App unter dem Benutzer und aktualisiert sich selbst') : t('Router bringt Ollama auf diesem Knoten selbsttätig auf die neueste Version: nur im Nachtfenster, Kanarienvogel zuerst, nur im Leerlauf. Voraussetzung: Ollama läuft als Kind des Agenten')}"><input type="checkbox" ${p.ollama_auto_update && (n.ollama_update || {}).unmanaged_reason !== 'tray' ? 'checked' : ''} ${(n.ollama_update || {}).unmanaged_reason === 'tray' ? 'disabled' : ''} data-change="nodePolicy" data-args="${args(n.fp, 'ollama_auto_update', 'checked')}"> ${t('Ollama-Auto-Update')}</label>`;
+    const u = n.update || {};
+    const ou = n.ollama_update || {};
+    const ouState = ou.state ? `<div class="${ou.state === 'failed' || ou.state === 'stalled' ? 'bad' : ou.state === 'done' ? 'ok' : ou.state === 'manual' ? 'muted' : 'warn'}">Ollama ${esc(ou.version || '')}: ${esc(ou.state)}${ou.message ? ' – ' + esc(ou.message) : ''}${ou.ts ? ` <span class="muted">${esc(ou.ts.slice(11))}</span>` : ''}</div>` : '';
+    const ouBtn = n.state === 'approved' && ou.pending && ou.managed === true && n.connected ? `<button class="small" data-click="nodeOllamaUpdate" data-args="${args(n.fp, String(ou.available ?? ''))}">${t('Ollama auf {v} aktualisieren', { v: esc(ou.available) })}</button>` : '';
+    const uState = u.state ? `<div class="${u.state === 'failed' || u.state === 'stalled' ? 'bad' : u.state === 'done' ? 'ok' : 'warn'}">Update ${esc(u.version || '')}: ${esc(u.state)}${u.message ? ' – ' + esc(u.message) : ''}${u.ts ? ` <span class="muted">${esc(u.ts.slice(11))}</span>` : ''}</div>` : '';
+    const uBtn = n.state === 'approved' && u.pending && n.connected ? `<button class="small" data-click="nodeUpdate" data-args="${args(n.fp, String(u.available ?? ''))}">${t('auf {v} aktualisieren', { v: esc(u.available) })}</button>` : '';
+    const btn = n.state === 'pending' ? `<button data-click="nodeAct" data-args="${args(n.fp, 'approve')}">${t('freigeben')}</button><br><button class="small" data-click="nodeDel" data-args="${args(n.fp)}">${t('löschen')}</button>`
+      : n.state === 'approved' ? `<button class="small" data-click="nodeRevoke" data-args="${args(n.fp, t('Knoten {n} sperren? Der Tunnel wird getrennt.', { n: n.name }))}">${t('sperren')}</button>`
+      : `<button data-click="nodeAct" data-args="${args(n.fp, 'approve')}">${t('wieder freigeben')}</button><br><button class="small" data-click="nodeDel" data-args="${args(n.fp)}">${t('löschen')}</button>`;
+    const vram = f.vram_total_mib ? (f.vram_total_mib / 1024).toFixed(1) + ' GiB' : '';
+    const base = n.learned && n.learned.baseline_gib != null ? `${t('{g} GiB gelernt', { g: n.learned.baseline_gib })} <span class="muted">(${t('{n} Proben', { n: n.learned.samples || 0 })})</span>` : `<span class="muted">${t('noch nichts gelernt')}</span>`;
+    tb.insertAdjacentHTML('beforeend', `<tr><td><b>${esc(n.name)}</b><div class="muted" title="${n.fp}">${n.fp.slice(0, 16)}…${n.connected ? ' · ' + t('verbunden') : ''}</div></td>
+      <td>${st}<div class="muted">${t('seit')} ${esc((n.first_seen || '').replace('T', ' '))}${n.remote ? ' · ' + esc(n.remote) : ''}</div></td>
+      <td>${esc(f.hostname || '')}<div class="muted">${esc([f.manufacturer, f.model].filter(Boolean).join(' '))}<br>${esc(f.os || '')}/${esc(f.arch || '')} · Agent ${esc(f.agent_version || '?')}${u.pending ? ` <span class="badge half_open" title="${t('neue Version hinterlegt')}">→ ${esc(u.available)}</span>` : ''} · Ollama ${esc(ou.current || f.ollama_version || '?')}${ou.unmanaged_reason === 'tray' ? ` <span class="badge" title="${t('Ollama läuft hier als Tray-App unter dem Benutzer und aktualisiert sich über den eigenen Updater, nicht über den Router')}">${t('Tray-App')}</span>` : ou.unmanaged_reason === 'agent' && ou.pending ? ` <span class="badge" title="${t('Der Agent meldet erst ab 0.12.1, ob er Ollama steuert; bis dahin schickt der Router keine Ollama-Updates')}">${t('Agent ≥ 0.12.1 nötig')}</span>` : ''}${ou.pending ? ` <span class="badge half_open" title="${t('neuere Ollama-Version verfügbar')}">→ ${esc(ou.available)}</span>` : ''}</div></td>
+      <td>${esc(f.gpu || '–')}<div class="muted">${vram}</div></td><td>${esc(f.mac || '–')}<div class="muted">${esc(f.local_ip || '')}</div></td>
+      <td>${base}${p.foreign_vram_baseline_gib != null ? `<div class="muted">Policy ${p.foreign_vram_baseline_gib} GiB</div>` : ''}</td>
+      <td>${pol}</td><td>${btn}${uBtn ? '<br>' + uBtn : ''}${uState}${ouBtn ? '<br>' + ouBtn : ''}${ouState}</td></tr>`);
+  }
+}
+async function nodeOllamaUpdate(fp, v) { if (!confirm(t('Ollama auf {v} aktualisieren? Der Agent lädt das Release-Archiv (ca. 1,4 GB), hält Ollama an, tauscht die Dateien und startet es neu. Geladene Modelle gehen dabei verloren.', { v }))) return;
+  try { const r = await api(`/admin/nodes/${fp}/ollama-update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); $('#msg').innerHTML = `<span class="ok">${esc(r.message)}</span>`; }
+  catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } await refresh(); }
+async function ollamaCheck() { try { const r = await api('/admin/ollama-update/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    $('#msg').innerHTML = r.latest && r.latest.version ? `<span class="ok">Ollama ${esc(r.latest.version)}</span>` : `<span class="bad">${esc((r.latest || {}).error || '?')}</span>`; }
+  catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } await refresh(); }
+async function nodeUpdate(fp, v) { if (!confirm(t('Agent auf {v} aktualisieren? Der Dienst startet neu, Ollama und STT auf dem Knoten damit auch.', { v }))) return;
+  try { const r = await api(`/admin/nodes/${fp}/update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); $('#msg').innerHTML = `<span class="ok">${esc(r.message)}</span>`; }
+  catch (e) { $('#msg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } await refresh(); }
+async function nodeAct(fp, action) { try { await api(`/admin/nodes/${fp}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (e) { alert(e.message); } await refresh(); }
+async function nodePolicy(fp, pol) { if (document.activeElement) document.activeElement.blur(); try { await api(`/admin/nodes/${fp}/policy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pol) }); } catch (e) { alert(e.message); } await refresh(); }
+async function nodeDel(fp) { if (!confirm(t('Registereintrag löschen?'))) return; try { await api(`/admin/nodes/${fp}`, { method: 'DELETE' }); } catch (e) { alert(e.message); } await refresh(); }
+
+async function renderContextServices() {
+  try {
+    const s = await api('/admin/context');
+    const root = document.getElementById('context-services');
+    root.replaceChildren();
+    for (const name of ['session_store', 'context_manager', 'hindsight', 'outbox']) {
+      const tile = document.createElement('div'); tile.className = 'tile';
+      const label = document.createElement('h4'); label.textContent = name.replaceAll('_', ' ');
+      const value = document.createElement('div'); value.textContent = s[name] || 'unknown';
+      tile.append(label, value); root.append(tile);
+    }
+    const counts = document.createElement('div'); counts.className = 'tile';
+    counts.textContent = 'Outbox: ' + Object.entries(s.outbox_counts || {}).map(([k,v]) => k + ': ' + v).join(' · ');
+    root.append(counts);
+    // ADR-0090: clients whose recalls are all skipped because their requests carry tools (ADR-0059)
+    const skipped = Object.entries(s.recall_skipped_for_tools || {});
+    if (skipped.length) {
+      const tile = document.createElement('div'); tile.className = 'tile warn';
+      tile.textContent = 'Recall skipped, requests carry tools (ADR-0059): ' + skipped.map(([c, r]) =>
+        `${c} → ${r.project}, ${r.requests} since ${new Date(r.since * 1000).toLocaleString()}`).join(' · ');
+      root.append(tile);
+    }
+  } catch (_) { document.getElementById('context-services').textContent = 'Status unavailable'; }
+}
+// Router 0.35.0 (ADR-0101): active problems as records; texts in the UI language. Built with textContent only, so a node or
+// model name reported by an agent stays text (ADR-0065).
+async function renderProblems() {
+  const root = document.getElementById('problems');
+  try {
+    const r = await api('/admin/problems?lang=' + LANG);
+    root.replaceChildren();
+    if (!r.problems.length) {
+      const li = document.createElement('li'); li.className = 'ok'; li.textContent = t('keine'); root.append(li); return;
+    }
+    for (const p of r.problems) {
+      const li = document.createElement('li'); li.className = p.severity === 'critical' ? 'bad' : 'warn';
+      const sev = document.createElement('b'); sev.textContent = (p.severity === 'critical' ? t('kritisch') : t('Warnung')) + ' ';
+      const code = document.createElement('code'); code.textContent = p.code;
+      const msg = document.createElement('span'); msg.textContent = p.message;
+      li.append(sev, code, msg); root.append(li);
+    }
+  } catch (e) {
+    const li = document.createElement('li'); li.className = 'muted'; li.textContent = t('Probleme nicht abrufbar: {e}', { e: e.message });
+    root.replaceChildren(li);
+  }
+}
+let TICK = 0;
+async function refresh() { STATE = await api(decisionsUrl()); await loadMetrics(); await renderContextServices(); await renderProblems(); sampleLive(); renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderOps(); renderDecisions();
+  if (!dirty && (++TICK % 5 === 0)) { CFG = await api('/admin/config?lang=' + LANG); renderModels(); } }   // Konfiguration aendert sich selten: alle 15 s statt 3 s
+async function load() { CFG = await api('/admin/config?lang=' + LANG); STATE = await api(decisionsUrl()); await loadMetrics(); await renderContextServices(); await renderProblems(); sampleLive(); dirty = false; renderLive(); renderNodes(); renderCloud(); renderRegistry(); renderModels(); renderRoles(); renderSettings(); renderClients(); renderOps(); renderDecisions(); $('#msg').textContent = ''; }
+// Rollen-Editor setzt nur `dirty`; Tab-Punkt daraus ableiten (Einstellungen/Katalog pflegen ihre Punkte selbst)
+$('#roles').addEventListener('change', () => { rolesDirty = true; markDirty(); });
+$('#roles').addEventListener('click', e => { if (e.target.tagName === 'BUTTON') { rolesDirty = true; setTimeout(markDirty, 0); } });
+$('#exposeConcrete').addEventListener('change', () => { rolesDirty = true; markDirty(); });
+// ---- UI actions (ADR-0128): what the former inline handlers did, by name. An element names its action in data-click,
+// data-change or data-input and its arguments in data-args (JSON array, see args()) or data-arg (one string); el is the
+// element (formerly `this`). VALUE holds the conversions the handlers applied to this.value / this.checked.
+const VALUE = {
+  text: el => el.value,
+  num: el => +el.value,
+  checked: el => el.checked,
+  textOrNull: el => el.value === '' ? null : el.value,
+  numOrNull: el => el.value === '' ? null : +el.value,
+  boolOrNull: el => el.value === '' ? null : el.value === 'true',
+  flagOrNull: el => el.value === '' ? null : el.value === '1',
+  numIfSet: el => el.value ? +el.value : null,
+};
+const ACTIONS = {
+  setLang: (el, lang) => setLang(lang),
+  showTab: (el, tab) => showTab(tab),
+  save: () => save(),
+  tryIt: () => tryIt(),
+  loadTest: () => loadTest(),
+  addRole: () => addRole(),
+  addClient: () => addClient(),
+  addCloudModel: () => addCloudModel(),
+  setDecN: el => setDecN(el.value),
+  renderDecisions: () => renderDecisions(),
+  modelField: (el, m, k) => modelField(m, k, el.value),
+  delCloudModel: (el, m) => delCloudModel(m),
+  measure: (el, m) => measure(m),
+  bench: (el, m) => bench(m),
+  expAdd: (el, rname, kind) => { CFG.roles[rname][kind] = { model: allModels()[0], num_ctx: 8192, percent: 10 }; dirty = true; renderRoles(); },
+  expField: (el, rname, kind, field, conv) => { CFG.roles[rname][kind][field] = VALUE[conv](el); dirty = true; },
+  expDel: (el, rname, kind) => { CFG.roles[rname][kind] = null; dirty = true; renderRoles(); },
+  roleField: (el, rname, field, conv) => { CFG.roles[rname][field] = VALUE[conv](el); dirty = true; },
+  delRole: (el, rname) => delRole(rname),
+  tierField: (el, rname, i, field, conv, rerender) => { CFG.roles[rname].tiers[i][field] = VALUE[conv](el); dirty = true; if (rerender) renderRoles(); },
+  moveTier: (el, rname, i, d) => moveTier(rname, i, d),
+  delTier: (el, rname, i) => delTier(rname, i),
+  addTier: (el, rname) => addTier(rname),
+  setChange: (el, path, conv) => setChange(path, VALUE[conv](el)),
+  listToggle: (el, path, item) => listToggle(path, item, el.checked),
+  resetSetting: (el, path) => resetSetting(path),
+  copyToken: (el, name, done) => navigator.clipboard.writeText(NEW_TOKENS[name]).then(() => { el.textContent = done; }),
+  rotateToken: (el, name) => rotateToken(name),
+  delClient: (el, name) => delClient(name),
+  ollamaCheck: () => ollamaCheck(),
+  nodePolicy: (el, fp, field, conv) => nodePolicy(fp, { [field]: VALUE[conv](el) }),
+  nodeOllamaUpdate: (el, fp, v) => nodeOllamaUpdate(fp, v),
+  nodeUpdate: (el, fp, v) => nodeUpdate(fp, v),
+  nodeAct: (el, fp, action) => nodeAct(fp, action),
+  nodeRevoke: (el, fp, question) => { if (confirm(question)) nodeAct(fp, 'revoke'); },
+  nodeDel: (el, fp) => nodeDel(fp),
+};
+// One listener per event type, in the capture phase on the document: it walks the event's path from the target upwards,
+// as inline handlers fired, and runs each named action before the listeners of #roles see the event (as before). The
+// path is fixed when the event starts, so an action that re-renders the list does not cut it short.
+for (const type of ['click', 'change', 'input']) {
+  document.addEventListener(type, ev => {
+    for (const el of ev.composedPath()) {
+      if (!(el instanceof HTMLElement) || !el.dataset[type]) continue;
+      const name = el.dataset[type];
+      // Only the actions listed above: a name such as "constructor" must not reach what objects inherit.
+      if (!Object.hasOwn(ACTIONS, name)) { console.error(`unknown UI action: ${name}`); continue; }
+      const action = ACTIONS[name];
+      action(el, ...(el.dataset.args !== undefined ? JSON.parse(el.dataset.args) : el.dataset.arg !== undefined ? [el.dataset.arg] : []));
+    }
+  }, true);
+}
+
+showTab(location.hash.slice(1) || (() => { try { return localStorage.getItem('skirnir.tab'); } catch { return null; } })() || 'uebersicht');
+load(); setInterval(() => refresh().catch(() => {}), 3000);

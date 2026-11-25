@@ -8,7 +8,7 @@
 
 *Übersicht in der lokalen Entwicklungsumgebung (`test/dev_env.py`) mit zwei Fake-Knoten und synthetischem Verkehr. Die UI gibt es auf Englisch und Deutsch (Umschalter in der Kopfzeile).*
 
-`https://<name>:11435/`, Anmeldung mit einem Benutzer aus `control_auth.users`. Eine Seite ([router/ui.html](../router/ui.html)),
+`https://<name>:11435/`, Anmeldung mit einem Benutzer aus `control_auth.users`. Eine Seite ([router/ui.html](../router/ui.html) mit ihrem Skript [router/ui.js](../router/ui.js), kein Inline-Skript),
 ohne externe Bibliotheken, sechs Tabs:
 
 - **Übersicht:** die aktiven **Probleme** (Schwere, Code und Text in der Sprache der UI, [unten](#probleme));
