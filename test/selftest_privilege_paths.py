@@ -164,6 +164,13 @@ def units():
     # ADR-0086: own account; it writes its state and logs, nothing in /etc/skirnir-router
     check(unit_values(router, "User") == ["skirnir-router"] and unit_values(router, "Group") == ["skirnir-router"],
           "router unit: runs as the account skirnir-router")
+    # ADR-0138 (TM-14): the fuller directive set, checked running under systemd by test/unit_hardening_check.sh
+    hardening = {"ProtectKernelLogs": "true", "ProtectClock": "true", "ProtectHostname": "true", "PrivateDevices": "true",
+                 "RestrictNamespaces": "true", "RestrictRealtime": "true", "RemoveIPC": "true", "ProtectProc": "invisible",
+                 "ProcSubset": "pid", "RestrictAddressFamilies": "AF_UNIX AF_INET AF_INET6 AF_NETLINK",
+                 "SystemCallFilter": "@system-service", "SystemCallErrorNumber": "EPERM"}
+    for key, value in hardening.items():
+        check(unit_values(router, key) == [value], f"router unit: {key}={value} (ADR-0138)")
     check(not rw or not any(p.lstrip("-+").rstrip("/") == "/etc/skirnir-router" for p in rw),
           f"router unit: /etc/skirnir-router is not in ReadWritePaths ({rw})")
     check(unit_may_write(router, "/var/lib/skirnir-router/roles.yaml") and unit_may_write(router, "/var/log/skirnir-router/audit.jsonl"),

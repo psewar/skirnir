@@ -1,0 +1,9 @@
+# Throwaway image for test/unit_hardening_check.sh: Debian 13 with systemd as PID 1 and the distribution packages
+# router/install.sh expects, so the router runs under its real unit. Built locally, never published.
+FROM docker.io/library/debian:trixie
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      systemd systemd-sysv dbus procps python3 python3-venv python3-aiohttp python3-yaml python3-cryptography \
+      ca-certificates curl openssl \
+ && rm -rf /var/lib/apt/lists/*
+STOPSIGNAL SIGRTMIN+3
+CMD ["/lib/systemd/systemd"]

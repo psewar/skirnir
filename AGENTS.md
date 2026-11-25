@@ -75,6 +75,7 @@ python test/run_tests.py       # end-to-end suite, ~3 min; needs the loopback po
 python test/check_public_changes.py                            # public-data scan of your added lines
 bash test/smoke_container.sh   # router image: build, --init, start, health (Docker or Podman, rootful; Linux or WSL); --selftests too
 bash test/smoke_decision_images.sh   # decision service images: build, compile, imports load (Docker or Podman)
+bash test/unit_hardening_check.sh    # router under its real systemd unit: install.sh, TLS, API, UI, writes, reload (rootful, Linux or WSL)
 ```
 
 - Python dependencies are hash-locked (ADR-0074). A change to `router/requirements*.txt`, `requirements-dev.txt` or
@@ -83,6 +84,8 @@ bash test/smoke_decision_images.sh   # decision service images: build, compile, 
   `lock_requirements.py resolve` (on Linux) for `requirements-ci-lock.txt`, and `lock_requirements.py pin --lock
   router/requirements-container-lock.txt` with the router's whole dependency closure at the CI lock's versions for the
   container image (ADR-0121; `test/selftest_container_image.py` compares them); never edit a lock by hand.
+- A change to `router/skirnir-router.service` runs `bash test/unit_hardening_check.sh` before the pull request (it starts
+  the router under the unit in a throwaway systemd container; not in CI, ADR-0138).
 - The router image (`router/Dockerfile`, `router/compose.yaml`) ships the same program files as `router/install.sh`;
   CI's `container` job builds and starts it and runs the router self-tests inside it. A new program file goes into both.
 - The decision service images (`decision-embed/`, `decision-jevlike/`) are built by `.github/workflows/decision-images.yml`
