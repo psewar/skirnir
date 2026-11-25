@@ -473,7 +473,7 @@ function renderCloud() {
     const st = !c.enabled ? `<span class="muted">${t('deaktiviert')}</span>` : !c.key ? `<span class="bad">${t('kein Schlüssel')}</span>` : `<span class="ok">${t('aktiv')}</span>`;
     const pct = c.budget_percent ?? 0;
     const cls = pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : '';
-    const bar = c.budget_month_chf ? `<div class="bar ${cls}"><i style="width:${Math.min(100, pct)}%"></i></div>` : '';
+    const bar = c.budget_month_chf ? `<div class="bar ${cls}"><i data-pct="${Math.min(100, pct)}"></i></div>` : '';
     tb.insertAdjacentHTML('beforeend', `<tr><td><b>☁ ${esc(name)}</b><div class="muted">${esc(c.kind)} · ${esc(c.base_url)}</div></td>
       <td>${st}${cc.enabled === false ? `<div class="muted">${t('Cloud global aus')}</div>` : ''}</td>
       <td>${(c.models || []).map(m => `<span class="badge cloud">${esc(m)}</span>`).join('') || '<span class="muted">–</span>'}</td>
@@ -481,6 +481,8 @@ function renderCloud() {
       <td>${c.breaker === 'closed' ? '<span class="ok">closed</span>' : `<span class="badge ${esc(c.breaker)}">${esc(c.breaker)}</span>`}${c.inflight ? ` · ${c.inflight} ${t('aktiv')}` : ''}</td>
       <td class="muted">${esc(c.region || '–')} · ${esc(c.ceiling || c.max_data_class || cc.max_cloud_data_class || '–')}${c.trust === 'institutional' ? ` · <span title="${t('institutionell (ADR-0099): eigene Datenklassen-Grenze statt der globalen')}">${t('institutionell')}</span>` : ''}</td></tr>`);
   }
+  // ADR-0130: no style attribute in markup; the bar width is set through CSSOM, which style-src 'self' allows.
+  for (const i of tb.querySelectorAll('.bar i[data-pct]')) i.style.width = `${Number(i.dataset.pct)}%`;
 }
 
 function renderModels() {
@@ -541,7 +543,7 @@ function expEditor(rname, kind, r) {
   return `<div class="exp"><span class="muted" title="${tip}">${label}</span>
     <select data-change="expField" data-args="${args(rname, kind, 'model', 'text')}">${opts}</select>
     <input type="number" value="${v.num_ctx}" step="1024" min="1024" title="num_ctx" data-change="expField" data-args="${args(rname, kind, 'num_ctx', 'num')}">
-    <span style="display:flex;gap:4px;align-items:center"><input type="number" value="${v.percent}" min="0" max="100" style="width:56px" title="${t('Prozent der Anfragen')}" data-change="expField" data-args="${args(rname, kind, 'percent', 'num')}">%
+    <span class="flex-row-4"><input type="number" value="${v.percent}" min="0" max="100" class="w-56" title="${t('Prozent der Anfragen')}" data-change="expField" data-args="${args(rname, kind, 'percent', 'num')}">%
       <button class="small" title="${t('entfernen')}" data-click="expDel" data-args="${args(rname, kind)}">✕</button></span></div>`;
 }
 
@@ -557,14 +559,14 @@ function renderRoles() {
     const lf = r.latency_first;
     const prio = r.priority || 'normal';
     let html = `<div class="role" data-role="${esc(rname)}"><h3><code>${esc(rname)}:latest</code>
-      <label class="muted" title="${t('leer = globale Einstellung (warm_first={v})', { v: CFG.warm_first })}"><select data-change="roleField" data-args="${args(rname, 'latency_first', 'flagOrNull')}" style="width:auto">
+      <label class="muted" title="${t('leer = globale Einstellung (warm_first={v})', { v: CFG.warm_first })}"><select data-change="roleField" data-args="${args(rname, 'latency_first', 'flagOrNull')}" class="w-auto">
         <option value="" ${lf === null || lf === undefined ? 'selected' : ''}>${t('warm zuerst: global ({v})', { v: t(CFG.warm_first ? 'an' : 'aus') })}</option>
         <option value="1" ${lf === true ? 'selected' : ''}>${t('warm zuerst: an')}</option>
         <option value="0" ${lf === false ? 'selected' : ''}>${t('warm zuerst: aus (strikt nach Rang)')}</option></select></label>
-      <label class="muted" title="${t('Prioritätsklasse beim Warten auf einen vollen Knoten: interactive vor normal vor batch (Alterung verhindert Verhungern)')}"><select data-change="roleField" data-args="${args(rname, 'priority', 'text')}" style="width:auto">
+      <label class="muted" title="${t('Prioritätsklasse beim Warten auf einen vollen Knoten: interactive vor normal vor batch (Alterung verhindert Verhungern)')}"><select data-change="roleField" data-args="${args(rname, 'priority', 'text')}" class="w-auto">
         ${['interactive', 'normal', 'batch'].map(p => `<option value="${p}" ${p === prio ? 'selected' : ''}>${t('Priorität')}: ${p}</option>`).join('')}</select></label>
-      ${toolsWarn} ${cloudInfo}<button class="small" style="margin-left:auto" data-click="delRole" data-args="${args(rname)}">${t('Rolle löschen')}</button></h3>
-      <div class="tier muted" style="font-size:11px"><span></span><span>${t('Modell')}</span><span>num_ctx max</span><span>busy_ok</span><span></span></div>`;
+      ${toolsWarn} ${cloudInfo}<button class="small ml-auto" data-click="delRole" data-args="${args(rname)}">${t('Rolle löschen')}</button></h3>
+      <div class="tier muted fs-11"><span></span><span>${t('Modell')}</span><span>num_ctx max</span><span>busy_ok</span><span></span></div>`;
     r.tiers.forEach((tr, i) => {
       html += `<div class="tier"><span class="muted">${i + 1}.</span>
         <select data-change="tierField" data-args="${args(rname, i, 'model', 'text', true)}">${opts(tr.model)}</select>
@@ -676,10 +678,10 @@ function renderClients() {
         <div>${settingInput(it)}</div><div>${it.overridden || pending ? `<button class="small" title="${t('zurück auf config.yaml')}" data-click="resetSetting" data-args="${args(it.path)}">↺</button>` : ''}</div></div>`;
     }).join('');
     return `<div class="client"><h3>${internal ? '🐦' : '👥'} ${esc(name)} <span class="badge">${internal ? t('intern') : c.source === 'ui' ? t('aus der UI') : 'config.yaml'}</span>
-        <span class="muted" style="font-size:12px">${s.total ?? 0} ${t('Anfragen')} · ${seen}${s.via ? ' · via ' + esc(s.via) : ''}${s.forbidden ? ` · <span class="warn">${s.forbidden} ${t('verboten')}</span>` : ''}${s.rate_limited ? ` · <span class="warn">${s.rate_limited} ${t('gedrosselt')}</span>` : ''}</span>
-        <span style="margin-left:auto">${internal ? '' : `<button class="small" data-click="rotateToken" data-args="${args(name)}" title="${t('neues zufälliges Secret; das alte gilt sofort nicht mehr')}">${t(c.has_token ? '🔑 Secret erneuern' : '🔑 Secret erzeugen')}</button>`}
+        <span class="muted fs-12">${s.total ?? 0} ${t('Anfragen')} · ${seen}${s.via ? ' · via ' + esc(s.via) : ''}${s.forbidden ? ` · <span class="warn">${s.forbidden} ${t('verboten')}</span>` : ''}${s.rate_limited ? ` · <span class="warn">${s.rate_limited} ${t('gedrosselt')}</span>` : ''}</span>
+        <span class="ml-auto">${internal ? '' : `<button class="small" data-click="rotateToken" data-args="${args(name)}" title="${t('neues zufälliges Secret; das alte gilt sofort nicht mehr')}">${t(c.has_token ? '🔑 Secret erneuern' : '🔑 Secret erzeugen')}</button>`}
         ${c.source === 'ui' ? ` <button class="small" data-click="delClient" data-args="${args(name)}">${t('Client löschen')}</button>` : ''}</span></h3>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">${t('Identität')}: ${ident}${c.note ? ' · ' + esc(c.note) : ''}</div>${tok}${rows}</div>`;
+      <div class="muted fs-12 mb-6">${t('Identität')}: ${ident}${c.note ? ' · ' + esc(c.note) : ''}</div>${tok}${rows}</div>`;
   }).join('') || `<span class="muted">${t('keine Clients konfiguriert (client_auth.clients)')}</span>`;
 }
 async function rotateToken(name) {
@@ -709,6 +711,7 @@ async function delClient(name) {
 
 // ---- Live-Statistik: /metrics parsen, Verlaeufe puffern, mit Canvas zeichnen (keine externe Bibliothek) ----
 const PAL = ['#58a6ff', '#3fb950', '#d29922', '#c084fc', '#f85149', '#79c0ff', '#56d364', '#e3b341'];
+const palClass = i => `pal${i % PAL.length}`;   // legend colour as a class (.pal0 ... in ui.css), not a style attribute (ADR-0130)
 const LIVE = { rpm: [], tps: [], gpu: {}, vram: {}, inflight: [], waiting: [], models: {}, modelHist: [], prevReq: null, prevTok: null, prevT: null };
 let METRICS = null, USAGE = null;
 function parseMetrics(txt) {
@@ -834,11 +837,11 @@ function renderLive() {
   const nodes = Object.keys(STATE.nodes); const last = a => a.length ? a[a.length - 1] : null; const col = i => PAL[i % PAL.length];
   $('#lv-rpm').textContent = last(LIVE.rpm) != null ? fmtN(last(LIVE.rpm)) : '–'; spark('#sp-rpm', [{ v: LIVE.rpm, c: PAL[0] }], { fill: true });
   $('#lv-tps').textContent = last(LIVE.tps) != null ? fmtN(last(LIVE.tps)) : '–'; spark('#sp-tps', [{ v: LIVE.tps, c: PAL[1] }], { fill: true });
-  $('#lv-gpu').innerHTML = nodes.map((n, i) => `<span style="color:${col(i)}">● ${esc(n)} <b>${STATE.nodes[n].gpu_known ? STATE.nodes[n].gpu_util + ' %' : '–'}</b></span>`).join('') || '–';
+  $('#lv-gpu').innerHTML = nodes.map((n, i) => `<span class="${palClass(i)}">● ${esc(n)} <b>${STATE.nodes[n].gpu_known ? STATE.nodes[n].gpu_util + ' %' : '–'}</b></span>`).join('') || '–';
   spark('#sp-gpu', nodes.map((n, i) => ({ v: LIVE.gpu[n] || [], c: col(i) })), { max: 100 });
-  $('#lv-vram').innerHTML = nodes.map((n, i) => `<span style="color:${col(i)}">● ${esc(n)} <b>${STATE.nodes[n].gpu_known ? (STATE.nodes[n].vram_free_gib ?? 0).toFixed(1) : '–'}</b></span>`).join('') || '–';
+  $('#lv-vram').innerHTML = nodes.map((n, i) => `<span class="${palClass(i)}">● ${esc(n)} <b>${STATE.nodes[n].gpu_known ? (STATE.nodes[n].vram_free_gib ?? 0).toFixed(1) : '–'}</b></span>`).join('') || '–';
   spark('#sp-vram', nodes.map((n, i) => ({ v: LIVE.vram[n] || [], c: col(i) })), { max: Math.max(1, ...nodes.map(n => STATE.nodes[n].vram_total_gib || 0)) });
-  $('#lv-inflight').innerHTML = `${last(LIVE.inflight) ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">${t('laufend')}</span> · <span class="${last(LIVE.waiting) ? 'warn' : ''}">${last(LIVE.waiting) ?? 0}</span> <span class="muted" style="font-size:12px;font-weight:normal">${t('wartend')}</span>`;
+  $('#lv-inflight').innerHTML = `${last(LIVE.inflight) ?? 0} <span class="muted fs-12 fw-normal">${t('laufend')}</span> · <span class="${last(LIVE.waiting) ? 'warn' : ''}">${last(LIVE.waiting) ?? 0}</span> <span class="muted fs-12 fw-normal">${t('wartend')}</span>`;
   spark('#sp-inflight', [{ v: LIVE.inflight, c: PAL[0] }, { v: LIVE.waiting, c: PAL[2] }]);
   const days = Object.entries((USAGE || {}).days || {}).sort();
   bars('#ch-days', days.map(([d]) => d.slice(8) + '.' + d.slice(5, 7)), [{ v: days.map(([, d]) => (d.requests || 0) - (d.errors || 0)), c: PAL[0] }, { v: days.map(([, d]) => d.errors || 0), c: PAL[4] }],
@@ -855,7 +858,7 @@ function renderLive() {
 function renderModelCharts(last, col) {   // hieß renderModels und verdeckte die Katalogtabelle (Review 2026-09-25)
   const active = Object.entries(LIVE.models).filter(([, a]) => a.some(v => v > 0)).sort((a, b) => (last(b[1]) || 0) - (last(a[1]) || 0) || b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0));
   const totalNow = active.reduce((a, [, v]) => a + (last(v) || 0), 0);
-  $('#lv-models').innerHTML = active.length ? active.map(([m, v], i) => `<span style="color:${col(i)}">● ${esc(m)} <b>${totalNow ? Math.round(100 * (last(v) || 0) / totalNow) + ' %' : '–'}</b> <span class="muted">${fmtN(last(v) || 0)}/min</span></span>`).join('') : `<span class="muted">${t('noch keine Anfragen im 30-s-Fenster')}</span>`;
+  $('#lv-models').innerHTML = active.length ? active.map(([m, v], i) => `<span class="${palClass(i)}">● ${esc(m)} <b>${totalNow ? Math.round(100 * (last(v) || 0) / totalNow) + ' %' : '–'}</b> <span class="muted">${fmtN(last(v) || 0)}/min</span></span>`).join('') : `<span class="muted">${t('noch keine Anfragen im 30-s-Fenster')}</span>`;
   // Ohne Anfragen in den letzten 10 Minuten nur Ueberschrift + Legendenzeile: die leere Zeichenflaeche belegte sonst eine
   // ganze Zeile ohne Information (2026-10-04). Erst sichtbar machen, dann zeichnen - cv() misst die Groesse am Element.
   $('#ch-models').style.display = active.length ? '' : 'none';
@@ -874,10 +877,10 @@ function renderOps() {
   const q = (adm.entries || []).map(e => `<div class="muted">${esc(e.priority)} · ${esc(e.role)} → ${esc(e.node)} · ${e.waiting_s} s</div>`).join('');
   const w = sch.score || {};
   $('#ops').innerHTML = `
-    <div class="tile"><h4>${t('Nutzung heute')}</h4><div class="big">${u.requests ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">${t('Anfragen')}</span></div>
+    <div class="tile"><h4>${t('Nutzung heute')}</h4><div class="big">${u.requests ?? 0} <span class="muted fs-12 fw-normal">${t('Anfragen')}</span></div>
       <div class="muted">${((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)).toLocaleString(LOCALE)} ${t('Tokens')} · ${u.errors ?? 0} ${t('Fehler')} · <span class="cloudc">${fmtCost(u.cost_chf)}</span> Cloud</div>
       <div class="muted">${t('Cloud im Monat')}: <b class="cloudc">${fmtCost(cloudSpend)}</b> · Sessions ${STATE.sessions ?? 0} · Idempotency ${(STATE.idempotency || {}).entries ?? 0}</div></div>
-    <div class="tile"><h4>${t('Warteschlange')}</h4><div class="big ${adm.waiting ? 'warn' : ''}">${adm.waiting ?? 0} <span class="muted" style="font-size:12px;font-weight:normal">${t('wartend')}</span></div>${q || `<div class="muted">${t('niemand wartet')}</div>`}</div>
+    <div class="tile"><h4>${t('Warteschlange')}</h4><div class="big ${adm.waiting ? 'warn' : ''}">${adm.waiting ?? 0} <span class="muted fs-12 fw-normal">${t('wartend')}</span></div>${q || `<div class="muted">${t('niemand wartet')}</div>`}</div>
     <div class="tile"><h4>Scheduler</h4><div class="muted">${t('Score: warm {warm} · Anfrage −{inflight} · voll −{saturated} · VRAM ×{vram} · Gewicht ×{weight} · Tempo ×{speed} · Fehler −{errors}', { warm: w.warm, inflight: w.inflight, saturated: w.saturated, vram: w.vram_free, weight: w.weight, speed: w.speed, errors: w.errors })}</div>
       <div class="muted">${t('Breaker: {f} Fehler / {w} s → {o} s offen', { f: (sch.breaker || {}).failures, w: (sch.breaker || {}).window_s, o: (sch.breaker || {}).open_s })}</div>
       <div class="muted">${t('Admission: {n} je Knoten · Alterung {a} s · max. Wartezeit {w} s', { n: (sch.admission || {}).max_inflight_default, a: (sch.admission || {}).aging_s, w: (sch.admission || {}).max_wait_s })}</div></div>
@@ -1027,10 +1030,10 @@ async function renderRegistry() {
     const st = n.state === 'approved' ? `<span class="state ${n.node_state || 'offline'}">${n.node_state || 'offline'}</span>`
       : n.state === 'pending' ? `<span class="state busy">${t('wartet auf Freigabe')}</span>` : `<span class="state offline">${t('gesperrt')}</span>`;
     const pol = `<label><input type="checkbox" ${p.wol ? 'checked' : ''} data-change="nodePolicy" data-args="${args(n.fp, 'wol', 'checked')}"> WOL</label><br>
-      <label>${t('Gewicht')} <input type="number" min="1" max="10" value="${p.weight ?? 1}" style="width:48px" data-change="nodePolicy" data-args="${args(n.fp, 'weight', 'num')}"></label><br>
-      <label title="${t('gleichzeitige Anfragen (Admission); leer = Default aus der Konfiguration; sollte OLLAMA_NUM_PARALLEL des Rechners entsprechen')}">${t('gleichzeitig')} <input type="number" min="1" max="32" value="${p.max_inflight ?? ''}" placeholder="def" style="width:48px" data-change="nodePolicy" data-args="${args(n.fp, 'max_inflight', 'numIfSet')}"></label><br>
-      <label title="${t('busy ab dieser GPU-Auslastung in % (mit >= 1 GiB fremdem VRAM); leer = global (Einstellungen › Busy-Erkennung)')}">${t('busy ab GPU')} <input type="number" min="1" max="100" value="${p.busy_gpu_util_pct ?? ''}" placeholder="glob" style="width:48px" data-change="nodePolicy" data-args="${args(n.fp, 'busy_gpu_util_pct', 'numIfSet')}"> %</label><br>
-      <label title="${t('busy ab so viel fremdem VRAM über der Baseline in GiB; leer = global. Kleine Karten brauchen kleinere Werte: auf 16 GiB neben 8 GiB Ollama bleibt einem Spiel nie 6 GiB')}">${t('busy ab fremd')} <input type="number" min="0.1" max="64" step="0.5" value="${p.busy_foreign_gib ?? ''}" placeholder="glob" style="width:48px" data-change="nodePolicy" data-args="${args(n.fp, 'busy_foreign_gib', 'numIfSet')}"> GiB</label><br>
+      <label>${t('Gewicht')} <input type="number" min="1" max="10" value="${p.weight ?? 1}" class="w-48" data-change="nodePolicy" data-args="${args(n.fp, 'weight', 'num')}"></label><br>
+      <label title="${t('gleichzeitige Anfragen (Admission); leer = Default aus der Konfiguration; sollte OLLAMA_NUM_PARALLEL des Rechners entsprechen')}">${t('gleichzeitig')} <input type="number" min="1" max="32" value="${p.max_inflight ?? ''}" placeholder="def" class="w-48" data-change="nodePolicy" data-args="${args(n.fp, 'max_inflight', 'numIfSet')}"></label><br>
+      <label title="${t('busy ab dieser GPU-Auslastung in % (mit >= 1 GiB fremdem VRAM); leer = global (Einstellungen › Busy-Erkennung)')}">${t('busy ab GPU')} <input type="number" min="1" max="100" value="${p.busy_gpu_util_pct ?? ''}" placeholder="glob" class="w-48" data-change="nodePolicy" data-args="${args(n.fp, 'busy_gpu_util_pct', 'numIfSet')}"> %</label><br>
+      <label title="${t('busy ab so viel fremdem VRAM über der Baseline in GiB; leer = global. Kleine Karten brauchen kleinere Werte: auf 16 GiB neben 8 GiB Ollama bleibt einem Spiel nie 6 GiB')}">${t('busy ab fremd')} <input type="number" min="0.1" max="64" step="0.5" value="${p.busy_foreign_gib ?? ''}" placeholder="glob" class="w-48" data-change="nodePolicy" data-args="${args(n.fp, 'busy_foreign_gib', 'numIfSet')}"> GiB</label><br>
       <label title="${t('Router beachtet den GPU-Schutz-Status dieses Agenten: Deckel 1 in Stufe 2, Score-Abzug bei Hochlast, Probleme an HA. Aus z. B. für Karten ohne 12V-2x6-Stecker; der Agent setzt sein Power-Limit trotzdem')}"><input type="checkbox" ${p.gpu_guard === false ? '' : 'checked'} data-change="nodePolicy" data-args="${args(n.fp, 'gpu_guard', 'checked')}"> ${t('GPU-Schutz beachten')}</label><br>
       <label><input type="checkbox" ${p.mqtt === false ? '' : 'checked'} data-change="nodePolicy" data-args="${args(n.fp, 'mqtt', 'checked')}"> ${t('MQTT-Gerät in HA')}</label><br>
       <label title="${t('Router bringt diesen Agenten selbsttätig auf die hinterlegte Version (Kanarienvogel zuerst, dann die anderen nach der Wartezeit); nur im Leerlauf')}"><input type="checkbox" ${p.auto_update ? 'checked' : ''} data-change="nodePolicy" data-args="${args(n.fp, 'auto_update', 'checked')}"> ${t('Auto-Update')}</label><br>

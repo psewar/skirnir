@@ -1,0 +1,103 @@
+/* Control UI styles, served at /ui.css (ADR-0130). */
+:root { --bg:#0f1419; --card:#161c24; --line:#273241; --fg:#e6edf3; --muted:#8b98a8; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --acc:#58a6ff; --cloud:#c084fc; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, Segoe UI, sans-serif; }
+header { padding:12px 22px; border-bottom:1px solid var(--line); display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; }
+header h1 { margin:0; font-size:22px; } header .muted { color:var(--muted); }
+header .lang { display:flex; gap:4px; align-items:center; align-self:center; color:var(--muted); } header .lang button.active { color:var(--acc); border-color:var(--acc); }
+main { padding:18px 22px; display:grid; gap:18px; grid-template-columns: 1fr 1fr; }
+@media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+section h2 { margin:0 0 10px; font-size:15px; }
+.wide { grid-column: 1 / -1; }
+table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+.badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; border:1px solid var(--line); color:var(--muted); margin:1px 2px 1px 0; }
+.badge.cap { color:var(--fg); } .badge.cloud { color:var(--cloud); border-color:var(--cloud); }
+.badge.open { color:var(--bad); border-color:var(--bad); } .badge.half_open { color:var(--warn); border-color:var(--warn); }
+.state { font-weight:700; } .state.free { color:var(--ok); } .state.busy { color:var(--warn); } .state.offline { color:var(--bad); }
+.loaded { color:var(--ok); } .cloudc { color:var(--cloud); }
+.role { border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-bottom:10px; }
+.role h3 { margin:0 0 6px; font-size:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.role h3 code { color:var(--acc); }
+.tier { display:grid; grid-template-columns: 28px 1fr 110px 90px 90px; gap:6px; align-items:center; margin:3px 0; }
+.exp { display:grid; grid-template-columns: 90px 1fr 110px 80px; gap:6px; align-items:center; margin:4px 0; font-size:12px; }
+select, input[type=number], input[type=text], textarea { background:#0b0f14; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:4px 6px; font:inherit; }
+input[type=number] { width:100%; } select { width:100%; }
+button { background:#1f2a37; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:4px 10px; cursor:pointer; font:inherit; }
+button:hover { border-color:var(--acc); } button.primary { background:#1f6feb; border-color:#1f6feb; } button.small { padding:1px 6px; font-size:12px; }
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
+.muted { color:var(--muted); } .warn { color:var(--warn); } .bad { color:var(--bad); } .ok { color:var(--ok); }
+pre { background:#0b0f14; border:1px solid var(--line); border-radius:4px; padding:8px; white-space:pre-wrap; max-height:260px; overflow:auto; font-size:12px; }
+ul.problems { list-style:none; margin:0; padding:0; } ul.problems li { padding:2px 0; } ul.problems code { margin-right:6px; }
+.decisions { max-height:60vh; overflow:auto; }
+.decisions div { font-family: ui-monospace, Consolas, monospace; font-size:12px; padding:2px 0; border-bottom:1px dashed var(--line); }
+.dec-ctl { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:4px 0 8px; font-size:13px; }
+.dec-ctl input[type=text] { width:220px; }
+#msg { min-height:18px; }
+.tiles { display:grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap:12px; }
+.tile { border:1px solid var(--line); border-radius:6px; padding:10px 12px; } .tile h4 { margin:0 0 6px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+.big { font-size:20px; font-weight:700; }
+.bar { height:6px; background:#0b0f14; border:1px solid var(--line); border-radius:3px; overflow:hidden; margin-top:4px; } .bar i { display:block; height:100%; background:var(--acc); }
+.bar.warn i { background:var(--warn); } .bar.bad i { background:var(--bad); }
+header img { height:60px; width:auto; align-self:center; margin:-4px 0 -4px 0; border-radius:14px; }   /* Kachel-Logo (Skirnir, 2026-09-16): eigener dunkler Grund, keine helle Kachel mehr noetig */
+nav.tabs { display:flex; gap:4px; padding:8px 22px 0; border-bottom:1px solid var(--line); background:var(--card); }
+nav.tabs button { background:transparent; border:1px solid transparent; border-bottom:none; border-radius:6px 6px 0 0; padding:7px 14px; color:var(--muted); font-size:14px; }
+nav.tabs button:hover { color:var(--fg); border-color:transparent; } nav.tabs button.active { color:var(--fg); background:var(--bg); border-color:var(--line); margin-bottom:-1px; padding-bottom:8px; }
+nav.tabs button .dot { color:var(--warn); margin-left:4px; }
+main section[data-tab] { display:none; } main[data-active="uebersicht"] section[data-tab="uebersicht"], main[data-active="rollen"] section[data-tab="rollen"],
+main[data-active="katalog"] section[data-tab="katalog"], main[data-active="einstellungen"] section[data-tab="einstellungen"],
+main[data-active="clients"] section[data-tab="clients"], main[data-active="agenten"] section[data-tab="agenten"] { display:block; }
+.settings { display:grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap:12px; }
+.srow { display:grid; grid-template-columns: 1fr 150px 26px; gap:6px; align-items:center; padding:3px 0; border-bottom:1px dashed var(--line); font-size:13px; }
+.srow:last-child { border-bottom:none; } .srow .lbl { color:var(--fg); } .srow .base { color:var(--muted); font-size:11px; }
+.srow.over .lbl { color:var(--acc); } .srow input[type=text] { width:100%; }
+.srow .chk { display:flex; flex-wrap:wrap; gap:6px; font-size:12px; } .srow .chk label { white-space:nowrap; }
+.sub { margin:8px 0 2px; font-size:12px; color:var(--cloud); font-weight:600; }
+.charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:12px; margin-top:12px; }
+canvas.spark { width:100%; height:46px; display:block; margin-top:4px; } canvas.chart { width:100%; height:190px; display:block; }
+.legend span { margin-right:12px; font-size:12px; } .legend b { color:var(--fg); }
+.client { border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+.client h3 { margin:0 0 6px; font-size:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.client .srow { grid-template-columns: 1fr 190px 26px; }
+.tok { background:#0b0f14; border:1px solid var(--warn); border-radius:4px; padding:8px; margin:6px 0; font-size:12px; }
+.tok code { font-family: ui-monospace, Consolas, monospace; word-break: break-all; color:var(--fg); font-size:13px; }
+.newclient { display:grid; grid-template-columns: 1.2fr 1.4fr 1fr auto; gap:6px; align-items:center; margin-bottom:12px; }
+.newmodel { display:grid; grid-template-columns: 1.4fr 1fr 1fr 80px 80px 90px auto; gap:6px; align-items:center; margin-top:8px; font-size:12px; }
+.inl { width:70px !important; padding:2px 4px; font-size:12px; }
+
+/* Utility classes in place of the former style attributes (ADR-0130: style-src 'self' allows no inline style).
+   !important keeps the precedence a style attribute had over the element rules above. */
+.fw-normal { font-weight:normal !important; }
+.fs-12 { font-size:12px !important; }
+.fs-11 { font-size:11px !important; }
+.mb-6 { margin-bottom:6px !important; }
+.ml-auto { margin-left:auto !important; }
+.mt-14 { margin-top:14px !important; }
+.mt-10 { margin-top:10px !important; }
+.m-4-0-6 { margin:4px 0 6px !important; }
+.m-0-0-8 { margin:0 0 8px !important; }
+.span-all { grid-column:1 / -1 !important; }
+.acc { color:var(--acc) !important; }
+.flex-row-4 { display:flex !important; gap:4px !important; align-items:center !important; }
+.w-auto { width:auto !important; }
+.w-full { width:100% !important; }
+.w-48 { width:48px !important; }
+.w-56 { width:56px !important; }
+.w-60 { width:60px !important; }
+.w-70 { width:70px !important; }
+.w-140 { width:140px !important; }
+.w-150 { width:150px !important; }
+.w-170 { width:170px !important; }
+.w-200 { width:200px !important; }
+.w-220 { width:220px !important; }
+
+/* Palette of the live tiles' legends; the same colours as PAL in ui.js (test/selftest_browser.py compares). */
+.pal0 { color:#58a6ff !important; }
+.pal1 { color:#3fb950 !important; }
+.pal2 { color:#d29922 !important; }
+.pal3 { color:#c084fc !important; }
+.pal4 { color:#f85149 !important; }
+.pal5 { color:#79c0ff !important; }
+.pal6 { color:#56d364 !important; }
+.pal7 { color:#e3b341 !important; }

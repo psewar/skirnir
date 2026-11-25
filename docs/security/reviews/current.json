@@ -2,59 +2,69 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "21ae6ac094d9cd68f9df6e2fae0dee5b388c2fb7",
- "change_digest": "a379225dd0a1533906199c44a4b87e5d7ec20180b146f01f5c41f9f54dc7817c",
+ "base_sha": "83a9feea5ec085ed20c293d8daa5ecb9ec8645ca",
+ "change_digest": "8ab34191a34c9ecdf568da70538e4b70f93a0d1343e7c661881b3df820ff2a0c",
  "reviewed_paths": [
   "CHANGELOG.md",
-  "requirements-ci-lock.txt",
-  "router/requirements-lock.txt",
-  "router/skirnir_router/common.py",
-  "docs/security/reviews/current.json",
-  "router/requirements-container-lock.txt",
-  "router/requirements.txt",
-  "requirements-dev.txt",
-  "test/requirements-hindsight.txt",
-  "router/requirements-session.txt",
-  "router/skirnir_router/ha.py",
-  "router/skirnir_router/pydeps.py",
+  "deploy/deploy.py",
+  "docs/adr/0128-the-control-ui-runs-no-inline-script.md",
+  "docs/adr/0130-the-control-ui-uses-no-inline-style.md",
+  "docs/adr/README.md",
+  "docs/install-router.de.md",
+  "docs/install-router.md",
+  "docs/operations.de.md",
+  "docs/operations.md",
+  "docs/reference.de.md",
+  "docs/reference.md",
+  "docs/security/risk-register.json",
+  "docs/security/threat-model.de.md",
+  "docs/security/threat-model.md",
+  "router/Dockerfile",
   "router/install.sh",
-  "tools/security/lock_requirements.py",
-  ".github/workflows/security.yml"
+  "router/skirnir_router/admin.py",
+  "router/skirnir_router/app.py",
+  "router/skirnir_router/browser_headers.py",
+  "router/skirnir_router/common.py",
+  "router/ui.css",
+  "router/ui.html",
+  "router/ui.js",
+  "test/selftest_browser.py",
+  "test/selftest_install.py",
+  "docs/security/reviews/current.json",
+  "router/skirnir_router/auth.py",
+  "router/skirnir_router/common.py",
+  "docs/adr/0065-browser-headers-and-handler-escaping-for-the-control-ui.md"
  ],
  "risk_ids": [
-  "TM-16"
+  "TM-03"
  ],
  "boundaries": [
-  "B8",
-  "B9"
+  "B2"
  ],
- "summary": "Lock refresh for TM-16's next action 'refresh the Python locks regularly'. No code change apart from VERSION 0.42.3 -> 0.42.4. router/requirements-lock.txt (what pydeps.py lets pip install into the router's venv on top of the distribution, --require-hashes --no-deps): paho-mqtt 2.1.0 -> 2.2.0, written by lock_requirements.py pin, which takes every SHA-256 PyPI publishes for the release; the two hashes equal those already in the container lock and the CI lock (compared), verify-pypi confirms them. paho-mqtt 2.2.0 (upstream changelog read) hardens packet parsing against corrupted and malformed packets, fixes keepalive and QoS 2 inflight tracking, drops Python 3.7/3.8 (the router needs 3.11) and turns two ValueErrors into TypeErrors for wrong argument types (max_queued_messages_set, callback_api_version). Traced B9: the only user is ha.py (MQTT to Home Assistant); new_client passes CallbackAPIVersion.VERSION1 as before and ha.py calls neither max_queued_messages_set nor reinitialise; a probe built the client with 2.2.0 (VERSION1, the same DeprecationWarning as 2.1.0) and set the callbacks ha.py uses. Traced B8: pydeps.plan installs a lock entry only where the venv lacks the package or holds a differing version it installed before; a distribution's own python3-paho-mqtt is untouched, the router image already installs 2.2.0 from its own lock (ADR-0121). requirements-ci-lock.txt, re-resolved on Linux with lock_requirements.py resolve in the router's pinned base image: ruff 0.17.4 -> 0.17.6, pydantic 2.14.3 -> 2.14.4, pydantic_core 2.50.4 -> 2.50.5, every other pin unchanged; these are installed in CI only (--require-hashes). hindsight-client stays 0.10.3: 1.x is outside the <1 bound of test/requirements-hindsight.txt, deliberately not moved here. pip-audit 2.10.1 (as in security.yml) finds no known vulnerability in any of the three locks.",
- "findings": [],
+ "summary": "Router 0.42.5 closes TM-03's next action 'consider dropping unsafe-inline for styles' (ADR-0130, proposed, supersedes ADR-0128 whose script decision stays). Before, the control port's CSP allowed style-src 'unsafe-inline' because ui.html had a <style> element and the page plus the markup ui.js builds had 52 style attributes; injected markup could lay a disguised overlay over a control (click redirection with the operator's session) or hide/fake a warning. Now the <style> element is router/ui.css (content unchanged), loaded with <link rel=stylesheet href=ui.css>; 48 static style attributes became utility classes (merged into existing class attributes, !important so they keep a style attribute's precedence over element rules such as select {width:100%}); 3 legend colours became classes pal0..pal7 via palClass(i) with PAL's colours; the budget bar width moved to data-pct and is set through CSSOM after rendering (Number() of the attribute, so only a number reaches the style). Policy: style-src 'self' (no 'unsafe-inline' anywhere on the control port). Traced B2: /ui.css is a GET route on the control app; basic_auth_middleware exempts only /v1/, so it needs the control login like / and /ui.js (tested: 401 without login, headers on success and refusal); the handler serves one fixed path next to ui.html (no request-derived path), Content-Type text/css, Cache-Control no-store. browser_headers.install applies the CSP to the new response. ui.css loads nothing (no url(), no @import), so img-src/default-src stay untouched. Shipping: install.sh requires and copies ui.css, router/Dockerfile copies it, deploy.py uploads it with mode 0644 like ui.js. Nothing else of the control UI's behaviour changes: no action, handler or data path changed; the script change is palClass, data-pct and the CSSOM loop. Residual: script code may still set styles through CSSOM, which injected markup cannot reach; style hashes/nonces were not needed.",
+ "findings": [
+  {
+   "id": "STYLE-IMPORTANT-PARTIAL",
+   "evidence": "The first generated ui.css put !important only on the last declaration of .flex-row-4 (display:flex; gap:4px; align-items:center !important) and none on the legend classes, so element rules could have won where the former style attribute had won.",
+   "resolution": "Every declaration of the utility and legend classes carries !important; in a browser all 91 elements with a utility or legend class have the same computed style and position as with the former style set inline.",
+   "disposition": "fixed"
+  }
+ ],
  "tests": [
   {
-   "command": "python tools/security/lock_requirements.py check ; python tools/security/lock_requirements.py verify-pypi",
+   "command": "python test/selftest_browser.py",
    "result": "passed",
-   "evidence": "Python locks: 0 problem(s); PyPI verification: 0 problem(s)."
+   "evidence": "13 tests OK. New: style-src exactly 'self' and no 'unsafe-inline' in the policy; /ui.css 200 with text/css, no-store and the control headers, 401 without login (rejected case); no style element or attribute in ui.html or ui.js and no setAttribute('style') (the same patterns find 31 + 21 attributes and the element in origin/main's files); exactly one style sheet ui.css; every utility class used is defined; legend classes equal PAL; ui.css has no url() or @import."
   },
   {
-   "command": "pip-audit --require-hashes --disable-pip -r <each of router/requirements-lock.txt, router/requirements-container-lock.txt, requirements-ci-lock.txt> (pip-audit 2.10.1)",
+   "command": "browser (built-in pane, Chromium) against test/dev_env.py",
    "result": "passed",
-   "evidence": "No known vulnerabilities found, for each lock."
+   "evidence": "Response CSP style-src 'self'; only /ui.css loaded (123 rules). For each of the 91 elements with a utility or legend class: every computed property and the bounding rectangle equal those with the classes removed and the former declarations set inline through CSSOM (0 differences). Injected style attribute (full-screen red overlay) and injected <style> element were blocked as style-src-attr and style-src-elem violations; the overlay did not render (position static, no background). Fresh tab through all six tabs plus one live refresh: no console message, no violation. Budget bar with 42 % and 130 %: width 42 % and 100 % through CSSOM."
   },
   {
-   "command": "ruff check . with ruff 0.17.6 (the new pin, in a separate venv)",
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check ., router.py --check router/config.example.yaml --pure and node --check router/ui.js",
    "result": "passed",
-   "evidence": "All checks passed."
-  },
-  {
-   "command": "probe: ha.new_client(paho.mqtt.client, ...) with paho-mqtt 2.2.0 installed",
-   "result": "passed",
-   "evidence": "Client built with CallbackAPIVersion.VERSION1, only the known DeprecationWarning; on_connect and on_message with the 1.x signatures assigned."
-  },
-  {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
-   "result": "passed",
-   "evidence": "93 commands, 0 failed; includes selftest_pydeps, selftest_container_image (container lock = CI lock versions), selftest_dependency_audit, lock_requirements check and verify-pypi."
+   "evidence": "93 commands, 0 failed; includes selftest_browser, selftest_install (its install.sh run is skipped on Windows; CI runs it on Linux), check_adr_index (130 ADRs), check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
@@ -64,7 +74,7 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; added lines are version pins, PyPI hashes and the changelog row."
+   "evidence": "run after staging this record; added lines are CSS, class names, code, documentation."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -73,8 +83,9 @@
   }
  ],
  "limitations": [
-  "paho-mqtt 2.2.0 was not run against a real MQTT broker; ha.py's client construction and callback API were probed, the network path is unchanged code.",
-  "The upstream changelog describes the hardening; the packet parser changes themselves were not audited.",
-  "Hosts keep their distribution's paho-mqtt; only venv installs from the lock change."
+  "Browser checks in Chromium only.",
+  "install.sh's copy of ui.css is exercised by selftest_install on Linux (CI), not locally on Windows; the container image build is CI's container job.",
+  "Admin access segmentation (TM-03's remaining next action) and stolen admin credentials are out of scope.",
+  "The full check run and the end-to-end suite ran on base 21ae6ac; the new base 83a9fee adds only the lock refresh (router 0.42.4, no code change), after which selftest_browser and the ADR index check were run again."
  ]
 }
