@@ -2,71 +2,58 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "07c811a4bf5b524af496260424ef80e297c11730",
- "change_digest": "654c7520db1463e7bb03dec2217cdad46069faec84765d5a0a3e73ebafe6d218",
+ "base_sha": "5d992c1b11db979ccda4b3dca962339717d05fc5",
+ "change_digest": "d70f9d51cb12d631d5f2000de23f11e0b1a006fddc188497d2a4a25cc64bc84a",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "design/shared-memory-interoperability.de.md",
-  "design/shared-memory-interoperability.md",
-  "requirements-ci-lock.txt",
+  "docs/adr/0131-model-listings-follow-the-clients-grants.md",
+  "docs/adr/README.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
+  "docs/security/risk-register.json",
+  "docs/security/threat-model.de.md",
+  "docs/security/threat-model.md",
+  "router/skirnir_router/auth.py",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/memory_gateway.py",
-  "test/requirements-hindsight.txt",
-  "test/selftest_interoperability.py",
+  "router/skirnir_router/openai_api.py",
+  "router/skirnir_router/proxy.py",
+  "test/selftest_model_listing.py",
+  "test/selftest_standby_switch.py",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/session_api.py",
-  "router/skirnir_router/memory.py",
-  "test/integration_live_memory.py",
-  ".github/workflows/security.yml"
+  "router/skirnir_router/anthropic_api.py",
+  "router/skirnir_router/app.py",
+  "router/skirnir_router/scheduler.py",
+  "docs/adr/0052-concrete-model-names-need-an-explicit-grant.md"
  ],
  "risk_ids": [
-  "TM-10",
-  "TM-16"
+  "TM-04"
  ],
  "boundaries": [
-  "B1",
-  "B5",
-  "B9"
+  "B1"
  ],
- "summary": "Router 0.42.7 makes the native memory gateway's recall accept what the official hindsight-client 1.x sends. Found while checking the open item 'hindsight-client 1.x' (the CI lock stayed on 0.10.3 because of the <1 bound): with 1.3.0 the SDK contract test failed with 400 'invalid object fields'. A loopback capture showed that 1.x sends every recall option, unset ones as null, plus the new field rerank; session_api.fields refused the unknown name. Retain items already allowed all 1.x fields (resolve_entities, update_mode, strategy, observation_scopes, ...). Traced B1/B5: gateway_recall validates the client request before it calls service.recall_merged; it forwards no expansion or ranking knobs and refuses options whose meaning would be lost. The change adds rerank to the allowed names and treats it like include: null passes; an object must have only prune/dedup (else 'invalid object fields') and all values null (the bank's defaults), otherwise 'unsupported gateway recall option: rerank'. No value of rerank reaches Hindsight; the upstream request is unchanged. No other field or limit changed; authorization, scope and bank checks run before as before. Dependency (B9/TM-16): test/requirements-hindsight.txt allows <2, the CI lock moves hindsight-client 0.10.3 -> 1.3.0 (resolved on Linux, same transitive pins, hashes verified against PyPI, pip-audit clean). The SDK is a test dependency only; the router does not import it.",
- "findings": [
-  {
-   "id": "GATEWAY-RECALL-SDK1-RERANK",
-   "evidence": "hindsight-client 1.3.0 recall -> 400 invalid object fields (unknown field rerank); every recall of a client on SDK 1.x would fail. Compatibility defect, not a security weakness: the refusal was fail-safe.",
-   "resolution": "rerank accepted when it asks for nothing, refused with a named reason otherwise; test_gateway_recall_accepts_what_hindsight_client_1_sends (5 subtests fail without the fix) and the SDK contract test pass with 1.3.0 and 0.10.3.",
-   "disposition": "fixed"
-  }
- ],
+ "summary": "Router 0.42.8 closes TM-04's validation gap 'model listings still show concrete names to role-only clients' (ADR-0131, proposed, extends ADR-0052). auth.client_allows is split: client_grant is the grant check without side effects (same logic: no client -> allowed; concrete needs models:true or the internal UI client; a role needs '*', its name or its exposed name in roles), client_allows calls it and counts forbidden and audits a refusal exactly as before (same reason texts, same audit fields). Traced B1: both request-path call sites in proxy.py still call client_allows, so access is unchanged; the API middleware sets request['client'] before handlers run, so the listing sees the same identity. proxy.tags_list(request) is behind /api/tags (proxy.handle_tags), /v1/models and /v1/models/{model} (openai_api, OpenAI and Anthropic form); all four call sites pass the request. It now lists a role only when client_grant allows it, concrete names only when expose_concrete is on and the client may use concrete names, and the decision router's auto entry only when a role is listed. Role exposed names stay in 'seen' for hidden roles, so no concrete model can appear under a hidden role's name. Observe mode without identity sees everything (client_grant returns None), as before. /api/ps and /api/show are unchanged; /api/ps names loaded concrete models and nodes to any client (noted in TM-04). No exception or error-text path added.",
+ "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_interoperability.py (SharedGatewayTests)",
+   "command": "python test/selftest_model_listing.py (new, added to ci.yml)",
    "result": "passed",
-   "evidence": "New test: the exact 1.3.0 recall payload (captured on loopback) with rerank null, {} and prune/dedup null -> 200 with the result; rerank {prune: true} and {dedup: false} -> 400 'unsupported gateway recall option: rerank', {other: null} and a string -> 400 'invalid object fields' (rejected cases). With memory_gateway.py from origin/main 5 subtests fail."
-  },
-  {
-   "command": "test_official_hindsight_sdk_recall_retain_and_operation_status with hindsight-client 1.3.0 and 0.10.3 (separate venv)",
-   "result": "passed",
-   "evidence": "Recall, retain (async, with context and timestamp), operation status and the 503 -> ApiException case pass with both versions; with 1.3.0 and the old gateway it failed with 400."
-  },
-  {
-   "command": "lock_requirements.py check, verify-pypi; pip-audit --require-hashes -r requirements-ci-lock.txt; pip-audit -r test/requirements-hindsight.txt",
-   "result": "passed",
-   "evidence": "0 problems; no known vulnerabilities."
+   "evidence": "5 tests OK over the real API app with an enforce configuration: one-role client sees only that role; all-roles client with models:false sees no concrete name; models:true adds it; /v1/models OpenAI and Anthropic form filter alike; /v1/models/{concrete} 404 for the role-only client, 200 for models:true; observe without identity sees everything; the UI client keeps concrete names; listing counts no forbidden request and writes no audit line; a hidden role requested with /api/chat is refused 403 and audited (rejected case). With proxy.py, auth.py and openai_api.py from origin/main 3 of 5 fail."
   },
   {
    "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "93 commands, 0 failed (the SDK contract test is skipped there: the local Python has no SDK)."
+   "evidence": "94 commands, 0 failed; includes selftest_security (client_allows grant cases) and check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "337 PASS, 0 failures on base 07c811a."
+   "evidence": "337 PASS, 0 failures on base 5d992c1; its /api/tags checks run unauthenticated in observe mode and with the tester client (roles *, models true), which still see roles, concrete names and auto."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; synthetic test values only."
+   "evidence": "run after staging this record; synthetic tokens and model names only."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -75,8 +62,8 @@
   }
  ],
  "limitations": [
-  "No run against a real Hindsight server or a real Hermes plugin on SDK 1.x; the live memory test needs an operator-provided service.",
-  "CI tests the SDK at the lock's version (1.3.0) only; 0.10.3 was checked locally.",
-  "The end-to-end suite failed once on base 83a9fee in 'Residency: rank-1 prewarmed again after evictor idle' (timing-sensitive, flaked before, unrelated to the memory gateway) and passed on the rerun; on base 07c811a see the end-to-end entry."
+  "/api/ps still lists loaded concrete models and node names to any client; /api/show answers for any name the client asks about, as before.",
+  "Per-client model allowlists (TM-04's other idea) are not added.",
+  "test/selftest_standby_switch.py called tags_list() without a request; it now passes an identity-less request (observe), which lists everything as before."
  ]
 }

@@ -43,8 +43,8 @@ client_auth:
 
 | Per client | Meaning |
 |---|---|
-| `roles` | Roles the client may use (`["*"]` or missing = all) |
-| `models` | Concrete model names allowed? ([ADR-0052](adr/0052-concrete-model-names-need-an-explicit-grant.md)) |
+| `roles` | Roles the client may use (`["*"]` or missing = all); model listings show it only these ([ADR-0131](adr/0131-model-listings-follow-the-clients-grants.md)) |
+| `models` | Concrete model names allowed? ([ADR-0052](adr/0052-concrete-model-names-need-an-explicit-grant.md)); without it, listings show no concrete names |
 | `requests_per_minute` | Rate limit; above it 429 |
 | `max_concurrent` | Requests in progress at once, default 4; the next one gets 429 with `Retry-After: 1` ([ADR-0063](adr/0063-bound-concurrency-and-body-size-per-client.md)) |
 | `max_body_mib` | Body size, default 16; above it 413: a declared size before any work, a chunked body while it is read (ADR-0063, ADR-0129) |
@@ -145,7 +145,8 @@ roles:
   5 min – otherwise "warm first" would stay stuck on the fallback tier forever.
 - **Concrete models** (`qwen3-coder:30b`) remain directly callable (`expose_concrete_models`) and go 1:1 to a node that has
   them; otherwise 404 as with Ollama. A client needs `models: true` for them; without the setting it gets roles only and
-  the router warns at load time (ADR-0052).
+  the router warns at load time (ADR-0052). Since router 0.42.8 the listings (`/api/tags`, `/v1/models`) show a
+  client only the roles it may use and concrete names only with `models: true` (ADR-0131).
 - **Canary** (`roles.<r>.canary: {model, num_ctx, percent}`) sends a share of the traffic to a candidate, even cold.
   **Shadow** (`roles.<r>.shadow`) repeats a share of the requests after the response, without streaming, against a second model on
   a free node; the client notices nothing, speed and error rate end up in the statistics.

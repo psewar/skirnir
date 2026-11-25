@@ -59,6 +59,7 @@ jobs:
       - run: python test/selftest_sbom.py
       - run: python test/selftest_deletion_lifecycle.py
       - run: python test/selftest_browser.py
+      - run: python test/selftest_model_listing.py
       - run: python test/selftest_agent_revocation.py
       - run: python test/selftest_key_rotation.py
       - run: python test/selftest_english_names.py

@@ -43,8 +43,8 @@ client_auth:
 
 | Je Client | Bedeutung |
 |---|---|
-| `roles` | Rollen, die der Client nutzen darf (`["*"]` oder fehlend = alle) |
-| `models` | Konkrete Modellnamen erlaubt? ([ADR-0052](adr/0052-concrete-model-names-need-an-explicit-grant.md)) |
+| `roles` | Rollen, die der Client nutzen darf (`["*"]` oder fehlend = alle); Modelllisten zeigen ihm nur diese ([ADR-0131](adr/0131-model-listings-follow-the-clients-grants.md)) |
+| `models` | Konkrete Modellnamen erlaubt? ([ADR-0052](adr/0052-concrete-model-names-need-an-explicit-grant.md)); ohne die Einstellung zeigen Listen keine konkreten Namen |
 | `requests_per_minute` | Rate Limit; darüber 429 |
 | `max_concurrent` | Gleichzeitig laufende Anfragen, Standard 4; die nächste bekommt 429 mit `Retry-After: 1` ([ADR-0063](adr/0063-bound-concurrency-and-body-size-per-client.md)) |
 | `max_body_mib` | Body-Größe, Standard 16; darüber 413: eine angegebene Größe vor jeder Arbeit, ein Chunked-Body beim Lesen (ADR-0063, ADR-0129) |
@@ -146,7 +146,8 @@ roles:
   mehr gefragt wurde – sonst bliebe „warm zuerst“ dauerhaft auf der Ausweichstufe hängen.
 - **Konkrete Modelle** (`qwen3-coder:30b`) sind weiter direkt aufrufbar (`expose_concrete_models`) und gehen 1:1 an einen Knoten,
   der sie hat; sonst 404 wie bei Ollama. Ein Client braucht dafür `models: true`; ohne die Einstellung bekommt er nur Rollen,
-  und der Router warnt beim Laden (ADR-0052).
+  und der Router warnt beim Laden (ADR-0052). Seit Router 0.42.8 zeigen die Listen (`/api/tags`, `/v1/models`)
+  einem Client nur die Rollen, die er nutzen darf, und konkrete Namen nur mit `models: true` (ADR-0131).
 - **Canary** (`roles.<r>.canary: {model, num_ctx, percent}`) leitet einen Anteil des Verkehrs auf einen Kandidaten, auch kalt.
   **Shadow** (`roles.<r>.shadow`) wiederholt einen Anteil der Anfragen nach der Antwort ohne Stream gegen ein zweites Modell auf
   einem freien Knoten; der Client merkt nichts, Tempo und Fehlerrate landen in der Statistik.

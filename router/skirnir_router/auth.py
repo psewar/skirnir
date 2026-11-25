@@ -248,8 +248,10 @@ def inference_refusal(spec, request):
     return Problem(403, "client may only use POST /rerank and GET /info (inference: false)", "inference_disabled")
 
 
-def client_allows(request, role, concrete):
-    """None = allowed, else the reason for 403. Unauthenticated requests (observe) have no restrictions."""
+def client_grant(request, role, concrete):
+    """None when the request's client may use this role (concrete=False) or concrete model names (concrete=True; role
+    is then not read), else the reason. No side effects: model listings filter with it (ADR-0131). Unauthenticated
+    requests (observe) have no restrictions."""
     name = request.get("client")
     if not name:
         return None
@@ -258,14 +260,20 @@ def client_allows(request, role, concrete):
         # ADR-0052: concrete names need an explicit grant; the router's own UI client keeps them.
         if name == state.INTERNAL_CLIENT or c.get("models", False) is True:
             return None
-        reason = f"client {name}: concrete model names not allowed (roles only)"
-    else:
-        roles = c.get("roles") or ["*"]
-        if "*" in roles or role["name"] in roles or role["exposed"] in roles:
-            return None
-        reason = f"client {name}: role {role['name']} not allowed"
-    _stats_for(name)["forbidden"] += 1
-    audit("forbidden", client=name, model=role["exposed"], path=request.path)
+        return f"client {name}: concrete model names not allowed (roles only)"
+    roles = c.get("roles") or ["*"]
+    if "*" in roles or role["name"] in roles or role["exposed"] in roles:
+        return None
+    return f"client {name}: role {role['name']} not allowed"
+
+
+def client_allows(request, role, concrete):
+    """None = allowed, else the reason for 403; a refusal is counted and audited. See client_grant."""
+    reason = client_grant(request, role, concrete)
+    if reason is not None:
+        name = request.get("client")
+        _stats_for(name)["forbidden"] += 1
+        audit("forbidden", client=name, model=role["exposed"], path=request.path)
     return reason
 
 
