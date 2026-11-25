@@ -2,50 +2,46 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "89d92a9f574d0fc111f5dbfbbde93d3b850a4eb1",
- "change_digest": "1aa82efe4436f2fbce2a7ff0c380621fecc89b225556ad8ea264b113e389f0cc",
+ "base_sha": "1c49aef7dcd8e47f2b3c6d1c96b9b11276914e67",
+ "change_digest": "18e22fc8998236084aea8f654010f9cc9ea1334321544f6eab20ed3a215edb96",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0135-a-client-can-have-its-own-monthly-cloud-budget.md",
+  "docs/adr/0136-new-agents-enroll-only-from-configured-networks.md",
   "docs/adr/README.md",
-  "docs/configuration.de.md",
-  "docs/configuration.md",
+  "docs/install-agent.de.md",
+  "docs/install-agent.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
   "router/config.example.yaml",
-  "router/skirnir_router/auth.py",
-  "router/skirnir_router/cloud.py",
   "router/skirnir_router/common.py",
   "router/skirnir_router/config.py",
-  "router/skirnir_router/settings.py",
-  "test/selftest_client_cloud_budget.py",
+  "router/skirnir_router/registry.py",
+  "router/skirnir_router/values.py",
+  "test/selftest_enrollment_networks.py",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/metrics.py",
-  "router/skirnir_router/proxy.py",
-  "router/skirnir_router/request.py",
-  "docs/adr/0014-cloud-as-a-role-tier-with-declared-data-classes.md"
+  "router/skirnir_router/tunnel.py",
+  "docs/adr/0066-explicit-agent-key-creation-and-lost-key-recovery.md"
  ],
  "risk_ids": [
-  "TM-08"
+  "TM-07"
  ],
  "boundaries": [
-  "B1",
-  "B6"
+  "B3"
  ],
- "summary": "Router 0.42.12 closes TM-08's next action 'per-client cost bounds for cloud' (ADR-0135, proposed). New optional client_auth.clients.<c>.cloud_budget_month (int or float 0-100000, not bool; 0/absent = no limit); config refuses other values, settings.EDITABLE gets the same bounds for the web UI (Clients). Traced B6: proxy sets req.cloud_block = cloud.request_block_reason(req, body, request.get('client')) before tier selection; request.py reports it as the skip reason of every cloud tier (provider_block_reason only when it is None), so a reached budget closes all cloud tiers of the request and local tiers continue. The check runs after the client's cloud:false opt-out and before data-class and credential checks; it only adds a refusal reason, it never opens a tier. Spend source: cloud.client_spend_month sums days[YYYY-MM-*].clients[client].cost_chf in state.USAGE, which metrics.usage_add increments in observe_request for every finished request with its cost (proxy._finish -> metrics.observe_request with info['client']); usage_save keeps 90 days. The client name comes from the authenticated identity (request['client'] set by client_auth_middleware), so a client cannot spend under another's name; unidentified observe requests have no client budget (as before). Client view adds budget and spend (auth.client_auth_view, late import of cloud to avoid a cycle). Overshoot: requests already in flight finish and are charged, like the provider budget. No exception path added.",
+ "summary": "Router 0.42.13 closes TM-07's next action 'limit enrollment to known networks' (ADR-0136, proposed). New optional router.agent_enrollment_networks (list of CIDR; absent/empty = any address as before); config.py parses each entry with values.ip_network (ipaddress reference parser, strict=False, exception-ok at that boundary) and refuses a non-list or a non-network. Traced B3: the tunnel endpoint (registry.py) authenticates the hello (Ed25519 signature over the nonce) first, computes the key fingerprint and calls enrollment_denial(fp, request.remote) before upsert_hello; a known fingerprint (approved, pending, revoked) passes as before, so approved agents keep connecting from any address and revoked ones still get their revoked status. For an unknown fingerprint the network check now runs before the pending-capacity and per-address admission checks, so a refused key uses no admission slot and is never stored; the agent gets the status message with the reason and close code 1008, the existing refusal path. values.in_networks reads the peer text with values.ip_address (explicit failure -> outside), maps IPv4-mapped IPv6 to IPv4 and compares only same-version networks. request.remote is the TCP peer: behind a reverse proxy it is the proxy (documented). No exception path added outside the parser boundary.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_client_cloud_budget.py (new, added to ci.yml)",
+   "command": "python test/selftest_enrollment_networks.py (new, added to ci.yml)",
    "result": "passed",
-   "evidence": "4 tests: spend sums only this month's cost of this client (another month and another client excluded); below the budget cloud stays open, at the budget request_block_reason names the exhausted budget (rejected case), no budget / 0 / unidentified unchanged; client view shows budget and spend; configuration refuses -1, 100001, '5', True, [5]. With cloud.py, config.py and auth.py from origin/main 6 failures and 2 errors."
+   "evidence": "5 tests: CIDR, single address and host-bit parsing, bad values refused; inside/outside/IPv4-mapped/unreadable/missing matching; without networks any address enrolls; a new key from outside is refused with the reason and uses no admission slot (rejected case), inside (IPv4/IPv6) enrolls; approved and pending keys reconnect from outside; Config.load takes the list and refuses a string, a non-network and a number. With values.py, config.py and registry.py from origin/main 4 errors."
   },
   {
    "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "97 commands, 0 failed; includes selftest_security, selftest_institutional_provider, selftest_locale_neutral (settings texts), check_control_flow."
+   "evidence": "98 commands, 0 failed; includes selftest_security (enrollment caps unchanged), selftest_agent_revocation, check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
@@ -55,7 +51,7 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; synthetic client names and amounts only."
+   "evidence": "run after staging this record; documentation addresses (RFC 5737/3849) only."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -64,8 +60,8 @@
   }
  ],
  "limitations": [
-  "Requests in flight when the budget is reached still finish and are charged (overshoot by what is in flight).",
-  "The spend is what usage.json holds; deleting it resets the month (and the usage view).",
-  "The web UI shows the budget field in the client settings; the spend is in /admin/state, not yet drawn in the client card."
+  "Behind a reverse proxy the router sees the proxy's address; the list must then name the proxy.",
+  "Plausibility checks on reports of approved agents (TM-07's other action) are not added.",
+  "No wire-level test over the real tunnel endpoint for the network refusal; the unit test calls enrollment_denial, which the endpoint calls with request.remote (unchanged call site)."
  ]
 }

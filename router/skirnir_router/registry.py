@@ -34,6 +34,9 @@ def enrollment_denial(fp, remote, now=None):
     """Reject new identities before inserting into the persistent registry."""
     if fp in state.REG.nodes:
         return None  # Existing identities/reconnects don't consume admission slots.
+    networks = getattr(state.CFG, "agent_enrollment_networks", None) or []
+    if networks and not values.in_networks(remote, networks):   # ADR-0136: new identities only from these networks
+        return f"enrollment from {remote or 'an unknown address'} is outside router.agent_enrollment_networks"
     if sum(e.get("state") == "pending" for e in state.REG.nodes.values()) >= MAX_PENDING_NODES:
         return "pending enrollment capacity reached"
     now = time.monotonic() if now is None else now

@@ -7,7 +7,7 @@ import math
 
 from yarl import URL
 
-from .outcome import invalid
+from .outcome import failed, invalid
 
 LOOPBACK_HOSTS = ("127.0.0.1", "::1")   # literal loopback only (ADR-0048), never a name such as localhost
 
@@ -38,6 +38,25 @@ def ip_address(value, what):
         return str(ipaddress.ip_address(str(value).strip()))
     except ValueError:  # exception-ok: ipaddress is the reference parser for IPv4/IPv6 text
         return invalid(f"{what}: {value!r} is not an IP address")
+
+
+def ip_network(value, what):
+    """An IPv4/IPv6 network in CIDR form (a single address is a /32 or /128); host bits may be set (192.0.2.7/24)."""
+    try:
+        return ipaddress.ip_network(str(value).strip(), strict=False)
+    except ValueError:  # exception-ok: ipaddress is the reference parser for network text
+        return invalid(f"{what}: {value!r} is not an IP network")
+
+
+def in_networks(address, networks):
+    """Whether the address text lies in one of the networks; an IPv4-mapped IPv6 address counts as its IPv4 address.
+    Text that is no address is in no network."""
+    if not address or failed(parsed := ip_address(address, "address")):
+        return False
+    addr = ipaddress.ip_address(parsed)
+    if getattr(addr, "ipv4_mapped", None) is not None:
+        addr = addr.ipv4_mapped
+    return any(addr.version == net.version and addr in net for net in networks)
 
 
 def egress_url(value, what):

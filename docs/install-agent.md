@@ -185,6 +185,11 @@ tab; the Home Assistant sensor *Node awaiting approval*). Before approving:
 2. Compare the fingerprint with the one in the UI, over another channel than the network the node enrolled through (TM-07).
 3. Approve, and set Wake-on-LAN, weight and the node's MQTT device.
 
+To accept new agents only from your own networks, list them in `router.agent_enrollment_networks` (CIDR, for example
+`[192.0.2.0/24, 2001:db8::/32]`). A key the router does not know yet is then refused before it appears as pending when
+it connects from elsewhere; known agents reconnect from anywhere. Empty or absent means any address, as before. Behind
+a proxy the router sees the proxy's address (ADR-0136, TM-07).
+
 After approval the agent receives its configuration package through the tunnel (heartbeat interval, optional MQTT access) and
 needs no secrets of its own. No token, no firewall rule, no IP by hand.
 
