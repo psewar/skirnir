@@ -2,52 +2,74 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "f96ff1e3d401c4a98b3b193daac10b3496727ec8",
- "change_digest": "de016c668f7af47a8d9cd95c48059f2baf9a03e852cf76b5e0f6291380406a1a",
+ "base_sha": "b74584d95a3a2ea6d8e94849cb8fcca7bb589b4c",
+ "change_digest": "9ab0f6ca675e916ed94e0992aeb47263a05898f2558a9e80153c788d60f441e0",
  "reviewed_paths": [
-  ".github/workflows/release-provenance.yml",
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0139-the-router-source-is-released-as-an-attested-archive.md",
+  "docs/adr/0052-concrete-model-names-need-an-explicit-grant.md",
+  "docs/adr/0140-a-client-may-be-granted-a-list-of-concrete-models.md",
   "docs/adr/README.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
+  "router/config.example.yaml",
+  "router/skirnir_router/admin.py",
+  "router/skirnir_router/auth.py",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/config.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/settings.py",
+  "router/skirnir_router/values.py",
+  "router/ui.js",
+  "test/selftest_model_allowlist.py",
   "docs/security/reviews/current.json",
-  "router/install.sh",
-  "test/check_pinned_references.py",
-  "docs/adr/0075-release-provenance-by-reproducible-rebuild.md"
+  "router/skirnir_router/scheduler.py",
+  "router/skirnir_router/openai_api.py",
+  "docs/adr/0131-model-listings-follow-the-clients-grants.md",
+  "docs/adr/0133-the-running-model-list-follows-the-clients-grants.md"
  ],
  "risk_ids": [
-  "TM-16"
+  "TM-04"
  ],
  "boundaries": [
-  "B8",
-  "B9"
+  "B1",
+  "B2"
  ],
- "summary": "TM-16's 'consider signing the router source archive' (ADR-0139, proposed). CI change only, router and agent unchanged. .github/workflows/release-provenance.yml gets a second job router-source with its own job-level permissions (contents: write to upload the asset, id-token: write and attestations: write to sign) and the workflow-level permissions: {} unchanged. It runs on release published or workflow_dispatch with a tag, checks out the tag with persist-credentials: false, reads the router version from common.py and refuses anything but digits and dots (no injection into the file name), writes skirnir-router-<version>.tar.gz with git archive of router/ at HEAD, attests it with actions/attest-build-provenance at the commit already pinned in the same file (ADR-0055), and uploads it with gh release upload --clobber. No secret is used beyond github.token; no attacker-controlled input reaches a shell except the tag, which is passed through env and only used as an argument (as in the existing job). Independent of the agent rebuild job. This rules/CI change is flagged for maintainer review: its first real run is the next release.",
+ "summary": "Router 0.42.16 implements TM-04's per-client model allowlist as kay asked (ADR-0140, proposed, supersedes ADR-0052 whose status becomes 'superseded by ADR-0140'). client_auth.clients.<c>.models: true | false | list of concrete names. One parser, values.model_grant (bool as is; list of at most 200 names matching [A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}, trimmed, deduplicated, empty = false; anything else a Problem naming the key) used by config.py, settings.coerce (new type modelgrant: '*' = true, '' = false, comma list) and admin._client_spec (UI API client creation; before it did bool(value), so 'yes' meant true - now refused). values.model_granted normalises a missing tag to :latest on both sides (Ollama's resolution; scheduler.known_concrete returns the tagged name). Traced B1: both proxy call sites call auth.client_allows(request, role, concrete=True) with the concrete role whose name is the resolved model; client_grant now checks that name against the grant (true, the internal UI client, or listed); the refusal text names the model and the allowlist, counting and audit unchanged. Listings: tags_list checks each concrete name (so /v1/models/{model} 404s for an unlisted one), handle_ps checks each loaded model (listed -> with model and node; unlisted but its role granted -> role entry without model/node; else hidden). Observe without identity and the internal client unchanged. B2: the UI renders the grant as text via data-change/setChange with the existing 'text' conversion (no inline handler, CSP unchanged); the server validates every value. A listed name no node offers is accepted (documented); no patterns (deliberately).",
  "findings": [],
  "tests": [
   {
-   "command": "local: git archive --format=tar.gz --prefix=skirnir-router-<v>/ HEAD router; extract; check files",
+   "command": "python test/selftest_model_allowlist.py (new, added to ci.yml)",
    "result": "passed",
-   "evidence": "the archive (0.42.14 at the time, 719 kB) holds every file install.sh requires in router/ (router.py, skirnir_router/, unit, layout script, minimal config, requirements and lock, ui.html/js/css, install.sh)."
+   "evidence": "6 tests: parser (true/false/list, trim, dedupe, empty=false; refuses 'yes', 1, None, bad names, '' entry, numbers, 201 names, a dict - key named); tag normalisation; settings.coerce and admin._client_spec use it ('*', '', comma list; 'yes' refused); configuration list accepted, 'yes' refused; request path: listed model allowed, unlisted refused with the allowlist reason and audited (rejected case), roles-only refused, UI client and unidentified unchanged; /api/tags, /v1/models and /api/ps show only the listed concrete model. With the six changed modules from origin/main: 4 failures, 8 errors."
   },
   {
-   "command": "python -c yaml.safe_load(release-provenance.yml); python test/check_pinned_references.py; python test/selftest_pinned_references.py",
+   "command": "python test/selftest_security.py; python test/selftest_model_listing.py; python test/selftest_browser.py",
    "result": "passed",
-   "evidence": "two jobs parse; 0 pin findings; pin self-test 0 failures."
+   "evidence": "ADR-0052's cases (missing setting, true, non-boolean string), the ADR-0131/0133 listing tests and the UI's no-inline-handler/CSP checks unchanged."
   },
   {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes; plus ruff check .",
+   "command": "browser (built-in pane) against test/dev_env.py",
    "result": "passed",
-   "evidence": "99 commands, 0 failed."
+   "evidence": "Client fields show '*' for models true and empty for false (type text, placeholder 'keine'); typing 'granite4.2:8b, qwen3-coder:30b' for a client and saving through the UI's own change action stored the list (overridden, value as list); no CSP violation; with that client's token /api/tags listed only granite4.2:8b among concrete names and /api/chat for it passed the grant check (503 only for the unavailable test node)."
+  },
+  {
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes; plus ruff check ., router.py --check router/config.example.yaml --pure and node --check router/ui.js",
+   "result": "passed",
+   "evidence": "100 commands, 0 failed."
+  },
+  {
+   "command": "python test/run_tests.py",
+   "result": "passed",
+   "evidence": "337 PASS, 0 failures."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record."
+   "evidence": "run after staging this record; synthetic model names only."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -56,8 +78,7 @@
   }
  ],
  "limitations": [
-  "The release workflow cannot run before a release is published; its first real run is the next release (or a manual run with an existing tag).",
-  "The attestation proves the archive came from the workflow at that tag, not a reproducible rebuild of its bytes.",
-  "Extending the agent rebuild to releases whose agent came from an earlier commit (TM-16's other item) is not part of this change."
+  "Exact names only, no patterns; a name no node offers yet is accepted and grants nothing until it appears.",
+  "/api/show answers model details for any name a client asks about, as before."
  ]
 }

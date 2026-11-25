@@ -46,7 +46,7 @@ client_auth:
 | Je Client | Bedeutung |
 |---|---|
 | `roles` | Rollen, die der Client nutzen darf (`["*"]` oder fehlend = alle); Modelllisten zeigen ihm nur diese ([ADR-0131](adr/0131-model-listings-follow-the-clients-grants.md)) |
-| `models` | Konkrete Modellnamen erlaubt? ([ADR-0052](adr/0052-concrete-model-names-need-an-explicit-grant.md)); ohne die Einstellung zeigen Listen keine konkreten Namen |
+| `models` | Konkrete Modellnamen: `true` = alle, `false` oder fehlend = keine (nur Rollen, Warnung beim Laden) oder eine Liste der erlaubten, z. B. `[qwen3-coder:30b, nomic-embed-text]` (ein Name ohne Tag heißt `:latest`); Listen zeigen nur diese ([ADR-0140](adr/0140-a-client-may-be-granted-a-list-of-concrete-models.md), seit Router 0.42.16; in der Web-UI: `*`, leer oder Komma-Liste) |
 | `requests_per_minute` | Rate Limit; darüber 429 |
 | `max_concurrent` | Gleichzeitig laufende Anfragen, Standard 4; die nächste bekommt 429 mit `Retry-After: 1` ([ADR-0063](adr/0063-bound-concurrency-and-body-size-per-client.md)) |
 | `max_body_mib` | Body-Größe, Standard 16; darüber 413: eine angegebene Größe vor jeder Arbeit, ein Chunked-Body beim Lesen (ADR-0063, ADR-0129) |

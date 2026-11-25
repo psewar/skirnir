@@ -46,7 +46,7 @@ client_auth:
 | Per client | Meaning |
 |---|---|
 | `roles` | Roles the client may use (`["*"]` or missing = all); model listings show it only these ([ADR-0131](adr/0131-model-listings-follow-the-clients-grants.md)) |
-| `models` | Concrete model names allowed? ([ADR-0052](adr/0052-concrete-model-names-need-an-explicit-grant.md)); without it, listings show no concrete names |
+| `models` | Concrete model names: `true` = all, `false` or missing = none (roles only, load-time warning), or a list of the allowed names, e.g. `[qwen3-coder:30b, nomic-embed-text]` (a name without a tag means `:latest`); listings show only these ([ADR-0140](adr/0140-a-client-may-be-granted-a-list-of-concrete-models.md), since router 0.42.16; in the web UI: `*`, empty or a comma list) |
 | `requests_per_minute` | Rate limit; above it 429 |
 | `max_concurrent` | Requests in progress at once, default 4; the next one gets 429 with `Retry-After: 1` ([ADR-0063](adr/0063-bound-concurrency-and-body-size-per-client.md)) |
 | `max_body_mib` | Body size, default 16; above it 413: a declared size before any work, a chunked body while it is read (ADR-0063, ADR-0129) |

@@ -608,7 +608,10 @@ function delCloudModel(m) {
   MODEL_DELETES.push(m); delete MODEL_CHANGES[m]; delete CFG.models[m]; dirty = true; renderModels(); renderRoles(); markDirty();
 }
 
+// clients.<c>.models (ADR-0140): true = "*", false = empty, an allowlist = its names
+const grantText = v => v === true ? '*' : Array.isArray(v) ? v.join(', ') : '';
 function fmtVal(it, v) {
+  if (it.type === 'modelgrant') return grantText(v) || t('keine');
   if (v === null || v === undefined) return it.nullable ? t('leer') : String(it.default ?? '–');
   if (Array.isArray(v)) return v.join(', ');
   return String(v);
@@ -631,6 +634,7 @@ function settingInput(it) {
     case 'choice': return `<select data-change="setChange" data-args="${args(it.path, 'textOrNull')}">${it.nullable ? `<option value="" ${shown == null ? 'selected' : ''}>${t('leer')}</option>` : ''}${(it.choices || []).map(c => `<option value="${esc(c)}" ${c === shown ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
     case 'tristate': return `<select data-change="setChange" data-args="${args(it.path, 'boolOrNull')}"><option value="false" ${shown === false ? 'selected' : ''}>false</option><option value="true" ${shown === true ? 'selected' : ''}>true</option><option value="" ${shown == null ? 'selected' : ''}>${t('leer')}</option></select>`;
     case 'list': { const cur = new Set(shown || []); return `<div class="chk">${(it.choices || []).map(c => `<label><input type="checkbox" ${cur.has(c) ? 'checked' : ''} data-change="listToggle" data-args="${args(it.path, c)}"> ${esc(c)}</label>`).join('')}</div>`; }
+    case 'modelgrant': return `<input type="text" value="${esc(grantText(shown))}" placeholder="${t('keine')}" data-change="setChange" data-args="${args(it.path, 'text')}">`;
     default: return `<input type="text" value="${esc(shown ?? '')}" placeholder="${it.nullable ? t('leer') : ''}" data-change="setChange" data-args="${args(it.path, 'textOrNull')}">`;
   }
 }
