@@ -192,7 +192,7 @@
       "status": "open",
       "scenario": "Shared writer injects false facts or tool instructions.",
       "controls": "Grants, provenance and untrusted-context markers. Since router 0.20.0 a shared scope names its writers (memory_scopes.<scope>.writers, checked at load and per request, ADR-0060) and automatic recall skips requests that carry tools (skipped:tools) unless the project grant sets recall_into_tools: true (ADR-0059); opting in accepts the risk for that client.",
-      "next_action": "Review the writer list of every shared scope and every recall_into_tools opt-in; confirm or limit tool calls in clients that opt in; consider fact review before shared facts are recalled.",
+      "next_action": "Review the writer list of every shared scope and every recall_into_tools opt-in; confirm or limit tool calls in clients that opt in; decide on fact review before shared facts are recalled (ADR-0145, proposed: writes into a shared scope wait for a reviewer before they reach the bank).",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_memory.py",

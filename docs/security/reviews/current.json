@@ -2,58 +2,45 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "8583271dc778564e821aa6bd027cd0fd221b3415",
- "change_digest": "148e1dd8daed22559336e5010cfaa8cc3b6832c91bd74bae5d57a5f6e80e4c1e",
+ "base_sha": "e9256f084bc6e5da04fa076cbc8f575f9bb7721a",
+ "change_digest": "ce9905a4b138ae61e7028f5419d79fa46315cfc943607c3af534be634c08be52",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
-  ".github/workflows/security.yml",
-  "AGENTS.md",
-  "CHANGELOG.md",
-  "docs/adr/0144-the-python-locks-are-checked-weekly-against-a-fresh-resolution.md",
+  "docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md",
   "docs/adr/README.md",
   "docs/security/risk-register.json",
-  "docs/security/threat-model.de.md",
-  "docs/security/threat-model.md",
-  "test/selftest_lock_freshness.py",
-  "test/smoke_container.sh",
-  "tools/security/lock_requirements.py",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/pydeps.py",
-  "test/selftest_dependency_audit.py",
-  "test/selftest_container_image.py",
-  "test/check_pinned_references.py",
-  "docs/adr/0074-hash-locked-python-installs.md",
-  "docs/adr/0081-dependency-audit-also-runs-weekly.md",
-  "docs/adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md"
+  "docs/security/threat-model.md",
+  "design/shared-memory-interoperability.md",
+  "docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md",
+  "docs/adr/0059-no-automatic-recall-into-requests-with-tools.md",
+  "docs/adr/0060-shared-memory-scopes-name-their-writers.md",
+  "router/skirnir_router/memory.py",
+  "router/skirnir_router/memory_outbox.py",
+  "router/skirnir_router/memory_gateway.py",
+  "router/skirnir_router/session_migrations.py",
+  "router/skirnir_router/metrics.py"
  ],
  "risk_ids": [
-  "TM-16"
+  "TM-10",
+  "TM-08",
+  "TM-11"
  ],
  "boundaries": [
-  "B9"
+  "B4",
+  "B5"
  ],
- "summary": "CI/tooling change, router and agent unchanged: implements TM-16's next action 'Refresh the Python locks regularly' as a check (ADR-0144, proposed). Reviewed against the previous trusted versions of tools/security/lock_requirements.py and .github/workflows/security.yml (flagged for explicit maintainer review). lock_requirements.py: cmd_resolve's pip invocation moved unchanged into pip_resolve (same flags: --dry-run, --only-binary=:all: so no sdist build code runs, CPython 3.11, manylinux x86_64; only the Linux refusal text is reworded); resolve's output is byte-for-byte the same path. New read-only command outdated: pip_resolve of CI_REQS, compares router, container and CI lock entries by canonical name, released() reads the first upload time from PyPI's JSON API (urllib, 30 s timeout, failures surface as before in pypi()), fails only for versions older than --grace-days (default 30, negative refused before any network). It writes no file. security.yml: new job python-lock-freshness only on schedule and workflow_dispatch (never push or pull_request, so PR code never runs in it and upstream releases cannot block PRs), workflow-level permissions contents: read, actions pinned to the same SHAs (check_pinned_references: 0 findings), installs nothing. No existing check, audit, trigger or condition removed; selftest_dependency_audit still passes. test/smoke_container.sh lists the new self-test under TOOLING (repository tooling the router image cannot run: the lock tool needs packaging or pip, which the image lacks), like selftest_pydeps; the first CI run failed exactly there and nowhere else. AGENTS.md gains one sentence on the weekly run. The risk register drops the done v0.35.1 provenance action (run 45630953077, 2026-11-25).",
+ "summary": "Documentation only, no code, configuration or workflow change: proposes ADR-0145 (status proposed) for TM-10's 'consider fact review before shared facts are recalled' and points TM-10's next action at it; ADR index regenerated. The proposal was reviewed as a design against the current write and read paths: every write into a shared bank (REST retain, gateway retain, automatic retention) goes through memory_outbox.submit when the durable outbox is on; the in-memory queue path (enqueue) exists only without it, so the ADR requires the durable outbox. Holding writes before delivery is the only router point where one writer's text is unmixed; recall-side filters were rejected because consolidated observations lose source metadata (ADR-0059). Reviewers need read on the scope, so seeing held text adds no exposure beyond their grant; approve/reject by anyone else answers 404 so held operations are not revealed; approval re-checks grants (removed writer -> revoked); rejected and expired payloads are scrubbed; the control UI keeps showing counts only (content in the admin UI deferred to its own ADR, B2/TM-03). Finding fixed in the proposal before publication: held operations count against outbox_capacity while outbox_client_capacity is off by default, so one writer could fill the global outbox with held writes for the whole expiry and block all clients' memory writes (TM-08); the ADR now bounds held operations per writer and scope (review_max_held, refusal only for that writer) and lists the rejected-case test. Also added: replay of a rejected event stays rejected; the review tool reads its credential from the environment; direct backend access bypasses review as it bypasses every grant (B5, TM-11).",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_lock_freshness.py (new, added to ci.yml)",
+   "command": "python test/check_adr_index.py",
    "result": "passed",
-   "evidence": "7 tests (1 skipped on Linux by design): nothing pending when pip picks the locked versions (canonical names); newer release overdue only past the grace (30 days exactly not), router lock compared too, unknown date listed not overdue, longer grace keeps it pending; dropped/added CI packages listed never overdue; the command passes on the current locks, fails for an overdue release and names the explicit bound, passes inside the grace; a negative grace is refused before pip runs (rejected case); non-Linux refused; the workflow job runs only on schedule/dispatch with the default grace. Without the change: 7 errors."
+   "evidence": "ADR index ok: 145 ADRs."
   },
   {
-   "command": "python tools/security/lock_requirements.py outdated (WSL Ubuntu, Python 3.14 venv, live PyPI)",
+   "command": "python test/selftest_threat_review.py",
    "result": "passed",
-   "evidence": "0 pending changes with the default grace and with --grace-days 0; instrument probe: pip resolved 31 packages, all equal to the CI lock; a lowered aiohttp entry (3.9.0) was reported as 'aiohttp 3.9.0 -> 3.14.5 (released 45 days ago, OVERDUE)'."
-  },
-  {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/ (Windows), plus ruff check ., router.py --check --pure, check_pinned_references, selftest_dependency_audit",
-   "result": "passed",
-   "evidence": "104 commands, 1 failed: the new 'lock_requirements.py outdated' step itself, which refuses Windows by design ('pip resolution runs on Linux only'); it passed in WSL (above)."
-  },
-  {
-   "command": "CI job 'Router container image' (smoke_container.sh --selftests) with this fix",
-   "result": "not_run",
-   "evidence": "Not run locally (needs a rootful container engine); CI runs it on this push. On the first push (541a7da) it reported 81 of 82 passed: selftest_lock_freshness.py failed inside the image with 'pydeps: neither `packaging` nor pip's vendored copy is importable'. Fixed by listing it under TOOLING; bash -n test/smoke_container.sh and test/selftest_container_image.py (20 tests, 3 skipped) pass locally."
+   "evidence": "run after staging this record."
   },
   {
    "command": "python test/check_public_changes.py",
@@ -67,9 +54,8 @@
   }
  ],
  "limitations": [
-  "The scheduled job itself has not run on GitHub yet; its first run is the next weekly schedule or a manual dispatch.",
-  "Entries only the router or container lock has (not needed for the CI target) are not compared.",
-  "A PyPI outage turns the weekly run red, as for verify-pypi.",
+  "The ADR is a proposal; nothing is implemented, so no behaviour was tested. Its confirmation section lists the rejected-case tests the implementing pull request must bring.",
+  "The design was checked against the current code paths, not against a running Hindsight or a real reviewer workflow.",
   "The end-to-end suite was not run: no router or agent code changed."
  ]
 }
