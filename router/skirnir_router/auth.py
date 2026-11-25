@@ -12,7 +12,8 @@ from collections import deque
 from aiohttp import web
 
 from . import state
-from .common import anthropic_error, basic_credentials, log, ollama_error, open_private, openai_error
+from .common import (BODY_PREREAD, BODY_READ, BODY_TOO_LARGE, anthropic_error, basic_credentials, log, ollama_error,
+                     open_private, openai_error, read_body_bounded, with_body_limit)
 from .outcome import Problem
 
 
@@ -217,6 +218,17 @@ async def client_auth_middleware(request, handler):
     st["inflight"] += 1
     st["peak_inflight"] = max(st["peak_inflight"], st["inflight"])
     try:
+        if request.content_length is None and request.body_exists:
+            # ADR-0129: a chunked body declares no size, so read it here, within the client's limit and inside its
+            # concurrency slot (a client cannot hold more than max_concurrent bodies in memory). The handler gets the
+            # request with the body already read, and the fact that it was (BODY_PREREAD).
+            request = with_body_limit(request, max_body)
+            outcome = await read_body_bounded(request)
+            if outcome == BODY_TOO_LARGE:
+                st["too_large"] += 1
+                audit("body_too_large", client=name, path=request.path, limit_mib=max_body // MIB, chunked=True)
+                return _deny(request, 413, f"request body above {max_body // MIB} MiB for client {name}")
+            request[BODY_PREREAD] = outcome == BODY_READ
         return await handler(request)
     finally:   # also when the client disconnects mid-stream (cancellation): the slot is always given back
         st["inflight"] -= 1

@@ -2,89 +2,78 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "fe84eb7d8f9ab3d4958fa9276b1a9817d75d66cd",
- "change_digest": "a7f13d884a1ac79a910e1ae47b8e233b29f510e60f9b5b841a020438e7e0cdc1",
+ "base_sha": "8d4e66c05ab731f0b751bfd5004f54df33eaf5fd",
+ "change_digest": "5821cd8f391f158d93805f34b42227dc5c473c88492b907e3d1f30de9437eb8f",
  "reviewed_paths": [
   "CHANGELOG.md",
-  "deploy/deploy.py",
-  "docs/adr/0065-browser-headers-and-handler-escaping-for-the-control-ui.md",
-  "docs/adr/0128-the-control-ui-runs-no-inline-script.md",
+  "docs/adr/0063-bound-concurrency-and-body-size-per-client.md",
+  "docs/adr/0129-the-per-client-body-limit-also-bounds-chunked-bodies.md",
   "docs/adr/README.md",
-  "docs/install-router.de.md",
-  "docs/install-router.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
-  "docs/reference.de.md",
-  "docs/reference.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
-  "router/Dockerfile",
-  "router/install.sh",
-  "router/skirnir_router/admin.py",
-  "router/skirnir_router/app.py",
-  "router/skirnir_router/browser_headers.py",
-  "router/skirnir_router/common.py",
-  "router/ui.html",
-  "router/ui.js",
-  "test/selftest_browser.py",
-  "test/selftest_install.py",
-  "docs/security/reviews/current.json",
+  "router/config.example.yaml",
   "router/skirnir_router/auth.py",
-  "test/dev_env.py",
-  "test/selftest_container_image.py"
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/session_api.py",
+  "test/selftest_client_limits.py",
+  "test/selftest_security.py",
+  "docs/security/reviews/current.json",
+  "router/skirnir_router/app.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/openai_api.py",
+  "router/skirnir_router/anthropic_api.py",
+  "router/skirnir_router/rerank.py",
+  "router/skirnir_router/memory.py",
+  "router/skirnir_router/memory_gateway.py",
+  "router/skirnir_router/managed.py",
+  "docs/clients.md",
+  "docs/troubleshooting.md"
  ],
  "risk_ids": [
-  "TM-03"
+  "TM-08"
  ],
  "boundaries": [
   "B1",
-  "B2"
+  "B9"
  ],
- "summary": "Router 0.42.2 implements the TM-03 next action (ADR-0128, proposed, supersedes ADR-0065): the control UI runs no inline script. The page's script moved unchanged from ui.html into router/ui.js (served at /ui.js), and its 68 inline event handlers (20 in ui.html, 48 built by the script with js()) became named actions: elements carry data-click/data-change/data-input and data-args (a JSON array built by args() = esc(JSON.stringify(...)) or data-arg (one fixed string in static markup); one listener per event type, capture phase on the document, walks ev.composedPath() from the target and calls ACTIONS[name](el, ...args), only for names ACTIONS owns (Object.hasOwn; 'constructor', 'toString', '__proto__' are refused, checked in a browser). The control port's CSP is script-src 'self' (no 'unsafe-inline', no 'unsafe-eval'); style-src keeps 'unsafe-inline' (47 style attributes; documented as residual). Traced B1/B2: /ui.js is a fixed path to a fixed file (no name from the request, no traversal), registered on the control app behind basic_auth_middleware like '/' (only /v1/ is exempt; refused without login, tested), Cache-Control no-store and the control headers. Values from node, model, role, client and setting data reach handlers only as JSON values parsed from an HTML-escaped attribute; nothing is concatenated into code. Mechanical equivalence was checked: all 44 changed script lines are identical to the old ones apart from the handler attributes, the other differences are the header comment, args() replacing js(), the dispatcher and a removed unused variable; static handlers in ui.html were replaced by exact matches. One deliberate behaviour difference: settings actions pass the raw setting path instead of the HTML-escaped one (identical for all existing paths, which contain no &<>\"'; before, listToggle would have failed for such a path). Residual: injected markup (should an escape be missed) can still name one of the fixed actions, which then needs an operator click (and the confirmation for revoking); before, it could run arbitrary script without a click. install.sh refuses a source folder without ui.js; deploy.py and the Dockerfile ship it; selftest_container_image derives the image's files from install.sh. No configuration key, API field, secret or data path changes.",
+ "summary": "Router 0.42.3 closes TM-08's next action 'bound chunked bodies per client' (ADR-0129, proposed, supersedes ADR-0063). Before, max_body_mib (default 16) was checked only against a declared Content-Length; a body sent with Transfer-Encoding: chunked was bounded only by the API app's client_max_size of 64 MiB, so a client could send four times its limit per request and up to max_concurrent such bodies. Now client_auth_middleware, for a configured client whose request has a body without a declared length, takes the client's concurrency slot first and then reads the body through request.clone(client_max_size=max_body) via the new boundary helper common.read_body_bounded, which reports BODY_READ, BODY_TOO_LARGE or BODY_UNREADABLE as a fact. aiohttp 3.14's BaseRequest.read checks the size while it reads (verified in its source), so memory per request stays within the limit plus one read chunk. BODY_TOO_LARGE answers 413 with the same message as for a declared size, counts too_large and writes the audit line body_too_large with chunked: true; the slot is given back in the existing finally. BODY_READ passes the clone (state incl. request['client'] and match_info copied by aiohttp) with the body cached and the fact request[BODY_PREREAD] = True, so handlers (read_json, request.read) see the full body; BODY_UNREADABLE passes the clone on and the handler's own read reports the failure as before (read_json -> None -> 400). Traced B1: identification, rate limit, inference refusal and the declared-size check run before as before; unauthenticated requests and the UI identity are unchanged (64 MiB ceiling). Request-body readers checked: proxy, openai_api, anthropic_api, rerank and admin read the whole body (read_json / request.read); session_api.body (used by the session API, memory.py and memory_gateway.py) streams request.content with its own 1 MiB bound and now uses the pre-read bytes when BODY_PREREAD is set, applying the same 1 MiB bound to them; managed.lines streams an upstream reply, not a request. For a chunked session or memory write from a configured client, memory per request is now the client's limit (default 16 MiB) instead of 1 MiB before the session bound applies; noted in ADR-0129. Exceptions: the helper catches aiohttp's HTTPRequestEntityTooLarge (the only signal aiohttp gives) and other read failures at the network boundary, both marked exception-ok; no error text is parsed. Possible behaviour change for operators: a client that sent chunked bodies above its max_body_mib now gets 413 (noted in the changelog with the fix: raise max_body_mib). Re-review after merging main: #194 (router 0.42.2, ADR-0128, control UI without inline script) was merged first, so this change is renumbered to router 0.42.3, ADR-0129 and v0.47.4; ADR-0063 now says superseded by ADR-0129, the TM-08 lines of threat model and risk register name 0.42.3/ADR-0129, the TM-03 lines from #194 are untouched. The diff against the new base equals the reviewed diff apart from these numbers (compared line by line). #194 changes the control port (CSP, /ui.js behind the Basic-auth middleware, a GET without body); client_auth_middleware and the API app it guards are not touched by it, so the two changes do not interact.",
  "findings": [
   {
-   "id": "CSP-ACTION-PROTOTYPE",
-   "evidence": "The first version of the dispatcher looked up ACTIONS[name] directly, so data-click=\"constructor\" or \"toString\" reached inherited Object methods (harmless calls, but not the listed actions).",
-   "resolution": "The dispatcher accepts only Object.hasOwn(ACTIONS, name) and logs anything else; selftest_browser.py asserts the guard; in a browser 'constructor', 'toString' and '__proto__' were refused while the real actions still ran.",
+   "id": "CHUNKED-PREREAD-SESSION-BODY",
+   "evidence": "The first version of this change pre-read chunked bodies in the middleware without telling handlers. session_api.body streams request.content itself, so a chunked session or memory write from a configured client would have found the stream used up and answered 400 'body must contain valid JSON' (reproduced by the new test with the session_api branch removed).",
+   "resolution": "The middleware sets the fact request[BODY_PREREAD]; session_api.body takes the cached bytes when it is set and applies its 1 MiB bound to them. test_handlers_that_stream_their_body_get_the_body_the_middleware_read covers a chunked JSON body (200), 2 MiB chunked (413 'session body exceeds 1 MiB') and a declared body (still streamed).",
+   "disposition": "fixed"
+  },
+  {
+   "id": "CHUNKED-CLONE-AIOHTTP-38",
+   "evidence": "An independent code review of PR #195 found that request.clone(client_max_size=...) does not exist in aiohttp 3.8.4 (checked in its source: clone has no such parameter; 3.9.1 has it), while router/requirements.txt allows aiohttp>=3.8.4 (Debian 12's python3-aiohttp). Every chunked request of a configured client would have raised TypeError there (500). CI runs aiohttp 3.14 only.",
+   "resolution": "common.CLONE_TAKES_BODY_LIMIT checks the clone signature once; common.with_body_limit uses the public parameter where it exists and otherwise clones and sets _client_max_size, the attribute aiohttp 3.8.4's read() checks (verified in its source; 3.8 refuses at >= the limit). test_the_limit_also_holds_where_clone_takes_no_limit forces the fallback: 17 MiB chunked 413, 3 MiB chunked 200 intact.",
    "disposition": "fixed"
   }
  ],
  "tests": [
   {
-   "command": "python test/selftest_browser.py",
+   "command": "python test/selftest_client_limits.py",
    "result": "passed",
-   "evidence": "10 tests OK: script-src exactly 'self'; /ui.js 200 with login, text/javascript, no-store, control headers; /ui.js and /admin/state 401 without login (rejected case); no inline handler or inline script in ui.html or in the markup ui.js builds (the same patterns find all 68 handlers and the inline script in origin/main's ui.html); every data-args is ${args(...)}; every named action exists and every action is named; capture-phase listener and the hasOwn guard present; nothing evaluated as code; nothing loaded from elsewhere."
-  },
-  {
-   "command": "browser (built-in pane) against python test/dev_env.py, CSP and rejected cases",
-   "result": "passed",
-   "evidence": "Served CSP default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; ... Injected <img onerror>, a button with onclick and an inline <script> did not run (window.__pwned stayed 0); the browser reported script-src-attr and script-src-elem violations. A fresh tab through all six tabs and the decision filters: no console message, no policy violation."
-  },
-  {
-   "command": "browser against test/dev_env.py, every UI action",
-   "result": "passed",
-   "evidence": "66 checks: 39 with the called functions replaced by recorders (each click action's arguments; setChange for numOrNull, checked, textOrNull, boolOrNull with their conversions; all nine nodePolicy fields; modelField, listToggle, setDecN, renderDecisions on change and input), 16 on CFG (tier model with re-render, num_ctx, busy_ok; latency_first 1/0/empty; priority; moveTier; canary add, fields, remove; addTier, delTier; the #roles listener still marks the roles dirty after the action), 11 with real calls (pending setting then reset; rotate secret then copy; approve node then revoke with cancel and confirm; update, delete and client actions with arguments containing \\\"'<& intact). Language switch to German and back works."
+   "evidence": "12 tests OK (also with the aiohttp 3.8 fallback path forced). New: 17 MiB chunked for a client with the default 16 MiB -> 413 with the client message, handler not run, too_large counted, audit body_too_large with chunked true, slot free (rejected case); 17 MiB chunked for a client allowing 32 MiB and a chunked JSON body reach the handler intact, also through read_json; session_api.body behind the middleware: chunked JSON 200, 2 MiB chunked 413, declared body unchanged; a slow chunked upload holds the client's only slot while it is read, a second request gets 429. Without the fix (auth.py from origin/main) the rejected case fails (200 != 413); with the pre-read moved before the slot (mutation) the slot test fails (0 != 1); without the session_api branch the session test fails (400 != 200)."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "end-to-end suite: 337 PASS, 0 failures (before the hasOwn guard, which touches only ui.js)."
+   "evidence": "337 PASS, 0 failures (after merging main and renumbering; before: 337 PASS, 0 failures)."
   },
   {
-   "command": "every python command of the python job in .github/workflows/ci.yml (Windows), except pip install, run_tests.py and check_public_changes",
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "94 commands, 0 failed (before the hasOwn guard; selftest_browser.py rerun afterwards: OK). selftest_install.py skips its Linux-only cases on Windows; CI runs them."
-  },
-  {
-   "command": "node --check router/ui.js",
-   "result": "passed",
-   "evidence": "syntax ok after every change."
+   "evidence": "93 commands, 0 failed, after merging main and renumbering; includes selftest_client_limits (12 tests), selftest_security (its request stub reads body_exists), selftest_browser from #194, check_control_flow (0 findings), ADR index (129 ADRs), lock_requirements verify-pypi and the baseline evidence check."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; added lines reviewed by hand: code, synthetic test values, documentation."
+   "evidence": "run after staging this record; added lines reviewed by hand: code, synthetic test values (example model/prompt), documentation."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -93,10 +82,9 @@
   }
  ],
  "limitations": [
-  "'unsafe-inline' remains for styles: injected markup can still change how the page looks.",
-  "Injected markup could still name one of the fixed UI actions; it would need an operator click (and the confirmation for revoking).",
-  "The browser checks ran in the built-in Chromium-based pane only, not in Firefox or Safari; Object.hasOwn and composedPath need a browser from 2021 or later.",
-  "The node update buttons (agent and Ollama) were checked with elements built by args() as the template does, since the development environment has no pending update; their template lines are mechanically identical to the old ones apart from the attributes.",
-  "No design document covers the control UI; ADR-0128 and browser_headers.py describe the mechanism."
+  "Memory per chunked request is bounded by about twice max_body_mib: aiohttp raises its read chunk size to the limit and checks after appending a chunk.",
+  "The aiohttp 3.8 fallback was exercised by forcing it on aiohttp 3.14 (same attribute name in both, verified in 3.8.4's source), not on a real 3.8 installation.",
+  "Not measured under hostile load (many clients at once); TM-08's hostile-load test remains open.",
+  "Unauthenticated requests in observe mode and the router's UI identity keep the 64 MiB ceiling, as before."
  ]
 }

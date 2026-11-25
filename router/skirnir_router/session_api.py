@@ -16,7 +16,7 @@ from . import auth, deletion_journal, metrics, state
 from .outcome import Problem, failed, invalid, too_large
 from .session_config import SessionConfig
 from .context_config import ContextConfig
-from .common import state_dir
+from .common import BODY_PREREAD, state_dir
 from .session_store import PostgresSessionStore, open_session_store  # noqa: F401  (PostgresSessionStore: tests patch its open)
 from .session_types import NOT_FOUND, UNAVAILABLE
 
@@ -142,6 +142,11 @@ def parse_json(data):
 
 
 async def body(request):
+    if request.get(BODY_PREREAD):
+        # ADR-0129: the client middleware already read this chunked body within the client's limit; the stream is used
+        # up and the bytes are on the request.
+        data = await request.read()
+        return BODY_TOO_LARGE if len(data) > MAX_BODY_BYTES else parse_json(data)
     # Bound before buffering; API app otherwise accepts 64 MiB for inference images.
     data = bytearray()
     async for chunk in request.content.iter_chunked(65536):

@@ -47,7 +47,7 @@ client_auth:
 | `models` | Concrete model names allowed? ([ADR-0052](adr/0052-concrete-model-names-need-an-explicit-grant.md)) |
 | `requests_per_minute` | Rate limit; above it 429 |
 | `max_concurrent` | Requests in progress at once, default 4; the next one gets 429 with `Retry-After: 1` ([ADR-0063](adr/0063-bound-concurrency-and-body-size-per-client.md)) |
-| `max_body_mib` | Declared body size, default 16; above it 413 (ADR-0063) |
+| `max_body_mib` | Body size, default 16; above it 413: a declared size before any work, a chunked body while it is read (ADR-0063, ADR-0129) |
 | `max_priority` | Highest admission priority the client may claim |
 | `cloud`, `data_class` | Cloud tiers allowed, declared data class ([below](#cloud-as-a-tier-in-roles)) |
 | `privacy_check` | Content check before a cloud tier (below) |
