@@ -9,7 +9,7 @@ from aiohttp import ClientError, ClientTimeout, web
 
 from . import config, nodes, poll, state
 from .common import GIB, load_json_file, log, read_json, save_json_file, state_dir
-from .outcome import bad_gateway, failed, unavailable
+from .outcome import bad_gateway, failed, invalid, unavailable
 
 
 def perf_path():
@@ -233,14 +233,27 @@ async def handle_bench(request):
     return web.json_response({"started": True, "node": node.name, "model": model})
 
 
-MEASURE_CTX_FIX = (8192, 32768)   # plus every context with which a role loads the model
+MEASURE_CTX_FIX = (8192, 32768)   # plus every context with which a role loads the model, plus the caller's (ADR-0146)
+MEASURE_EXTRA = (6, 2048, 1048576)   # at most this many extra contexts, each within these bounds
 
 
-def measure_ctxs(model):
+def measure_ctxs(model, extra=()):
     """Measurement points: the fixed contexts plus every one with which a tier loads the model - measured where it
-    runs, instead of extrapolating from 32k to 196k."""
+    runs, instead of extrapolating from 32k to 196k - plus the contexts the caller asked for (ADR-0146): a candidate
+    without a role is measured at the context a role would give it."""
     tiers = {int(t["num_ctx"]) for r in state.CFG.roles.values() for t in r["tiers"] if t["model"] == model and not t.get("cloud")}
-    return sorted(set(MEASURE_CTX_FIX) | tiers)
+    return sorted(set(MEASURE_CTX_FIX) | tiers | set(extra))
+
+
+def measure_extra(value):
+    """The caller's extra measurement contexts as a tuple, or a Problem. Absent means none."""
+    most, low, high = MEASURE_EXTRA
+    if value is None:
+        return ()
+    if (not isinstance(value, list) or not 1 <= len(value) <= most or len(set(value)) != len(value)
+            or any(type(c) is not int or not low <= c <= high for c in value)):
+        return invalid(f"contexts must be a list of 1 to {most} distinct integers from {low} to {high}")
+    return tuple(value)
 
 
 def fit_linear(points):
@@ -326,13 +339,13 @@ async def _stable_used(node, after, timeout=90):
     return unavailable("VRAM use did not settle (heartbeats)")
 
 
-async def _measure_real(model, node):
+async def _measure_real(model, node, extra=()):
     """Since 0.3.5: for each context unload everything, read baseline, load, delta per nvidia-smi = actual usage.
     /api/ps reports only part (qwen3.6:35b-a3b 21.0 instead of 26.4 GiB at 196k, laguna-xs-2.1 19.2 instead of 29.7 GiB at
     131k - measured 2026-09-30); with these numbers the router miscalculated budget, foreign VRAM and baseline.
     Returns {ctx: (used, ps_size_vram, ps_size)} or a Problem."""
     res = {}
-    for ctx in measure_ctxs(model):
+    for ctx in measure_ctxs(model, extra):
         for attempt in range(1, MEASURE_TRIES + 1):
             point = await _measure_point(model, node, ctx)
             if failed(point):
@@ -429,15 +442,22 @@ def catalog_entry(res, node_name, real):
     return e
 
 
-async def measure_model(model, node):
+def measures_real(node):
+    """True when the node reports GPU values, so a measurement reads the real usage (nvidia-smi) per context."""
+    return bool(node.gpu_known(time.time()) and node.vram_used_gib is not None)
+
+
+async def measure_model(model, node, extra=()):
     """Profile the model and write the catalog entry to roles.yaml. With GPU values in the Heartbeat (Agent) real per
     nvidia-smi for each used context, otherwise like until 0.3.4 per /api/ps. Runs only on a free node without
-    active requests; unloads all models during this (prewarm afterwards), the state machine rests meanwhile (poll.evaluate)."""
-    state.MEASURING[model] = {"node": node.name, "step": "start", "started": time.time(), "error": None}
+    active requests; unloads all models during this (prewarm afterwards), the state machine rests meanwhile (poll.evaluate).
+    `extra`: further contexts the caller asked for (ADR-0146); only the real measurement takes them."""
+    real = measures_real(node)
+    state.MEASURING[model] = {"node": node.name, "step": "start", "started": time.time(), "error": None,
+                              "contexts": measure_ctxs(model, extra) if real else list(MEASURE_CTX_FIX)}
     node.inflight += 1          # Router does not select the node for other tasks
     try:
-        real = bool(node.gpu_known(time.time()) and node.vram_used_gib is not None)
-        res = await (_measure_real(model, node) if real else _measure_ps(model, node))
+        res = await (_measure_real(model, node, extra) if real else _measure_ps(model, node))
         if failed(res):
             log.warning("measure %s on %s failed: %s", model, node.name, res.message)
             state.MEASURING[model].update(step="error", error=res.message)
@@ -473,6 +493,10 @@ async def handle_measure(request):
     model = b.get("model")
     if not model:
         return web.json_response({"error": "model missing"}, status=400)
+    # ADR-0146: further contexts to measure, so a candidate needs no temporary role to be measured where it would run
+    extra = measure_extra(b.get("contexts"))
+    if failed(extra):
+        return web.json_response({"error": extra.message}, status=extra.status)
     if model in state.MEASURING:
         return web.json_response({"error": f"{model} is being measured right now"}, status=409)
     if len(state.MEASURING) >= 1:
@@ -480,5 +504,10 @@ async def handle_measure(request):
     node = _free_node_for(model, b.get("node"))
     if node is None:
         return web.json_response({"error": f"no free node without running requests has {model}"}, status=409)
-    state.spawn(measure_model(model, node))
-    return web.json_response({"started": True, "node": node.name, "model": model})
+    if extra and not measures_real(node):
+        # /api/ps measures only 8k and 32k and reports too little for some models; a context asked for would be missing
+        return web.json_response({"error": f"{node.name} reports no GPU values; contexts need the real measurement "
+                                           "(an agent with GPU values in its heartbeat)"}, status=409)
+    state.spawn(measure_model(model, node, extra))
+    return web.json_response({"started": True, "node": node.name, "model": model, "real": measures_real(node),
+                              "contexts": measure_ctxs(model, extra) if measures_real(node) else list(MEASURE_CTX_FIX)})

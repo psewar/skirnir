@@ -76,6 +76,7 @@ jobs:
       - run: python test/selftest_toolcall_rescue.py
       - run: python test/selftest_availability.py
       - run: python test/selftest_vram_real.py
+      - run: python test/selftest_bench_api.py
       - run: python test/selftest_context_sharing.py
       - run: python test/selftest_children_vram.py
       - run: python test/selftest_cpu_node.py

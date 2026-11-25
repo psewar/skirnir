@@ -88,6 +88,7 @@ def build_apps():
     ctl.router.add_get("/admin/state", admin.handle_state)
     ctl.router.add_route("*", "/admin/client_auth", admin.handle_client_auth)
     ctl.router.add_get("/admin/config", admin.handle_config_get)
+    ctl.router.add_get("/admin/roles", admin.handle_roles)   # 0.43.1: role -> model@context, read only (ADR-0147)
     ctl.router.add_put("/admin/config", admin.handle_config_put)
     ctl.router.add_post("/admin/clients/{name}/token", admin.handle_client_token)   # Clients tab: new secret (plaintext shown once)
     ctl.router.add_post("/admin/try", admin.handle_try)
