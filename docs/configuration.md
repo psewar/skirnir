@@ -150,7 +150,7 @@ roles:
 - **Concrete models** (`qwen3-coder:30b`) remain directly callable (`expose_concrete_models`) and go 1:1 to a node that has
   them; otherwise 404 as with Ollama. A client needs `models: true` for them; without the setting it gets roles only and
   the router warns at load time (ADR-0052). Since router 0.42.8 the listings (`/api/tags`, `/v1/models`) show a
-  client only the roles it may use and concrete names only with `models: true` (ADR-0131).
+  client only the roles it may use and concrete names only with `models: true` (ADR-0131); since router 0.42.10 `/api/ps` too: a role-only client sees its loaded roles by role name, without model or node (ADR-0133).
 - **Canary** (`roles.<r>.canary: {model, num_ctx, percent}`) sends a share of the traffic to a candidate, even cold.
   **Shadow** (`roles.<r>.shadow`) repeats a share of the requests after the response, without streaming, against a second model on
   a free node; the client notices nothing, speed and error rate end up in the statistics.

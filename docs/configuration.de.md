@@ -151,7 +151,7 @@ roles:
 - **Konkrete Modelle** (`qwen3-coder:30b`) sind weiter direkt aufrufbar (`expose_concrete_models`) und gehen 1:1 an einen Knoten,
   der sie hat; sonst 404 wie bei Ollama. Ein Client braucht dafür `models: true`; ohne die Einstellung bekommt er nur Rollen,
   und der Router warnt beim Laden (ADR-0052). Seit Router 0.42.8 zeigen die Listen (`/api/tags`, `/v1/models`)
-  einem Client nur die Rollen, die er nutzen darf, und konkrete Namen nur mit `models: true` (ADR-0131).
+  einem Client nur die Rollen, die er nutzen darf, und konkrete Namen nur mit `models: true` (ADR-0131); seit Router 0.42.10 auch `/api/ps`: Ein Client nur mit Rollen sieht seine geladenen Rollen unter dem Rollennamen, ohne Modell und Knoten (ADR-0133).
 - **Canary** (`roles.<r>.canary: {model, num_ctx, percent}`) leitet einen Anteil des Verkehrs auf einen Kandidaten, auch kalt.
   **Shadow** (`roles.<r>.shadow`) wiederholt einen Anteil der Anfragen nach der Antwort ohne Stream gegen ein zweites Modell auf
   einem freien Knoten; der Client merkt nichts, Tempo und Fehlerrate landen in der Statistik.

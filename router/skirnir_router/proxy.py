@@ -1059,15 +1059,24 @@ async def handle_show(request):
 
 
 async def handle_ps(request):
+    """Loaded models like /api/ps, as the request's client may see them (ADR-0133, extends ADR-0131): with concrete
+    names (models:true, the UI client, observe without identity) every loaded model with its node, as before; a
+    role-only client sees only the roles it may use, named by the role, without model or node names."""
     concrete_to_role = {}
     for exposed, role in state.CFG.roles.items():
         for t in role["tiers"]:
             concrete_to_role.setdefault(t["model"], exposed)
+    concrete = auth.client_grant(request, None, concrete=True) is None
     out = []
     for n in state.NODES.values():
         for m, gib in n.loaded.items():
             role = concrete_to_role.get(m) or next((r for c, r in concrete_to_role.items() if n.same_blob(m, c)), m)
-            out.append({"name": role, "model": m, "node": n.name, "size_vram": int(gib * GIB), "size": int(gib * GIB)})
+            granted = role in state.CFG.roles and auth.client_grant(request, state.CFG.roles[role], concrete=False) is None
+            size = {"size_vram": int(gib * GIB), "size": int(gib * GIB)}
+            if concrete:   # a role the client may not use is not named; the concrete model is
+                out.append({"name": role if granted or role not in state.CFG.roles else m, "model": m, "node": n.name, **size})
+            elif granted:
+                out.append({"name": role, "model": role, **size})
     return web.json_response({"models": out})
 
 
