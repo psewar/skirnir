@@ -276,6 +276,10 @@ _e(C + "cloud", "bool", "Cloud erlaubt", "aus = Opt-out: Cloud-Stufen werden fue
    label_en="Cloud allowed", help_en="off = opt-out: cloud tiers are skipped for this client")
 _e(C + "data_class", "choice", "Datenklasse", "Deklaration fuer Anfragen ohne routing.data_class (leer = globaler Default)", "Clients", None, choices="data_classes", nullable=True,
    label_en="Data class", help_en="declaration for requests without routing.data_class (empty = global default)")
+_e(C + "cloud_budget_month", "float", "Cloud-Budget je Monat", "Ausgaben dieses Clients fuer Cloud-Stufen ueber alle Anbieter, in der "
+   "Waehrung der Katalogpreise; 0 = keine Grenze; erschoepft = seine Cloud-Stufen werden uebersprungen (ADR-0135)", "Clients", 0,
+   min=0, max=100000, step=0.5, label_en="Cloud budget per month",
+   help_en="this client's spend on cloud tiers over all providers, in the catalogue currency; 0 = no limit; exhausted = its cloud tiers are skipped (ADR-0135)")
 
 # Order in the Settings-Tab. Review 2026-09-25: Decision Engine, GPU guard and Agent-Update were missing here, their entries
 # were never visible in the UI (saving via API worked).

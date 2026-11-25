@@ -52,6 +52,7 @@ client_auth:
 | `max_body_mib` | Body-Größe, Standard 16; darüber 413: eine angegebene Größe vor jeder Arbeit, ein Chunked-Body beim Lesen (ADR-0063, ADR-0129) |
 | `max_priority` | Höchste Admission-Priorität, die der Client beanspruchen darf |
 | `cloud`, `data_class` | Cloud-Stufen erlaubt, deklarierte Datenklasse ([unten](#cloud-als-stufe-in-rollen)) |
+| `cloud_budget_month` | Ausgaben des Clients für Cloud-Stufen je Kalendermonat über alle Anbieter, in der Währung der Katalogpreise; erschöpft = seine Cloud-Stufen werden übersprungen, lokale laufen weiter; 0 oder fehlend = keine Grenze ([ADR-0135](adr/0135-a-client-can-have-its-own-monthly-cloud-budget.md)) |
 
 Das Audit-Log (`audit_log`) rotiert nach Größe, wenn `audit_log_max_mib` gesetzt ist (1-4096): Bevor eine Zeile in eine Datei geht, die die Grenze erreicht hat, wird die Datei zu `audit.jsonl.1`, ältere Generationen rücken bis `audit_log_keep` nach (1-100, Vorgabe 5), die älteste wird gelöscht. `0` oder keine Einstellung heißt keine Rotation, wie vor Router 0.42.9; dann muss ein externes Werkzeug wie logrotate die Datei begrenzen ([ADR-0132](adr/0132-the-router-rotates-its-audit-log-by-size.md)).
 Ablehnungen eines identifizierten Clients (`rate_limited`, `concurrency_limited`, `body_too_large`, `forbidden`) werden höchstens einmal pro Minute je Client und Art geschrieben; die nächste Zeile trägt in `suppressed` die Zahl der zurückgehaltenen, und die Zähler des Clients in der UI und in den Metriken zählen jede Ablehnung (seit Router 0.42.11, [ADR-0134](adr/0134-refusal-audit-lines-of-identified-clients-are-throttled.md)).
@@ -330,7 +331,8 @@ Schranken (`router.cloud`):
   Router 0.42.6; vorher blieben Inhaltsteile und Argumente von Werkzeugaufrufen ungelesen).
 - **Budget** je Anbieter und Monat (`budget_month`), in der Währung der Katalogpreise (`price_per_m`, je Million Tokens);
   erschöpft = Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem. Kosten je Anfrage in Usage und Metriken.
-  Siehe [Währung](#währung-von-preisen-und-budgets).
+  Siehe [Währung](#währung-von-preisen-und-budgets). Ein Client kann zusätzlich eine eigene Monatsgrenze über alle
+  Anbieter haben (`client_auth.clients.<c>.cloud_budget_month`, seit Router 0.42.12, ADR-0135).
 - **Egress-Allowlist** für `base_url` (+ `egress_allow`), Schlüssel nur aus `secrets.env`, nie im Log; Circuit Breaker wie bei
   Knoten; Schattenläufe gehen nie in die Cloud.
 - **Transport:** Anbieter benötigen den endgültigen HTTPS-Endpunkt. HTTP ist nur für explizit erlaubte, wörtliche
