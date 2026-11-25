@@ -1,5 +1,15 @@
 # Changelog
 
+## Weekly lock freshness check (unreleased; router and agent unchanged)
+
+- The weekly *Security checks* run has a new job `python-lock-freshness` (also on manual dispatch, never on pushes or
+  pull requests). It lets pip resolve the CI requirements as `lock_requirements.py resolve` does, compares the
+  router, container and CI locks with that, and fails when a version pip would pick is older than 30 days (ADR-0144,
+  proposed; TM-16). New command `python tools/security/lock_requirements.py outdated [--grace-days N]` (Linux,
+  network). To hold a version back, bound it in its requirements file with a comment saying why. New self-test
+  `test/selftest_lock_freshness.py` (in CI). TM-16 no longer lists the v0.35.1 provenance run, which was done on
+  2026-11-25.
+
 ## Agent provenance for releases that ship an earlier agent (unreleased; router and agent unchanged)
 
 - *Release provenance* rebuilds the agent binaries from the release's tag and, when that does not reproduce them,
