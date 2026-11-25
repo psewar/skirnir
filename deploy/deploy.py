@@ -47,6 +47,7 @@ FILES = [  # (local, target path in container, mode); source is ROUTER_DIR, unle
     ("router.py", "/opt/skirnir-router/router.py", "0755"),
     ("ui.html", "/opt/skirnir-router/ui.html", "0644"),
     ("ui.js", "/opt/skirnir-router/ui.js", "0644"),       # the UI script (ADR-0128)
+    ("ui.css", "/opt/skirnir-router/ui.css", "0644"),     # the UI style sheet (ADR-0130)
     ("skirnir.png", "/opt/skirnir-router/skirnir.png", "0644"),    # Logo im UI-Kopf
     ("favicon.png", "/opt/skirnir-router/favicon.png", "0644"),    # Tab icon (128 px), also /favicon.ico
     ("decision-tfidf.json", "/etc/skirnir-router/decision-tfidf.json", "0644"),   # Decision Engine tier 1 (train_tfidf.py)

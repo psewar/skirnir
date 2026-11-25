@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Self-test (TM-03, ADR-0065, ADR-0128): browser-facing protections of the control UI.
+"""Self-test (TM-03, ADR-0065, ADR-0128, ADR-0130): browser-facing protections of the control UI.
 
-Headers: the UI, its script, admin JSON and refusals carry the Content-Security-Policy (scripts only from the router: no
-'unsafe-inline', no 'unsafe-eval'; no foreign code, connect-src 'self', frame-ancestors 'none', ...), X-Frame-Options
-DENY, nosniff and no referrer; the API port carries nosniff and no referrer. /ui.js needs the control login like the page.
+Headers: the UI, its script and style sheet, admin JSON and refusals carry the Content-Security-Policy (scripts and styles
+only from the router: no 'unsafe-inline', no 'unsafe-eval'; no foreign code, connect-src 'self', frame-ancestors 'none',
+...), X-Frame-Options DENY, nosniff and no referrer; the API port carries nosniff and no referrer. /ui.js and /ui.css
+need the control login like the page. Styles: no style element or attribute in ui.html or in markup ui.js builds; every
+utility class the markup uses is defined in ui.css; the legend classes have the colours of the charts' palette.
 CORS: no answer carries Access-Control-Allow-*, also not for a foreign Origin or a preflight.
 UI (static, ui.html and ui.js): no inline event handler and no inline script anywhere, also not in markup the script
 builds; every data-args value goes through args() (esc() of a JSON array; esc() escapes the single quote); every action an
@@ -23,6 +25,7 @@ from skirnir_router import app, auth, browser_headers, config, state  # noqa: E4
 
 UI = os.path.join(HERE, "..", "router", "ui.html")
 UI_JS = os.path.join(HERE, "..", "router", "ui.js")
+UI_CSS = os.path.join(HERE, "..", "router", "ui.css")
 PASSWORD = "synthetic-operator-password"
 FOREIGN = "https://foreign.example.invalid"
 
@@ -62,12 +65,12 @@ class HeaderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_control_port_headers(self):
         auth_header = {"Authorization": basic("operator", PASSWORD), "Origin": FOREIGN}
-        for path in ("/", "/ui.js", "/admin/state"):
+        for path in ("/", "/ui.js", "/ui.css", "/admin/state"):
             r = await self.ctl.get(path, headers=auth_header)
             await r.read()
             self.assertEqual(r.status, 200, path)
             self.assert_control_headers(r, path)
-        for path in ("/admin/state", "/ui.js"):   # rejected: no login, no script either
+        for path in ("/admin/state", "/ui.js", "/ui.css"):   # rejected: no login, no script or style sheet either
             r = await self.ctl.get(path, headers={"Origin": FOREIGN})
             self.assertEqual(r.status, 401, path)
             self.assert_control_headers(r, f"refusal {path}")
@@ -82,11 +85,21 @@ class HeaderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.headers.get("Cache-Control"), "no-store", "page and script always from the same installation")
         self.assertIn("const ACTIONS = {", body)
 
-    def test_policy_runs_only_the_routers_own_scripts(self):
+    async def test_style_sheet_is_served_as_a_file_without_cache(self):
+        r = await self.ctl.get("/ui.css", headers={"Authorization": basic("operator", PASSWORD)})
+        body = await r.text()
+        self.assertEqual(r.status, 200)
+        self.assertTrue(r.headers.get("Content-Type", "").startswith("text/css"), r.headers.get("Content-Type"))
+        self.assertEqual(r.headers.get("Cache-Control"), "no-store", "page and style sheet always from the same installation")
+        self.assertIn(".pal0 {", body)
+
+    def test_policy_runs_only_the_routers_own_scripts_and_styles(self):
         directives = dict(d.strip().split(" ", 1) for d in browser_headers.CONTROL_CSP.split(";"))
         self.assertEqual(directives["script-src"], "'self'", "no 'unsafe-inline', no 'unsafe-eval', no other source")
+        self.assertEqual(directives["style-src"], "'self'", "no 'unsafe-inline' for styles either (ADR-0130)")
         self.assertEqual(directives["default-src"], "'self'")
         self.assertNotIn("'unsafe-eval'", browser_headers.CONTROL_CSP)
+        self.assertNotIn("'unsafe-inline'", browser_headers.CONTROL_CSP)
 
     async def test_api_port_headers(self):
         r = await self.api.post("/api/chat", json={"model": "x", "messages": []}, headers={"Origin": FOREIGN})
@@ -98,6 +111,8 @@ class HeaderTests(unittest.IsolatedAsyncioTestCase):
 
 # onclick=, onerror="...", oninput = '...' as an attribute; not a variable such as `const onNodes = ...`
 INLINE_HANDLER = re.compile(r"\son[a-z]+=|\son[a-z]+\s*=\s*[\"']")
+# style="..." / style='...' as an attribute; not CSSOM such as `el.style.width = ...`
+INLINE_STYLE = re.compile(r"\sstyle\s*=\s*[\"'`$]")
 
 
 class UiTests(unittest.TestCase):
@@ -107,6 +122,8 @@ class UiTests(unittest.TestCase):
             cls.ui = f.read()
         with open(UI_JS, encoding="utf-8") as f:
             cls.js = f.read()
+        with open(UI_CSS, encoding="utf-8") as f:
+            cls.css = f.read()
         body = re.search(r"\nconst ACTIONS = \{\n(.*?)\n\};\n", cls.js, re.S)
         cls.actions = set(re.findall(r"^  (\w+): ", body.group(1), re.M)) if body else set()
 
@@ -146,9 +163,32 @@ class UiTests(unittest.TestCase):
         self.assertIn("if (!Object.hasOwn(ACTIONS, name))", self.js, "only listed actions, nothing inherited")
         self.assertRegex(self.js, r"\}, true\);\n\}", "the listener runs in the capture phase")
 
+    def test_no_inline_style(self):
+        # The same patterns find the style element and the 52 style attributes of ui.html/ui.js before ADR-0130.
+        for name, text in (("ui.html", self.ui), ("ui.js", self.js)):
+            self.assertEqual(INLINE_STYLE.findall(text), [], f"{name}: no style attribute, also not in built markup")
+            self.assertEqual(re.findall(r"<style\b", text), [], f"{name}: no style element")
+        self.assertEqual(re.findall(r"setAttribute\(\s*['\"`]style", self.js), [], "no style attribute set by script")
+        self.assertEqual(re.findall(r'<link rel="stylesheet" href="([^"]+)">', self.ui), ["ui.css"], "one style sheet")
+
+    def test_utility_and_palette_classes_are_defined(self):
+        used = set()
+        for value in re.findall(r'class="([^"]*)"', self.ui + self.js):
+            used.update(c for c in re.sub(r"\$\{[^}]*\}", " ", value).split())
+        defined = set(re.findall(r"^\.([\w-]+) \{[^}]*!important; \}$", self.css, re.M))
+        self.assertGreater(len(defined), 20, "instrument: utility classes parsed")
+        utility = {c for c in used if re.fullmatch(r"(?:w|fs|fw|mt|mb|ml|m)-[\w-]+|span-all|flex-row-4|acc", c)}
+        self.assertEqual(sorted(utility - defined), [], "a utility class the markup uses is not defined in ui.css")
+        pal_js = re.findall(r"'(#[0-9a-fA-F]{6})'", re.search(r"const PAL = \[([^\]]*)\];", self.js).group(1))
+        pal_css = re.findall(r"^\.pal(\d+) \{ color:(#[0-9a-fA-F]{6}) !important; \}$", self.css, re.M)
+        self.assertEqual([c for _, c in pal_css], pal_js, "the legend classes have the colours the charts draw with")
+        self.assertEqual([int(i) for i, _ in pal_css], list(range(len(pal_js))))
+        self.assertIn("const palClass = i => `pal${i % PAL.length}`;", self.js)
+
     def test_ui_loads_nothing_from_elsewhere(self):
         for name, text in (("ui.html", self.ui), ("ui.js", self.js)):
             self.assertEqual(re.findall(r'(?:src|href)="https?://', text), [], f"{name}: only the router's own origin")
+        self.assertEqual(re.findall(r"url\(|@import", self.css), [], "ui.css loads nothing")
         self.assertNotIn("connect-src 'self' https:", browser_headers.CONTROL_CSP)
 
 

@@ -40,7 +40,7 @@ class InstallTests(unittest.TestCase):
         rc, out, last = self.install()
         self.assertEqual((rc, last), (0, "STATE: installed"), out)
         prefix = os.path.join(self.root, "opt", "skirnir-router")
-        for f in ("router.py", "skirnir_router/app.py", "ui.html", "ui.js", "config.minimal.yaml", "config.example.yaml", "install.sh"):
+        for f in ("router.py", "skirnir_router/app.py", "ui.html", "ui.js", "ui.css", "config.minimal.yaml", "config.example.yaml", "install.sh"):
             self.assertTrue(os.path.exists(os.path.join(prefix, f)), f)
         self.assertFalse(any("__pycache__" in d for d, _, _ in os.walk(prefix)), "no bytecode caches copied")
         self.assertTrue(os.path.exists(os.path.join(self.root, "etc", "systemd", "system", "skirnir-router.service")))
