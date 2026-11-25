@@ -12,18 +12,22 @@ Three locks:
     python tools/security/lock_requirements.py resolve --out requirements-ci-lock.txt -r requirements-dev.txt ...
     python tools/security/lock_requirements.py check                 offline: all locks well formed and consistent
     python tools/security/lock_requirements.py verify-pypi           network: every hash is PyPI's, no version yanked
+    python tools/security/lock_requirements.py outdated [--grace-days 30]   network, Linux: what a refresh would change;
+                                          fails when pip would pick a release older than the grace (ADR-0144)
 
 pin and resolve take every sha256 PyPI publishes for the pinned version (wheels for all platforms and the sdist), so one
 lock serves every supported host; pip accepts an artifact only if its hash is listed. resolve lets pip choose the versions
 for Linux x86_64, CPython 3.11, wheels only, and writes them with all their hashes.
 """
 import argparse
+import functools
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import urllib.request
+from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "router", "skirnir_router"))
@@ -36,6 +40,7 @@ CI_LOCK = "requirements-ci-lock.txt"
 CI_REQS = ("requirements-dev.txt", "test/requirements-hindsight.txt", "router/requirements-session.txt")
 PYTHONS = ("3.11", "3.12", "3.13", "3.14", "3.15")
 CI_PYTHON = "3.11"
+GRACE_DAYS = 30   # ADR-0144: a release pip would pick that is older than this makes `outdated` fail
 
 
 def pypi(name, version):
@@ -46,6 +51,15 @@ def pypi(name, version):
     files = data.get("urls") or []
     return (sorted({f["digests"]["sha256"] for f in files}), data["info"].get("requires_dist") or [],
             any(f.get("yanked") for f in files))
+
+
+def released(name, version):
+    """When PyPI first published this version (aware UTC datetime, the earliest file upload), or None without files."""
+    url = f"https://pypi.org/pypi/{name}/{version}/json"
+    with urllib.request.urlopen(url, timeout=30) as r:   # network: failures surface to the caller as they are
+        files = json.load(r).get("urls") or []
+    times = [f["upload_time_iso_8601"].replace("Z", "+00:00") for f in files if f.get("upload_time_iso_8601")]
+    return min(datetime.fromisoformat(t) for t in times) if times else None
 
 
 def linux_env(py):
@@ -120,24 +134,32 @@ def cmd_pin(a):
     return None
 
 
-def cmd_resolve(a):
+def pip_resolve(requirements):
+    """[(name, version)] pip chooses today for the CI target (Linux x86_64, CPython CI_PYTHON, wheels only) from the
+    requirement files, or the reason it cannot. resolve writes the CI lock from it, outdated compares the locks with it."""
     if not sys.platform.startswith("linux"):
-        return "resolve runs on Linux only: pip evaluates environment markers (sys_platform) for the running system"
+        return "pip resolution runs on Linux only: pip evaluates environment markers (sys_platform) for the running system"
     with tempfile.TemporaryDirectory() as tmp:
         report = os.path.join(tmp, "report.json")
         cmd = [sys.executable, "-m", "pip", "install", "--dry-run", "--ignore-installed", "--quiet", "--report", report,
                "--only-binary=:all:", "--python-version", CI_PYTHON, "--implementation", "cp", "--abi", "cp311",
                "--platform", "manylinux_2_28_x86_64", "--platform", "manylinux_2_17_x86_64", "--platform",
                "manylinux2014_x86_64", "--target", os.path.join(tmp, "t")]
-        for r in a.requirements:
+        for r in requirements:
             cmd += ["-r", os.path.join(ROOT, r)]
         run = subprocess.run(cmd, capture_output=True, text=True)
         if run.returncode != 0:
             return f"pip could not resolve: {run.stderr.strip()[-600:]}"
         items = json.load(open(report, encoding="utf-8"))["install"]
+    return [(it["metadata"]["name"], it["metadata"]["version"]) for it in items]
+
+
+def cmd_resolve(a):
+    resolved = pip_resolve(a.requirements)
+    if isinstance(resolved, str):
+        return resolved
     entries = {}
-    for it in items:
-        name, version = it["metadata"]["name"], it["metadata"]["version"]
+    for name, version in resolved:
         hashes, _, yanked = pypi(name, version)
         if yanked:
             return f"{name} {version} is yanked on PyPI"
@@ -208,6 +230,63 @@ def cmd_verify_pypi(_a):
     return "PyPI verification failed" if problems else None
 
 
+def pending_changes(locks, resolved, released_at, now, grace_days):
+    """What a refresh would change (ADR-0144), as dicts {lock, name, locked, fresh, age_days, overdue}:
+    - each lock entry whose package pip now resolves to another version; age_days counts from that version's first
+      upload, overdue when it is older than grace_days (unknown date: listed, not overdue);
+    - for the CI lock, entries pip no longer needs (fresh None) and packages it newly needs (locked None), never
+      overdue on their own: they come with another package's version change.
+    locks {path: {canonical name: entry}}, resolved [(name, version)], released_at(name, version) -> datetime or None."""
+    fresh = {pydeps.canonicalize_name(n): (n, v) for n, v in resolved}
+    out = []
+    for path, entries in locks.items():
+        for key in sorted(entries):
+            e = entries[key]
+            if key not in fresh or fresh[key][1] == e["version"]:
+                continue
+            when = released_at(*fresh[key])
+            age = None if when is None else max(0, (now - when).days)
+            out.append({"lock": path, "name": e["name"], "locked": e["version"], "fresh": fresh[key][1],
+                        "age_days": age, "overdue": age is not None and age > grace_days})
+    if CI_LOCK in locks:
+        ci = locks[CI_LOCK]
+        out += [{"lock": CI_LOCK, "name": ci[k]["name"], "locked": ci[k]["version"], "fresh": None, "age_days": None,
+                 "overdue": False} for k in sorted(set(ci) - set(fresh))]
+        out += [{"lock": CI_LOCK, "name": fresh[k][0], "locked": None, "fresh": fresh[k][1], "age_days": None,
+                 "overdue": False} for k in sorted(set(fresh) - set(ci))]
+    return out
+
+
+def describe(change):
+    c = change
+    if c["fresh"] is None:
+        return f"{c['lock']}: {c['name']} {c['locked']} is no longer needed"
+    if c["locked"] is None:
+        return f"{c['lock']}: {c['name']} {c['fresh']} is newly needed"
+    when = "release date unknown" if c["age_days"] is None else f"released {c['age_days']} days ago"
+    return f"{c['lock']}: {c['name']} {c['locked']} -> {c['fresh']} ({when}{', OVERDUE' if c['overdue'] else ''})"
+
+
+def cmd_outdated(a):
+    if a.grace_days < 0:
+        return "--grace-days must be 0 or more"
+    resolved = pip_resolve(list(CI_REQS))
+    if isinstance(resolved, str):
+        return resolved
+    locks = {path: load(path)[0] for path in (ROUTER_LOCK, CONTAINER_LOCK, CI_LOCK)}
+    changes = pending_changes(locks, resolved, functools.lru_cache(maxsize=None)(released), datetime.now(timezone.utc),
+                              a.grace_days)
+    for c in changes:
+        print(describe(c))
+    overdue = [c for c in changes if c["overdue"]]
+    print(f"Lock freshness: {len(changes)} pending change(s), {len(overdue)} older than {a.grace_days} days")
+    if overdue:
+        return ("the Python locks are overdue for a refresh: run resolve for the CI lock and pin the router and container "
+                "locks at the same versions (ADR-0074, ADR-0121), or bound the version in its requirements file with a "
+                "comment saying why")
+    return None
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="command", required=True)
@@ -219,10 +298,13 @@ def main(argv=None):
     s.add_argument("-r", dest="requirements", action="append", default=None)
     sub.add_parser("check")
     sub.add_parser("verify-pypi")
+    s = sub.add_parser("outdated")
+    s.add_argument("--grace-days", type=int, default=GRACE_DAYS)
     a = p.parse_args(argv)
     if a.command == "resolve" and not a.requirements:
         a.requirements = list(CI_REQS)
-    err = {"pin": cmd_pin, "resolve": cmd_resolve, "check": cmd_check, "verify-pypi": cmd_verify_pypi}[a.command](a)
+    err = {"pin": cmd_pin, "resolve": cmd_resolve, "check": cmd_check, "verify-pypi": cmd_verify_pypi,
+           "outdated": cmd_outdated}[a.command](a)
     if err:
         print(err, file=sys.stderr)
         return 1

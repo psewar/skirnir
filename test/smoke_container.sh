@@ -21,7 +21,7 @@ SELFTESTS=0
 # Self-tests of repository tooling, not of the router: they need git, pip, Go or the lock tool, which the image lacks.
 TOOLING="selftest_pinned_references selftest_pydeps selftest_sbom selftest_threat_review selftest_trusted_gate
          selftest_dependency_audit selftest_container_image selftest_control_flow selftest_english_names
-         selftest_training_data selftest_privacy_threshold"
+         selftest_training_data selftest_privacy_threshold selftest_lock_freshness"
 refuse() { echo "$1"; echo "STATE: refused"; exit 2; }
 # A command that a refusal suggests is meant to be pasted: it repeats only shell-inert text, the rest as a placeholder.
 inert() { case "$1" in "" | *[!A-Za-z0-9/._+:@=-]*) return 1 ;; esac; }

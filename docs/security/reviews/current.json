@@ -2,69 +2,58 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "2cc7b95ac3234eb98f666b7d0cd7f10bb834c92d",
- "change_digest": "56bc40c08a1a1631c985d66371ac38356b21f9e4012d3d248a9dad05631b75b5",
+ "base_sha": "8583271dc778564e821aa6bd027cd0fd221b3415",
+ "change_digest": "148e1dd8daed22559336e5010cfaa8cc3b6832c91bd74bae5d57a5f6e80e4c1e",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
+  ".github/workflows/security.yml",
+  "AGENTS.md",
   "CHANGELOG.md",
-  "design/router-container.md",
-  "docs/adr/0143-the-admin-part-of-the-control-port-answers-only-configured-networks.md",
+  "docs/adr/0144-the-python-locks-are-checked-weekly-against-a-fresh-resolution.md",
   "docs/adr/README.md",
-  "docs/install-router.de.md",
-  "docs/install-router.md",
-  "docs/reference.de.md",
-  "docs/reference.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
-  "docs/troubleshooting.de.md",
-  "docs/troubleshooting.md",
-  "router/config.example.yaml",
-  "router/skirnir_router/auth.py",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/posture.py",
-  "test/selftest_admin_networks.py",
+  "test/selftest_lock_freshness.py",
+  "test/smoke_container.sh",
+  "tools/security/lock_requirements.py",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/app.py",
-  "router/skirnir_router/settings.py",
-  "router/skirnir_router/values.py",
-  "router/skirnir_router/registry.py",
-  "router/skirnir_router/agentupdate.py",
-  "router/skirnir_router/browser_headers.py",
-  "deploy/deploy.py",
-  "docs/adr/0053-control-port-requires-users-even-on-loopback.md",
-  "docs/adr/0136-new-agents-enroll-only-from-configured-networks.md"
+  "router/skirnir_router/pydeps.py",
+  "test/selftest_dependency_audit.py",
+  "test/selftest_container_image.py",
+  "test/check_pinned_references.py",
+  "docs/adr/0074-hash-locked-python-installs.md",
+  "docs/adr/0081-dependency-audit-also-runs-weekly.md",
+  "docs/adr/0121-the-router-image-installs-its-own-complete-hash-lock-on-the-official-python-image.md"
  ],
  "risk_ids": [
-  "TM-03",
-  "TM-01"
+  "TM-16"
  ],
  "boundaries": [
-  "B2"
+  "B9"
  ],
- "summary": "Router 0.42.18 implements TM-03's next action 'Segment admin access' (ADR-0143, proposed). Traced B2: the control port app (app.build_apps) runs unexpected_error_middleware, then auth.basic_auth_middleware, for every route. The middleware passed /v1/ paths through before and still does (tunnel identity/approval, ADR-0136 enrollment networks, heartbeat token, one-time binary token). New: for every other path (UI and its files, /admin/*, /metrics) a non-empty router.admin_networks refuses a source address outside every network with 403 before the Basic Auth check, the ADR-0053 loopback switch and the failure counter. The address is request.remote, the TCP peer; aiohttp does not read X-Forwarded-For here, so a header cannot spoof it. values.in_networks maps IPv4-mapped IPv6 to IPv4 and puts non-addresses and None outside. Bypass via the /v1/ prefix was probed with a real aiohttp server (3.14.4): /v1/../admin/state, %2e%2e, %2F and mixed forms keep path.startswith('/v1/') true but resolve to 404, because aiohttp matches the literal path without dot-segment folding; the new test pins this against the real control app and pins the /v1/ routes to the three agent paths. The key is not in settings.EDITABLE; settings.coerce refuses it ('cannot be changed in the UI'), and Config.merged applies UI overrides only through roles, models, expose_concrete_models, clients and settings, so a stolen admin login cannot widen it. Config refuses non-CIDR lists and a list without loopback for a literal loopback control_listen (lockout). The agent calls only /v1/ on the control port (agent/*.go checked); deploy.py asks /admin/state over loopback on the router host, documented (include 127.0.0.1/32). Posture adds admin_from_any_network (info like control_on_network, so --init still writes no medium finding, ADR-0067; TM-03) for a network listener without the list. Default off, existing configurations unchanged. No new exception path.",
+ "summary": "CI/tooling change, router and agent unchanged: implements TM-16's next action 'Refresh the Python locks regularly' as a check (ADR-0144, proposed). Reviewed against the previous trusted versions of tools/security/lock_requirements.py and .github/workflows/security.yml (flagged for explicit maintainer review). lock_requirements.py: cmd_resolve's pip invocation moved unchanged into pip_resolve (same flags: --dry-run, --only-binary=:all: so no sdist build code runs, CPython 3.11, manylinux x86_64; only the Linux refusal text is reworded); resolve's output is byte-for-byte the same path. New read-only command outdated: pip_resolve of CI_REQS, compares router, container and CI lock entries by canonical name, released() reads the first upload time from PyPI's JSON API (urllib, 30 s timeout, failures surface as before in pypi()), fails only for versions older than --grace-days (default 30, negative refused before any network). It writes no file. security.yml: new job python-lock-freshness only on schedule and workflow_dispatch (never push or pull_request, so PR code never runs in it and upstream releases cannot block PRs), workflow-level permissions contents: read, actions pinned to the same SHAs (check_pinned_references: 0 findings), installs nothing. No existing check, audit, trigger or condition removed; selftest_dependency_audit still passes. test/smoke_container.sh lists the new self-test under TOOLING (repository tooling the router image cannot run: the lock tool needs packaging or pip, which the image lacks), like selftest_pydeps; the first CI run failed exactly there and nowhere else. AGENTS.md gains one sentence on the weekly run. The risk register drops the done v0.35.1 provenance action (run 45630953077, 2026-11-25).",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_admin_networks.py (new, added to ci.yml)",
+   "command": "python test/selftest_lock_freshness.py (new, added to ci.yml)",
    "result": "passed",
-   "evidence": "10 tests. Rejected cases: outside addresses (plain, IPv4-mapped, other IPv6, None, non-address) get 403 on /, /ui.js, /ui.css, /favicon.ico, /admin/state, /admin/config, /metrics, /admin/ha and a PUT, also with valid credentials, reach no handler and leave _BASIC_SRC/_BASIC_FAIL/_BASIC_OK empty; the unauthenticated loopback switch does not open it; /v1/ dot-segment and encoded-slash paths resolve to 404 in the real control app, whose /v1/ routes are exactly the three agent paths; settings.apply refuses router.admin_networks; config refuses non-lists, invalid networks and a loopback listener without loopback. Accepted cases: no list = login decides as before; inside addresses (IPv4, mapped, IPv6) go on to the login; /v1/ paths pass; posture finding present/absent as intended. With auth.py, config.py and posture.py from origin/main: 47 failures, 1 error (the UI-settings case passes there too: it guards that the existing EDITABLE lock covers the new key)."
+   "evidence": "7 tests (1 skipped on Linux by design): nothing pending when pip picks the locked versions (canonical names); newer release overdue only past the grace (30 days exactly not), router lock compared too, unknown date listed not overdue, longer grace keeps it pending; dropped/added CI packages listed never overdue; the command passes on the current locks, fails for an overdue release and names the explicit bound, passes inside the grace; a negative grace is refused before pip runs (rejected case); non-Linux refused; the workflow job runs only on schedule/dispatch with the default grace. Without the change: 7 errors."
   },
   {
-   "command": "python test/selftest_posture.py and python test/selftest_security.py",
+   "command": "python tools/security/lock_requirements.py outdated (WSL Ubuntu, Python 3.14 venv, live PyPI)",
    "result": "passed",
-   "evidence": "unchanged expectations still hold (clean configuration is loopback, no new finding)."
+   "evidence": "0 pending changes with the default grace and with --grace-days 0; instrument probe: pip resolved 31 packages, all equal to the CI lock; a lowered aiohttp entry (3.9.0) was reported as 'aiohttp 3.9.0 -> 3.14.5 (released 45 days ago, OVERDUE)'."
   },
   {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes; plus ruff check ., router.py --check router/config.example.yaml --pure and node --check router/ui.js",
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/ (Windows), plus ruff check ., router.py --check --pure, check_pinned_references, selftest_dependency_audit",
    "result": "passed",
-   "evidence": "102 commands, 0 failed."
+   "evidence": "104 commands, 1 failed: the new 'lock_requirements.py outdated' step itself, which refuses Windows by design ('pip resolution runs on Linux only'); it passed in WSL (above)."
   },
   {
-   "command": "python test/run_tests.py",
-   "result": "passed",
-   "evidence": "337 PASS, 0 failures (the suite runs without router.admin_networks)."
+   "command": "CI job 'Router container image' (smoke_container.sh --selftests) with this fix",
+   "result": "not_run",
+   "evidence": "Not run locally (needs a rootful container engine); CI runs it on this push. On the first push (541a7da) it reported 81 of 82 passed: selftest_lock_freshness.py failed inside the image with 'pydeps: neither `packaging` nor pip's vendored copy is importable'. Fixed by listing it under TOOLING; bash -n test/smoke_container.sh and test/selftest_container_image.py (20 tests, 3 skipped) pass locally."
   },
   {
    "command": "python test/check_public_changes.py",
@@ -78,8 +67,9 @@
   }
  ],
  "limitations": [
-  "Behind a reverse proxy or a container runtime's userland proxy the router sees the proxy's address; segmentation then belongs to the proxy (documented).",
-  "Stolen admin credentials used from inside a listed network are not affected (out of scope for TM-03).",
-  "Not exercised against a live router with TLS in a browser; the middleware and the real control app's routing are tested in-process, the end-to-end suite runs without the key."
+  "The scheduled job itself has not run on GitHub yet; its first run is the next weekly schedule or a manual dispatch.",
+  "Entries only the router or container lock has (not needed for the CI target) are not compared.",
+  "A PyPI outage turns the weekly run red, as for verify-pypi.",
+  "The end-to-end suite was not run: no router or agent code changed."
  ]
 }

@@ -320,8 +320,8 @@
       "priority": "P2",
       "status": "open",
       "scenario": "Mutable dependencies/actions or compromised build.",
-      "controls": "pip-audit on runtime and optional requirement sets and govulncheck on every push, pull request and weekly, enforced by test/selftest_dependency_audit.py (ADR-0081); Dependabot (actions, Go, monitoring compose, decision-service Dockerfiles). Third-party actions pinned to commit SHAs, tools to versions, images and base images to digests, enforced by test/check_pinned_references.py (ADR-0055). Default-branch PR verification on an isolated hosted runner, App-bound merge status and same-dependency bump checks. Router hosts install pip packages only from router/requirements-lock.txt with --require-hashes --no-deps on top of distribution packages; CI installs requirements-ci-lock.txt; both locks are audited and compared with PyPI (ADR-0074). Release provenance: the agent is rebuilt from the tag and attested with SBOMs only if byte-identical (ADR-0075). Since ADR-0139 every release also carries skirnir-router-<version>.tar.gz (router/ of the tag) with an attested build provenance. Since ADR-0141 an agent shipped again is rebuilt from the release that first published it when the tag does not reproduce it (tools/security/rebuild_agent.sh).",
-      "next_action": "Refresh the Python locks regularly (no Dependabot support for them); run Release provenance by hand for releases that failed before ADR-0141 (v0.35.1).",
+      "controls": "pip-audit on runtime and optional requirement sets and govulncheck on every push, pull request and weekly, enforced by test/selftest_dependency_audit.py (ADR-0081); Dependabot (actions, Go, monitoring compose, decision-service Dockerfiles). Third-party actions pinned to commit SHAs, tools to versions, images and base images to digests, enforced by test/check_pinned_references.py (ADR-0055). Default-branch PR verification on an isolated hosted runner, App-bound merge status and same-dependency bump checks. Router hosts install pip packages only from router/requirements-lock.txt with --require-hashes --no-deps on top of distribution packages; CI installs requirements-ci-lock.txt; both locks are audited and compared with PyPI (ADR-0074). Release provenance: the agent is rebuilt from the tag and attested with SBOMs only if byte-identical (ADR-0075). Since ADR-0139 every release also carries skirnir-router-<version>.tar.gz (router/ of the tag) with an attested build provenance. Since ADR-0141 an agent shipped again is rebuilt from the release that first published it when the tag does not reproduce it (tools/security/rebuild_agent.sh). Since ADR-0144 the weekly security run (and a manual dispatch) compares every lock with what pip resolves today and fails when a release older than 30 days is missing (tools/security/lock_requirements.py outdated).",
+      "next_action": "Refresh the Python locks when the weekly lock freshness run fails (ADR-0144), or bound the version with a stated reason.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         ".github/workflows/security.yml",
@@ -333,9 +333,10 @@
         "test/selftest_pydeps.py",
         "test/selftest_sbom.py",
         "tools/security/lock_requirements.py",
+        "test/selftest_lock_freshness.py",
         ".github/workflows/release-provenance.yml"
       ],
-      "validation_gap": "V14: lock freshness depends on a manual refresh; distribution packages follow the distribution's updates; provenance covers the agent binaries, the router is released as source."
+      "validation_gap": "V14: a refresh is still a manual pull request, but a weekly run fails when one is overdue (ADR-0144); entries only the router or container lock has are not compared; distribution packages follow the distribution's updates; provenance covers the agent binaries, the router is released as source."
     }
   ]
 }

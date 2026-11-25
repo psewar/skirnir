@@ -84,6 +84,9 @@ bash test/unit_hardening_check.sh    # router under its real systemd unit: insta
   `lock_requirements.py resolve` (on Linux) for `requirements-ci-lock.txt`, and `lock_requirements.py pin --lock
   router/requirements-container-lock.txt` with the router's whole dependency closure at the CI lock's versions for the
   container image (ADR-0121; `test/selftest_container_image.py` compares them); never edit a lock by hand.
+  The weekly security run fails when pip would pick a release older than 30 days that the locks do not have yet
+  (`lock_requirements.py outdated`, on Linux; ADR-0144): refresh them in a pull request, or bound the version in its
+  requirements file with a comment saying why.
 - A change to `router/skirnir-router.service` runs `bash test/unit_hardening_check.sh` before the pull request (it starts
   the router under the unit in a throwaway systemd container; not in CI, ADR-0138).
 - The router image (`router/Dockerfile`, `router/compose.yaml`) ships the same program files as `router/install.sh`;
