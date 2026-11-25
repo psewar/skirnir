@@ -2,65 +2,52 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "37d3dca4dc2169310ad2bf61026c7b05e8d5e9fc",
- "change_digest": "683b7b9413bc2a7d7b0ccf1c6faf4a65d0bac89d836ece9905545b623ca82458",
+ "base_sha": "f96ff1e3d401c4a98b3b193daac10b3496727ec8",
+ "change_digest": "de016c668f7af47a8d9cd95c48059f2baf9a03e852cf76b5e0f6291380406a1a",
  "reviewed_paths": [
-  "AGENTS.md",
+  ".github/workflows/release-provenance.yml",
   "CHANGELOG.md",
-  "docs/adr/0138-the-router-unit-drops-what-a-python-network-service-does-not-need.md",
+  "docs/adr/0139-the-router-source-is-released-as-an-attested-archive.md",
   "docs/adr/README.md",
-  "docs/install-router.de.md",
-  "docs/install-router.md",
+  "docs/operations.de.md",
+  "docs/operations.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
-  "router/skirnir-router.service",
-  "router/skirnir_router/common.py",
-  "test/selftest_privilege_paths.py",
-  "test/unit_hardening/Containerfile",
-  "test/unit_hardening/inside.sh",
-  "test/unit_hardening/make_config.py",
-  "test/unit_hardening_check.sh",
   "docs/security/reviews/current.json",
   "router/install.sh",
-  "router/skirnir_router/process_view.py",
-  "router/skirnir_router/wol.py",
-  "docs/adr/0086-router-runs-as-its-own-account.md"
+  "test/check_pinned_references.py",
+  "docs/adr/0075-release-provenance-by-reproducible-rebuild.md"
  ],
  "risk_ids": [
-  "TM-14"
+  "TM-16"
  ],
  "boundaries": [
   "B8",
   "B9"
  ],
- "summary": "Router 0.42.15 closes TM-14's 'fuller unit directive set' (ADR-0138, proposed). router/skirnir-router.service adds ProtectKernelLogs, ProtectClock, ProtectHostname, PrivateDevices, RestrictNamespaces, RestrictRealtime, RemoveIPC, ProtectProc=invisible, ProcSubset=pid, RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK, SystemCallFilter=@system-service, SystemCallErrorNumber=EPERM; existing directives unchanged. Checked what the router needs: it reads /proc/self only (process_view.py), opens AF_INET UDP for Wake-on-LAN (wol.py) and TCP/TLS for everything else, no devices, raw or packet sockets. Proven at runtime: the new test/unit_hardening_check.sh builds a throwaway Debian 13 image (systemd 257) and runs the real install.sh, starts the router under the unit with TLS and checks API, model list, chat without node, UI, admin state, a configuration write into the state folder and a reload, failing on journal lines that look like refused calls or files: passed with the new unit (exposure 1.5 instead of 4.9 for the previous unit, measured the same way), failed with a deliberately too narrow RestrictAddressFamilies=AF_UNIX. The check runs a privileged container on the developer's machine only (not CI, no credentials; synthetic password/token, example domain). AGENTS.md (a rules file) gains the command and the rule to run it for unit changes: flagged for maintainer review. MemoryDenyWriteExecute and a tighter syscall list were deliberately left out (documented).",
+ "summary": "TM-16's 'consider signing the router source archive' (ADR-0139, proposed). CI change only, router and agent unchanged. .github/workflows/release-provenance.yml gets a second job router-source with its own job-level permissions (contents: write to upload the asset, id-token: write and attestations: write to sign) and the workflow-level permissions: {} unchanged. It runs on release published or workflow_dispatch with a tag, checks out the tag with persist-credentials: false, reads the router version from common.py and refuses anything but digits and dots (no injection into the file name), writes skirnir-router-<version>.tar.gz with git archive of router/ at HEAD, attests it with actions/attest-build-provenance at the commit already pinned in the same file (ADR-0055), and uploads it with gh release upload --clobber. No secret is used beyond github.token; no attacker-controlled input reaches a shell except the tag, which is passed through env and only used as an argument (as in the existing job). Independent of the agent rebuild job. This rules/CI change is flagged for maintainer review: its first real run is the next release.",
  "findings": [],
  "tests": [
   {
-   "command": "bash test/unit_hardening_check.sh (rootful Podman machine, WSL)",
+   "command": "local: git archive --format=tar.gz --prefix=skirnir-router-<v>/ HEAD router; extract; check files",
    "result": "passed",
-   "evidence": "install.sh STATE installed; service active; API version 200 over TLS; /api/tags 200; chat without node 503; UI 200; admin state 200; PUT /admin/config 200 and roles.yaml in /var/lib/skirnir-router; reload active 200; journal without refused calls or files; exposure 1.5 (previous unit 4.9). Rejected case: with RestrictAddressFamilies=AF_UNIX the check fails (tracebacks, STATE failed)."
+   "evidence": "the archive (0.42.14 at the time, 719 kB) holds every file install.sh requires in router/ (router.py, skirnir_router/, unit, layout script, minimal config, requirements and lock, ui.html/js/css, install.sh)."
   },
   {
-   "command": "python test/selftest_privilege_paths.py",
+   "command": "python -c yaml.safe_load(release-provenance.yml); python test/check_pinned_references.py; python test/selftest_pinned_references.py",
    "result": "passed",
-   "evidence": "12 new checks, one per directive; with the previous unit file 12 failures."
+   "evidence": "two jobs parse; 0 pin findings; pin self-test 0 failures."
   },
   {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check ., router.py --check and bash -n of the new scripts",
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes; plus ruff check .",
    "result": "passed",
-   "evidence": "99 commands, 0 failed; includes selftest_install and selftest_security (unit checks)."
-  },
-  {
-   "command": "python test/run_tests.py",
-   "result": "passed",
-   "evidence": "337 PASS, 0 failures (runs without systemd)."
+   "evidence": "99 commands, 0 failed."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; synthetic test password and token, router.example.net."
+   "evidence": "run after staging this record."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -69,8 +56,8 @@
   }
  ],
  "limitations": [
-  "The runtime check ran on Debian 13 / systemd 257 only; an older systemd ignores directives it does not know.",
-  "Not in CI (needs a privileged container); AGENTS.md asks for it on unit changes.",
-  "Paths not exercised in the check: MQTT, PostgreSQL/SQLite session store, Hindsight, cloud egress, agent tunnel; they use the same socket families and ordinary file calls."
+  "The release workflow cannot run before a release is published; its first real run is the next release (or a manual run with an existing tag).",
+  "The attestation proves the archive came from the workflow at that tag, not a reproducible rebuild of its bytes.",
+  "Extending the agent rebuild to releases whose agent came from an earlier commit (TM-16's other item) is not part of this change."
  ]
 }
