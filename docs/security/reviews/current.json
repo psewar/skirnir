@@ -2,12 +2,12 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "fe84eb7d8f9ab3d4958fa9276b1a9817d75d66cd",
- "change_digest": "b017bc1b991f2ef5ebf218857054cefaa4051cd18f3b583b3cb9d591bd4fac0f",
+ "base_sha": "8d4e66c05ab731f0b751bfd5004f54df33eaf5fd",
+ "change_digest": "5821cd8f391f158d93805f34b42227dc5c473c88492b907e3d1f30de9437eb8f",
  "reviewed_paths": [
   "CHANGELOG.md",
   "docs/adr/0063-bound-concurrency-and-body-size-per-client.md",
-  "docs/adr/0128-the-per-client-body-limit-also-bounds-chunked-bodies.md",
+  "docs/adr/0129-the-per-client-body-limit-also-bounds-chunked-bodies.md",
   "docs/adr/README.md",
   "docs/configuration.de.md",
   "docs/configuration.md",
@@ -39,7 +39,7 @@
   "B1",
   "B9"
  ],
- "summary": "Router 0.42.2 closes TM-08's next action 'bound chunked bodies per client' (ADR-0128, proposed, supersedes ADR-0063). Before, max_body_mib (default 16) was checked only against a declared Content-Length; a body sent with Transfer-Encoding: chunked was bounded only by the API app's client_max_size of 64 MiB, so a client could send four times its limit per request and up to max_concurrent such bodies. Now client_auth_middleware, for a configured client whose request has a body without a declared length, takes the client's concurrency slot first and then reads the body through request.clone(client_max_size=max_body) via the new boundary helper common.read_body_bounded, which reports BODY_READ, BODY_TOO_LARGE or BODY_UNREADABLE as a fact. aiohttp 3.14's BaseRequest.read checks the size while it reads (verified in its source), so memory per request stays within the limit plus one read chunk. BODY_TOO_LARGE answers 413 with the same message as for a declared size, counts too_large and writes the audit line body_too_large with chunked: true; the slot is given back in the existing finally. BODY_READ passes the clone (state incl. request['client'] and match_info copied by aiohttp) with the body cached and the fact request[BODY_PREREAD] = True, so handlers (read_json, request.read) see the full body; BODY_UNREADABLE passes the clone on and the handler's own read reports the failure as before (read_json -> None -> 400). Traced B1: identification, rate limit, inference refusal and the declared-size check run before as before; unauthenticated requests and the UI identity are unchanged (64 MiB ceiling). Request-body readers checked: proxy, openai_api, anthropic_api, rerank and admin read the whole body (read_json / request.read); session_api.body (used by the session API, memory.py and memory_gateway.py) streams request.content with its own 1 MiB bound and now uses the pre-read bytes when BODY_PREREAD is set, applying the same 1 MiB bound to them; managed.lines streams an upstream reply, not a request. For a chunked session or memory write from a configured client, memory per request is now the client's limit (default 16 MiB) instead of 1 MiB before the session bound applies; noted in ADR-0128. Exceptions: the helper catches aiohttp's HTTPRequestEntityTooLarge (the only signal aiohttp gives) and other read failures at the network boundary, both marked exception-ok; no error text is parsed. Possible behaviour change for operators: a client that sent chunked bodies above its max_body_mib now gets 413 (noted in the changelog with the fix: raise max_body_mib).",
+ "summary": "Router 0.42.3 closes TM-08's next action 'bound chunked bodies per client' (ADR-0129, proposed, supersedes ADR-0063). Before, max_body_mib (default 16) was checked only against a declared Content-Length; a body sent with Transfer-Encoding: chunked was bounded only by the API app's client_max_size of 64 MiB, so a client could send four times its limit per request and up to max_concurrent such bodies. Now client_auth_middleware, for a configured client whose request has a body without a declared length, takes the client's concurrency slot first and then reads the body through request.clone(client_max_size=max_body) via the new boundary helper common.read_body_bounded, which reports BODY_READ, BODY_TOO_LARGE or BODY_UNREADABLE as a fact. aiohttp 3.14's BaseRequest.read checks the size while it reads (verified in its source), so memory per request stays within the limit plus one read chunk. BODY_TOO_LARGE answers 413 with the same message as for a declared size, counts too_large and writes the audit line body_too_large with chunked: true; the slot is given back in the existing finally. BODY_READ passes the clone (state incl. request['client'] and match_info copied by aiohttp) with the body cached and the fact request[BODY_PREREAD] = True, so handlers (read_json, request.read) see the full body; BODY_UNREADABLE passes the clone on and the handler's own read reports the failure as before (read_json -> None -> 400). Traced B1: identification, rate limit, inference refusal and the declared-size check run before as before; unauthenticated requests and the UI identity are unchanged (64 MiB ceiling). Request-body readers checked: proxy, openai_api, anthropic_api, rerank and admin read the whole body (read_json / request.read); session_api.body (used by the session API, memory.py and memory_gateway.py) streams request.content with its own 1 MiB bound and now uses the pre-read bytes when BODY_PREREAD is set, applying the same 1 MiB bound to them; managed.lines streams an upstream reply, not a request. For a chunked session or memory write from a configured client, memory per request is now the client's limit (default 16 MiB) instead of 1 MiB before the session bound applies; noted in ADR-0129. Exceptions: the helper catches aiohttp's HTTPRequestEntityTooLarge (the only signal aiohttp gives) and other read failures at the network boundary, both marked exception-ok; no error text is parsed. Possible behaviour change for operators: a client that sent chunked bodies above its max_body_mib now gets 413 (noted in the changelog with the fix: raise max_body_mib). Re-review after merging main: #194 (router 0.42.2, ADR-0128, control UI without inline script) was merged first, so this change is renumbered to router 0.42.3, ADR-0129 and v0.47.4; ADR-0063 now says superseded by ADR-0129, the TM-08 lines of threat model and risk register name 0.42.3/ADR-0129, the TM-03 lines from #194 are untouched. The diff against the new base equals the reviewed diff apart from these numbers (compared line by line). #194 changes the control port (CSP, /ui.js behind the Basic-auth middleware, a GET without body); client_auth_middleware and the API app it guards are not touched by it, so the two changes do not interact.",
  "findings": [
   {
    "id": "CHUNKED-PREREAD-SESSION-BODY",
@@ -63,17 +63,12 @@
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "end-to-end suite: 337 PASS, 0 failures."
+   "evidence": "337 PASS, 0 failures (after merging main and renumbering; before: 337 PASS, 0 failures)."
   },
   {
-   "command": "every python command of the python job in .github/workflows/ci.yml (Windows), except pip install, run_tests.py and check_public_changes",
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "94 commands, 0 failed; includes check_control_flow (0 findings), ADR index (128), configuration check of config.example.yaml."
-  },
-  {
-   "command": "python test/selftest_security.py ; python tools/security/lock_requirements.py verify-pypi ; python tools/security/review.py check --base HEAD --head HEAD --baseline-only (the python commands of the other workflows)",
-   "result": "passed",
-   "evidence": "selftest_security.py's request stub gained body_exists = False (a request without body, as aiohttp reports it): the middleware now reads that attribute, and the first CI run of this PR failed there with AttributeError. After the change all PASS; verify-pypi 0 problems; baseline evidence check 0 errors."
+   "evidence": "93 commands, 0 failed, after merging main and renumbering; includes selftest_client_limits (12 tests), selftest_security (its request stub reads body_exists), selftest_browser from #194, check_control_flow (0 findings), ADR index (129 ADRs), lock_requirements verify-pypi and the baseline evidence check."
   },
   {
    "command": "python test/check_public_changes.py",
@@ -90,7 +85,6 @@
   "Memory per chunked request is bounded by about twice max_body_mib: aiohttp raises its read chunk size to the limit and checks after appending a chunk.",
   "The aiohttp 3.8 fallback was exercised by forcing it on aiohttp 3.14 (same attribute name in both, verified in 3.8.4's source), not on a real 3.8 installation.",
   "Not measured under hostile load (many clients at once); TM-08's hostile-load test remains open.",
-  "Unauthenticated requests in observe mode and the router's UI identity keep the 64 MiB ceiling, as before.",
-  "ADR-0128 and router 0.42.2 are also taken by the open PR #194 (control UI CSP); the PR merged second renumbers (next free ADR number, next patch version)."
+  "Unauthenticated requests in observe mode and the router's UI identity keep the 64 MiB ceiling, as before."
  ]
 }
