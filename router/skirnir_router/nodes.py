@@ -188,6 +188,8 @@ class Node(Breaker):
         # Agent-Sicht
         self.hb_ts = 0.0
         self.gpu_util = None
+        self.implausible_fields = []   # heartbeat values the router dropped as out of range (ADR-0137)
+        self.implausible_logged = 0.0  # last log line about them
         self.sensors = None   # Extra sensors from heartbeat (Agent >= 0.6.0), dict or None
         self.guard = None     # GPU-Schutz laut Agent (>= 0.7.0): state, limit_w, target_w, problem, reason, warnings (guard_english)
         self.draining_until = 0.0   # Agent update running: no new requests to this node until done
@@ -634,7 +636,7 @@ class Node(Breaker):
             "last_gen": self.last_gen, "last_prompt": self.last_prompt,
             "inflight": self.inflight, "gpu_known": bool(self.gpu_known(now)),
             "gpu_present": self.gpu_present,   # 0.36.0 (ADR-0102): False = the node computes in main memory
-            "gpu_util": self.gpu_util, "vram_free_gib": self.vram_free_gib,
+            "gpu_util": self.gpu_util, "implausible_fields": list(self.implausible_fields), "vram_free_gib": self.vram_free_gib,
             "vram_used_gib": self.vram_used_gib, "vram_total_gib": self.vram_total_gib, "foreign_vram_gib": round(self.foreign_vram_gib(), 2), "children_vram_gib": round(self.children_vram_gib, 2),
             "heartbeat_age_s": round(now - self.hb_ts, 1) if self.hb_ts else None,
             "wol": self.wol, "waker": self.waker, "tunnel": self.tunnel is not None, "tls": self.tls, "fingerprint": self.fp[:16] if self.fp else None, "baseline_gib": round(self.baseline_gib(), 2), "weight": self.weight, "tls_fingerprint": self.tls_fp[:16] if self.tls_fp else None, "last_wake_age_s": round(now - self.last_wake, 1) if self.last_wake else None,

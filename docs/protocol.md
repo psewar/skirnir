@@ -116,7 +116,9 @@ agent's children's VRAM, a running game, main memory, the health of tunnel route
 game block says `enabled: false` when game detection is switched off on the node (agent 0.36.0, ADR-0103); `via` is
 `path` or `name` (older agents sent the German `pfad`, which the router still accepts). A missing block means the agent
 does not report that fact; the router then keeps its previous behaviour for it. A heartbeat the router cannot apply is
-answered with `state: ""` and `error`.
+answered with `state: ""` and `error`. Since router 0.42.14 (ADR-0137) the router uses a GPU number only within
+the schema's range, and free VRAM and the Ollama process only when they are not above the total; a value outside is ignored
+(unknown, as without GPU), the rest of the heartbeat applies, and the node view lists the ignored fields.
 
 ### Upstream state
 

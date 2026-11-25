@@ -2,27 +2,28 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "1c49aef7dcd8e47f2b3c6d1c96b9b11276914e67",
- "change_digest": "18e22fc8998236084aea8f654010f9cc9ea1334321544f6eab20ed3a215edb96",
+ "base_sha": "2c8c81087b7c40c9e31c57fbc0863b61de759f3f",
+ "change_digest": "40e468cfb85460b3c05cdb272abbb7ffa5b203feb71b40333eadee4f2082021f",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0136-new-agents-enroll-only-from-configured-networks.md",
+  "docs/adr/0137-the-router-uses-only-plausible-gpu-numbers-from-an-agent.md",
   "docs/adr/README.md",
-  "docs/install-agent.de.md",
-  "docs/install-agent.md",
+  "docs/protocol.de.md",
+  "docs/protocol.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
-  "router/config.example.yaml",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/registry.py",
-  "router/skirnir_router/values.py",
-  "test/selftest_enrollment_networks.py",
+  "router/skirnir_router/nodes.py",
+  "router/skirnir_router/poll.py",
+  "test/selftest_heartbeat_plausibility.py",
+  "test/selftest_protocol.py",
   "docs/security/reviews/current.json",
   "router/skirnir_router/tunnel.py",
-  "docs/adr/0066-explicit-agent-key-creation-and-lost-key-recovery.md"
+  "router/skirnir_router/scheduler.py",
+  "docs/protocol/heartbeat.schema.json",
+  "docs/protocol/heartbeat-ack.schema.json"
  ],
  "risk_ids": [
   "TM-07"
@@ -30,18 +31,30 @@
  "boundaries": [
   "B3"
  ],
- "summary": "Router 0.42.13 closes TM-07's next action 'limit enrollment to known networks' (ADR-0136, proposed). New optional router.agent_enrollment_networks (list of CIDR; absent/empty = any address as before); config.py parses each entry with values.ip_network (ipaddress reference parser, strict=False, exception-ok at that boundary) and refuses a non-list or a non-network. Traced B3: the tunnel endpoint (registry.py) authenticates the hello (Ed25519 signature over the nonce) first, computes the key fingerprint and calls enrollment_denial(fp, request.remote) before upsert_hello; a known fingerprint (approved, pending, revoked) passes as before, so approved agents keep connecting from any address and revoked ones still get their revoked status. For an unknown fingerprint the network check now runs before the pending-capacity and per-address admission checks, so a refused key uses no admission slot and is never stored; the agent gets the status message with the reason and close code 1008, the existing refusal path. values.in_networks reads the peer text with values.ip_address (explicit failure -> outside), maps IPv4-mapped IPv6 to IPv4 and compares only same-version networks. request.remote is the TCP peer: behind a reverse proxy it is the proxy (documented). No exception path added outside the parser boundary.",
- "findings": [],
+ "summary": "Router 0.42.14 addresses TM-07's next action 'plausibility checks on reports of an approved agent' (ADR-0137, proposed). Traced B3: an approved agent's heartbeat arrives over the tunnel (tunnel.dispatch TUN_HB -> json.loads -> poll.apply_heartbeat inside a broad except that answers state '' with the error text) or through the token-guarded injection endpoint (poll.handle_heartbeat). apply_heartbeat took gpu_util_pct and the VRAM numbers unchecked: impossible values reached node.gpu_util / vram_*_gib used by scheduler fit, busy detection and the baseline; a wrong type raised mid-way, leaving earlier fields applied and later ones not. Now poll.plausible_gpu_facts applies the heartbeat schema's ranges explicitly (type in int/float excluding bool, NaN and infinity out, gpu_util 0-100, VRAM 0-4 TiB) and consistency for the values that give a node room (free and ollama_proc not above total + 256 MiB; children entries individually), returning kept facts and dropped names. Used VRAM above the total is kept: it only makes the node look busier (a first version dropped it and the end-to-end suite failed, its foreign-load scenarios send used above total); apply_heartbeat applies only kept values (dropped = None = unknown, the existing no-GPU path), records node.implausible_fields (node snapshot) and logs at most every 600 s per node. Wire format unchanged; the ack for such a heartbeat is now the normal one (error is x-ignored-by-receiver). The tunnel's broad except stays for genuinely unexpected faults. No new exception path; plausible lies remain possible (documented).",
+ "findings": [
+  {
+   "id": "HEARTBEAT-UNCHECKED-GPU-NUMBERS",
+   "evidence": "apply_heartbeat assigned gpu_util_pct and vram_*_mib from the agent without type or range checks; selftest_heartbeat_plausibility with poll.py and nodes.py from origin/main: 17 errors and 1 failure (subtests included; the checker does not exist there, and impossible free VRAM is used). Pre-existing since the heartbeat fields were introduced.",
+   "resolution": "plausible_gpu_facts with schema ranges and total consistency; dropped values are unknown and listed on the node.",
+   "disposition": "fixed"
+  }
+ ],
  "tests": [
   {
-   "command": "python test/selftest_enrollment_networks.py (new, added to ci.yml)",
+   "command": "python test/selftest_heartbeat_plausibility.py (new, added to ci.yml)",
    "result": "passed",
-   "evidence": "5 tests: CIDR, single address and host-bit parsing, bad values refused; inside/outside/IPv4-mapped/unreadable/missing matching; without networks any address enrolls; a new key from outside is refused with the reason and uses no admission slot (rejected case), inside (IPv4/IPv6) enrolls; approved and pending keys reconnect from outside; Config.load takes the list and refuses a string, a non-network and a number. With values.py, config.py and registry.py from origin/main 4 errors."
+   "evidence": "6 tests: schema examples unchanged; out-of-range, wrong type, NaN, infinity dropped; free/ollama_proc above the total dropped with rounding slack accepted, used above it kept; children filtered per entry; a heartbeat with bad numbers applies the rest, lists the fields on the node and in its snapshot, logs once per interval and a good heartbeat clears the list; a free-VRAM lie above the card is not used (rejected case)."
+  },
+  {
+   "command": "python test/selftest_protocol.py",
+   "result": "passed",
+   "evidence": "test_heartbeat_answers_over_the_tunnel now expects a heartbeat with a non-numeric vram_total_mib to be answered normally (state free, no error) with the field listed as implausible; all heartbeat and ack schema examples still conform."
   },
   {
    "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "98 commands, 0 failed; includes selftest_security (enrollment caps unchanged), selftest_agent_revocation, check_control_flow."
+   "evidence": "99 commands, 0 failed; includes selftest_children_vram, selftest_cpu_node, selftest_power, selftest_standby_switch, check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
@@ -51,7 +64,7 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; documentation addresses (RFC 5737/3849) only."
+   "evidence": "run after staging this record; synthetic node values only."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -60,8 +73,7 @@
   }
  ],
  "limitations": [
-  "Behind a reverse proxy the router sees the proxy's address; the list must then name the proxy.",
-  "Plausibility checks on reports of approved agents (TM-07's other action) are not added.",
-  "No wire-level test over the real tunnel endpoint for the network refusal; the unit test calls enrollment_denial, which the endpoint calls with request.remote (unchanged call site)."
+  "Plausible but false reports (believable load or free memory) still pass; no cross-check against observed answer times.",
+  "Other heartbeat blocks (sensors, game, memory) keep their existing handling; only the GPU numbers are range-checked here."
  ]
 }

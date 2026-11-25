@@ -123,6 +123,9 @@ die Modelle des Bereitschafts-Ollama. Der Spiel-Block meldet `enabled: false`, w
 abgeschaltet ist (Agent 0.36.0, ADR-0103); `via` ist `path` oder `name` (ältere Agenten schickten das deutsche `pfad`,
 das der Router weiter annimmt). Fehlt ein Block, meldet der Agent diesen Fakt nicht; der Router behält dafür sein
 bisheriges Verhalten. Einen Heartbeat, den der Router nicht anwenden kann, beantwortet er mit `state: ""` und `error`.
+Seit Router 0.42.14 (ADR-0137) nutzt der Router eine GPU-Zahl nur innerhalb des Schema-Bereichs, und Frei und den
+Ollama-Prozess nur, wenn sie nicht über der Gesamtmenge liegen; ein Wert außerhalb wird ignoriert (unbekannt, wie ohne
+GPU), der Rest des Heartbeats gilt, und die Knotenansicht nennt die ignorierten Felder.
 
 ### Upstream-Zustand
 
