@@ -2,69 +2,65 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "2c8c81087b7c40c9e31c57fbc0863b61de759f3f",
- "change_digest": "40e468cfb85460b3c05cdb272abbb7ffa5b203feb71b40333eadee4f2082021f",
+ "base_sha": "37d3dca4dc2169310ad2bf61026c7b05e8d5e9fc",
+ "change_digest": "683b7b9413bc2a7d7b0ccf1c6faf4a65d0bac89d836ece9905545b623ca82458",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
+  "AGENTS.md",
   "CHANGELOG.md",
-  "docs/adr/0137-the-router-uses-only-plausible-gpu-numbers-from-an-agent.md",
+  "docs/adr/0138-the-router-unit-drops-what-a-python-network-service-does-not-need.md",
   "docs/adr/README.md",
-  "docs/protocol.de.md",
-  "docs/protocol.md",
+  "docs/install-router.de.md",
+  "docs/install-router.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
+  "router/skirnir-router.service",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/nodes.py",
-  "router/skirnir_router/poll.py",
-  "test/selftest_heartbeat_plausibility.py",
-  "test/selftest_protocol.py",
+  "test/selftest_privilege_paths.py",
+  "test/unit_hardening/Containerfile",
+  "test/unit_hardening/inside.sh",
+  "test/unit_hardening/make_config.py",
+  "test/unit_hardening_check.sh",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/tunnel.py",
-  "router/skirnir_router/scheduler.py",
-  "docs/protocol/heartbeat.schema.json",
-  "docs/protocol/heartbeat-ack.schema.json"
+  "router/install.sh",
+  "router/skirnir_router/process_view.py",
+  "router/skirnir_router/wol.py",
+  "docs/adr/0086-router-runs-as-its-own-account.md"
  ],
  "risk_ids": [
-  "TM-07"
+  "TM-14"
  ],
  "boundaries": [
-  "B3"
+  "B8",
+  "B9"
  ],
- "summary": "Router 0.42.14 addresses TM-07's next action 'plausibility checks on reports of an approved agent' (ADR-0137, proposed). Traced B3: an approved agent's heartbeat arrives over the tunnel (tunnel.dispatch TUN_HB -> json.loads -> poll.apply_heartbeat inside a broad except that answers state '' with the error text) or through the token-guarded injection endpoint (poll.handle_heartbeat). apply_heartbeat took gpu_util_pct and the VRAM numbers unchecked: impossible values reached node.gpu_util / vram_*_gib used by scheduler fit, busy detection and the baseline; a wrong type raised mid-way, leaving earlier fields applied and later ones not. Now poll.plausible_gpu_facts applies the heartbeat schema's ranges explicitly (type in int/float excluding bool, NaN and infinity out, gpu_util 0-100, VRAM 0-4 TiB) and consistency for the values that give a node room (free and ollama_proc not above total + 256 MiB; children entries individually), returning kept facts and dropped names. Used VRAM above the total is kept: it only makes the node look busier (a first version dropped it and the end-to-end suite failed, its foreign-load scenarios send used above total); apply_heartbeat applies only kept values (dropped = None = unknown, the existing no-GPU path), records node.implausible_fields (node snapshot) and logs at most every 600 s per node. Wire format unchanged; the ack for such a heartbeat is now the normal one (error is x-ignored-by-receiver). The tunnel's broad except stays for genuinely unexpected faults. No new exception path; plausible lies remain possible (documented).",
- "findings": [
-  {
-   "id": "HEARTBEAT-UNCHECKED-GPU-NUMBERS",
-   "evidence": "apply_heartbeat assigned gpu_util_pct and vram_*_mib from the agent without type or range checks; selftest_heartbeat_plausibility with poll.py and nodes.py from origin/main: 17 errors and 1 failure (subtests included; the checker does not exist there, and impossible free VRAM is used). Pre-existing since the heartbeat fields were introduced.",
-   "resolution": "plausible_gpu_facts with schema ranges and total consistency; dropped values are unknown and listed on the node.",
-   "disposition": "fixed"
-  }
- ],
+ "summary": "Router 0.42.15 closes TM-14's 'fuller unit directive set' (ADR-0138, proposed). router/skirnir-router.service adds ProtectKernelLogs, ProtectClock, ProtectHostname, PrivateDevices, RestrictNamespaces, RestrictRealtime, RemoveIPC, ProtectProc=invisible, ProcSubset=pid, RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK, SystemCallFilter=@system-service, SystemCallErrorNumber=EPERM; existing directives unchanged. Checked what the router needs: it reads /proc/self only (process_view.py), opens AF_INET UDP for Wake-on-LAN (wol.py) and TCP/TLS for everything else, no devices, raw or packet sockets. Proven at runtime: the new test/unit_hardening_check.sh builds a throwaway Debian 13 image (systemd 257) and runs the real install.sh, starts the router under the unit with TLS and checks API, model list, chat without node, UI, admin state, a configuration write into the state folder and a reload, failing on journal lines that look like refused calls or files: passed with the new unit (exposure 1.5 instead of 4.9 for the previous unit, measured the same way), failed with a deliberately too narrow RestrictAddressFamilies=AF_UNIX. The check runs a privileged container on the developer's machine only (not CI, no credentials; synthetic password/token, example domain). AGENTS.md (a rules file) gains the command and the rule to run it for unit changes: flagged for maintainer review. MemoryDenyWriteExecute and a tighter syscall list were deliberately left out (documented).",
+ "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_heartbeat_plausibility.py (new, added to ci.yml)",
+   "command": "bash test/unit_hardening_check.sh (rootful Podman machine, WSL)",
    "result": "passed",
-   "evidence": "6 tests: schema examples unchanged; out-of-range, wrong type, NaN, infinity dropped; free/ollama_proc above the total dropped with rounding slack accepted, used above it kept; children filtered per entry; a heartbeat with bad numbers applies the rest, lists the fields on the node and in its snapshot, logs once per interval and a good heartbeat clears the list; a free-VRAM lie above the card is not used (rejected case)."
+   "evidence": "install.sh STATE installed; service active; API version 200 over TLS; /api/tags 200; chat without node 503; UI 200; admin state 200; PUT /admin/config 200 and roles.yaml in /var/lib/skirnir-router; reload active 200; journal without refused calls or files; exposure 1.5 (previous unit 4.9). Rejected case: with RestrictAddressFamilies=AF_UNIX the check fails (tracebacks, STATE failed)."
   },
   {
-   "command": "python test/selftest_protocol.py",
+   "command": "python test/selftest_privilege_paths.py",
    "result": "passed",
-   "evidence": "test_heartbeat_answers_over_the_tunnel now expects a heartbeat with a non-numeric vram_total_mib to be answered normally (state free, no error) with the field listed as implausible; all heartbeat and ack schema examples still conform."
+   "evidence": "12 new checks, one per directive; with the previous unit file 12 failures."
   },
   {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check ., router.py --check and bash -n of the new scripts",
    "result": "passed",
-   "evidence": "99 commands, 0 failed; includes selftest_children_vram, selftest_cpu_node, selftest_power, selftest_standby_switch, check_control_flow."
+   "evidence": "99 commands, 0 failed; includes selftest_install and selftest_security (unit checks)."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "337 PASS, 0 failures."
+   "evidence": "337 PASS, 0 failures (runs without systemd)."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; synthetic node values only."
+   "evidence": "run after staging this record; synthetic test password and token, router.example.net."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -73,7 +69,8 @@
   }
  ],
  "limitations": [
-  "Plausible but false reports (believable load or free memory) still pass; no cross-check against observed answer times.",
-  "Other heartbeat blocks (sensors, game, memory) keep their existing handling; only the GPU numbers are range-checked here."
+  "The runtime check ran on Debian 13 / systemd 257 only; an older systemd ignores directives it does not know.",
+  "Not in CI (needs a privileged container); AGENTS.md asks for it on unit changes.",
+  "Paths not exercised in the check: MQTT, PostgreSQL/SQLite session store, Hindsight, cloud egress, agent tunnel; they use the same socket families and ordinary file calls."
  ]
 }

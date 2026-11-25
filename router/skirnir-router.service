@@ -29,6 +29,25 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 LockPersonality=true
 SystemCallArchitectures=native
+# ADR-0138 (TM-14): what a Python network service needs none of. Checked under systemd on Debian 13 with install.sh,
+# TLS, the API, the UI, a configuration write and a reload (test/unit_hardening_check.sh); systemd-analyze security
+# rates the unit lower (better) with them.
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+PrivateDevices=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RemoveIPC=true
+# /proc shows only this process: the router reads /proc/self (process_view.py) and nothing of other processes.
+ProtectProc=invisible
+ProcSubset=pid
+# IPv4/IPv6 for clients, nodes, providers and Wake-on-LAN (UDP), Unix sockets for local services, netlink for the C
+# library's address lookups.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# The system calls of an ordinary service; a call outside answers EPERM instead of killing the process.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 ProtectSystem=strict
 # tmpfs, not true: an inaccessible home answers EACCES instead of "not found", and asyncpg's lookup of ~/.postgresql
 # client certificates then aborts the session store start. tmpfs hides the homes just as well.
