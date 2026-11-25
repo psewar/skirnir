@@ -2,44 +2,60 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "238405d4dd026707e113a34c3c313aee2032db90",
- "change_digest": "64f0deda91c0b4378d55d3a2fa5905291f8b8fefe8da1aab5734937cf522ff3f",
+ "base_sha": "28967618f01334b5706efff377b7beb73b4b8678",
+ "change_digest": "8a01febba407e45fc978f074b1c07add9e12bd3fd7d2f660a88c52e37e1bee85",
  "reviewed_paths": [
+  ".github/workflows/ci.yml",
   "CHANGELOG.md",
-  "docs/adr/0133-the-running-model-list-follows-the-clients-grants.md",
+  "docs/adr/0134-refusal-audit-lines-of-identified-clients-are-throttled.md",
   "docs/adr/README.md",
   "docs/configuration.de.md",
   "docs/configuration.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/proxy.py",
-  "test/selftest_model_listing.py",
-  "docs/security/reviews/current.json",
   "router/skirnir_router/auth.py",
-  "router/skirnir_router/app.py",
-  "router/skirnir_router/nodes.py",
-  "docs/adr/0131-model-listings-follow-the-clients-grants.md"
+  "router/skirnir_router/common.py",
+  "test/selftest_client_limits.py",
+  "test/selftest_hostile_load.py",
+  "docs/security/reviews/current.json",
+  "router/skirnir_router/metrics.py",
+  "router/skirnir_router/proxy.py",
+  "docs/adr/0057-bound-unauthenticated-statistics-and-audit-volume.md",
+  "docs/adr/0132-the-router-rotates-its-audit-log-by-size.md"
  ],
  "risk_ids": [
-  "TM-04"
+  "TM-08",
+  "TM-15"
  ],
  "boundaries": [
-  "B1"
+  "B1",
+  "B9"
  ],
- "summary": "Router 0.42.10 closes the residual ADR-0131 left in TM-04: /api/ps (proxy.handle_ps, GET on the API app, behind client_auth_middleware like every inference path) answered every client with every loaded model, its role, the concrete model name and the node. Now (ADR-0133, proposed, extends ADR-0131) it uses auth.client_grant (no counting, no audit): a client that may use concrete names (models:true, the internal UI client, no identity in observe) gets every entry with model and node as before, but an entry whose role it may not use carries the concrete name instead of that role's name; a client without concrete names gets only entries of roles it may use, with name and model set to the role and no node, and nothing for models outside a role. The role mapping (tier models and same_blob) and sizes are unchanged; the Ollama shape (name, model, size, size_vram) stays. Access is unchanged: inference still goes through client_allows. No exception path added.",
- "findings": [],
+ "summary": "Router 0.42.11 works on TM-08's next action 'hostile-load test'. Writing it found a real gap: ADR-0057 bounds audit lines of unauthenticated requests, but every refusal of an identified client (client_auth_middleware: rate_limited, forbidden by inference_refusal, body_too_large declared and chunked, concurrency_limited; client_allows: forbidden role or concrete name) called audit() directly, i.e. one audit-log write plus one journal line per refused request. A client with a valid token that keeps sending while its max_concurrent slots are busy is refused cheaply and immediately, so it could grow the audit log and the journal at its sending rate (disk, journal noise, and with ADR-0132's rotation older evidence rotated out). Now (ADR-0134, proposed) all six call sites go through auth._audit_client: one line per client and event kind per CLIENT_AUDIT_EVERY_S (60 s), withheld lines counted per kind in the client's statistics (audit_suppressed) and reported with the next line (suppressed); the per-client counters (rate_limited, forbidden, too_large, concurrency_limited) and their metrics still count every refusal. The client's last_audit field (a vestigial float, unused) is now the per-kind time map. State per client is bounded by the event kinds (four). Configured clients are few and known, so no global budget is added (one client's flood cannot hide another's line). The refusal paths themselves are unchanged (status, message, order, Retry-After, no body read before the slot check). Unauthenticated handling (ADR-0057) unchanged. No exception or error-text path added.",
+ "findings": [
+  {
+   "id": "CLIENT-REFUSAL-AUDIT-FLOOD",
+   "evidence": "test_a_flood_is_bounded_and_does_not_starve_another_client with auth.py from origin/main: 200 concurrency refusals wrote 200 audit lines (and journal lines); rate-limited and forbidden floods likewise one line per refusal. Pre-existing since the per-client limits (ADR-0063) and the role check; found by this test.",
+   "resolution": "_audit_client throttles per client and kind; the four hostile-load tests fail without it and pass with it.",
+   "disposition": "fixed"
+  }
+ ],
  "tests": [
   {
-   "command": "python test/selftest_model_listing.py",
+   "command": "python test/selftest_hostile_load.py (new, added to ci.yml)",
    "result": "passed",
-   "evidence": "6 tests OK. New test_running_models_follow_the_grants with a node that has loaded a concrete model outside any role and models of two roles: models:true sees all three with model and node; a one-role client without models:true sees only its role by role name, no model, no node (rejected detail); all roles without models:true see both roles that way and no concrete model; models:true with one role sees the other role's model under its concrete name; observe without identity sees everything; no forbidden audit. With proxy.py from origin/main the new test fails."
+   "evidence": "4 tests over the real client middleware with a held handler: 200 concurrent requests of a client whose 4 slots are busy -> all 429, at most 4 inside, only the 4 admitted bodies read, another client served meanwhile, counter 200, one audit line, after the interval the next line reports 199 withheld, slots free afterwards; 60 requests at 5/min -> 55 refused, one line; 100 requests for a role the client may not use -> all 403, one line; two clients' floods throttled apart. All four fail with auth.py from origin/main."
+  },
+  {
+   "command": "python test/selftest_client_limits.py",
+   "result": "passed",
+   "evidence": "12 tests; the chunked-refusal audit line now carries suppressed 0."
   },
   {
    "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "95 commands, 0 failed."
+   "evidence": "96 commands, 0 failed; includes selftest_security (unauthenticated budget unchanged), selftest_model_listing, selftest_rerank, check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
@@ -49,7 +65,7 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; synthetic names only."
+   "evidence": "run after staging this record; synthetic client names only."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -58,7 +74,7 @@
   }
  ],
  "limitations": [
-  "/api/show still answers details for any name a client asks about (model details, not node names), as before.",
-  "Per-client model allowlists (TM-04's other idea) are not added."
+  "In-process flood only (one event loop, loopback); no measurement on the real router hardware or under network load; per-client cloud cost bounds remain open.",
+  "A second refusal of the same kind within a minute for another path or role is visible only as a count."
  ]
 }

@@ -54,6 +54,7 @@ client_auth:
 | `cloud`, `data_class` | Cloud tiers allowed, declared data class ([below](#cloud-as-a-tier-in-roles)) |
 
 The audit log (`audit_log`) rotates by size when `audit_log_max_mib` is set (1-4096): before a line goes into a file that reached the limit, the file becomes `audit.jsonl.1`, older generations move up to `audit_log_keep` (1-100, default 5) and the oldest is removed. `0` or no setting means no rotation, as before router 0.42.9; then an external tool such as logrotate has to bound the file ([ADR-0132](adr/0132-the-router-rotates-its-audit-log-by-size.md)).
+Refusals of an identified client (`rate_limited`, `concurrency_limited`, `body_too_large`, `forbidden`) are written at most once a minute per client and kind; the next line carries `suppressed` with the number withheld, and the client's counters in the UI and the metrics count every refusal (since router 0.42.11, [ADR-0134](adr/0134-refusal-audit-lines-of-identified-clients-are-throttled.md)).
 | `privacy_check` | Content check before a cloud tier (below) |
 | `rerank` | Right to use the [rerank endpoint](reference.md#optional-rerank-endpoint) |
 | `inference` | `false` = only the rerank endpoint, everything else 403 |
