@@ -108,6 +108,7 @@ jobs:
       - run: python test/selftest_rerank.py
       - run: python test/selftest_context.py
       - run: python test/selftest_interoperability.py
+      - run: python test/selftest_memory_review.py
       - run: python test/selftest_reliability.py
       - run: python test/selftest_verified_delivery.py
       - run: python test/selftest_memory_backend.py
@@ -171,6 +172,8 @@ jobs:
       - run: python test/integration_context.py
       - run: python test/integration_deletion_lifecycle.py
       - run: python test/integration_interoperability.py
+      # Review states, migration 7 and the review statements on PostgreSQL (ADR-0145).
+      - run: python test/selftest_memory_review.py
 
   container:
     # ADR-0116: the router image builds from the pinned base and the container lock, passes --check, writes a first

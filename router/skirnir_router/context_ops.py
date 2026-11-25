@@ -22,7 +22,8 @@ async def poll(api):
     cfg = state.CFG.session_store
     store = api.get(session_api.STORE_KEY)
     STATUS.update(session_store="disabled", context_manager="enabled" if state.CFG.context_manager.enabled else "disabled",
-                  hindsight="disabled", outbox="disabled", outbox_counts={}, outbox_oldest_seconds=0, checked_at=int(time.time()))
+                  hindsight="disabled", outbox="disabled", outbox_counts={}, outbox_oldest_seconds=0, review_held={},
+                  checked_at=int(time.time()))
     if cfg.enabled and store is not None:
         STATUS["session_store"] = "unavailable" if failed(await store.health()) else "available"
     service = api.get(memory.SERVICE_KEY)
@@ -32,12 +33,14 @@ async def poll(api):
         if service.outbox is not None:
             counts, age = await service.outbox.outbox_counts(), await service.outbox.outbox_oldest()
             stuck = await service.outbox.outbox_stuck_deletions()
-            if failed(counts) or failed(age) or failed(stuck):
+            held = await service.outbox.outbox_held_counts()
+            if failed(counts) or failed(age) or failed(stuck) or failed(held):
                 STATUS["outbox"] = "unavailable"
             else:
                 STATUS["outbox_counts"] = counts
                 STATUS["outbox_oldest_seconds"] = age if isinstance(age, (int, float)) else 0
                 STATUS["outbox_stuck_deletions"] = int(stuck or 0)   # ADR-0076: requested but dead or revoked
+                STATUS["review_held"] = held   # ADR-0145: writes awaiting review per shared scope, counts only
                 STATUS["outbox"] = "available"
 
 
@@ -84,6 +87,21 @@ async def pause(stopping, seconds):
         await asyncio.gather(waiter, return_exceptions=True)
 
 
+async def expire_reviews(store):
+    """ADR-0145: writes held for review past their deadline become rejected (reason review_expired), payload dropped.
+    Runs on every maintenance pass, whatever the retention settings; at most 100 rows per call, so it loops."""
+    while True:
+        expired = await store.outbox_expire_reviews()
+        if failed(expired):
+            metrics._counter("skirnir_context_maintenance_total", {"outcome": "unavailable"})
+            return
+        if expired:
+            memory.count("review", "expired", expired)
+            log.info("memory review: %d held write(s) expired unreviewed", expired)
+        if expired < 100:
+            return
+
+
 async def maintenance(api, stopping):
     # None: no cleanup yet, the first pass cleans up at once. A 0 here held the first cleanup back for
     # maintenance_interval_s after boot, because time.monotonic() starts near zero then.
@@ -96,6 +114,7 @@ async def maintenance(api, stopping):
         due = last_cleanup is None or time.monotonic() - last_cleanup >= cfg.maintenance_interval_s
         if cfg.enabled and store is not None and not stopping.is_set() and due:
             last_cleanup = time.monotonic()
+            await expire_reviews(store)
             if cfg.retention_days or cfg.archived_retention_days or memory_cfg.outbox_retention_days:
                 result = await store.cleanup(cfg.retention_days, cfg.archived_retention_days, memory_cfg.outbox_retention_days,
                                              with_memory=cfg.delete_memory_with_session)

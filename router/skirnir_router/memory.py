@@ -105,6 +105,32 @@ def curator_scopes(principal):
     return scopes
 
 
+def review_for(scope):
+    """ADR-0145: the shared scope's policy when this scope's writes must wait for a reviewer, else None. A reviewer's own
+    writes are not held: it could approve them anyway."""
+    if not scope.shared_scope:
+        return None
+    policy = getattr(state.CFG, "memory_scopes", {}).get(scope.shared_scope) or {}
+    return policy if policy.get("review") and scope.principal not in policy.get("reviewers", ()) else None
+
+
+def reviewer_scopes(principal):
+    """The shared scopes this client reviews (ADR-0145): listed in the scope's reviewers, with read on a project bound to
+    it. Checked per request, so a live policy can never widen what loading allowed."""
+    policy = ((auth.client_auth_cfg().get("clients") or {}).get(principal) or {}).get("memory") or {}
+    scopes = []
+    for project, grant in (policy.get("projects") or {}).items():
+        if not (isinstance(grant, dict) and grant.get("scope") and grant.get("read")):
+            continue
+        shared = getattr(state.CFG, "memory_scopes", {}).get(grant["scope"]) or {}
+        if not (shared.get("review") and principal in shared.get("reviewers", ())):
+            continue
+        scope = scope_for_principal(principal, project, read=True, explicit=True)
+        if not failed(scope) and scope.shared_scope:
+            scopes.append(scope)
+    return scopes
+
+
 def recall_with(principal, project):
     """Further projects a client reads together with `project` (memory project option recall_with), as configured."""
     spec = (auth.client_auth_cfg().get("clients") or {}).get(principal) or {}
@@ -379,6 +405,9 @@ class MemoryService:
         if self.outbox is not None:
             from .memory_outbox import submit
             return await submit(self, scope, event_id, content, confirmed, provenance, shared_observations, context, timestamp, session_id)
+        if review_for(scope) is not None:
+            # ADR-0145: loading refuses review without the durable outbox; checked again so a held write is never queued
+            return unavailable("memory review needs the durable outbox")
         # Context and timestamp come only from the gateway, which requires the persistent outbox.
         return self.enqueue(scope, event_id, content, confirmed=confirmed, provenance=provenance)
 
@@ -499,6 +528,8 @@ def register(app):
     app.router.add_post(PREFIX + "/list", handle_list)
     from .memory_gateway import register
     register(app)
+    from . import memory_review   # ADR-0145: reviewers list, approve and reject held writes into a shared scope
+    memory_review.register(app)
 
 
 async def _api(request, result_for):

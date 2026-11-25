@@ -78,3 +78,9 @@ requests, until an hour after its last such request. `skirnir_memory_recall_skip
 clients, and the log says once per client and hour that it happened, without names. If the client should get the
 facts, set `recall_into_tools: true` on its grant, which accepts that facts reach a model that can call tools; otherwise
 turn its recall off or leave it.
+
+A write into a shared scope with `review: true` answers 202 with the state `awaiting_review` and is not recalled by
+anyone until a reviewer approves it ([ADR-0145](adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md)): list and decide with
+`python tools/memory_review.py list --project <alias>` as a reviewer. A 429 on such a write means this writer already
+has `review_max_held` writes waiting in the scope; other writers are not affected. `/admin/context` shows the waiting
+writes per scope as `review_held`.

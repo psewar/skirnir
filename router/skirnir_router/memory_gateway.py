@@ -25,6 +25,7 @@ from .outcome import Problem, bad_gateway, denied, failed, invalid, unavailable
 from .reliability_store import OPERATION_NOT_FOUND
 
 GATEWAY = "/v1/skirnir/hindsight"
+AWAITING_REVIEW = "awaiting_review"   # outbox state of a write held for a reviewer (ADR-0145)
 SCOPE_DENIED = denied("memory scope denied")
 # Client-facing wording per status.
 PUBLIC = {400: "invalid memory gateway request", 403: SCOPE_DENIED.message, 404: OPERATION_NOT_FOUND.message,
@@ -217,9 +218,10 @@ async def operation_control(request, service, principal, gateway):
     if gateway:
         # Hermes waits for verified completion, never local 202 alone. The outbox's state wins over a single upstream
         # reading: an accepted job whose extraction failed upstream is resubmitted, so it is still in progress.
+        # ADR-0145: a write held for review is still pending; a rejected or expired one failed.
         mapped = {"pending": "pending", "processing": "processing", "accepted": "processing", "completed": "completed",
                   "dead": "failed", "revoked": "cancelled", "cancelled": "cancelled", "deleted": "completed",
-                  "delete_pending": "pending"}.get(row["state"], "pending")
+                  "delete_pending": "pending", "awaiting_review": "pending", "rejected": "failed"}.get(row["state"], "pending")
         live = result.get("upstream_status")
         result["status"] = live if live in ("pending", "processing", "completed") else mapped
     return web.json_response(result)
@@ -336,6 +338,11 @@ async def gateway_retain(service, scope, principal, alias, data):
         verified = await wait_verified(service, principal, operation)
         if failed(verified):
             return verified
+        if verified == AWAITING_REVIEW:
+            # ADR-0145: held until a reviewer decides, possibly days later. Answered at once as admitted, not completed
+            # (202, like async), with the state as a fact; waiting would only hold a synchronous slot until a timeout.
+            return web.json_response({"success": True, "bank_id": alias, "items_count": 1, "operation_id": operation,
+                                      "async": True, "durable": True, "state": AWAITING_REVIEW}, status=202)
     # Official SDKs deserialize RetainResponse only for HTTP 200. async=true still means admission, not completed
     # extraction (our REST API uses 202); async=false answers 200 only after verified completion.
     return web.json_response({"success": True, "bank_id": alias, "items_count": 1, "operation_id": operation,
@@ -343,8 +350,9 @@ async def gateway_retain(service, scope, principal, alias, data):
 
 
 async def wait_verified(service, principal, operation):
-    """None once the outbox verified the extraction as completed, or a Problem. The job stays durable either way:
-    on timeout it keeps going, and resending identical content returns the same operation."""
+    """None once the outbox verified the extraction as completed, AWAITING_REVIEW when the write is held for a reviewer
+    (ADR-0145), or a Problem. The job stays durable either way: on timeout it keeps going, and resending identical
+    content returns the same operation."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + service.cfg.sync_wait_s
     service.sync_waiting += 1
@@ -356,7 +364,9 @@ async def wait_verified(service, principal, operation):
                 return row
             if row["state"] == "completed":
                 return None
-            if row["state"] in ("dead", "revoked", "cancelled", "deleted"):
+            if row["state"] == AWAITING_REVIEW:
+                return AWAITING_REVIEW
+            if row["state"] in ("dead", "revoked", "cancelled", "deleted", "rejected"):
                 return bad_gateway(f"memory extraction did not complete (state {row['state']}, category {row.get('last_error') or 'none'}); "
                                    f"operation_id={operation}")
             if loop.time() >= deadline:

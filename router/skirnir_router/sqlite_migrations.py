@@ -10,6 +10,8 @@ Do not edit released migrations: append a new version instead, here and in sessi
 from .outcome import unavailable
 
 OUTBOX_STATES = ('pending', 'processing', 'accepted', 'completed', 'dead', 'revoked', 'cancelled', 'delete_pending', 'deleted')
+# Added by migration 2 (ADR-0145); kept apart so migration 1 stays exactly as released.
+REVIEW_STATES = ('awaiting_review', 'rejected')
 
 MIGRATIONS = ((
     """CREATE TABLE sessions (
@@ -122,6 +124,60 @@ MIGRATIONS = ((
     # add and subtract (BEGIN IMMEDIATE already serializes every writer, the advisory lock has no counterpart here).
     "CREATE TABLE outbox_totals (state TEXT PRIMARY KEY, jobs INTEGER NOT NULL CHECK (jobs >= 0)) STRICT",
     "INSERT INTO outbox_totals VALUES " + ",".join(f"('{state}', 0)" for state in OUTBOX_STATES),
+    """CREATE TRIGGER outbox_totals_insert AFTER INSERT ON memory_outbox BEGIN
+        UPDATE outbox_totals SET jobs = jobs + 1 WHERE state = NEW.state;
+    END""",
+    """CREATE TRIGGER outbox_totals_delete AFTER DELETE ON memory_outbox BEGIN
+        UPDATE outbox_totals SET jobs = jobs - 1 WHERE state = OLD.state;
+    END""",
+    """CREATE TRIGGER outbox_totals_update AFTER UPDATE OF state ON memory_outbox WHEN OLD.state <> NEW.state BEGIN
+        UPDATE outbox_totals SET jobs = jobs - 1 WHERE state = OLD.state;
+        UPDATE outbox_totals SET jobs = jobs + 1 WHERE state = NEW.state;
+    END""",
+), (
+    # PostgreSQL migration 7 (ADR-0145): the outbox states awaiting_review and rejected. SQLite cannot change a CHECK
+    # constraint, so the table is rebuilt the documented way (new table, copy, drop, rename, then its indexes and
+    # triggers again); the rows and their counts in outbox_totals stay as they are.
+    """CREATE TABLE memory_outbox_next (
+        operation_id TEXT PRIMARY KEY,
+        owner TEXT NOT NULL,
+        project TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (json_valid(scope)),
+        fingerprint TEXT NOT NULL,
+        delete_requested INTEGER NOT NULL DEFAULT 0 CHECK (delete_requested IN (0, 1)),
+        payload TEXT CHECK (payload IS NULL OR json_valid(payload)),
+        state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'processing', 'accepted', 'completed', 'dead',
+                                                             'revoked', 'cancelled', 'delete_pending', 'deleted',
+                                                             'awaiting_review', 'rejected')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        available_at INTEGER NOT NULL,
+        lease TEXT,
+        lease_until INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_error TEXT,
+        retry_ids TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(retry_ids)),
+        retry_base INTEGER NOT NULL DEFAULT 0,
+        retry_rounds INTEGER NOT NULL DEFAULT 0,
+        upstream_attempts INTEGER NOT NULL DEFAULT 0,
+        upstream_base INTEGER NOT NULL DEFAULT 0,
+        verify_checks INTEGER NOT NULL DEFAULT 0,
+        accepted_at INTEGER,
+        session_id TEXT
+    ) STRICT""",
+    "INSERT INTO memory_outbox_next SELECT * FROM memory_outbox",
+    "DROP TABLE memory_outbox",
+    "ALTER TABLE memory_outbox_next RENAME TO memory_outbox",
+    "CREATE INDEX outbox_pending ON memory_outbox(available_at, created_at) WHERE state IN ('pending', 'processing', 'delete_pending')",
+    "CREATE INDEX outbox_owner ON memory_outbox(owner, operation_id)",
+    "CREATE INDEX outbox_owner_active ON memory_outbox(owner) WHERE state IN ('pending', 'processing', 'delete_pending')",
+    "CREATE INDEX outbox_active_created ON memory_outbox(created_at) WHERE state IN ('pending', 'processing', 'delete_pending')",
+    """CREATE INDEX outbox_payload_expiry ON memory_outbox(updated_at)
+        WHERE payload IS NOT NULL AND state IN ('completed', 'dead', 'revoked', 'cancelled', 'deleted')""",
+    "CREATE INDEX outbox_verify ON memory_outbox(available_at) WHERE state = 'accepted'",
+    "CREATE INDEX outbox_session ON memory_outbox(owner, session_id) WHERE session_id IS NOT NULL",
+    "CREATE INDEX outbox_review ON memory_outbox(available_at) WHERE state = 'awaiting_review'",
+    "INSERT INTO outbox_totals VALUES " + ",".join(f"('{state}', 0)" for state in REVIEW_STATES),
     """CREATE TRIGGER outbox_totals_insert AFTER INSERT ON memory_outbox BEGIN
         UPDATE outbox_totals SET jobs = jobs + 1 WHERE state = NEW.state;
     END""",

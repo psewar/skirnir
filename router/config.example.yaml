@@ -39,6 +39,9 @@ router:
   # e.g. {team: {data_class: personal, allow_cloud: false, writers: [agent-a]}}: only listed clients may hold a write
   # grant on the scope (ADR-0060). A grant's recall_into_tools: true lets automatic recall reach requests that carry
   # tools; otherwise they get skipped:tools (ADR-0059).
+  # review: true with reviewers: [curator-a] (ADR-0145, needs hindsight.outbox_enabled) holds every write of a
+  # writer that is not a reviewer until a reviewer approves it (POST /v1/skirnir/memory/review, tools/memory_review.py);
+  # review_expire_days (14) rejects unreviewed writes, review_max_held (100) bounds them per writer.
   # Optional POST /rerank (TEI) on a node's reranker via the agent tunnel route "rerank"; see design/rerank.md.
   # No node usable -> 424 rerank_unavailable without Retry-After (callers fall back to their own reranker at once).
   # Callers also need the client right rerank: true (client_auth.clients.<name>.rerank). The same right opens GET /info

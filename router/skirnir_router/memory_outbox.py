@@ -47,7 +47,7 @@ async def submit(service, scope, event_id, content, confirmed, provenance=None, 
     operation = service.validate_retain(scope, event_id, content)
     if failed(operation):
         return operation
-    from .memory import rejected_content
+    from .memory import rejected_content, review_for
     from .memory_gateway import provenance as make_provenance
     origin = provenance or make_provenance({}, scope.principal, confirmed=confirmed)
     if failed(origin):
@@ -59,9 +59,12 @@ async def submit(service, scope, event_id, content, confirmed, provenance=None, 
         payload["shared_observations"] = True
     # Optional keys only when given: rows without them (also all rows admitted before) keep their shape and fingerprint.
     item = {key: value for key, value in (("context", context), ("timestamp", timestamp)) if value is not None}
+    # ADR-0145: a non-reviewer's write into a reviewed shared scope waits as awaiting_review; the worker never claims it.
+    review = review_for(scope)
+    held = {"held": (review["review_expire_days"], review["review_max_held"])} if review is not None else {}
     admitted = await service.outbox.outbox_put(UUID(operation), {**asdict(scope), "__bank": service.bank(scope)}, {**payload, **item}, digest(payload),
                                                service.cfg.outbox_capacity, **({"owner_capacity": service.cfg.outbox_client_capacity} if service.cfg.outbox_client_capacity else {}),
-                                               **({"session_id": UUID(session_id)} if session_id else {}))
+                                               **({"session_id": UUID(session_id)} if session_id else {}), **held)
     if failed(admitted):
         return admitted
     service.wakeup.set()

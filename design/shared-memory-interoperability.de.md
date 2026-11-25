@@ -1,6 +1,7 @@
 # Gemeinsames Gedächtnis, Agent-Übergaben und Zuverlässigkeit
 
-> Entscheidungen (warum): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md)
+> Entscheidungen (warum): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md),
+> [ADR-0145](../docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md) (Prüfung, bevor ein Eintrag eine gemeinsame Bank erreicht)
 
 [Englische Referenz mit vollständigem Konfigurationsbeispiel](shared-memory-interoperability.md).
 Die Erweiterung nutzt den bestehenden Session Store, den Hindsight-Adapter und die
@@ -184,8 +185,55 @@ sowohl `read` als auch `delete` hat, kuratiert diesen Bereich:
 - „Ändern“ heißt: korrigierten Fakt schreiben, alte Operation löschen. Hindsights
   direktes Bearbeiten ist nicht freigegeben.
 
+**Prüfung, bevor ein Eintrag eine gemeinsame Bank erreicht (ADR-0145, Router 0.43.0).** Kuratieren wirkt erst,
+wenn ein Fakt vielleicht schon abgerufen wurde. Ein Bereich kann Einträge stattdessen zurückhalten, bis ein Prüfer
+sie gesehen hat:
+
+```yaml
+memory_scopes:
+  shared-research: {data_class: personal, writers: [agent-a, agent-b], review: true, reviewers: [curator-a],
+                    review_expire_days: 14, review_max_held: 100}
+```
+
+- `review` ist standardmäßig aus. Mit `review` sind `reviewers` nötig (konfigurierte Clients, jeder mit `read` auf
+  einem Projekt dieses Bereichs) und `hindsight.outbox_enabled`: Ein zurückgehaltener Eintrag muss einen Neustart
+  überstehen. Alles andere lehnt das Laden ab, auch Prüf-Einstellungen ohne `review: true`.
+- Ein Eintrag eines Schreibers, der nicht Prüfer ist (REST-Retain, Gateway-Retain, automatische Erfassung), wird als
+  `awaiting_review` angenommen und erst zugestellt, wenn ein Prüfer ihn freigibt. Einträge eines Prüfers selbst
+  werden nicht zurückgehalten.
+- `POST /v1/skirnir/memory/review` mit `{project, limit?, offset?}` (das Projekt des Prüfers in diesem Bereich) liefert
+  eine Seite (1-50, Standard 20) zurückgehaltener Einträge, die ältesten zuerst: `operation_id`, `writer`,
+  `created_at`, `expires_at` und genau den `content`, `context` und die `provenance`, aus denen das Backend
+  extrahieren würde. Was der Inhaltsfilter ablehnt, steht nur mit ID unter `withheld`. Wer nicht Prüfer des Bereichs
+  ist, bekommt 403.
+- `POST /v1/skirnir/memory/operations/{uuid}/approve` oder `/reject` mit `{}` entscheidet über einen Eintrag. Die
+  Freigabe setzt ihn auf `pending`, der Worker stellt ihn zu; vorher prüft sie das Recht des Schreibers erneut, und
+  ein Schreiber ohne dieses Recht bekommt stattdessen `revoked` (`reason: policy_changed`). Die Ablehnung ergibt
+  `rejected` (`review_rejected`) und verwirft den Text. Wer nicht Prüfer dieser Bank ist, bekommt 404, auch der
+  Schreiber selbst. Ein nicht mehr zurückgehaltener Eintrag antwortet mit 409 und seinem `state`. Jede Entscheidung
+  wird mit Prüfer, Schreiber und Bereich protokolliert, ohne Inhalt.
+- `tools/memory_review.py` (`list`, `show`, `approve`, `reject`) erledigt dasselbe für einen Menschen. Es liest die
+  Router-Adresse und das Token des Prüfers aus `SKIRNIR_REVIEW_URL` und `SKIRNIR_REVIEW_TOKEN` (optional
+  `SKIRNIR_REVIEW_CA`) und lehnt unverschlüsseltes http ab, außer zu Loopback.
+- Der Schreiber sieht im Operationsstatus `awaiting_review` (das Gateway meldet `pending`) und kann den Eintrag mit
+  `DELETE` zurückziehen. Eine Wiederholung desselben Events liefert die bestehende Operation, ein abgelehnter Eintrag
+  bleibt also abgelehnt.
+- Ein zurückgehaltener Eintrag verfällt nach `review_expire_days` (ab dem Schreiben): `rejected` mit
+  `review_expired`, Text verworfen, beim nächsten Wartungslauf. Ein geändertes `review_expire_days` gilt für neue
+  Einträge.
+- Zurückgehaltene Einträge zählen nicht gegen `outbox_capacity`. Jeder Schreiber darf je Bereich höchstens
+  `review_max_held` zurückgehaltene Einträge haben; darüber bekommt nur dieser Schreiber für weitere Einträge in den
+  Bereich 429.
+- `/admin/context` zeigt `review_held` (Anzahl je Bereich, kein Inhalt); das Gauge `skirnir_memory_outbox_jobs` hat
+  die Zustände `awaiting_review` und `rejected`; `skirnir_memory_events_total{operation="review"}` zählt
+  `approved`, `rejected`, `revoked` und `expired`.
+- Die Prüfung wirkt nicht rückwirkend: Fakten, die schon in der Bank sind, bleiben, bis ein Kurator sie löscht. Wird
+  `review` abgeschaltet, gibt das nichts frei: Zurückgehaltene Einträge haben dann keinen Prüfer und verfallen, wenn
+  ihre Schreiber sie nicht vorher zurückziehen. Die Prüfung hält nur Einträge über den Router zurück; direkter
+  Zugriff auf das Backend umgeht sie wie jede Freigabe (TM-11).
+
 Zustände: `pending`, `processing`, `accepted`, `completed`, `dead`, `revoked`,
-`cancelled`, `delete_pending`, `deleted`. `accepted` bestätigt den Upstream-Eingang,
+`cancelled`, `delete_pending`, `deleted`, mit Prüfung zusätzlich `awaiting_review` und `rejected`. `accepted` bestätigt den Upstream-Eingang,
 der Auftrag wird noch geprüft; `completed` heißt, Hindsight meldet die Extraktion fertig.
 
 **Geprüfte Zustellung.** Hindsight wiederholt einen gescheiterten LLM-Aufruf nur kurz
