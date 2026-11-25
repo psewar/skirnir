@@ -161,7 +161,7 @@ class MiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.entered, 0, "the handler never ran")
         self.assertEqual(self.stats("default-client")["too_large"], 1)
         self.assertEqual(self.stats("default-client")["inflight"], 0, "the slot is given back")
-        self.assertIn(("body_too_large", {"client": "default-client", "path": "/api/chat", "limit_mib": 16, "chunked": True}),
+        self.assertIn(("body_too_large", {"client": "default-client", "path": "/api/chat", "limit_mib": 16, "chunked": True, "suppressed": 0}),
                       self.audits)
 
     async def test_chunked_body_within_the_limit_reaches_the_handler_intact(self):

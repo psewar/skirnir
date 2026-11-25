@@ -147,15 +147,15 @@
       "priority": "P1",
       "status": "open",
       "scenario": "Pre-auth flood, long streams or parallel costly inference.",
-      "controls": "Client rate and enrollment limits. Unauthenticated statistics capped at 1024 sources (LRU, evictions counted); their audit lines limited per source and event kind and by a global per-minute budget with withheld counts (ADR-0057). Since router 0.22.0 (ADR-0063) every configured client has max_concurrent requests in progress (default 4, 429 with Retry-After) and max_body_mib declared body size (default 16, 413), with per-client peak gauges. Since router 0.42.3 (ADR-0129) a chunked body is read inside the client's slot with max_body_mib as the limit and refused with 413 (audit body_too_large, chunked) once it grows past it.",
-      "next_action": "Measure peaks per client and tune limits; per-client cost bounds for cloud; hostile-load test.",
+      "controls": "Client rate and enrollment limits. Unauthenticated statistics capped at 1024 sources (LRU, evictions counted); their audit lines limited per source and event kind and by a global per-minute budget with withheld counts (ADR-0057). Since router 0.22.0 (ADR-0063) every configured client has max_concurrent requests in progress (default 4, 429 with Retry-After) and max_body_mib declared body size (default 16, 413), with per-client peak gauges. Since router 0.42.3 (ADR-0129) a chunked body is read inside the client's slot with max_body_mib as the limit and refused with 413 (audit body_too_large, chunked) once it grows past it. Since router 0.42.11 (ADR-0134) refusal audit lines of identified clients are throttled to one per client and event kind per minute (suppressed count on the next line; counters count every refusal), checked by an in-process hostile-load test.",
+      "next_action": "Measure peaks per client and tune limits; per-client cost bounds for cloud; load measurements on the real deployment.",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_client_limits.py",
         "test/selftest_max_parallel.py",
         "test/selftest_security.py"
       ],
-      "validation_gap": "V12: pre-auth state, audit volume and per-client concurrency, declared and chunked body size are bounded and unit-tested; per-client cost and hostile-load budgets remain."
+      "validation_gap": "V12: pre-auth state, unauthenticated and identified audit volume, per-client concurrency, declared and chunked body size are bounded and tested, also under an in-process flood (test/selftest_hostile_load.py); per-client cost and measurements on real hardware remain."
     },
     {
       "id": "TM-09",

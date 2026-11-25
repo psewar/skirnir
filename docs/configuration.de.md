@@ -54,6 +54,7 @@ client_auth:
 | `cloud`, `data_class` | Cloud-Stufen erlaubt, deklarierte Datenklasse ([unten](#cloud-als-stufe-in-rollen)) |
 
 Das Audit-Log (`audit_log`) rotiert nach Größe, wenn `audit_log_max_mib` gesetzt ist (1-4096): Bevor eine Zeile in eine Datei geht, die die Grenze erreicht hat, wird die Datei zu `audit.jsonl.1`, ältere Generationen rücken bis `audit_log_keep` nach (1-100, Vorgabe 5), die älteste wird gelöscht. `0` oder keine Einstellung heißt keine Rotation, wie vor Router 0.42.9; dann muss ein externes Werkzeug wie logrotate die Datei begrenzen ([ADR-0132](adr/0132-the-router-rotates-its-audit-log-by-size.md)).
+Ablehnungen eines identifizierten Clients (`rate_limited`, `concurrency_limited`, `body_too_large`, `forbidden`) werden höchstens einmal pro Minute je Client und Art geschrieben; die nächste Zeile trägt in `suppressed` die Zahl der zurückgehaltenen, und die Zähler des Clients in der UI und in den Metriken zählen jede Ablehnung (seit Router 0.42.11, [ADR-0134](adr/0134-refusal-audit-lines-of-identified-clients-are-throttled.md)).
 | `privacy_check` | Inhaltsprüfung vor einer Cloud-Stufe (unten) |
 | `rerank` | Recht auf den [Rerank-Endpunkt](reference.de.md#optionaler-rerank-endpunkt) |
 | `inference` | `false` = nur der Rerank-Endpunkt, alles andere 403 |

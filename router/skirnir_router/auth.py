@@ -29,6 +29,7 @@ _UNAUTH_AUDIT_EVERY_S = 300            # at most one audit line per source IP an
 # TM-08 / ADR-0057: refused unauthenticated requests must not grow memory or the audit log without bound.
 MAX_UNAUTH_SOURCES = 1024              # tracked unauthenticated sources, least recently seen evicted first
 UNAUTH_AUDIT_PER_MIN = 120             # audit lines for unauthenticated requests per minute, over all sources
+CLIENT_AUDIT_EVERY_S = 60              # ADR-0134: at most one refusal line per identified client and event kind in this time
 _UNAUTH_AUDIT_TIMES = deque()          # times of those lines in the last minute
 _UNAUTH_SUPPRESSED = [0]               # lines withheld by the global budget since the last written one
 _audit_failed = [False]
@@ -76,6 +77,19 @@ def audit(event, **fields):
                 log.warning("audit log %s not writable (%s) - events only in the journal", path, e)
                 _audit_failed[0] = True
     log.info("AUDIT %s", line)
+
+
+def _audit_client(name, event, **fields):
+    """A refusal of an identified client to the audit log: at most one line per client and event kind per
+    CLIENT_AUDIT_EVERY_S (ADR-0134, extends ADR-0057 to identified clients). Withheld lines are counted and reported with
+    the next written one (suppressed); the client's counters and metrics still count every refusal."""
+    st, now = _stats_for(name), time.time()
+    last, withheld = st["last_audit"], st["audit_suppressed"]
+    if now - last.get(event, 0.0) < CLIENT_AUDIT_EVERY_S:
+        withheld[event] = withheld.get(event, 0) + 1
+        return
+    last[event] = now
+    audit(event, client=name, **fields, suppressed=withheld.pop(event, 0))
 
 
 def _unauth_source(ip):
@@ -159,7 +173,8 @@ def _deny(request, status, msg, why=None):
 
 def _stats_for(name):
     return state.CLIENT_STATS["clients"].setdefault(name, {"total": 0, "last_seen": 0.0, "via": None, "recent": deque(),
-                                                           "rate_limited": 0, "forbidden": 0, "last_audit": 0.0,
+                                                           "rate_limited": 0, "forbidden": 0, "last_audit": {},
+                                                           "audit_suppressed": {},
                                                            "inflight": 0, "peak_inflight": 0, "concurrency_limited": 0,
                                                            "too_large": 0})
 
@@ -209,12 +224,12 @@ async def client_auth_middleware(request, handler):
             rec.popleft()
         if len(rec) > rpm:
             st["rate_limited"] += 1
-            audit("rate_limited", client=name, path=request.path, limit=rpm)
+            _audit_client(name, "rate_limited", path=request.path, limit=rpm)
             return _deny(request, 429, f"rate limit: {rpm} requests per minute for client {name}")
     refused = inference_refusal(cfg["clients"].get(name) or {}, request)
     if refused is not None:
         st["forbidden"] += 1
-        audit("forbidden", client=name, path=request.path, reason=refused.kind)
+        _audit_client(name, "forbidden", path=request.path, reason=refused.kind)
         return _deny(request, refused.status, refused.message, why={"code": refused.kind, "blockers": []})
     request["client"] = name
     spec = cfg["clients"].get(name)
@@ -223,11 +238,11 @@ async def client_auth_middleware(request, handler):
     limit, max_body = client_limits(spec)
     if request.content_length is not None and request.content_length > max_body:
         st["too_large"] += 1
-        audit("body_too_large", client=name, path=request.path, limit_mib=max_body // MIB)
+        _audit_client(name, "body_too_large", path=request.path, limit_mib=max_body // MIB)
         return _deny(request, 413, f"request body above {max_body // MIB} MiB for client {name}")
     if st["inflight"] >= limit:
         st["concurrency_limited"] += 1
-        audit("concurrency_limited", client=name, path=request.path, limit=limit)
+        _audit_client(name, "concurrency_limited", path=request.path, limit=limit)
         resp = _deny(request, 429, f"concurrency limit: {limit} requests at a time for client {name}")
         resp.headers["Retry-After"] = "1"
         return resp
@@ -242,7 +257,7 @@ async def client_auth_middleware(request, handler):
             outcome = await read_body_bounded(request)
             if outcome == BODY_TOO_LARGE:
                 st["too_large"] += 1
-                audit("body_too_large", client=name, path=request.path, limit_mib=max_body // MIB, chunked=True)
+                _audit_client(name, "body_too_large", path=request.path, limit_mib=max_body // MIB, chunked=True)
                 return _deny(request, 413, f"request body above {max_body // MIB} MiB for client {name}")
             request[BODY_PREREAD] = outcome == BODY_READ
         return await handler(request)
@@ -289,7 +304,7 @@ def client_allows(request, role, concrete):
     if reason is not None:
         name = request.get("client")
         _stats_for(name)["forbidden"] += 1
-        audit("forbidden", client=name, model=role["exposed"], path=request.path)
+        _audit_client(name, "forbidden", model=role["exposed"], path=request.path)
     return reason
 
 
