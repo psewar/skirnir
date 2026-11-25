@@ -207,6 +207,8 @@ class Node(Breaker):
         self.vram_total_reported_gib = None
         self.ollama_proc_gib = None
         self.children_vram_gib = 0.0   # Agent >= 0.13.0: Grafikspeicher seiner Kinder außer Ollama (STT per CUDA), gemeldet
+        # Agent >= 0.37.0 (ADR-0148): {"count", "private_mib"} of Ollama's runner processes; None = the agent cannot tell
+        self.ollama_runners = None
         # Agent >= 0.17.0: Game and RAM as fact (poll.apply_heartbeat). game None = agent does not report it
         # (too old / Linux without detection) - then only foreign VRAM and GPU load apply as before.
         self.game = None              # {"running", "name", "via", ...} from agent
@@ -263,6 +265,11 @@ class Node(Breaker):
 
     def gpu_known(self, now):
         return self.hb_ts and (now - self.hb_ts) <= state.CFG.hb_stale_s
+
+    def runners_known(self, now):
+        """Ollama's runner processes from a fresh heartbeat (ADR-0148), else None: a stale count 0 must not read as
+        "released" for a node whose agent stopped reporting."""
+        return self.ollama_runners if self.ollama_runners is not None and self.gpu_known(now) else None
 
     def ollama_vram_gib(self):
         """What Ollama currently occupies: for each loaded model the measured actual occupancy at its loaded context
@@ -646,6 +653,7 @@ class Node(Breaker):
             "gpu": self.gpu, "sensors": self.sensors, "gpu_guard": self.guard_view(now), "loaded_names_by_digest": sorted(m for m in self.models if self.is_loaded(m)),
             "breaker": self.breaker, "max_inflight": self.effective_max_inflight(), "draining": now < self.draining_until, "ollama_source": "push" if self.ollama_push_active(now) else "poll",
             "game": self.game, "memory": self.memory, "memory_pressure": self.mem_pressure,   # Agent >= 0.17.0
+            "ollama_runners": self.runners_known(now),   # Agent >= 0.37.0 (ADR-0148): count 0 = runner memory released
             "game_heavy": self.game_heavy, "game_heavy_why": self.game_heavy_why,             # 0.8.7
             "routes": self.routes,
         }

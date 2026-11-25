@@ -11,3 +11,10 @@ func gpuProcessVRAM() (map[uint32]uint64, error) {
 }
 
 func (t *procTree) pids() []uint32 { return nil }
+
+// members: outside Windows the agent does not list a child's process tree (a process group, platform_other.go), so the
+// runners of an Ollama child are not counted there (ADR-0148).
+func (t *procTree) members() ([]uint32, bool) { return nil, false }
+
+// isConsoleHost: there is no console host process outside Windows.
+func isConsoleHost(pid uint32) bool { return false }

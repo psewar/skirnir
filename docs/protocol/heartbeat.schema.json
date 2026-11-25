@@ -25,6 +25,7 @@
     },
     "game": {"$ref": "#/$defs/game", "x-since-agent": "0.17.0"},
     "memory": {"$ref": "#/$defs/memory", "x-since-agent": "0.17.0"},
+    "ollama_runners": {"$ref": "#/$defs/ollama_runners", "x-since-agent": "0.37.0"},
     "routes": {
       "type": "object",
       "description": "Health of the services behind configured tunnel routes (agent setting tunnel.routes), by route name. The router only sends a routed request (for example rerank) to a node whose route is up. Absent without routes.",
@@ -128,6 +129,16 @@
       },
       "additionalProperties": true
     },
+    "ollama_runners": {
+      "type": "object",
+      "description": "Ollama's runner processes as a fact (ADR-0148): every process in the process tree of the Ollama the agent supervises (summed over every running Ollama child), besides the server itself and the console host Windows starts for it. Ollama runs one runner per loaded model, and the runner holds the model's main memory until it has exited, seconds after the model left /api/ps. count 0 means no runner lives, so an unloaded model's memory is released. Absent when the agent cannot tell: Ollama is not its child or not running, or the platform does not list the tree (only Windows does).",
+      "properties": {
+        "count": {"type": "integer", "minimum": 0, "maximum": 256, "description": "Runner processes alive. A process whose program or memory cannot be read still counts."},
+        "private_mib": {"type": "integer", "minimum": 0, "description": "Their private working sets in MiB, summed: main memory they hold that only paging out would free. File pages of the model go to the standby list when a runner exits and are not counted."}
+      },
+      "required": ["count", "private_mib"],
+      "additionalProperties": true
+    },
     "route_health": {
       "type": "object",
       "description": "Health of one routed service. Only up true counts as up; an unknown reason counts as unhealthy.",
@@ -158,6 +169,7 @@
       "game": {"supported": true, "enabled": true, "running": true, "name": "example-game.exe", "via": "path", "since": 1789999000,
                "folders": 3, "procs": 1, "gpu_dedicated_mib": 3000, "gpu_shared_mib": 200, "gpu_pct": 35.0},
       "memory": {"ram_available_gib": 41.2, "ram_total_gib": 63.7, "commit_free_gib": 50.1, "commit_limit_gib": 80.0},
+      "ollama_runners": {"count": 1, "private_mib": 3120},
       "routes": {"rerank": {"up": true, "reason": ""}},
       "standby_models": ["example-model:8b"]
     }

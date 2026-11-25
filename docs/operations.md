@@ -31,13 +31,36 @@ To quiet a single node for a measurement (no unloading or prewarming until a giv
 ended early with `DELETE` ([ADR-0061](adr/0061-quiet-a-single-node-for-a-measurement.md); endpoints in
 [reference.md](reference.md#interfaces)).
 
+### Unloading a node before a large job
+
+After `keep_alive: 0` a model leaves `/api/ps` at once, but Ollama's runner process keeps the model's main memory for
+several seconds until it has exited. A large job started in that gap (a VM, say) can push the node close to full RAM.
+Since agent 0.37.0 the agent reports the runner processes in every heartbeat when Ollama is its child on Windows; the
+node view in `/admin/state` shows them as `ollama_runners: {count, private_mib}` (`null` where the agent cannot tell), and
+`/metrics` as `node_ollama_runners` and `node_ollama_runner_private_gib` ([ADR-0148](adr/0148-the-agent-reports-ollamas-runner-processes-and-their-memory.md)).
+`count` 0 means no runner lives, so the memory is released.
+
+`POST /admin/nodes/{fp}/unload` (optional body `{"timeout_s": 1..600}`, default 120) does the whole sequence: it unloads
+every model `/api/ps` lists, waits for an empty `/api/ps` and then for a heartbeat received after that with `count` 0
+([ADR-0149](adr/0149-an-admin-unload-answers-once-the-runner-memory-is-released.md)).
+
+| Answer | Meaning |
+|---|---|
+| 200 `released: true` | The memory is released; `unloaded` names the models, `waited_s` the time. |
+| 409 | Refused before anything was unloaded: the node is offline, its upstream is no Ollama, its agent does not report runners (older than 0.37.0, Linux, Ollama not its child), an unload already runs on it, or a measurement or benchmark runs on it. `error` and `next` say which and what to do. |
+| 503 `released: false` | `reason` is `timeout` (a model is still listed or a runner still lives at the deadline; see `loaded` and `ollama_runners`), `not_reported` (the agent stopped reporting runners, for example because Ollama restarted) or `offline`. |
+| 502 | Ollama on the node could not be asked. |
+
+The answer is a moment: a request that arrives afterwards loads a model again. Quiet stops the router's own prewarming,
+not requests.
+
 ## Observability
 
 `GET /metrics` (control port, Basic Auth) returns Prometheus text without `prometheus_client`, prefix `skirnir_`:
 `requests_total{role,node,model,client,via,outcome}`, `tokens_total{kind,…}`, histograms `request_duration_seconds`,
 `ttft_seconds`, `queue_wait_seconds`, `events_total{event,node}`, per node `node_up`, `node_state`, `node_inflight`,
-`node_gpu_util_percent`, `node_vram_*_gib`, `node_breaker`, per model `model_loaded_gib`, `perf_gen_tps`, `perf_error_rate`,
-plus `decision_*`, `cloud_*`, `usage_today_*`, `info`, and the active problems as `problem{code,severity,node,subject}` and
+`node_gpu_util_percent`, `node_vram_*_gib`, `node_breaker`, `node_ollama_runners` and `node_ollama_runner_private_gib`
+(only for nodes whose agent reports them), per model `model_loaded_gib`, `perf_gen_tps`, `perf_error_rate`, plus `decision_*`, `cloud_*`, `usage_today_*`, `info`, and the active problems as `problem{code,severity,node,subject}` and
 `problems_active` ([below](#problems)).
 
 ```yaml

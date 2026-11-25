@@ -127,6 +127,13 @@ Seit Router 0.42.14 (ADR-0137) nutzt der Router eine GPU-Zahl nur innerhalb des 
 Ollama-Prozess nur, wenn sie nicht über der Gesamtmenge liegen; ein Wert außerhalb wird ignoriert (unbekannt, wie ohne
 GPU), der Rest des Heartbeats gilt, und die Knotenansicht nennt die ignorierten Felder.
 
+Seit Agent 0.37.0 (ADR-0148) trägt der Heartbeat `ollama_runners: {count, private_mib}`, wenn Ollama unter Windows ein
+Kind des Agenten ist: die Prozesse in Ollamas Prozessbaum außer dem Server und seinem Konsolen-Host, ein Runner je
+geladenem Modell, und ihre privaten Arbeitssätze in MiB. `count` 0 heißt, kein Runner lebt mehr, der Hauptspeicher eines
+entladenen Modells ist also frei; nach `keep_alive: 0` kommt das Sekunden nach dem leeren `/api/ps`. Der Block fehlt, wo
+der Agent es nicht sagen kann (Ollama nicht sein Kind oder nicht gestartet, Linux). Der Router (0.44.0) verwirft einen
+Block außerhalb des Schemas als unplausibel und nutzt ihn nur, solange der Heartbeat frisch ist.
+
 ### Upstream-Zustand
 
 Mit OLLAMA meldet der Agent, was sein Upstream hält: `up`, die Einträge von `/api/tags` und `/api/ps` unverändert, und bei

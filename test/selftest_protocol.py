@@ -162,6 +162,8 @@ READERS = [
     ("poll.py", "note_game_memory", "g", "heartbeat.schema.json", "#/$defs/game"),
     ("poll.py", "note_game_memory", "m", "heartbeat.schema.json", "#/$defs/memory"),
     ("poll.py", "route_health", "r", "heartbeat.schema.json", "#/$defs/route_health"),
+    ("poll.py", "note_ollama_runners", "b", "heartbeat.schema.json", ""),
+    ("poll.py", "note_ollama_runners", "r", "heartbeat.schema.json", "#/$defs/ollama_runners"),
     ("poll.py", "apply_ollama_push", "msg", "ollama-state.schema.json", ""),
     ("poll.py", "apply_ollama_push", "blocked", "ollama-state.schema.json", "#/$defs/upstream_blocked"),
     ("poll.py", "apply_power", "msg", "power.schema.json", ""),

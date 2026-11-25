@@ -418,6 +418,7 @@ func TestProtocolHeartbeatMatchesSchema(t *testing.T) {
 		"children_vram_mib": reflect.TypeOf((*Supervisor).childrenVRAM).Out(0),
 		"game":              reflect.TypeOf((*GameWatch).Fact).Out(0),
 		"memory":            reflect.TypeOf(memoryFact).Out(0),
+		"ollama_runners":    reflect.TypeOf((*Supervisor).ollamaRunners).Out(0),
 		"routes":            reflect.TypeOf((*Routes).Report).Out(0),
 		"standby_models":    reflect.TypeOf((*StandbyStore).Models).Out(0),
 	}

@@ -120,6 +120,13 @@ answered with `state: ""` and `error`. Since router 0.42.14 (ADR-0137) the route
 the schema's range, and free VRAM and the Ollama process only when they are not above the total; a value outside is ignored
 (unknown, as without GPU), the rest of the heartbeat applies, and the node view lists the ignored fields.
 
+Since agent 0.37.0 (ADR-0148) the heartbeat carries `ollama_runners: {count, private_mib}` when Ollama is the agent's child
+on Windows: the processes in Ollama's process tree besides the server and its console host, one runner per loaded model,
+and their private working sets in MiB. `count` 0 means no runner lives, so an unloaded model's main memory is released;
+after `keep_alive: 0` that comes seconds later than the empty `/api/ps`. The block is absent where the agent cannot tell
+(Ollama not its child or not running, Linux). The router (0.44.0) drops a block outside the schema as implausible and
+uses the block only while the heartbeat is fresh.
+
 ### Upstream state
 
 With OLLAMA the agent reports what its upstream holds: `up`, the entries of `/api/tags` and `/api/ps` unchanged, and for an

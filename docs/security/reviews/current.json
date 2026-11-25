@@ -2,72 +2,95 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "8aded0aecbdd27d9e3021ea3562767f858025ebb",
- "change_digest": "6df87314397130604587c2ed516cbe3e9bd4e4bebabf3ad2e980d291b6b7e063",
+ "base_sha": "25a3d3f5e5fb0143e452b4aefa1b44669845ffed",
+ "change_digest": "544b5c1946b1060f1cce65298ed8f0e3089c1992136006af0b28b8298a825003",
  "reviewed_paths": [
   ".github/workflows/ci.yml",
   "CHANGELOG.md",
+  "agent/README.md",
+  "agent/gpuproc_other.go",
+  "agent/gpuproc_windows.go",
+  "agent/heartbeat.go",
+  "agent/ollamarunners.go",
+  "agent/ollamarunners_test.go",
+  "agent/ollamarunners_windows_test.go",
+  "agent/protocol_conformance_test.go",
+  "agent/supervisor_windows_test.go",
   "design/routing-algorithm.md",
-  "docs/adr/0146-a-measurement-takes-the-contexts-the-caller-names.md",
-  "docs/adr/0147-a-read-only-admin-endpoint-lists-each-role-as-model-at-context.md",
+  "docs/adr/0148-the-agent-reports-ollamas-runner-processes-and-their-memory.md",
+  "docs/adr/0149-an-admin-unload-answers-once-the-runner-memory-is-released.md",
   "docs/adr/README.md",
+  "docs/operations.de.md",
+  "docs/operations.md",
+  "docs/protocol.de.md",
+  "docs/protocol.md",
+  "docs/protocol/heartbeat.schema.json",
   "docs/reference.de.md",
   "docs/reference.md",
-  "router/skirnir_router/admin.py",
+  "docs/security/risk-register.json",
+  "docs/security/threat-model.de.md",
+  "docs/security/threat-model.md",
   "router/skirnir_router/app.py",
   "router/skirnir_router/common.py",
-  "router/skirnir_router/perf.py",
-  "test/selftest_bench_api.py",
+  "router/skirnir_router/metrics.py",
+  "router/skirnir_router/nodes.py",
+  "router/skirnir_router/poll.py",
+  "router/skirnir_router/unload.py",
+  "test/selftest_ollama_runners.py",
+  "test/selftest_protocol.py",
   "docs/security/reviews/current.json",
   "router/skirnir_router/auth.py",
-  "router/skirnir_router/config.py",
-  "router/skirnir_router/poll.py",
-  "docs/adr/0143-the-admin-part-of-the-control-port-answers-only-configured-networks.md"
+  "router/skirnir_router/quiet.py",
+  "router/skirnir_router/perf.py",
+  "agent/supervisor.go",
+  "agent/platform_windows.go",
+  "agent/procmem_windows.go",
+  "agent/game_windows.go"
  ],
  "risk_ids": [
   "TM-03",
+  "TM-07",
   "TM-08"
  ],
  "boundaries": [
   "B2",
-  "B3"
+  "B3",
+  "B8",
+  "B9"
  ],
- "summary": "Two admin-only control API additions for the model test bench (ADR-0146, ADR-0147, proposed). B2: GET /admin/roles is registered on the control app only; basic_auth_middleware covers every path outside /v1/, so it needs the admin login and router.admin_networks like /admin/config (tested: 401 before the handler without a login); GET only, no PUT. It returns a strict subset of GET /admin/config's roles (exposed_as, tier model, num_ctx, cloud provider name), no system_append prompts, options, canary, shadow, clients or nodes, with Cache-Control no-store; no data that /admin/config did not already give the same caller. POST /admin/measure: the optional contexts list is validated before a node is chosen or anything is spawned (1-6 distinct ints, bool excluded, 2048..1048576; 400 otherwise); on a node without GPU values a request with contexts is refused (409) instead of silently measuring only 8k/32k. B3/TM-08: each listed context is one more unload+load on the chosen free node under the existing single-measurement lock (state.MEASURING) and node.inflight, so measurements stay serialized; a very large context may spill into RAM, which the catalog marks as partial_offload as before - the admin asks for it explicitly, as when setting a role's num_ctx. Requests without contexts follow the previous path unchanged (tested). No new dependency, configuration key or protocol field.",
+ "summary": "Implements ADR-0148 and ADR-0149 (proposed). Agent 0.37.0 adds the heartbeat block ollama_runners {count, private_mib}: Supervisor.ollamaRunners sums, over every running child whose program is Ollama, the processes of its job object except the child's own pid and the system console host (GetSystemDirectory + conhost.exe, compared by full path), with their private working sets (procMemory). Agent side (B8): only read queries with PROCESS_QUERY_LIMITED_INFORMATION (QueryFullProcessImageName, K32GetProcessMemoryInfo) on pids taken from the agent's own job; the job is created without a breakaway flag (platform_windows.go newKillOnCloseJob), so a runner cannot leave it to hide; the only excluded program is the system's console host at the system path, which an unprivileged Ollama cannot replace. procTree.members now says whether the job was listed in full; a failed or partial query gives no fact (pids() keeps its old behaviour for existing callers). Unreadable processes still count, so the fact errs towards 'still held'. Router side, agent data (B3, TM-07): poll.note_ollama_runners accepts only a dict with integer count 0..256 and integer private_mib 0..4 TiB (bool excluded), stores a new dict of these two integers (no agent string reaches /admin/state, metrics or the UI), and drops anything else as implausible (ADR-0137 pattern, logged at most every ten minutes); it never raises. Node.runners_known hides a stale value. The fact does not influence routing; it is used for display, two metrics and the unload answer. A compromised agent can therefore make only its own node's unload answer 'released' early (added to TM-07 in threat model EN/DE and the risk register). New route POST /admin/nodes/{fp}/unload (B2, TM-03): registered before the generic node action and protected like every admin write by basic_auth_middleware (every non-/v1/ path: admin_networks, Basic Auth) and the X-Skirnir-UI header check for non-GET /admin/*; tests show 401 without credentials and 403 without the header, and neither reaches Ollama. Preconditions are checked before any effect (unknown fp 404, not approved 409, offline, OpenAI upstream, no fresh runner fact, unload already running, measurement or benchmark on the node 409; malformed or non-object body 400). The action sends keep_alive 0 for the model names from that node's own /api/ps back to the same node through perf._ollama (the existing measurement path, an allowed tunnel path), then answers released only with a heartbeat received after /api/ps emptied. Resource bound (TM-08): one unload per node at a time (RUNNING set, cleared in finally also on cancellation), timeout_s at most 600, polling every 0.5 s; admin-only. Logs and journal carry node name, fixed reason values and model names. Findings fixed before publication: (1) a malformed JSON body was read as None and defaulted to an empty body, so a garbled request would still unload; now 400, tested. (2) Parallel unloads of the same node could multiply the /api/ps polling through its tunnel for up to 600 s each; now one at a time per node with 409, tested including cancellation. Pre-existing and unchanged: model names from a node's /api/ps reach the log unescaped, as in poll.busy_unload_check and perf.",
  "findings": [],
  "tests": [
   {
-   "command": "python test/selftest_bench_api.py (new, in ci.yml)",
+   "command": "python test/selftest_ollama_runners.py (new, in ci.yml python job)",
    "result": "passed",
-   "evidence": "5 tests: contexts join fixed and role contexts, cloud tiers excluded, no-contexts unchanged; malformed lists (empty, duplicate, out of range, strings, floats, bools, scalar, too many) refused with 400 and nothing spawned; node without GPU values refused for contexts (409), measured by /api/ps without; roles listing equals /admin/config roles reduced, no prompts/options; GET-only route; 401 without login before the handler. Without the router change: 1 failure, 13 errors."
+   "evidence": "all checks pass: heartbeat block stored, 13 rejected value shapes dropped as implausible while GPU values still apply, stale heartbeat hides the fact, node view and both metrics (absent for a node without the fact); timeout_s validation (9 rejected values); every 409 refusal before Ollama is asked; release only with a heartbeat after the empty /api/ps (mutation removing the hb_ts check fails the test); timeout, timeout with loaded, not_reported, offline, 502; HTTP 404/409/400 incl. malformed JSON, 200, 503, journal entry; second concurrent unload 409 and guard cleared after the answer and after cancellation; route resolves to unload.handle_unload; 401 without credentials and 403 without X-Skirnir-UI, neither reaching Ollama."
   },
   {
-   "command": "selftest_vram_real, selftest_admin_networks, selftest_memory, ruff, check_control_flow, check_adr_index",
+   "command": "go test ./... (Windows), gofmt -l ., go vet ./... with GOOS=windows and GOOS=linux, GOOS=linux go test -c",
    "result": "passed",
-   "evidence": "all green; control flow 0 findings."
+   "evidence": "new TestCountRunners, TestOllamaRunnersWireForm, TestOllamaRunnersNeedAnOllamaChild (all platforms) and TestOllamaRunnersInARealJob, TestConsoleHostIsNoRunner, TestOllamaRunnersSumOverOllamaChildren (Windows, real job objects) pass; TestConsoleHostIsNoRunner shows Windows puts conhost.exe into the job of a console program with its own console; protocol conformance tests fail until the schema documents the block, then pass."
   },
   {
-   "command": "every python test/... and tools/... command of all workflows (Windows)",
+   "command": "every python test/... and tools/... command of all workflows (Windows), before the rebase onto 25a3d3f",
    "result": "passed",
-   "evidence": "106 commands, 1 failed: lock_requirements.py outdated refuses Windows by design (passes on Linux)."
+   "evidence": "108 commands, 106 OK; the two failures are local only: check_public_changes.py needs PUBLIC_CHANGES_BASE from CI (run without it: 0 findings), and lock_requirements.py outdated refuses Windows by design. python test/run_tests.py (end-to-end) 0 failures."
   },
   {
-   "command": "python test/run_tests.py (end-to-end suite)",
+   "command": "every python test/... and tools/... command of all workflows (Windows), after the rebase onto 25a3d3f",
    "result": "passed",
-   "evidence": "337 PASS, 0 failures."
+   "evidence": "109 commands, 107 OK; the same two local-only failures as before (PUBLIC_CHANGES_BASE missing outside CI, run without it: 0 findings; lock_requirements.py outdated is Linux only). python test/run_tests.py (end-to-end): 337 PASS, 0 failures."
   },
   {
-   "command": "python test/check_public_changes.py",
-   "result": "passed",
-   "evidence": "run after staging this record."
-  },
-  {
-   "command": "python tools/security/review.py check --base origin/main --head INDEX",
-   "result": "passed",
-   "evidence": "run after staging this record."
+   "command": "Linux execution of the Go tests, router container self-tests",
+   "result": "not_run",
+   "evidence": "no Go toolchain in the local WSL distribution and no container run here; CI's go (Linux and Windows) and container jobs run them."
   }
  ],
  "limitations": [
-  "Not measured on a real GPU node: the measurement path itself (_measure_real) is unchanged apart from the extra contexts and is covered by selftest_vram_real; the test bench's own switch to the new options is not part of this repository.",
-  "The model test bench's wish for a fact 'model unloaded and process RAM freed' is not addressed here: it needs the agent to report runner process memory (protocol change) and is proposed separately."
+  "No real Ollama was used (the task forbids testing against personal infrastructure): the runner classification is tested with the test binary as server and runner in real job objects, not with ollama.exe and its runners; a future Ollama helper process in the job would keep the count above 0 (safe direction, unload then times out).",
+  "The agent's fact cannot be verified by the router; a compromised agent can claim its own node's memory released early (TM-07).",
+  "The count is node-wide; per-model attribution is out of scope (ADR-0148).",
+  "Linux agents report no block, so the unload is refused there with 409."
  ]
 }

@@ -17,6 +17,7 @@ from . import decision, fallback_observation, memory, quiet, rerank, session_api
 from .unexpected import unexpected_error_middleware
 from . import posture, process_view
 from . import browser_headers
+from . import unload
 from .common import log, INFER_PATHS, FORBIDDEN_PATHS, split_listen
 from .outcome import failed
 
@@ -83,6 +84,7 @@ def build_apps():
     ctl.router.add_get("/admin/nodes", registry.handle_nodes)
     ctl.router.add_post("/admin/nodes/{fp}/quiet", quiet.handle_start)     # 0.21.0: quiet for a measurement (ADR-0061)
     ctl.router.add_delete("/admin/nodes/{fp}/quiet", quiet.handle_end)
+    ctl.router.add_post("/admin/nodes/{fp}/unload", unload.handle_unload)   # 0.44.0: answers once runner memory is released (ADR-0149)
     ctl.router.add_post("/admin/nodes/{fp}/{action}", registry.handle_node_action)
     ctl.router.add_delete("/admin/nodes/{fp}", registry.handle_node_delete)
     ctl.router.add_get("/admin/state", admin.handle_state)
