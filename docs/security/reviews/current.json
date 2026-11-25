@@ -3,7 +3,7 @@
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
  "base_sha": "fe84eb7d8f9ab3d4958fa9276b1a9817d75d66cd",
- "change_digest": "905ecda152460d1e03b3591535eeffdc4c4bccb4bdfd19aca7005db6a08b9cfe",
+ "change_digest": "b017bc1b991f2ef5ebf218857054cefaa4051cd18f3b583b3cb9d591bd4fac0f",
  "reviewed_paths": [
   "CHANGELOG.md",
   "docs/adr/0063-bound-concurrency-and-body-size-per-client.md",
@@ -19,6 +19,7 @@
   "router/skirnir_router/common.py",
   "router/skirnir_router/session_api.py",
   "test/selftest_client_limits.py",
+  "test/selftest_security.py",
   "docs/security/reviews/current.json",
   "router/skirnir_router/app.py",
   "router/skirnir_router/proxy.py",
@@ -68,6 +69,11 @@
    "command": "every python command of the python job in .github/workflows/ci.yml (Windows), except pip install, run_tests.py and check_public_changes",
    "result": "passed",
    "evidence": "94 commands, 0 failed; includes check_control_flow (0 findings), ADR index (128), configuration check of config.example.yaml."
+  },
+  {
+   "command": "python test/selftest_security.py ; python tools/security/lock_requirements.py verify-pypi ; python tools/security/review.py check --base HEAD --head HEAD --baseline-only (the python commands of the other workflows)",
+   "result": "passed",
+   "evidence": "selftest_security.py's request stub gained body_exists = False (a request without body, as aiohttp reports it): the middleware now reads that attribute, and the first CI run of this PR failed there with AttributeError. After the change all PASS; verify-pypi 0 problems; baseline evidence check 0 errors."
   },
   {
    "command": "python test/check_public_changes.py",
