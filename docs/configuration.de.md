@@ -47,7 +47,7 @@ client_auth:
 | `models` | Konkrete Modellnamen erlaubt? ([ADR-0052](adr/0052-concrete-model-names-need-an-explicit-grant.md)) |
 | `requests_per_minute` | Rate Limit; darüber 429 |
 | `max_concurrent` | Gleichzeitig laufende Anfragen, Standard 4; die nächste bekommt 429 mit `Retry-After: 1` ([ADR-0063](adr/0063-bound-concurrency-and-body-size-per-client.md)) |
-| `max_body_mib` | Angegebene Body-Größe, Standard 16; darüber 413 (ADR-0063) |
+| `max_body_mib` | Body-Größe, Standard 16; darüber 413: eine angegebene Größe vor jeder Arbeit, ein Chunked-Body beim Lesen (ADR-0063, ADR-0128) |
 | `max_priority` | Höchste Admission-Priorität, die der Client beanspruchen darf |
 | `cloud`, `data_class` | Cloud-Stufen erlaubt, deklarierte Datenklasse ([unten](#cloud-als-stufe-in-rollen)) |
 | `privacy_check` | Inhaltsprüfung vor einer Cloud-Stufe (unten) |

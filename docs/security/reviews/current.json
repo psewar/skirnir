@@ -2,79 +2,71 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "53314d27fe821c257a7b9e07995547d9ce4ec45f",
- "change_digest": "6ba80b2aad7316c7b4625c2606955242db1c759f78295d509fc1b860a4bdf559",
+ "base_sha": "fe84eb7d8f9ab3d4958fa9276b1a9817d75d66cd",
+ "change_digest": "3f9c877bb10f96850831f67f951352b004ed656de0119066667ec356c6704e70",
  "reviewed_paths": [
-  ".github/workflows/ci.yml",
-  ".github/workflows/decision-images.yml",
-  "AGENTS.md",
   "CHANGELOG.md",
-  "design/decision-engine.md",
-  "docs/adr/0127-ci-builds-the-decision-service-images-when-they-change-and-weekly.md",
+  "docs/adr/0063-bound-concurrency-and-body-size-per-client.md",
+  "docs/adr/0128-the-per-client-body-limit-also-bounds-chunked-bodies.md",
   "docs/adr/README.md",
-  "test/selftest_service_images.py",
-  "test/smoke_decision_images.sh",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
+  "docs/security/risk-register.json",
+  "docs/security/threat-model.de.md",
+  "docs/security/threat-model.md",
+  "router/config.example.yaml",
+  "router/skirnir_router/auth.py",
+  "router/skirnir_router/common.py",
+  "router/skirnir_router/session_api.py",
+  "test/selftest_client_limits.py",
   "docs/security/reviews/current.json",
-  ".github/dependabot.yml",
-  ".github/workflows/trusted-security-gate.yml",
-  ".github/workflows/security.yml",
-  "decision-embed/Dockerfile",
-  "decision-embed/compose.yaml",
-  "decision-embed/server.py",
-  "decision-embed/embedder.py",
-  "decision-jevlike/Dockerfile",
-  "decision-jevlike/compose.yaml",
-  "decision-jevlike/server.py",
-  "test/smoke_container.sh"
+  "router/skirnir_router/app.py",
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/openai_api.py",
+  "router/skirnir_router/anthropic_api.py",
+  "router/skirnir_router/rerank.py",
+  "router/skirnir_router/memory.py",
+  "router/skirnir_router/memory_gateway.py",
+  "router/skirnir_router/managed.py",
+  "docs/clients.md",
+  "docs/troubleshooting.md"
  ],
  "risk_ids": [
-  "TM-16"
+  "TM-08"
  ],
  "boundaries": [
+  "B1",
   "B9"
  ],
- "summary": "Refreshed after merging main at 53314d2 (#192: test/smoke_container.sh refuses under Git Bash, MSYS2 and Cygwin; it changed the smoke_container.sh line in AGENTS.md and added a changelog section, both kept beside this PR's lines; none of this PR's other paths). The merged tree was checked again; this PR's own content is unchanged. CI and tooling only; router, agent, the decision services and their images are unchanged. New workflow .github/workflows/decision-images.yml builds the decision-embed and decision-jevlike images (the directories besides router/ whose base images Dependabot updates) with the new test/smoke_decision_images.sh, on pull_request when a file that goes into an image changes, weekly and on workflow_dispatch (ADR-0127, proposed). Traced B9: trigger is pull_request (not pull_request_target), so candidate code runs with the read-only GITHUB_TOKEN and without secrets, as in ci.yml's container job; workflow permissions contents: read; checkout pinned to the same commit SHA as ci.yml with persist-credentials: false; the matrix value reaches the script through env (SERVICE) and is quoted, not interpolated into the shell; nothing is pushed or published; the import check runs with --network none. The script refuses an unknown service name and a missing Dockerfile before acting, builds with the build context of the service directory only, and inside the image only compiles the program files and imports modules (no service code runs, no model, no network). The build itself fetches packages from PyPI, the PyTorch CPU index and a pinned jevlike archive, exactly what the Dockerfiles already do on a host; the images stay local to the runner. The trusted security gate (workflow_run on CI) and the required checks are unchanged; the new workflow is path-filtered and therefore not a required check, which ADR-0127 states. ci.yml gains one step (test/selftest_service_images.py), nothing removed. AGENTS.md gains the check command and a rule; nothing weakened. The new self-test also guards the workflow's read-only permissions.",
- "findings": [],
+ "summary": "Router 0.42.2 closes TM-08's next action 'bound chunked bodies per client' (ADR-0128, proposed, supersedes ADR-0063). Before, max_body_mib (default 16) was checked only against a declared Content-Length; a body sent with Transfer-Encoding: chunked was bounded only by the API app's client_max_size of 64 MiB, so a client could send four times its limit per request and up to max_concurrent such bodies. Now client_auth_middleware, for a configured client whose request has a body without a declared length, takes the client's concurrency slot first and then reads the body through request.clone(client_max_size=max_body) via the new boundary helper common.read_body_bounded, which reports BODY_READ, BODY_TOO_LARGE or BODY_UNREADABLE as a fact. aiohttp 3.14's BaseRequest.read checks the size while it reads (verified in its source), so memory per request stays within the limit plus one read chunk. BODY_TOO_LARGE answers 413 with the same message as for a declared size, counts too_large and writes the audit line body_too_large with chunked: true; the slot is given back in the existing finally. BODY_READ passes the clone (state incl. request['client'] and match_info copied by aiohttp) with the body cached and the fact request[BODY_PREREAD] = True, so handlers (read_json, request.read) see the full body; BODY_UNREADABLE passes the clone on and the handler's own read reports the failure as before (read_json -> None -> 400). Traced B1: identification, rate limit, inference refusal and the declared-size check run before as before; unauthenticated requests and the UI identity are unchanged (64 MiB ceiling). Request-body readers checked: proxy, openai_api, anthropic_api, rerank and admin read the whole body (read_json / request.read); session_api.body (used by the session API, memory.py and memory_gateway.py) streams request.content with its own 1 MiB bound and now uses the pre-read bytes when BODY_PREREAD is set, applying the same 1 MiB bound to them; managed.lines streams an upstream reply, not a request. For a chunked session or memory write from a configured client, memory per request is now the client's limit (default 16 MiB) instead of 1 MiB before the session bound applies; noted in ADR-0128. Exceptions: the helper catches aiohttp's HTTPRequestEntityTooLarge (the only signal aiohttp gives) and other read failures at the network boundary, both marked exception-ok; no error text is parsed. Possible behaviour change for operators: a client that sent chunked bodies above its max_body_mib now gets 413 (noted in the changelog with the fix: raise max_body_mib).",
+ "findings": [
+  {
+   "id": "CHUNKED-PREREAD-SESSION-BODY",
+   "evidence": "The first version of this change pre-read chunked bodies in the middleware without telling handlers. session_api.body streams request.content itself, so a chunked session or memory write from a configured client would have found the stream used up and answered 400 'body must contain valid JSON' (reproduced by the new test with the session_api branch removed).",
+   "resolution": "The middleware sets the fact request[BODY_PREREAD]; session_api.body takes the cached bytes when it is set and applies its 1 MiB bound to them. test_handlers_that_stream_their_body_get_the_body_the_middleware_read covers a chunked JSON body (200), 2 MiB chunked (413 'session body exceeds 1 MiB') and a declared body (still streamed).",
+   "disposition": "fixed"
+  }
+ ],
  "tests": [
   {
-   "command": "bash test/smoke_decision_images.sh --engine podman (current main)",
+   "command": "python test/selftest_client_limits.py",
    "result": "passed",
-   "evidence": "decision-embed builds on python:3.14-slim, Python 3.14.10, loaded numpy, onnxruntime, tokenizers; decision-jevlike builds on python:3.15-slim, Python 3.15.2, loaded jevlike.data, jevlike.model, jevlike.train, torch; STATE: passed."
+   "evidence": "11 tests OK. New: 17 MiB chunked for a client with the default 16 MiB -> 413 with the client message, handler not run, too_large counted, audit body_too_large with chunked true, slot free (rejected case); 17 MiB chunked for a client allowing 32 MiB and a chunked JSON body reach the handler intact, also through read_json; session_api.body behind the middleware: chunked JSON 200, 2 MiB chunked 413, declared body unchanged; a slow chunked upload holds the client's only slot while it is read, a second request gets 429. Without the fix (auth.py from origin/main) the rejected case fails (200 != 413); with the pre-read moved before the slot (mutation) the slot test fails (0 != 1); without the session_api branch the session test fails (400 != 200)."
   },
   {
-   "command": "bash test/smoke_decision_images.sh --engine podman decision-embed, with decision-embed/Dockerfile temporarily on the base image of #173 (python:3.15-slim@sha256:65a65fc7...)",
+   "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "Rejected as intended: 'No matching distribution found for onnxruntime', FAIL decision-embed: the image does not build on python:3.15-slim, STATE: failed, exit 1. Dockerfile restored afterwards (git checkout)."
+   "evidence": "end-to-end suite: 337 PASS, 0 failures."
   },
   {
-   "command": "import check of the script against a synthetic /app/zz_missing.py (import doesnotexist_pkg; from numpy import no_such_name) in the decision-embed image",
+   "command": "every python command of the python job in .github/workflows/ci.yml (Windows), except pip install, run_tests.py and check_public_changes",
    "result": "passed",
-   "evidence": "Rejected as intended: 'missing: doesnotexist_pkg, numpy.no_such_name', exit 1."
-  },
-  {
-   "command": "bash test/smoke_decision_images.sh --engine podman decision-nope ; --help",
-   "result": "passed",
-   "evidence": "'unknown service decision-nope (known: decision-embed decision-jevlike)', STATE: refused; help prints the header."
-  },
-  {
-   "command": "python test/selftest_service_images.py",
-   "result": "passed",
-   "evidence": "11 tests OK, among them rejected cases: a new Dependabot docker directory without a build, a COPY source outside the trigger paths, a service missing from the script, no schedule, wider permissions, the router without its ci.yml job."
-  },
-  {
-   "command": "ruff check . ; check_adr_index.py ; selftest_pinned_references.py && check_pinned_references.py ; selftest_threat_review.py ; selftest_trusted_gate.py ; selftest_dependency_audit.py ; selftest_container_image.py ; selftest_english_names.py",
-   "result": "passed",
-   "evidence": "All checks passed; ADR index ok: 127 ADRs; pinned references 0 findings; 26 + gate + audit + 17 tests OK; english names ok. Rerun on the merged tree (main 53314d2): ruff, ADR index, pinned references, selftest_service_images (11 OK), selftest_container_image (20 OK, 3 skipped on Windows, from #192), selftest_threat_review (26 OK), selftest_trusted_gate, public-data scan: all pass."
+   "evidence": "94 commands, 0 failed; includes check_control_flow (0 findings), ADR index (128), configuration check of config.example.yaml."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "0 finding(s); added lines reviewed by hand: no hostnames, paths of the own environment or personal data."
-  },
-  {
-   "command": ".github/workflows/decision-images.yml on GitHub (PR #193, head dfb3839 before the merge)",
-   "result": "passed",
-   "evidence": "Decision service image (decision-embed) pass, Decision service image (decision-jevlike) pass; all other PR checks passed as well. The workflow runs again on the merged head."
+   "evidence": "run after staging this record; added lines reviewed by hand: code, synthetic test values (example model/prompt), documentation."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -83,9 +75,9 @@
   }
  ],
  "limitations": [
-  "Pre-existing (TM-16 baseline, not introduced here): the decision images install unpinned packages; ADR-0127 leaves hash locks for them undecided. The check makes a breaking release visible, it does not make builds reproducible.",
-  "The check neither starts a service nor loads a model; runtime incompatibilities of a model are not covered.",
-  "A path-filtered workflow cannot be a required check; it gates by the rule not to merge with failing CI.",
-  "Weekly failures show in the Actions tab and its notification, not on a pull request."
+  "Memory per chunked request is bounded by the limit plus one read chunk of aiohttp, not exactly by max_body_mib.",
+  "Not measured under hostile load (many clients at once); TM-08's hostile-load test remains open.",
+  "Unauthenticated requests in observe mode and the router's UI identity keep the 64 MiB ceiling, as before.",
+  "ADR-0128 and router 0.42.2 are also taken by the open PR #194 (control UI CSP); the PR merged second renumbers (next free ADR number, next patch version)."
  ]
 }

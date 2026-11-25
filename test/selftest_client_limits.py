@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Self-test (TM-08, ADR-0063): per-client bounds for authenticated traffic.
+"""Self-test (TM-08, ADR-0063, ADR-0128): per-client bounds for authenticated traffic.
 
 A configured client may have at most `max_concurrent` requests in progress (default 4); the next one is answered 429 with
-Retry-After at once, before any work. A declared request body above `max_body_mib` (default 16) is answered 413. A slot is
-given back when a request finishes, fails or the client disconnects. The router's own UI identity is not limited. Checks
-configuration, the middleware with a gated handler, cancellation, the UI fields and the metrics. Synthetic values only."""
+Retry-After at once, before any work. A declared request body above `max_body_mib` (default 16) is answered 413; so is a
+chunked body (no declared length) once it grows past the limit while the router reads it, inside the client's slot, so a
+client cannot hold more than max_concurrent bodies in memory. A chunked body within the limit reaches the handler intact.
+A slot is given back when a request finishes, fails or the client disconnects. The router's own UI identity is not limited.
+Checks configuration, the middleware with a gated handler, cancellation, the UI fields and the metrics. Synthetic values
+only."""
 import asyncio
 import copy
 import hashlib
@@ -17,7 +20,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "router"))
-from skirnir_router import admin, auth, config, metrics, state  # noqa: E402
+from skirnir_router import admin, auth, common, config, metrics, session_api, state  # noqa: E402
 from skirnir_router.outcome import failed  # noqa: E402
 
 EXAMPLE = os.path.join(HERE, "..", "router", "config.example.yaml")
@@ -71,12 +74,28 @@ class MiddlewareTests(unittest.IsolatedAsyncioTestCase):
             self.entered += 1
             await self.gate.wait()
             return web.json_response({"ok": True})
+
+        async def echo(request):   # what a handler sees of the body: its length and, through read_json, its JSON
+            raw = await request.read()
+            body = await common.read_json(request) if raw[:1] == b"{" else None
+            return web.json_response({"length": len(raw), "json": body})
+        async def session_write(request):   # the session and memory APIs read their body with session_api.body (1 MiB)
+            data = await session_api.body(request)
+            if failed(data):
+                return web.json_response({"error": data.message}, status=data.status)
+            return web.json_response({"json": data})
         app.router.add_post("/api/chat", slow)
+        app.router.add_post("/api/generate", echo)
+        app.router.add_post("/v1/sessions/example", session_write)
+        self.audits = []
+        self.real_audit = auth.audit
+        auth.audit = lambda event, **fields: self.audits.append((event, fields))
         self.client = TestClient(TestServer(app))
         await self.client.start_server()
 
     async def asyncTearDown(self):
         await self.client.close()
+        auth.audit = self.real_audit
         state.CFG, state.CLIENT_AUTH_MODE = self.previous[:2]
         state.CLIENT_STATS.clear()
         state.CLIENT_STATS.update(self.previous[2])
@@ -121,6 +140,78 @@ class MiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.entered, 0, "refused before the handler")
         self.assertEqual((await self.post("single-client", data=big)).status, 200, "max_body_mib: 32 allows it")
         self.assertEqual(self.stats("default-client")["too_large"], 1)
+
+    @staticmethod
+    async def chunks(total, piece=auth.MIB, gate=None):
+        """A request body without Content-Length: aiohttp sends an async generator with Transfer-Encoding: chunked."""
+        sent = 0
+        while sent < total:
+            n = min(piece, total - sent)
+            yield b"x" * n
+            sent += n
+            if gate is not None and sent == piece:
+                await gate.wait()   # hold the upload open after the first piece
+
+    async def test_chunked_body_above_the_limit_is_refused_while_read(self):
+        self.gate.set()
+        r = await self.client.post("/api/chat", data=self.chunks(17 * auth.MIB),
+                                   headers={"Authorization": "Bearer default-client"})
+        self.assertEqual(r.status, 413, "rejected: 17 MiB chunked for a client with the default 16 MiB")
+        self.assertIn("request body above 16 MiB for client default-client", await r.text())
+        self.assertEqual(self.entered, 0, "the handler never ran")
+        self.assertEqual(self.stats("default-client")["too_large"], 1)
+        self.assertEqual(self.stats("default-client")["inflight"], 0, "the slot is given back")
+        self.assertIn(("body_too_large", {"client": "default-client", "path": "/api/chat", "limit_mib": 16, "chunked": True}),
+                      self.audits)
+
+    async def test_chunked_body_within_the_limit_reaches_the_handler_intact(self):
+        r = await self.client.post("/api/generate", data=self.chunks(17 * auth.MIB),
+                                   headers={"Authorization": "Bearer single-client"})
+        self.assertEqual((r.status, (await r.json())["length"]), (200, 17 * auth.MIB), "max_body_mib: 32 allows it")
+
+        async def json_chunks():
+            yield b'{"model": "example", '
+            yield b'"prompt": "synthetic"}'
+        r = await self.client.post("/api/generate", data=json_chunks(),
+                                   headers={"Authorization": "Bearer default-client", "Content-Type": "application/json"})
+        self.assertEqual((await r.json())["json"], {"model": "example", "prompt": "synthetic"}, "read_json gets the body")
+        self.assertEqual(self.stats("single-client")["too_large"], 0)
+        self.assertEqual(self.audits, [])
+
+    async def test_handlers_that_stream_their_body_get_the_body_the_middleware_read(self):
+        # session_api.body streams the body with its own 1 MiB bound; after the middleware read a chunked body it uses the
+        # bytes on the request (BODY_PREREAD) instead of the used-up stream.
+        headers = {"Authorization": "Bearer default-client", "Content-Type": "application/json"}
+
+        async def json_chunks():
+            yield b'{"event_id": "example-1", '
+            yield b'"message": {"role": "user", "content": "synthetic"}}'
+        r = await self.client.post("/v1/sessions/example", data=json_chunks(), headers=headers)
+        self.assertEqual(r.status, 200, await r.text())
+        self.assertEqual((await r.json())["json"]["event_id"], "example-1")
+        r = await self.client.post("/v1/sessions/example", data=self.chunks(2 * auth.MIB), headers=headers)
+        self.assertEqual((r.status, (await r.json())["error"]), (413, "session body exceeds 1 MiB"),
+                         "within the client's 16 MiB, above the session API's own bound")
+        r = await self.client.post("/v1/sessions/example", data=b'{"event_id": "example-2"}', headers=headers)
+        self.assertEqual((await r.json())["json"], {"event_id": "example-2"}, "a declared body is still streamed as before")
+
+    async def test_a_chunked_body_is_read_inside_the_clients_slot(self):
+        # While a slow chunked upload is being read, it holds single-client's only slot: a second request is refused 429,
+        # so a client cannot hold more than max_concurrent bodies in memory by uploading slowly in parallel.
+        self.gate.set()
+        hold = asyncio.Event()
+        upload = asyncio.create_task(self.client.post("/api/generate", data=self.chunks(3 * auth.MIB, gate=hold),
+                                                      headers={"Authorization": "Bearer single-client"}))
+        for _ in range(200):   # the client's statistics exist once the upload reached the middleware
+            if state.CLIENT_STATS["clients"].get("single-client", {}).get("inflight") == 1:
+                break
+            await asyncio.sleep(0.01)
+        self.assertEqual(self.stats("single-client")["inflight"], 1, "the upload holds the slot while it is read")
+        self.assertEqual((await self.post("single-client")).status, 429)
+        hold.set()
+        r = await upload
+        self.assertEqual((r.status, (await r.json())["length"]), (200, 3 * auth.MIB))
+        self.assertEqual(self.stats("single-client")["inflight"], 0)
 
     async def test_a_disconnecting_client_gives_its_slot_back(self):
         with self.assertRaises(asyncio.TimeoutError):

@@ -9,7 +9,7 @@ import re
 from aiohttp import web
 
 
-VERSION = "0.42.1"
+VERSION = "0.42.2"
 GIB = 2 ** 30
 log = logging.getLogger("router")
 
@@ -148,6 +148,27 @@ async def read_json(request):
     # aiohttp raises JSONDecodeError, UnicodeDecodeError, or ClientError depending on case
     except Exception:  # noqa: BLE001  # exception-ok: untrusted request body and the connection it arrives on
         return None
+
+
+BODY_READ = "read"              # the whole body is read and cached on the request; handlers read it from there
+BODY_TOO_LARGE = "too_large"    # it grew past the request's client_max_size while it was read
+BODY_UNREADABLE = "unreadable"  # the connection failed while reading; the handler's own read reports it as before
+# Request state set by the client middleware when it has read the body (ADR-0128): the stream is used up, the bytes are
+# on the request (request.read()). A handler that streams the body itself checks this fact instead of the stream.
+BODY_PREREAD = "body_preread"
+
+
+async def read_body_bounded(request):
+    """Read the request body now, bounded by the request's client_max_size, and report the outcome as a fact
+    (BODY_READ, BODY_TOO_LARGE or BODY_UNREADABLE). aiohttp checks the size while it reads, so a body without a declared
+    length (chunked) cannot grow past the limit in memory (ADR-0128)."""
+    try:
+        await request.read()
+    except web.HTTPRequestEntityTooLarge:  # exception-ok: aiohttp reports an exceeded client_max_size only by raising
+        return BODY_TOO_LARGE
+    except Exception:  # noqa: BLE001  # exception-ok: untrusted request body and the connection it arrives on
+        return BODY_UNREADABLE
+    return BODY_READ
 
 
 def safe_node_name(name):
