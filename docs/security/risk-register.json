@@ -127,7 +127,7 @@
       "status": "open",
       "scenario": "Pending-slot flood or compromised approved agent.",
       "controls": "Ed25519 approval, bounded pending and per-IP admission. A wire-level test over the real tunnel endpoint shows that revocation ends waiting and streaming requests with the reason 'revoked', tells the agent, closes the connection and removes the node; the revoked key is refused on reconnect; new keys beyond the per-address limit are refused with 1008 and not registered, while an approved key still connects. The README asks to compare the UI fingerprint with skirnir-agent identity before approval (ADR-0066). Since router 0.42.13 (ADR-0136) router.agent_enrollment_networks limits enrollment of new keys to the operator's networks; known keys reconnect from anywhere.",
-      "next_action": "Set router.agent_enrollment_networks in the deployment; plausibility checks on reports of an approved agent.",
+      "next_action": "Set router.agent_enrollment_networks in the deployment; consider cross-checks of plausible but false reports (load against observed answer times).",
       "owner_role": "maintainer and operator",
       "test_refs": [
         "test/selftest_agent_revocation.py",

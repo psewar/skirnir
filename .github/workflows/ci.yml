@@ -64,6 +64,7 @@ jobs:
       - run: python test/selftest_hostile_load.py
       - run: python test/selftest_client_cloud_budget.py
       - run: python test/selftest_enrollment_networks.py
+      - run: python test/selftest_heartbeat_plausibility.py
       - run: python test/selftest_agent_revocation.py
       - run: python test/selftest_key_rotation.py
       - run: python test/selftest_english_names.py

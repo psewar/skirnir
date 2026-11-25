@@ -709,6 +709,52 @@ def hb_ack(node):
             "gpu_guard_ack": bool(state.CFG.gpu_guard["enabled"] and node.guard_policy)}
 
 
+MAX_VRAM_MIB = 1 << 22                # 4 TiB: more VRAM than any card has; a larger number is not a measurement
+VRAM_SLACK_MIB = 256                  # free VRAM may exceed the total by rounding and driver bookkeeping, not by more
+IMPLAUSIBLE_LOG_EVERY_S = 600         # one log line per node about dropped values in this time
+
+
+def _mib(value):
+    """A VRAM amount from an agent: a finite, non-negative number within MAX_VRAM_MIB, else None (not a measurement)."""
+    if type(value) not in (int, float) or value != value or not 0 <= value <= MAX_VRAM_MIB:
+        return None
+    return value
+
+
+def plausible_gpu_facts(b):
+    """The GPU numbers of a heartbeat as the router may use them (ADR-0137): each within the heartbeat schema's range
+    (gpu_util_pct 0-100, VRAM amounts >= 0 and below MAX_VRAM_MIB), and free VRAM and the Ollama process not above the
+    total: those two give a node room, so a larger number would attract requests it cannot take. Used VRAM above the total
+    only makes the node look busier (the end-to-end suite uses it to simulate foreign load) and is kept. A value outside is
+    dropped (None = unknown, as for a node without GPU). Returns (facts, dropped field names)."""
+    dropped = []
+    util = b.get("gpu_util_pct")
+    if util is not None and (type(util) not in (int, float) or util != util or not 0 <= util <= 100):
+        dropped.append("gpu_util_pct")
+        util = None
+    facts = {"gpu_util_pct": util}
+    for key in ("vram_total_mib", "vram_used_mib", "vram_free_mib", "ollama_proc_mib"):
+        raw = b.get(key)
+        facts[key] = _mib(raw)
+        if raw is not None and facts[key] is None:
+            dropped.append(key)
+    total = facts["vram_total_mib"]
+    if total is not None:
+        for key in ("vram_free_mib", "ollama_proc_mib"):
+            if facts[key] is not None and facts[key] > total + VRAM_SLACK_MIB:
+                facts[key] = None
+                dropped.append(key)
+    children = b.get("children_vram_mib")
+    if isinstance(children, dict):
+        kept = {k: v for k, v in children.items() if isinstance(k, str) and _mib(v) is not None}
+        if len(kept) != len(children):
+            dropped.append("children_vram_mib")
+        facts["children_vram_mib"] = kept
+    else:
+        facts["children_vram_mib"] = None
+    return facts, dropped
+
+
 def apply_heartbeat(node, b, now):
     """Adopt GPU facts from a heartbeat, run state machine, learn baseline."""
     node.hb_ts = now
@@ -725,15 +771,20 @@ def apply_heartbeat(node, b, now):
             log.info("node %s: TLS fingerprint taken from the agent (%s...)", node.name, node.tls_fp[:16])
         else:
             log.warning("node %s: invalid TLS fingerprint: %r", node.name, fp)
-    node.gpu_util = b.get("gpu_util_pct")
-    total = b.get("vram_total_mib"); used = b.get("vram_used_mib"); free = b.get("vram_free_mib")
+    facts, dropped = plausible_gpu_facts(b)   # ADR-0137: only numbers within range and consistent with the total
+    node.implausible_fields = dropped
+    if dropped and now - node.implausible_logged >= IMPLAUSIBLE_LOG_EVERY_S:
+        node.implausible_logged = now
+        log.warning("node %s: heartbeat values out of range ignored: %s", node.name, ", ".join(dropped))
+    node.gpu_util = facts["gpu_util_pct"]
+    total, used, free = facts["vram_total_mib"], facts["vram_used_mib"], facts["vram_free_mib"]
     node.vram_total_reported_gib = total / 1024 if total is not None else None
     node.vram_used_gib = used / 1024 if used is not None else None
     node.vram_free_gib = free / 1024 if free is not None else None
-    op = b.get("ollama_proc_mib")
+    op = facts["ollama_proc_mib"]
     node.ollama_proc_gib = op / 1024 if op is not None else None
-    kv = b.get("children_vram_mib")   # Agent >= 0.13.0: {kind: MiB} without Ollama; if field is missing, no such children
-    node.children_vram_gib = sum(v for v in kv.values() if isinstance(v, (int, float))) / 1024 if isinstance(kv, dict) else 0.0
+    kv = facts["children_vram_mib"]   # Agent >= 0.13.0: {kind: MiB} without Ollama; if field is missing, no such children
+    node.children_vram_gib = sum(kv.values()) / 1024 if kv is not None else 0.0
     note_game_memory(node, b, now)   # Agent >= 0.17.0: game and RAM as fact
     node.routes = route_health(b.get("routes"))   # Tunnel routes next to Ollama (Reranker); older agents report none
     sens = b.get("sensors")   # Agent >= 0.6.0: temperature, power, throttling, GPU-Z values (passed through unchanged)

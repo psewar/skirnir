@@ -321,11 +321,13 @@ class RequiredMeansRequired(unittest.TestCase):
         tun.dispatch(tunnel.tun_frame(tunnel.TUN_HB, 0, b"{}"))
         tun.node, tun.approved = self.node, True
         tun.dispatch(tunnel.tun_frame(tunnel.TUN_HB, 0, json.dumps({"vram_total_mib": "not a number"}).encode()))
+        # ADR-0137: a value out of the schema's range is dropped, the rest of the heartbeat applies and is answered
+        self.assertEqual(self.node.implausible_fields, ["vram_total_mib"])
         tun.dispatch(tunnel.tun_frame(tunnel.TUN_HB, 0, json.dumps(SCHEMAS["heartbeat.schema.json"]["examples"][0]).encode()))
         acks = [json.loads(f[5:]) for f in sent]
         self.assertEqual([f[0] for f in sent], [tunnel.TUN_HBACK] * 3)
-        self.assertEqual([a["state"] for a in acks], ["pending", "", "free"])
-        self.assertIn("error", acks[1])
+        self.assertEqual([a["state"] for a in acks], ["pending", "free", "free"])
+        self.assertNotIn("error", acks[1])
         for a in acks:
             self.assertEqual(strict("heartbeat-ack.schema.json", a), [], a)
 
