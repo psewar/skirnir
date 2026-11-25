@@ -1,7 +1,7 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-25
-decision-makers: maintainer (proposed by Claude while working through the open risk-register items)
+decision-makers: kay (maintainer), accepted 2026-11-25; proposed by Claude while working through the open risk-register items
 ---
 
 # Writes into a shared memory scope can wait for a reviewer before they reach the bank
@@ -131,31 +131,40 @@ The interface is REST under `/v1/skirnir/memory`, for reviewers of the scope onl
 * `POST /operations/{uuid}/approve` with `{}` moves the operation to `pending`, so delivery starts.
 * `POST /operations/{uuid}/reject` with `{}` moves it to the new terminal state `rejected` and scrubs the payload at once.
 * Approve or reject by a client that is not a reviewer of the scope answers 404, so it does not reveal the operation.
-  This includes the operation's own writer, which can still read its status.
-* Approval checks the grants again at that moment. A writer removed from `writers` meanwhile turns the operation into
-  `revoked`, as today.
+  This includes the operation's own writer, which can still read its status. Listing by a client that is not a reviewer
+  answers 403; a list names no operation.
+* A decision on a write that is no longer held answers 409 with its current state.
+* Approval checks the writer's grant again at that moment. A writer that lost its right meanwhile, for example removed
+  from `writers`, turns the operation into `revoked` (reason `policy_changed`) instead of delivering it.
 * Each decision is logged with reviewer, writer and scope, without content. It is counted as
-  `skirnir_memory_events_total{operation="review",outcome="approved|rejected|expired"}`.
+  `skirnir_memory_events_total{operation="review",outcome="approved|rejected|revoked|expired"}`.
 * A small command-line tool (`tools/memory_review.py`: list, show, approve, reject) uses a reviewer's credential, so a
   person can review without writing HTTP calls. It reads the credential from the environment, never from its arguments.
 
 ### Waiting is visible
 
-* The writer's operation status says `awaiting_review`. The gateway reports it as still processing.
-* `/admin/context` shows the number of held operations per scope, as a count only. So does the gauge
+* The writer's operation status says `awaiting_review`. The gateway reports it as `pending`. The writer may withdraw
+  the write with `DELETE`, like any write that was never sent.
+* `/admin/context` shows the number of held operations per scope as `review_held`, a count only. So does the gauge
   `skirnir_memory_outbox_jobs{status="awaiting_review"}`.
-* After `review_expire_days` a held operation becomes `rejected` with the reason `review_expired`, and its payload is
-  scrubbed.
-* Held operations count against `outbox_capacity` and `outbox_client_capacity`, as today. `outbox_client_capacity` is
-  off by default, so on its own one writer could fill the whole outbox with held writes for up to `review_expire_days`.
-  That would block every other client's memory writes. Therefore each writer may hold at most `review_max_held`
-  operations per scope. Past that, only this writer's further writes into the scope are refused (503, problem
-  `review_backlog_full`); other clients are not affected.
+* After `review_expire_days`, counted from the write, a held operation becomes `rejected` with the reason
+  `review_expired`, and its payload is scrubbed. The maintenance pass does this.
+* Held operations do not count against `outbox_capacity` and `outbox_client_capacity`: those bound the delivery work,
+  and `outbox_client_capacity` is off by default. Otherwise one writer could fill the whole outbox with held writes for
+  up to `review_expire_days` and block every other client's memory writes. Instead each writer may hold at most
+  `review_max_held` operations per scope. Past that, only this writer's further writes into the scope are refused with
+  429 (kind `review_backlog_full`): retrying does not help until a reviewer decides. Other clients are not affected.
+  Approval moves an operation into the delivery capacity and is refused with 503 while the outbox is full.
 
 ### Storage
 
-`awaiting_review` and `rejected` are new outbox states. They need a new migration for PostgreSQL, where the state column
-has a CHECK constraint, and for SQLite (ADR-0114). The migration only adds; existing rows are unchanged.
+`awaiting_review` and `rejected` are new outbox states. They need a new migration for PostgreSQL (7), where the state
+column has a CHECK constraint, and for SQLite (2, ADR-0114), which rebuilds the outbox table because SQLite cannot change
+a CHECK constraint. The migration only adds; existing rows and their counts are unchanged. A held operation's
+`available_at` holds its review deadline, since the worker never claims it; no new column is needed.
+
+Turning `review` off releases nothing: held operations then have no reviewer and expire, unless their writers withdraw
+them first.
 
 ### Consequences
 
@@ -177,20 +186,37 @@ has a CHECK constraint, and for SQLite (ADR-0114). The migration only adds; exis
 
 ### Confirmation
 
-The implementing pull request brings:
+Implemented in router 0.43.0. `test/selftest_memory_review.py` (in CI) runs without network against the synthetic
+memory backend of `selftest_memory`, which records every delivery, and a real session store: SQLite always, PostgreSQL in
+the CI job `sessions-postgres`.
 
-* A self-test `test/selftest_memory_review.py`, without router and network, with a stub backend that records every
-  delivery:
-  * The configuration is refused for each case listed above.
-  * A writer's retain becomes `awaiting_review` and is never delivered.
-  * A reviewer's retain is delivered directly.
-  * Approval delivers. Rejection and expiry never deliver, and they scrub the payload.
-  * Gateway retain and automatic retention are held the same way.
-  * Rejected cases: a writer cannot approve its own operation, a reviewer of another scope gets 404, and so does a
-    client without a grant.
-  * A writer past `review_max_held` is refused, while another writer of the same scope is still admitted.
-  * A replayed event of a rejected write stays rejected.
-  * A writer removed from `writers` before approval gets `revoked`.
-* The store integrations on SQLite and PostgreSQL (ADR-0114): the migration, and that a held operation survives a
-  restart.
-* TM-10, V9, the threat model and the design document in English and German.
+**Configuration:**
+
+* Review is off by default; the defaults are 14 days and 100 held writes.
+* Refused: a non-boolean `review`, review without reviewers, duplicate or malformed reviewers, review settings without
+  `review: true`, and out-of-range bounds.
+* Loading refuses an unknown reviewer, a reviewer without `read` on the scope, and review without the durable outbox.
+
+**Behaviour through the HTTP API:**
+
+* A writer's retain becomes `awaiting_review` and is never delivered. Its writer and the gateway see the state, and
+  `review_held` counts it.
+* The reviewer lists the exact text with writer and provenance. Approval delivers.
+* A reviewer's own retain is delivered directly.
+* Rejection and expiry never deliver and drop the text. A replayed event of a rejected write stays rejected; a new event
+  is held again.
+* Gateway retain and automatic retention are held the same way. The writer may withdraw a held write.
+* A held write survives a restart of the store.
+* `tools/memory_review.py` lists, shows and approves through the real API.
+
+**Rejected cases:**
+
+* The writer itself, another writer and a reviewer of another scope get 404 on approve and reject; non-reviewers get 403
+  on the list; an unknown token gets 401.
+* A writer that lost its right before approval gets `revoked`, and nothing is delivered.
+* A writer past `review_max_held` gets 429, while another writer of the scope is still admitted. Held writes do not use
+  the delivery capacity.
+* The tool refuses missing settings, credentials in the address, a missing CA file and plain http to a non-loopback host.
+
+**Storage:** SQLite migration 2 keeps existing rows and counts and accepts the new states, while the CHECK constraint
+still refuses unknown ones.

@@ -11,7 +11,7 @@ from yarl import URL
 
 from . import state
 from .session_config import SessionConfig, parse_session_config
-from .shared_config import parse_scopes
+from .shared_config import SCOPE_FIELDS, parse_scopes
 from .context_config import ContextConfig, parse_context_config
 from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
@@ -89,7 +89,7 @@ SCHEMA = {
         # since 0.37.0: the warm benchmark's prompt (perf.py); tok/s depends on its language, so measurements are comparable
         # only with the same prompt
         "benchmark": {"prompt": None},
-        "memory_scopes": {"*": {"data_class": None, "allow_cloud": None, "writers": None}},
+        "memory_scopes": {"*": dict.fromkeys(SCOPE_FIELDS)},
         "hindsight": {k: None for k in HindsightConfig.__dataclass_fields__},
         "context_manager": {k: None for k in ContextConfig.__dataclass_fields__},
         "session_store": {k: None for k in SessionConfig.__dataclass_fields__},
@@ -360,6 +360,8 @@ class Config:
                         # ADR-0060: writing into a shared scope needs both sides, the client's grant and the scope's list
                         return invalid(f"client {principal} may write memory scope {grant['scope']} only if "
                                        f"memory_scopes.{grant['scope']}.writers lists it")
+        if failed(problem := self._check_review()):
+            return problem
         self.mqtt = c.get("mqtt") or None   # Home Assistant per MQTT-Discovery (optional): host, port, username, password_env, base_topic, interval_s
         self._parse_wol(r.get("wol") or {})
         self.wakers = parse_wakers(r.get("wakers"))
@@ -601,6 +603,23 @@ class Config:
                 return invalid(f"client_auth.clients.{cname}.privacy_check must be boolean")
             if cspec.get("privacy_check") is True and not privacy.enabled:
                 return invalid(f"client_auth.clients.{cname}.privacy_check needs router.cloud.privacy_check.enabled: true")
+
+    def _check_review(self):
+        """ADR-0145: a reviewed shared scope holds writes in the durable outbox, and every reviewer can read the scope."""
+        clients = self.client_auth["clients"]
+        for alias, shared in self.memory_scopes.items():
+            if not shared["review"]:
+                continue
+            if not self.hindsight.outbox_enabled:
+                # a held write must survive a restart; the in-memory queue would deliver it or lose it
+                return invalid(f"memory_scopes.{alias}.review needs router.hindsight.outbox_enabled")
+            for reviewer in shared["reviewers"]:
+                if reviewer not in clients:
+                    return invalid(f"memory_scopes.{alias}.reviewers names an unknown client: {reviewer}")
+                grants = ((clients[reviewer].get("memory") or {}).get("projects") or {}).values()
+                if not any(g["scope"] == alias and g["read"] for g in grants):
+                    return invalid(f"reviewer {reviewer} of memory scope {alias} needs a project grant with read on it")
+        return None
 
     def _parse_wol(self, w):
         self.wol_wait_s = float(w.get("wait_up_s", _d("router.wol.wait_up_s")))

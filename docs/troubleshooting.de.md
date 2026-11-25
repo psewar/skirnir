@@ -80,3 +80,9 @@ seiner letzten solchen Anfrage. `skirnir_memory_recall_skipped_for_tools_clients
 einmal je Client und Stunde, dass es geschehen ist, ohne Namen. Soll der Client die Fakten bekommen,
 `recall_into_tools: true` in seiner Freigabe setzen; damit erreichen Fakten ein Modell, das Werkzeuge aufrufen kann.
 Sonst seinen Recall abschalten oder es so lassen.
+
+Ein Eintrag in einen gemeinsamen Bereich mit `review: true` antwortet mit 202 und dem Zustand `awaiting_review` und
+wird von niemandem abgerufen, bis ein Prüfer ihn freigibt ([ADR-0145](adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md)): als Prüfer mit
+`python tools/memory_review.py list --project <alias>` auflisten und entscheiden. Ein 429 auf einen solchen Eintrag
+heißt, dass dieser Schreiber schon `review_max_held` wartende Einträge im Bereich hat; andere Schreiber sind nicht
+betroffen. `/admin/context` zeigt die wartenden Einträge je Bereich als `review_held`.

@@ -1,6 +1,7 @@
 # Shared memory, agent exchange and reliability
 
-> Decisions (why): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md)
+> Decisions (why): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md),
+> [ADR-0145](../docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md) (review before a write reaches a shared bank)
 
 [Deutsche Anleitung](shared-memory-interoperability.de.md). This extends the existing
 [session store](session-store.md), [memory adapter](hindsight-memory.md) and
@@ -290,8 +291,47 @@ worker then runs under the curator's grant, so revoking it stops pending deletio
 "Changing" a fact means writing the corrected fact and deleting the old operation;
 Hindsight's in-place curation is not exposed.
 
+**Review before a write reaches a shared bank (ADR-0145, router 0.43.0).** Curation acts after a fact may already
+have been recalled. A scope can instead hold writes until a reviewer has seen them:
+
+```yaml
+memory_scopes:
+  shared-research: {data_class: personal, writers: [agent-a, agent-b], review: true, reviewers: [curator-a],
+                    review_expire_days: 14, review_max_held: 100}
+```
+
+- `review` is off by default. With it, `reviewers` is required (configured clients, each with `read` on a project
+  bound to the scope), and so is `hindsight.outbox_enabled`: a held write must survive a restart. Loading refuses
+  anything else, and also review settings without `review: true`.
+- A write by a writer that is not a reviewer (REST retain, gateway retain, automatic retention) is admitted as
+  `awaiting_review` and is never delivered until a reviewer approves it. A reviewer's own writes are not held.
+- `POST /v1/skirnir/memory/review` with `{project, limit?, offset?}` (the reviewer's project alias of the scope) lists
+  one page (1-50, default 20) of held writes, oldest first: `operation_id`, `writer`, `created_at`, `expires_at` and
+  the exact `content`, `context` and `provenance` the backend would extract from. Entries the content filter rejects are
+  listed under `withheld` by id only. A client that is not a reviewer of the scope gets 403.
+- `POST /v1/skirnir/memory/operations/{uuid}/approve` or `/reject` with `{}` decides one held write. Approval moves it
+  to `pending`, so the worker delivers it; it first checks the writer's grant again, and a writer that lost its right
+  gets `revoked` (`reason: policy_changed`) instead. Rejection gives `rejected` (`review_rejected`) and drops the text.
+  Anyone who is not a reviewer of that bank gets 404, its own writer too. A write that is no longer held answers 409
+  with its `state`. Each decision is logged with reviewer, writer and scope, without content.
+- `tools/memory_review.py` (`list`, `show`, `approve`, `reject`) does the same for a person. It reads the router
+  address and the reviewer's token from `SKIRNIR_REVIEW_URL` and `SKIRNIR_REVIEW_TOKEN` (optional `SKIRNIR_REVIEW_CA`)
+  and refuses plain http to anything but loopback.
+- The writer sees `awaiting_review` in its operation status (the gateway says `pending`) and may withdraw the write
+  with `DELETE`. A replay of the same event returns the existing operation, so a rejected write stays rejected.
+- A held write expires after `review_expire_days` (counted from the write): `rejected` with `review_expired`, text
+  dropped, at the next maintenance pass. A changed `review_expire_days` applies to new writes.
+- Held writes do not count against `outbox_capacity`. Each writer may hold at most `review_max_held` per scope;
+  past that only this writer's further writes into the scope get 429.
+- `/admin/context` shows `review_held` (count per scope, no content); the gauge `skirnir_memory_outbox_jobs` has
+  the states `awaiting_review` and `rejected`; `skirnir_memory_events_total{operation="review"}` counts `approved`,
+  `rejected`, `revoked` and `expired`.
+- Review is not retroactive: facts already in the bank stay until a curator deletes them. Turning `review` off
+  releases nothing: held writes then have no reviewer, and they expire unless their writers withdraw them first.
+  Review holds writes through the router only; direct access to the backend bypasses it like every grant (TM-11).
+
 States are `pending`, `processing`, `accepted`, `completed`, `dead`, `revoked`,
-`cancelled`, `delete_pending`, `deleted`. `accepted` means upstream acknowledged
+`cancelled`, `delete_pending`, `deleted`, and with review `awaiting_review` and `rejected`. `accepted` means upstream acknowledged
 retention and the job is being verified; `completed` means Hindsight reported the
 extraction as completed.
 
@@ -412,7 +452,8 @@ below-floor results are excluded. No second knowledge graph is introduced.
 
 Migration **3** appends discovery timestamps/indexes/triggers, handoff import keys,
 session scope references and the durable outbox; published migrations 1/2 remain
-unchanged. Startup applies it transactionally through the existing migrator.
+unchanged. Migration **7** (SQLite: **2**, router 0.43.0) adds the outbox states `awaiting_review` and `rejected`
+(ADR-0145); an older router refuses that schema, so roll back only with the backup taken before the upgrade. Startup applies it transactionally through the existing migrator.
 Take an operator-managed database backup before upgrades. Do not run this test
 suite against a real session database.
 

@@ -4,7 +4,7 @@ Methods return their result or a Problem (outcome.py).
 """
 from uuid import uuid4
 
-from .outcome import conflict, failed, not_found, unavailable
+from .outcome import Problem, conflict, failed, not_found, unavailable
 from .session_types import database, record
 
 OUTBOX_ERRORS = (None, "unavailable", "upstream_auth", "upstream_rejected", "protocol", "timeout", "transport", "remote_pending", "policy_changed",
@@ -12,13 +12,21 @@ OUTBOX_ERRORS = (None, "unavailable", "upstream_auth", "upstream_rejected", "pro
 OUTBOX_FINAL = ('accepted', 'completed', 'dead', 'revoked', 'pending', 'deleted', 'delete_pending')
 # Jobs whose payload is no longer needed. 'accepted' is not terminal: the job still waits for verified completion
 # and may be resubmitted from its payload.
-TERMINAL = ('completed', 'dead', 'revoked', 'cancelled', 'deleted')
+TERMINAL = ('completed', 'dead', 'revoked', 'cancelled', 'deleted', 'rejected')
 OPERATION_NOT_FOUND = not_found("memory operation not found")
+# ADR-0145: a reviewer's decision -> (new state, last_error). 'revoke': the writer lost its right before approval.
+REVIEW_DECISIONS = {"approve": ("pending", None), "reject": ("rejected", "review_rejected"), "revoke": ("revoked", "policy_changed")}
+# 429, not 503: retrying does not help until a reviewer decides; only this writer is refused, other clients are not.
+REVIEW_BACKLOG_FULL = Problem(429, "writes awaiting review reached review_max_held for this client", "review_backlog_full")
+NOT_HELD = conflict("operation is not awaiting review")
 
 
 class ReliabilityStore:
     @database
-    async def outbox_put(self, operation, scope, payload, fingerprint, capacity, owner_capacity=0, session_id=None):
+    async def outbox_put(self, operation, scope, payload, fingerprint, capacity, owner_capacity=0, session_id=None, held=None):
+        """Admit a job, or return the existing one for the same event and content. `held` = (expire_days, max_held) admits it
+        as awaiting_review (ADR-0145): never claimed, expiring after expire_days (its available_at is the review deadline),
+        and at most max_held per writer and bank. A held job does not count against the delivery capacity."""
         async with self.transaction() as (conn, tx):
             await conn.execute("SELECT pg_advisory_xact_lock(7365471202492)")
             old = await conn.fetchrow("SELECT * FROM skirnir_sessions.memory_outbox WHERE operation_id=$1", operation)
@@ -26,6 +34,16 @@ class ReliabilityStore:
                 if old["owner"] != scope["principal"] or old["fingerprint"] != fingerprint:
                     return tx.reject(conflict("event_id already used for different memory content"))
                 return record(old)
+            if held is not None:
+                expire_days, max_held = held
+                waiting = await conn.fetchval("""SELECT count(*) FROM skirnir_sessions.memory_outbox
+                    WHERE owner=$1 AND state='awaiting_review' AND scope->>'__bank'=$2""", scope["principal"], scope["__bank"])
+                if waiting >= max_held:
+                    return tx.reject(REVIEW_BACKLOG_FULL)
+                row = await conn.fetchrow("""INSERT INTO skirnir_sessions.memory_outbox(operation_id,owner,project,scope,payload,fingerprint,session_id,state,available_at)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,'awaiting_review',clock_timestamp()+$8*interval '1 day') RETURNING *""", operation, scope["principal"],
+                    scope["project"], scope, payload, fingerprint, session_id, expire_days)
+                return record(row)
             full = await self._outbox_capacity(conn, scope["principal"], capacity, owner_capacity)
             if failed(full):
                 return tx.reject(full)
@@ -33,6 +51,56 @@ class ReliabilityStore:
                 VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *""", operation, scope["principal"], scope["project"], scope, payload, fingerprint,
                 session_id)
             return record(row)
+
+    @database
+    async def outbox_held(self, bank, limit, offset):
+        """One page of the writes awaiting review in this bank, oldest first (ADR-0145). The caller checked the reviewer."""
+        async with self.connection() as conn:
+            rows = await conn.fetch("""SELECT * FROM skirnir_sessions.memory_outbox WHERE state='awaiting_review' AND scope->>'__bank'=$1
+                ORDER BY created_at,operation_id LIMIT $2 OFFSET $3""", bank, limit, offset)
+            return [record(row) for row in rows]
+
+    @database
+    async def outbox_review(self, operation, bank, decision, capacity, owner_capacity=0):
+        """A reviewer's decision on a held write of this bank (ADR-0145): 'approve' -> pending (delivery starts, within the
+        delivery capacity), 'reject' -> rejected, 'revoke' (the writer lost its right meanwhile) -> revoked; the last two
+        drop the payload. The row after the change, OPERATION_NOT_FOUND for another bank, or 409 when nothing is held."""
+        if decision not in REVIEW_DECISIONS:
+            raise ValueError("invalid review decision")  # exception-ok: programming error (violated invariant)
+        async with self.transaction() as (conn, tx):
+            await conn.execute("SELECT pg_advisory_xact_lock(7365471202492)")
+            row = await conn.fetchrow("SELECT * FROM skirnir_sessions.memory_outbox WHERE operation_id=$1 FOR UPDATE", operation)
+            if not row or row["scope"].get("__bank") != bank:
+                return tx.reject(OPERATION_NOT_FOUND)
+            if row["state"] != 'awaiting_review':
+                return tx.reject(NOT_HELD)
+            if decision == "approve":
+                full = await self._outbox_capacity(conn, row["owner"], capacity, owner_capacity)
+                if failed(full):
+                    return tx.reject(full)
+            state, error = REVIEW_DECISIONS[decision]
+            return record(await conn.fetchrow("""UPDATE skirnir_sessions.memory_outbox SET state=$2,last_error=$3,
+                payload=CASE WHEN $2='pending' THEN payload ELSE NULL END,available_at=clock_timestamp(),updated_at=clock_timestamp()
+                WHERE operation_id=$1 RETURNING *""", operation, state, error))
+
+    @database
+    async def outbox_expire_reviews(self):
+        """Held writes past their review deadline become rejected with reason review_expired, payload dropped (ADR-0145).
+        Number of rows changed, at most 100 per call."""
+        async with self.transaction() as (conn, tx):
+            result = await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state='rejected',last_error='review_expired',
+                payload=NULL,updated_at=clock_timestamp()
+                WHERE operation_id IN (SELECT operation_id FROM skirnir_sessions.memory_outbox
+                    WHERE state='awaiting_review' AND available_at<=clock_timestamp() ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 100)""")
+            return int(result.split()[-1])
+
+    @database
+    async def outbox_held_counts(self):
+        """{shared scope name: number of writes awaiting review} for /admin/context; counts only, never content."""
+        async with self.connection() as conn:
+            rows = await conn.fetch("""SELECT scope->>'shared_scope' AS shared,count(*) AS held FROM skirnir_sessions.memory_outbox
+                WHERE state='awaiting_review' GROUP BY scope->>'shared_scope'""")
+            return {r["shared"]: r["held"] for r in rows}
 
     @database
     async def outbox_claim(self, lease_s, max_attempts):
@@ -104,7 +172,8 @@ class ReliabilityStore:
             row = await conn.fetchrow("SELECT * FROM skirnir_sessions.memory_outbox WHERE owner=$1 AND operation_id=$2 FOR UPDATE", owner, operation)
             if not row:
                 return tx.reject(OPERATION_NOT_FOUND)
-            if row["state"] not in ('pending', 'dead', 'revoked', 'cancelled') or (row["attempts"] > 0 and row["state"] != 'cancelled'):
+            # A write awaiting review (ADR-0145) was never sent: its writer may withdraw it like a pending one.
+            if row["state"] not in ('pending', 'awaiting_review', 'dead', 'revoked', 'cancelled') or (row["attempts"] > 0 and row["state"] != 'cancelled'):
                 return tx.reject(conflict("operation may already be in Hindsight; cancellation is not a deletion guarantee"))
             await conn.execute("""UPDATE skirnir_sessions.memory_outbox SET state='cancelled',payload=NULL,updated_at=clock_timestamp()
                 WHERE operation_id=$1""", operation)

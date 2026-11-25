@@ -142,6 +142,12 @@ CREATE INDEX outbox_payload_expiry ON skirnir_sessions.memory_outbox(updated_at)
 """, """
 ALTER TABLE skirnir_sessions.memory_outbox ADD COLUMN session_id uuid;
 CREATE INDEX outbox_session ON skirnir_sessions.memory_outbox(owner,session_id) WHERE session_id IS NOT NULL;
+""", """
+ALTER TABLE skirnir_sessions.memory_outbox DROP CONSTRAINT memory_outbox_state_check;
+ALTER TABLE skirnir_sessions.memory_outbox ADD CONSTRAINT memory_outbox_state_check
+    CHECK(state IN ('pending','processing','accepted','completed','dead','revoked','cancelled','delete_pending','deleted',
+                    'awaiting_review','rejected'));
+CREATE INDEX outbox_review ON skirnir_sessions.memory_outbox(available_at) WHERE state='awaiting_review';
 """)
 
 
