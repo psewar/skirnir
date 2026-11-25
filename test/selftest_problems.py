@@ -64,7 +64,9 @@ def scenario(now):
     spill = node("spill-node", hb_ts=now, ram_spill={"synth-model:27b": 3.2})
     guard = node("guard-node", hb_ts=now, guard={"state": "unavailable", "problem": True, "reason": "limit not settable"},
                  guard_ts=now)
-    state.NODES = {n.name: n for n in (silent, spill, guard)}
+    lying = node("lying-node", hb_ts=now, report_mismatch={"free_vram": {"since": now, "free": 20.0, "loaded": 14.0, "room": 10.0},
+                                                           "gpu_idle": {"since": now, "util": 0}})   # ADR-0142
+    state.NODES = {n.name: n for n in (silent, spill, guard, lying)}
     state.REG = SimpleNamespace(nodes={
         "a" * 64: {"name": "upd-failed", "state": "approved", "update": {"state": "failed", "message": "checksum mismatch"}},
         "b" * 64: {"name": "upd-stalled", "state": "approved", "update": {"state": "stalled", "message": "no report for 31 min"}},
@@ -104,6 +106,8 @@ GERMAN = {   # the sentences of router 0.34, byte for byte
     ("agent_heartbeat_missing", "silent-node"): "Knoten silent-node: kein Agent-Heartbeat seit 60 min",
     ("ram_spill", "spill-node"): "Knoten spill-node: synth-model:27b liegt zu 3.2 GiB im Arbeitsspeicher (rechnet langsam auf der CPU)",
     ("gpu_guard", "guard-node"): "Knoten guard-node: GPU-Schutz unavailable (limit not settable)",
+    ("agent_free_vram_mismatch", "lying-node"): "Knoten lying-node: meldet 20.0 GiB freien VRAM, neben 14.0 GiB geladenen Modellen passen nur 10.0 GiB (Agent-Meldung unplausibel)",
+    ("agent_idle_while_generating", "lying-node"): "Knoten lying-node: meldet 0 % GPU-Last, waehrend er Ausgabe fuer den Router erzeugt (Agent-Meldung unplausibel)",
     ("agent_update_failed", "upd-failed"): "Agent-Update auf upd-failed fehlgeschlagen: checksum mismatch",
     ("agent_update_stalled", "upd-stalled"): "Agent-Update auf upd-stalled haengt (no report for 31 min)",
     ("ollama_update_failed", "upd-failed"): "Ollama-Update auf upd-failed fehlgeschlagen: checksum mismatch",

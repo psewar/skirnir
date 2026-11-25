@@ -44,6 +44,12 @@ CATALOGUE = {
     "ram_spill": ("warning", {
         "de": "Knoten {node}: {model} liegt zu {gib:.1f} GiB im Arbeitsspeicher (rechnet langsam auf der CPU)",
         "en": "node {node}: {model} has {gib:.1f} GiB in system RAM (runs slowly on the CPU)"}),
+    "agent_free_vram_mismatch": ("warning", {
+        "de": "Knoten {node}: meldet {free:.1f} GiB freien VRAM, neben {loaded:.1f} GiB geladenen Modellen passen nur {room:.1f} GiB (Agent-Meldung unplausibel)",
+        "en": "node {node}: reports {free:.1f} GiB free VRAM, but only {room:.1f} GiB fit next to {loaded:.1f} GiB of loaded models (agent report implausible)"}),
+    "agent_idle_while_generating": ("warning", {
+        "de": "Knoten {node}: meldet {util} % GPU-Last, waehrend er Ausgabe fuer den Router erzeugt (Agent-Meldung unplausibel)",
+        "en": "node {node}: reports {util} % GPU load while it generates output for the router (agent report implausible)"}),
     "gpu_guard": ("warning", {
         "de": "Knoten {node}: GPU-Schutz {guard_state} ({reason})",
         "en": "node {node}: GPU guard {guard_state} ({reason})"}),
@@ -127,6 +133,14 @@ def compute(now=None, unservable=None, lang=None):
             for m, g in sorted(n.ram_spill.items()):
                 if g >= state.CFG.ram_spill_problem_gib:
                     out.append(make("ram_spill", node=n.name, subject=m, model=m, gib=g))
+    # ADR-0142 (TM-07): an approved agent's reports contradict each other or what the router observes.
+    for n in online:
+        m = n.report_mismatch
+        if "free_vram" in m:
+            out.append(make("agent_free_vram_mismatch", node=n.name, free=m["free_vram"]["free"],
+                            loaded=m["free_vram"]["loaded"], room=m["free_vram"]["room"]))
+        if "gpu_idle" in m:
+            out.append(make("agent_idle_while_generating", node=n.name, util=m["gpu_idle"]["util"]))
     # GPU guard (Agent >= 0.7.0): unavailable (limit not settable), deselected (operator decision: counts as a problem),
     # voltage/temperature/hardware warning. Only if the router should consider this node's status. A node without a GPU
     # (gpu_present false, router 0.36.0, ADR-0102) has nothing to guard: no gpu_guard problem, whatever its agent reports.

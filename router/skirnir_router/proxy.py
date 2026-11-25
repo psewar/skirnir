@@ -704,6 +704,7 @@ class _Relay:
             if not line.strip():
                 continue
             first_at = first_at or time.time()
+            self.node.last_output_at = time.time()   # ADR-0142: observed by the router, not reported by the agent
             chunk = self._render_chunks(line, rescuer, first_at)
             if self.managed_problem is not None:
                 return await self._answer_problem(self.managed_problem)
