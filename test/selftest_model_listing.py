@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Self-test (TM-04, ADR-0131): model listings show a client only what it may use.
+"""Self-test (TM-04, ADR-0131, ADR-0133): model listings show a client only what it may use.
 
 Over the real API app (no network, no node): /api/tags, /v1/models (OpenAI and Anthropic form) and /v1/models/{model}
 list the roles a client is granted and concrete model names only with models:true, as the request path decides
 (auth.client_allows, ADR-0052). Unauthenticated requests in observe mode see everything, as before; the router's own
-UI client keeps concrete names. Listing refuses nothing, so it counts no forbidden request and writes no audit line.
+UI client keeps concrete names. /api/ps (ADR-0133): with concrete names every loaded model with model and node, a role
+the client may not use under the concrete name; without them only granted roles by role name, without model or node.
+Listing refuses nothing, so it counts no forbidden request and writes no audit line.
 Synthetic values only."""
 import hashlib
 import os
@@ -36,17 +38,27 @@ class ListingTests(unittest.IsolatedAsyncioTestCase):
             "role-only": {"roles": [self.granted], "models": False},
             "all-roles": {"roles": ["*"], "models": False},
             "full": {"roles": ["*"], "models": True},
+            "concrete-one-role": {"roles": [self.granted], "models": True},
         }
         for name, c in clients.items():
             c["token_sha256"] = hashlib.sha256(token(name).encode()).hexdigest()
         cfg.client_auth = {"mode": "enforce", "audit_log": None, "clients": clients}
         cfg.expose_concrete = True
         state.CFG, state.CLIENT_AUTH_MODE = cfg, None
-        # An offline node that reports a concrete model: listed by name, never chosen for a role's details.
+        # An offline node that reports a concrete model: listed by name, never chosen for a role's details. It has loaded
+        # that model and one model of two different roles (for /api/ps, ADR-0133).
+        owner = {}
+        for exposed, role in cfg.roles.items():
+            for tier in role["tiers"]:
+                owner.setdefault(tier["model"], exposed)
+        self.first_model = next(m for m, r in owner.items() if r == self.roles[0])
+        self.other_model, self.other_role = next((m, r) for m, r in owner.items() if r != self.roles[0])
         state.NODES.clear()
-        state.NODES["synthetic-node"] = SimpleNamespace(state="offline", model_details={
-            CONCRETE: {"name": CONCRETE, "model": CONCRETE, "modified_at": "2026-01-01T00:00:00Z", "size": 1,
-                       "digest": "synthetic", "details": {}}})
+        state.NODES["synthetic-node"] = SimpleNamespace(
+            state="offline", name="synthetic-node", same_blob=lambda a, b: a == b,
+            loaded={CONCRETE: 1.0, self.first_model: 2.0, self.other_model: 3.0},
+            model_details={CONCRETE: {"name": CONCRETE, "model": CONCRETE, "modified_at": "2026-01-01T00:00:00Z",
+                                      "size": 1, "digest": "synthetic", "details": {}}})
         self.audited = []
         self.real_audit = auth.audit
         auth.audit = lambda event, **fields: self.audited.append(event)
@@ -96,6 +108,30 @@ class ListingTests(unittest.IsolatedAsyncioTestCase):
         await self.names("role-only")
         after = (state.CLIENT_STATS["clients"].get("role-only") or {}).get("forbidden", 0)
         self.assertEqual((after, self.audited), (before, []), "a filtered listing is not a forbidden request")
+
+    async def running(self, client):
+        r = await self.api.get("/api/ps", headers={"Authorization": "Bearer " + token(client)} if client else {})
+        self.assertEqual(r.status, 200, await r.text())
+        return sorted((m["name"], m["model"], m.get("node")) for m in (await r.json())["models"])
+
+    async def test_running_models_follow_the_grants(self):
+        node = "synthetic-node"
+        everything = sorted([(CONCRETE, CONCRETE, node), (self.roles[0], self.first_model, node),
+                             (self.other_role, self.other_model, node)])
+        self.assertEqual(await self.running("full"), everything, "models:true: every loaded model with its node")
+        self.assertEqual(await self.running("role-only"), [(self.roles[0], self.roles[0], None)],
+                         "role-only: its role only, named by the role, no model or node name")
+        self.assertEqual(await self.running("all-roles"),
+                         sorted([(self.roles[0], self.roles[0], None), (self.other_role, self.other_role, None)]),
+                         "all roles without models:true: both roles, no concrete model, no node")
+        self.assertEqual(await self.running("concrete-one-role"),
+                         sorted([(CONCRETE, CONCRETE, node), (self.roles[0], self.first_model, node),
+                                 (self.other_model, self.other_model, node)]),
+                         "models:true with one role: a role it may not use is not named")
+        state.CFG.client_auth["mode"] = "observe"
+        state.CLIENT_AUTH_MODE = None
+        self.assertEqual(await self.running(None), everything, "observe without identity: unchanged")
+        self.assertNotIn("forbidden", self.audited, "listing running models refuses nothing")
 
     async def test_a_hidden_role_is_still_refused_when_requested(self):
         # The filter only hides; the request path keeps refusing (rejected case).
