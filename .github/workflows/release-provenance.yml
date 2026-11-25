@@ -5,6 +5,8 @@ name: Release provenance
 # published assets (ADR-0075). Equal: GitHub attests the build provenance of exactly those bytes and their SBOMs, and the
 # CycloneDX SBOMs of the agent binaries and the router's Python requirements are attached to the release. Different: the
 # job fails with both hashes, and nothing is attested. Verify:  gh attestation verify <file> --repo psewar/skirnir
+# The router is released as source: the job router-source attaches skirnir-router-<version>.tar.gz, the router/ folder
+# of the tag as git archive writes it, and attests its build provenance (ADR-0139), independent of the agent rebuild.
 
 on:
   release:
@@ -107,3 +109,34 @@ jobs:
           sbom-path: sbom/skirnir-agent-${{ steps.meta.outputs.version }}-linux-amd64.cdx.json
       - name: Attach the SBOMs to the release
         run: gh release upload "$TAG" sbom/*.cdx.json --repo "$GITHUB_REPOSITORY" --clobber
+
+  router-source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # attach the archive to the release
+      id-token: write       # sign the attestation
+      attestations: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      - name: Router source archive of the tag
+        id: archive
+        run: |
+          set -euo pipefail
+          rv=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' router/skirnir_router/common.py)
+          case "$rv" in *[!0-9.]*|"") echo "unexpected router version '$rv'"; exit 1 ;; esac
+          mkdir -p router-archive
+          git archive --format=tar.gz --prefix="skirnir-router-$rv/" -o "router-archive/skirnir-router-$rv.tar.gz" HEAD router
+          sha256sum router-archive/*.tar.gz
+          echo "path=router-archive/skirnir-router-$rv.tar.gz" >> "$GITHUB_OUTPUT"
+      - name: Attest build provenance of the router source archive
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.archive.outputs.path }}
+      - name: Attach the router source archive to the release
+        run: gh release upload "$TAG" router-archive/*.tar.gz --repo "$GITHUB_REPOSITORY" --clobber

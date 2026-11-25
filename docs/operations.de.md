@@ -164,6 +164,15 @@ Hashes scheitern (ADR-0075). Ein heruntergeladenes Binary prüfen:
 gh attestation verify skirnir-agent-<version>-windows-amd64.exe --repo psewar/skirnir
 ```
 
+Der Router erscheint als Quelltext. Derselbe Workflow hängt `skirnir-router-<version>.tar.gz` an, den Ordner `router/` des
+Tags, wie `git archive` ihn schreibt, und attestiert seine Build-Provenienz (ADR-0139). Um daraus statt aus einem Klon zu
+installieren:
+
+```bash
+gh attestation verify skirnir-router-<version>.tar.gz --repo psewar/skirnir
+tar -xzf skirnir-router-<version>.tar.gz && sudo bash skirnir-router-<version>/router/install.sh
+```
+
 Vertrauensanker des Agent-Selbstupdates bleibt die Ed25519-Signatur des Betreibers am Update-Manifest; die Attestierung
 zeigt, dass die veröffentlichten Bytes aus dem getaggten Quelltext stammen. Für ein früheres Release den Workflow von
 Hand mit dessen Tag starten.

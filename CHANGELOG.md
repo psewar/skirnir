@@ -1,5 +1,13 @@
 # Changelog
 
+## Router source archive in releases (unreleased; router and agent unchanged)
+
+- The workflow *Release provenance* gets a second job, `router-source`: for every published release it attaches
+  `skirnir-router-<version>.tar.gz` (the `router/` folder of the tag, written by `git archive`) and attests its build
+  provenance, independent of the agent rebuild (ADR-0139, proposed; TM-16). Verify with
+  `gh attestation verify skirnir-router-<version>.tar.gz --repo psewar/skirnir`; `docs/operations.md` shows how to
+  install from it. Before, the router was released only as the tag's source, with no signed artefact.
+
 ## Decision service images in CI (unreleased; router and agent unchanged)
 
 - `.github/workflows/decision-images.yml` builds the `decision-embed` and `decision-jevlike` images on pull requests that

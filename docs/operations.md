@@ -159,6 +159,14 @@ a downloaded binary:
 gh attestation verify skirnir-agent-<version>-windows-amd64.exe --repo psewar/skirnir
 ```
 
+The router is released as source. The same workflow attaches `skirnir-router-<version>.tar.gz`, the `router/` folder of
+the tag as `git archive` writes it, and attests its build provenance (ADR-0139). To install from it instead of a clone:
+
+```bash
+gh attestation verify skirnir-router-<version>.tar.gz --repo psewar/skirnir
+tar -xzf skirnir-router-<version>.tar.gz && sudo bash skirnir-router-<version>/router/install.sh
+```
+
 The operator's Ed25519 signature on the update manifest stays the trust anchor of the agents' self-update; the
 attestation shows that the published bytes come from the tagged source. For an earlier release, start the workflow by
 hand with its tag.
