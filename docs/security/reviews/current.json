@@ -2,59 +2,54 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "21ae6ac094d9cd68f9df6e2fae0dee5b388c2fb7",
- "change_digest": "a379225dd0a1533906199c44a4b87e5d7ec20180b146f01f5c41f9f54dc7817c",
+ "base_sha": "83a9feea5ec085ed20c293d8daa5ecb9ec8645ca",
+ "change_digest": "68f077899b602845320b19441877488f85903985bb6fc19bf87e8486ade90025",
  "reviewed_paths": [
   "CHANGELOG.md",
-  "requirements-ci-lock.txt",
-  "router/requirements-lock.txt",
+  "design/privacy-check.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
+  "docs/security/risk-register.json",
+  "docs/security/threat-model.de.md",
+  "docs/security/threat-model.md",
+  "router/skirnir_router/cloud.py",
   "router/skirnir_router/common.py",
+  "test/selftest_cloud_final_payload.py",
   "docs/security/reviews/current.json",
-  "router/requirements-container-lock.txt",
-  "router/requirements.txt",
-  "requirements-dev.txt",
-  "test/requirements-hindsight.txt",
-  "router/requirements-session.txt",
-  "router/skirnir_router/ha.py",
-  "router/skirnir_router/pydeps.py",
-  "router/install.sh",
-  "tools/security/lock_requirements.py",
-  ".github/workflows/security.yml"
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/privacy.py",
+  "router/skirnir_router/redactors.py",
+  "router/skirnir_router/openai_api.py",
+  "router/skirnir_router/anthropic_api.py",
+  "router/skirnir_router/memory.py",
+  "test/selftest_privacy_redactors.py"
  ],
  "risk_ids": [
-  "TM-16"
+  "TM-05"
  ],
  "boundaries": [
-  "B8",
-  "B9"
+  "B6",
+  "B7"
  ],
- "summary": "Lock refresh for TM-16's next action 'refresh the Python locks regularly'. No code change apart from VERSION 0.42.3 -> 0.42.4. router/requirements-lock.txt (what pydeps.py lets pip install into the router's venv on top of the distribution, --require-hashes --no-deps): paho-mqtt 2.1.0 -> 2.2.0, written by lock_requirements.py pin, which takes every SHA-256 PyPI publishes for the release; the two hashes equal those already in the container lock and the CI lock (compared), verify-pypi confirms them. paho-mqtt 2.2.0 (upstream changelog read) hardens packet parsing against corrupted and malformed packets, fixes keepalive and QoS 2 inflight tracking, drops Python 3.7/3.8 (the router needs 3.11) and turns two ValueErrors into TypeErrors for wrong argument types (max_queued_messages_set, callback_api_version). Traced B9: the only user is ha.py (MQTT to Home Assistant); new_client passes CallbackAPIVersion.VERSION1 as before and ha.py calls neither max_queued_messages_set nor reinitialise; a probe built the client with 2.2.0 (VERSION1, the same DeprecationWarning as 2.1.0) and set the callbacks ha.py uses. Traced B8: pydeps.plan installs a lock entry only where the venv lacks the package or holds a differing version it installed before; a distribution's own python3-paho-mqtt is untouched, the router image already installs 2.2.0 from its own lock (ADR-0121). requirements-ci-lock.txt, re-resolved on Linux with lock_requirements.py resolve in the router's pinned base image: ruff 0.17.4 -> 0.17.6, pydantic 2.14.3 -> 2.14.4, pydantic_core 2.50.4 -> 2.50.5, every other pin unchanged; these are installed in CI only (--require-hashes). hindsight-client stays 0.10.3: 1.x is outside the <1 bound of test/requirements-hindsight.txt, deliberately not moved here. pip-audit 2.10.1 (as in security.yml) finds no known vulnerability in any of the three locks.",
- "findings": [],
+ "summary": "Router 0.42.6 closes TM-05's next action 'include tool results in the final-payload test' and, found while doing so, a gap in the credential scan (cloud.scan_secrets, used by request_block_reason when credential_scan is block, the default). cloud._texts read only message contents given as a string, prompt, system and embedding input. Traced B6: on the native chat path (/api/chat, OllamaShape) a message content given as a list of parts is forwarded unchanged by cloud._oa_messages to OpenAI-style providers (o['content'] = content), and assistant tool_calls' function.arguments go to every provider (OpenAI tool_calls, Anthropic tool_use input via parse_tool_args); neither was scanned (probe: scan_secrets returned None for a synthetic key in parts and in arguments as object and as JSON text). OpenAI- and Anthropic-format requests join text parts into strings in openai_api/anthropic_api before routing, so only the native path carried lists; tool call arguments came through every API. Now _texts also reads the text of dict parts with a string text and the arguments of each tool call (string as is, object or list as JSON text with ensure_ascii=False); malformed parts and calls are skipped, not errors (no exception path). memory.py's use of scan_secrets ({'prompt': ...}) is unchanged. Effect for operators: a request whose parts or tool-call history look like they carry a key now stays local (cloud tier skipped with the credential_scan reason) - a stricter default, noted as a possible behaviour change. B7/final payload: the new test runs proxy._Relay._via_cloud with the privacy exception on a body with memory facts, an assistant tool call, a Home Assistant live context (door sensor) and an unrecognised result; the provider receives the redacted copy (memory facts and tool result present, door sensor absent, unrecognised result unchanged per ADR-0125) and the client's body is unchanged; with unrecognised_tool_results keep_local nothing reaches the provider and the refusal is answered. Not scanned (unchanged): the client's tools definitions and format schema, which are forwarded to providers but are schemas, not conversation content.",
+ "findings": [
+  {
+   "id": "CREDENTIAL-SCAN-PARTS-AND-TOOL-ARGS",
+   "evidence": "cloud._texts skipped list contents and tool_calls arguments; _oa_messages forwards list contents unchanged and both provider converters forward tool call arguments. A synthetic key there passed the credential scan (scan_secrets -> None) and would have reached a cloud provider. Pre-existing since the scan was introduced; found during this review, impact: the defence-in-depth scan against accidental secret egress missed agent tool-call histories and native content parts.",
+   "resolution": "_texts reads both; test_credential_scan_reads_every_text_a_provider_receives fails without the fix (3 of 4 places) and passes with it; malformed parts/calls are skipped.",
+   "disposition": "fixed"
+  }
+ ],
  "tests": [
   {
-   "command": "python tools/security/lock_requirements.py check ; python tools/security/lock_requirements.py verify-pypi",
+   "command": "python test/selftest_cloud_final_payload.py",
    "result": "passed",
-   "evidence": "Python locks: 0 problem(s); PyPI verification: 0 problem(s)."
-  },
-  {
-   "command": "pip-audit --require-hashes --disable-pip -r <each of router/requirements-lock.txt, router/requirements-container-lock.txt, requirements-ci-lock.txt> (pip-audit 2.10.1)",
-   "result": "passed",
-   "evidence": "No known vulnerabilities found, for each lock."
-  },
-  {
-   "command": "ruff check . with ruff 0.17.6 (the new pin, in a separate venv)",
-   "result": "passed",
-   "evidence": "All checks passed."
-  },
-  {
-   "command": "probe: ha.new_client(paho.mqtt.client, ...) with paho-mqtt 2.2.0 installed",
-   "result": "passed",
-   "evidence": "Client built with CallbackAPIVersion.VERSION1, only the known DeprecationWarning; on_connect and on_message with the 1.x signatures assigned."
+   "evidence": "8 tests OK. New: secret in a tool result, content parts, tool call arguments as object and as JSON text is found and the same bodies without it are clean (rejected case); instrument: _oa_messages forwards parts unchanged; malformed parts and calls skipped; final payload with memory and tool results through _via_cloud (redacted copy sent, door sensor removed, unrecognised result unchanged, client body unchanged) and keep_local (no provider call, refusal). With cloud.py from origin/main the scan test fails for content parts and both argument forms."
   },
   {
    "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "93 commands, 0 failed; includes selftest_pydeps, selftest_container_image (container lock = CI lock versions), selftest_dependency_audit, lock_requirements check and verify-pypi."
+   "evidence": "93 commands, 0 failed; includes selftest_privacy_redactors (default corpus byte-identical), selftest_privacy_check, selftest_institutional_provider, selftest_security, check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
@@ -64,7 +59,7 @@
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; added lines are version pins, PyPI hashes and the changelog row."
+   "evidence": "run after staging this record; the test's key is the existing synthetic shape assembled at runtime."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -73,8 +68,9 @@
   }
  ],
  "limitations": [
-  "paho-mqtt 2.2.0 was not run against a real MQTT broker; ha.py's client construction and callback API were probed, the network path is unchanged code.",
-  "The upstream changelog describes the hardening; the packet parser changes themselves were not audited.",
-  "Hosts keep their distribution's paho-mqtt; only venv installs from the lock change."
+  "The client's tools definitions and format schema are forwarded to providers and not scanned.",
+  "Secret patterns themselves are unchanged; a key format they do not know passes, as before.",
+  "No end-to-end no-egress test against a real provider; classifier quality remains TM-05's open action.",
+  "Router 0.42.6 / v0.47.7 follow the open #197 (0.42.5 / v0.47.6); the PR merged second takes main and keeps or moves its number."
  ]
 }

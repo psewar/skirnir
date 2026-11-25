@@ -319,7 +319,9 @@ Schranken (`router.cloud`):
   Das Journal hält `privacy_check` mit Ergebnis, Regel oder Wahrscheinlichkeit und Anzahl geschwärzter Einträge fest, nie
   den Text. Eine deklarierte `routing.data_class` wird nie übergangen.
 - **Credential-Scan** (`block`): Prompts mit erkennbaren Schlüsseln (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
-  gehen nicht in die Cloud; lokal laufen sie normal.
+  gehen nicht in die Cloud; lokal laufen sie normal. Er liest jeden Text, den der Anbieter erhielte: Nachrichteninhalte
+  (auch als Inhaltsteile), Werkzeugergebnisse, die Argumente von Werkzeugaufrufen im Verlauf, Prompt und System (seit
+  Router 0.42.6; vorher blieben Inhaltsteile und Argumente von Werkzeugaufrufen ungelesen).
 - **Budget** je Anbieter und Monat (`budget_month`), in der Währung der Katalogpreise (`price_per_m`, je Million Tokens);
   erschöpft = Anbieter fällt als Stufe weg, ab `warn_at_percent` ein HA-Problem. Kosten je Anfrage in Usage und Metriken.
   Siehe [Währung](#währung-von-preisen-und-budgets).

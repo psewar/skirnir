@@ -274,10 +274,26 @@ def _class_block_reason(t, req):
 
 
 def _texts(body):
+    """Every text of the request a provider would receive, for the credential scan: message contents as a string or as
+    the text of content parts (the native chat path hands a list to OpenAI-style providers unchanged), the arguments of
+    tool calls in the history (an object as its JSON text), prompt, system and embedding input."""
     out = []
     for m in body.get("messages") or []:
-        if isinstance(m, dict) and isinstance(m.get("content"), str):
-            out.append(m["content"])
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            out.append(content)
+        elif isinstance(content, list):
+            out += [p["text"] for p in content if isinstance(p, dict) and isinstance(p.get("text"), str)]
+        calls = m.get("tool_calls")
+        for call in calls if isinstance(calls, list) else []:
+            fn = call.get("function") if isinstance(call, dict) else None
+            args = fn.get("arguments") if isinstance(fn, dict) else None
+            if isinstance(args, str):
+                out.append(args)
+            elif isinstance(args, (dict, list)):
+                out.append(json.dumps(args, ensure_ascii=False))
     for k in ("prompt", "system"):
         if isinstance(body.get(k), str):
             out.append(body[k])

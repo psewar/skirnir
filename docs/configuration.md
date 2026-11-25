@@ -313,7 +313,9 @@ Limits (`router.cloud`):
   The journal records `privacy_check` with outcome, rule or probability and the number of redacted entries, never the text.
   A declared `routing.data_class` is never overruled.
 - **Credential scan** (`block`): prompts with recognisable keys (`sk-…`, `AKIA…`, `ghp_…`, JWT, `PRIVATE KEY`, `password: …`)
-  do not go to the cloud; locally they run normally.
+  do not go to the cloud; locally they run normally. It reads every text the provider would receive: message contents
+  (also as content parts), tool results, the arguments of tool calls in the history, prompt and system (since router
+  0.42.6; before, content parts and tool call arguments were not read).
 - **Budget** per provider and month (`budget_month`), in the currency of the catalogue prices (`price_per_m`, per million
   tokens); exhausted = the provider drops out as a tier, from `warn_at_percent` on a Home Assistant problem is raised. Cost
   per request in usage and metrics. See [currency](#currency-of-prices-and-budgets).
