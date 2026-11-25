@@ -16,7 +16,7 @@ from .context_config import ContextConfig, parse_context_config
 from .memory_config import CLIENT_MEMORY_FIELDS, PROJECT_FIELDS, HindsightConfig, parse_hindsight, parse_client_memory
 from .rerank_config import RerankConfig, parse_rerank_config
 from .waker_config import FIELDS as WAKER_FIELDS, check_choice as check_waker_choice, parse_wakers
-from .values import egress_url
+from .values import egress_url, ip_network
 from .privacy import FIELDS as PRIVACY_FIELDS, parse_privacy_config
 from . import cost_keys
 from . import settings as settings_mod
@@ -84,7 +84,7 @@ SCHEMA = {
         "listen": None, "control_listen": None, "public_url": None, "state_dir": None, "control_tls": {"cert": None, "key": None},
         "ollama_poll_s": None, "heartbeat_interval_s": None, "heartbeat_stale_s": None, "offline_after_misses": None,
         "agent_missing_problem_s": None, "ram_spill_problem_gib": None, "problem_language": None, "expose_concrete_models": None,
-        "request_timeout_s": None,
+        "request_timeout_s": None, "agent_enrollment_networks": None,
         "toolcall_rescue": None,
         # since 0.37.0: the warm benchmark's prompt (perf.py); tok/s depends on its language, so measurements are comparable
         # only with the same prompt
@@ -400,6 +400,15 @@ class Config:
         if self.problem_language not in PROBLEM_LANGUAGES:
             return invalid(f"router.problem_language must be one of {PROBLEM_LANGUAGES}, not {self.problem_language!r}")
         self.expose_concrete = bool(r.get("expose_concrete_models", False))
+        # ADR-0136 (TM-07): networks a NEW agent identity may enroll from; empty or absent = any address, as before
+        nets = r.get("agent_enrollment_networks") or []
+        if not isinstance(nets, list):
+            return invalid("router.agent_enrollment_networks must be a list of IP networks (CIDR)")
+        self.agent_enrollment_networks = []
+        for i, raw in enumerate(nets):
+            if failed(net := ip_network(raw, f"router.agent_enrollment_networks[{i}]")):
+                return net
+            self.agent_enrollment_networks.append(net)
         self.request_timeout_s = float(r.get("request_timeout_s", _d("router.request_timeout_s")))
         self.heartbeat_token = r.get("heartbeat_token") or ""
         self.api_tls = bool(r.get("api_tls", False))   # 11434 also TLS (cert from control_tls)

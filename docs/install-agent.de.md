@@ -194,6 +194,11 @@ als *wartend* (Punkt am Tab; Home-Assistant-Sensor *Knoten wartet auf Freigabe*)
    (TM-07).
 3. Freigeben und Wake-on-LAN, Gewicht und das MQTT-Gerät des Knotens einstellen.
 
+Um neue Agenten nur aus den eigenen Netzen anzunehmen, diese in `router.agent_enrollment_networks` eintragen (CIDR, z. B.
+`[192.0.2.0/24, 2001:db8::/32]`). Ein Schlüssel, den der Router noch nicht kennt, wird dann von anderswo abgewiesen, bevor
+er als wartend erscheint; bekannte Agenten verbinden sich weiter von überall. Leer oder fehlend heißt jede Adresse, wie
+bisher. Hinter einem Proxy sieht der Router die Adresse des Proxys (ADR-0136, TM-07).
+
 Nach der Freigabe bekommt der Agent sein Konfigurationspaket durch den Tunnel (Heartbeat-Takt, optional MQTT-Zugang) und
 braucht keine eigenen Secrets. Kein Token, keine Firewall-Regel, keine IP von Hand.
 
