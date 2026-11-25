@@ -1,5 +1,13 @@
 # Changelog
 
+## Agent provenance for releases that ship an earlier agent (unreleased; router and agent unchanged)
+
+- *Release provenance* rebuilds the agent binaries from the release's tag and, when that does not reproduce them,
+  from the release that first published this agent version (ADR-0141, proposed; TM-16). Before, a router release whose
+  `agent/` had changed without a new agent (v0.35.1: a `golang.org/x/sys` bump) failed the byte-for-byte comparison and
+  got no attestation or SBOMs. New `tools/security/rebuild_agent.sh` does the rebuild and comparison; the workflow takes
+  it from its own commit, so a manual run for an older tag works too. The comparison stays byte for byte.
+
 ## Router source archive in releases (unreleased; router and agent unchanged)
 
 - The workflow *Release provenance* gets a second job, `router-source`: for every published release it attaches

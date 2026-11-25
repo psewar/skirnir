@@ -158,7 +158,10 @@ Export von `agent/`, die im veröffentlichten Binary vermerkte Go-Version, CGO a
 für Byte mit den Release-Dateien. Nur wenn sie gleich sind, bestätigt GitHub ihre Herkunft (Attestierung), und das Release
 bekommt CycloneDX-SBOMs: eine je Agent-Binary (Go-Version, Module mit `go.sum`-Hash, Build-Einstellungen) und eine für die
 Python-Abhängigkeiten des Routers (`skirnir-router-<version>.cdx.json`). Ein Unterschied lässt den Workflow mit beiden
-Hashes scheitern (ADR-0075). Ein heruntergeladenes Binary prüfen:
+Hashes scheitern (ADR-0075). Ein Release, das den Agent eines früheren Releases mitbringt, wird aus dem Release
+nachgebaut, das diese Agent-Version zuerst veröffentlicht hat, wenn sein eigener Tag ihn nicht nachbildet (etwa nach
+einem Abhängigkeits-Update in `agent/` ohne neuen Agent); die Zusammenfassung des Laufs nennt die Quelle (ADR-0141).
+Ein heruntergeladenes Binary prüfen:
 
 ```bash
 gh attestation verify skirnir-agent-<version>-windows-amd64.exe --repo psewar/skirnir
