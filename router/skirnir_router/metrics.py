@@ -237,6 +237,11 @@ def render():
     gauge("skirnir_node_vram_total_gib", "total VRAM", [({"node": n.name}, n.vram_total_gib) for n in nodes])
     gauge("skirnir_node_vram_foreign_gib", "foreign VRAM (desktop, game) above the baseline", [({"node": n.name}, round(n.foreign_vram_gib(), 3)) for n in nodes])
     gauge("skirnir_node_ollama_vram_gib", "VRAM used by Ollama (measured real footprint where the catalog has it, else /api/ps)", [({"node": n.name}, round(n.ollama_vram_gib(), 3)) for n in nodes])
+    runners = {n.name: n.runners_known(now) for n in nodes}   # ADR-0148: absent where the agent cannot tell
+    gauge("skirnir_node_ollama_runners", "Ollama runner processes alive (agent); 0 = an unloaded model's memory is released",
+          [({"node": name}, r["count"]) for name, r in runners.items() if r is not None])
+    gauge("skirnir_node_ollama_runner_private_gib", "main memory Ollama's runner processes hold (private working set, agent)",
+          [({"node": name}, round(r["private_mib"] / 1024, 3)) for name, r in runners.items() if r is not None])
     gauge("skirnir_node_breaker", "1 for the breaker state", [({"node": n.name, "state": s}, 1 if n.breaker == s else 0) for n in nodes for s in ("closed", "open", "half_open")])
     # Sensors (Agent >= 0.6.0) and GPU guard (>= 0.7.0)
     sens = lambda n, k: (n.sensors or {}).get(k) if n.gpu_known(now) else None  # noqa: E731

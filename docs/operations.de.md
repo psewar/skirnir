@@ -33,13 +33,37 @@ Einen einzelnen Knoten für eine Messung ruhigstellen (bis zu einer Zeit kein En
 `POST /admin/nodes/{fp}/quiet`, vorzeitig beendet mit `DELETE` ([ADR-0061](adr/0061-quiet-a-single-node-for-a-measurement.md);
 Endpunkte in [reference.de.md](reference.de.md#schnittstellen)).
 
+### Einen Knoten vor einem großen Auftrag entladen
+
+Nach `keep_alive: 0` verschwindet ein Modell sofort aus `/api/ps`, aber Ollamas Runner-Prozess hält den Hauptspeicher des
+Modells noch einige Sekunden, bis er beendet ist. Ein großer Auftrag, der in dieser Lücke startet (etwa eine VM), kann den
+Knoten fast an die volle RAM-Grenze bringen. Seit Agent 0.37.0 meldet der Agent die Runner-Prozesse in jedem Heartbeat,
+wenn Ollama unter Windows sein Kind ist; die Knotenansicht in `/admin/state` zeigt sie als
+`ollama_runners: {count, private_mib}` (`null`, wo der Agent es nicht sagen kann), und `/metrics` als `node_ollama_runners`
+und `node_ollama_runner_private_gib` ([ADR-0148](adr/0148-the-agent-reports-ollamas-runner-processes-and-their-memory.md)).
+`count` 0 heißt, kein Runner lebt mehr, der Speicher ist also frei.
+
+`POST /admin/nodes/{fp}/unload` (optionaler Body `{"timeout_s": 1..600}`, Standard 120) erledigt den ganzen Ablauf: Es
+entlädt jedes Modell, das `/api/ps` nennt, wartet auf ein leeres `/api/ps` und danach auf einen später empfangenen
+Heartbeat mit `count` 0 ([ADR-0149](adr/0149-an-admin-unload-answers-once-the-runner-memory-is-released.md)).
+
+| Antwort | Bedeutung |
+|---|---|
+| 200 `released: true` | Der Speicher ist frei; `unloaded` nennt die Modelle, `waited_s` die Dauer. |
+| 409 | Abgelehnt, bevor etwas entladen wurde: Der Knoten ist offline, sein Upstream ist kein Ollama, sein Agent meldet keine Runner (älter als 0.37.0, Linux, Ollama nicht sein Kind), ein Entladen läuft schon, oder eine Messung oder ein Benchmark läuft darauf. `error` und `next` sagen, was davon und was zu tun ist. |
+| 503 `released: false` | `reason` ist `timeout` (zur Frist ist noch ein Modell gelistet oder ein Runner lebt; siehe `loaded` und `ollama_runners`), `not_reported` (der Agent meldet keine Runner mehr, etwa weil Ollama neu startete) oder `offline`. |
+| 502 | Ollama auf dem Knoten war nicht zu fragen. |
+
+Die Antwort ist ein Moment: Eine Anfrage, die danach kommt, lädt wieder ein Modell. Die Messruhe hält das Vorwärmen des
+Routers an, nicht Anfragen.
+
 ## Observability
 
 `GET /metrics` (Steuer-Port, Basic Auth) liefert Prometheus-Text ohne `prometheus_client`, Präfix `skirnir_`:
 `requests_total{role,node,model,client,via,outcome}`, `tokens_total{kind,…}`, Histogramme `request_duration_seconds`,
 `ttft_seconds`, `queue_wait_seconds`, `events_total{event,node}`, je Knoten `node_up`, `node_state`, `node_inflight`,
-`node_gpu_util_percent`, `node_vram_*_gib`, `node_breaker`, je Modell `model_loaded_gib`, `perf_gen_tps`, `perf_error_rate`,
-dazu `decision_*`, `cloud_*`, `usage_today_*`, `info` sowie die aktiven Probleme als `problem{code,severity,node,subject}`
+`node_gpu_util_percent`, `node_vram_*_gib`, `node_breaker`, `node_ollama_runners` und `node_ollama_runner_private_gib`
+(nur für Knoten, deren Agent sie meldet), je Modell `model_loaded_gib`, `perf_gen_tps`, `perf_error_rate`, dazu `decision_*`, `cloud_*`, `usage_today_*`, `info` sowie die aktiven Probleme als `problem{code,severity,node,subject}`
 und `problems_active` ([unten](#probleme)).
 
 ```yaml

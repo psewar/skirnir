@@ -102,6 +102,14 @@ Der Heartbeat traegt zwei Bloecke, damit der Router nicht aus fremdem VRAM raten
   moeglich, fehlen die Felder; der Router wertet dann jedes Spiel wie bisher als busy.
 - `memory: {ram_available_gib, ram_total_gib, commit_free_gib, commit_limit_gib}` aus `GlobalMemoryStatusEx`; Linux meldet
   nur RAM (`MemAvailable`), weil der Commit dort bei Ueberbuchung keine Grenze ist.
+- `ollama_runners: {count, private_mib}` seit 0.37.0 (ADR-0148, `ollamarunners.go`): die Prozesse im Job-Objekt des
+  Ollama-Kinds ausser dem Server selbst und dem Konsolen-Host (`System32\conhost.exe`), den Windows fuer ein
+  Konsolenprogramm ohne Konsole startet, summiert ueber alle laufenden Ollama-Kinder; Ollama faehrt je geladenem Modell
+  einen Runner. `private_mib` ist die Summe
+  ihrer privaten Arbeitssaetze (`procMemory`). `count` 0 heisst: kein Runner lebt, der Hauptspeicher eines entladenen
+  Modells ist frei. Ein Prozess, dessen Programm oder Speicher sich nicht lesen laesst, zaehlt trotzdem mit, damit nie zu
+  frueh 0 gemeldet wird. Der Block fehlt, wenn Ollama nicht Kind des Agenten ist oder nicht laeuft, und ausserhalb von
+  Windows (dort listet der Agent den Prozessbaum eines Kinds nicht).
 
 Was der Router damit macht (busy-Grund `game`, Speicherdruck): siehe README, Abschnitt Busy. Beides steht auch in `/health`.
 

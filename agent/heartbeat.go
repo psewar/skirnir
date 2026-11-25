@@ -90,6 +90,11 @@ func (h *Heartbeat) payload(ctx context.Context) (map[string]any, error) {
 			p["children_vram_mib"] = m
 		}
 	}
+	// 0.37.0 (ADR-0148): Ollama's runner processes and their memory; count 0 = an unloaded model's memory is released.
+	// Absent where the agent cannot tell (Ollama not its child or not running, not Windows).
+	if r, ok := h.sup.ollamaRunners(); ok {
+		p["ollama_runners"] = r
+	}
 	if h.game != nil { // 0.17.0: game and RAM - router marks node busy or avoids cold loads
 		p["game"] = h.game.Fact()
 	}

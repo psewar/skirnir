@@ -65,6 +65,19 @@ nach dem Ende                          free -> einmal prewarm (Grund quiet_end);
 Der Zustand steht in `/admin/state` (`nodes.<name>.quiet`) und im Journal (`quiet`, `quiet_end`); er lebt nur im
 Speicher, ein Router-Neustart beendet ihn.
 
+Entladen mit Freigabe-Nachweis (Router 0.44.0, Agent 0.37.0, ADR-0148/0149, `router/skirnir_router/unload.py`): Der
+Agent meldet im Heartbeat `ollama_runners: {count, private_mib}`, die Runner-Prozesse im Prozessbaum seines Ollama-Kinds;
+der Router zeigt sie nur bei frischem Heartbeat (`Node.runners_known`). `POST /admin/nodes/{fp}/unload` läuft so:
+```
+Vorbedingung     offline, OpenAI-Upstream, kein Runner-Fakt, schon ein Entladen, Messung/Benchmark auf dem Knoten
+                 -> 409, nichts entladen; Body kein JSON-Objekt -> 400
+entladen         /api/ps lesen, je Modell {model, keep_alive: 0}
+warten           bis /api/ps leer (t_leer), dann bis ein Heartbeat mit hb_ts > t_leer count 0 meldet -> 200 released
+Abbruch          timeout_s (Standard 120, höchstens 600) -> 503 reason timeout (+ loaded); Fakt verschwunden ->
+                 not_reported; Knoten offline -> offline; Ollama nicht erreichbar -> 502
+```
+Ein Heartbeat mit count 0 von vor dem leeren `/api/ps` zählt nicht: Er kann vor dem Start eines Runners entstanden sein.
+
 Knoten ohne GPU (Router/Agent 0.36.0, [ADR-0102](../docs/adr/0102-the-agent-starts-without-a-gpu.md)): Der Agent meldet
 `gpu_present: false` in den Fakten und jedem Heartbeat (fehlt das Feld, gilt der Knoten als GPU-Knoten) und schickt keine
 GPU-Werte. Der Knoten rechnet im Hauptspeicher:

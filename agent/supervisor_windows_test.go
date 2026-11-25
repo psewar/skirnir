@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -80,9 +81,15 @@ func waitDead(pid int, within time.Duration) bool {
 // startFamily starts a parent, attaches it to a tree, and returns the grandchild's PID.
 func startFamily(t *testing.T, g *childGroup, role string) (*exec.Cmd, *procTree, int) {
 	t.Helper()
+	return startFamilyWith(t, g, role, childProcAttr())
+}
+
+// startFamilyWith: startFamily with the parent's process attributes given (for example its own console).
+func startFamilyWith(t *testing.T, g *childGroup, role string, attr *syscall.SysProcAttr) (*exec.Cmd, *procTree, int) {
+	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
 	cmd.Env = append(os.Environ(), helperEnv+"="+role)
-	cmd.SysProcAttr = childProcAttr()
+	cmd.SysProcAttr = attr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

@@ -4,8 +4,11 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -97,23 +100,47 @@ type jobProcessIDList struct {
 
 // pids: all processes in the child's job - including grandchildren (the actual python.exe behind the venv starter, llama-server).
 func (t *procTree) pids() []uint32 {
+	out, _ := t.members()
+	return out
+}
+
+// members: the processes in the child's job, and whether the job could be listed in full (false: no job, or the query
+// failed). An empty list with true: no live process in the job.
+func (t *procTree) members() ([]uint32, bool) {
 	if t == nil {
-		return nil
+		return nil, false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.job == 0 {
-		return nil
+		return nil, false
 	}
 	var l jobProcessIDList
 	const jobObjectBasicProcessIDList = 3
 	if err := windows.QueryInformationJobObject(t.job, jobObjectBasicProcessIDList, uintptr(unsafe.Pointer(&l)),
 		uint32(unsafe.Sizeof(l)), nil); err != nil {
-		return nil
+		return nil, false // also a job with more processes than the list holds (ERROR_MORE_DATA): no partial count
 	}
 	out := make([]uint32, 0, l.InList)
 	for i := uint32(0); i < l.InList && i < uint32(len(l.List)); i++ {
 		out = append(out, uint32(l.List[i]))
 	}
-	return out
+	return out, l.InList == l.Assigned
 }
+
+// isConsoleHost: the process runs the system's console host (System32\conhost.exe). Windows starts one for a console
+// program that has no console of its own - Ollama under the service - and puts it into the program's job. It is no
+// runner. A process whose program cannot be read is not taken for one (processPath "").
+func isConsoleHost(pid uint32) bool {
+	host := consoleHostPath()
+	return host != "" && strings.EqualFold(processPath(pid), host)
+}
+
+// consoleHostPath: the full path of the system's console host, "" when the system folder cannot be read.
+var consoleHostPath = sync.OnceValue(func() string {
+	dir, err := windows.GetSystemDirectory()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "conhost.exe")
+})

@@ -755,6 +755,26 @@ def plausible_gpu_facts(b):
     return facts, dropped
 
 
+MAX_RUNNERS = 256                   # the agent lists at most this many processes of a job (heartbeat schema)
+
+
+def note_ollama_runners(node, b):
+    """Agent >= 0.37.0 (ADR-0148): Ollama's runner processes on the node as a fact, {"count", "private_mib"}. count 0 =
+    no runner lives, so an unloaded model's main memory is released. Absent = the agent cannot tell (older agent, Ollama
+    not its child or not running, not Windows): node.ollama_runners None. A block outside the schema's range is dropped
+    like an implausible GPU number (ADR-0137): unknown, never a guessed 0. Returns the dropped field names."""
+    r = b.get("ollama_runners")
+    if r is None:
+        node.ollama_runners = None
+        return []
+    count, private = (r.get("count"), r.get("private_mib")) if isinstance(r, dict) else (None, None)
+    if type(count) is not int or not 0 <= count <= MAX_RUNNERS or type(private) is not int or _mib(private) is None:
+        node.ollama_runners = None
+        return ["ollama_runners"]
+    node.ollama_runners = {"count": count, "private_mib": private}
+    return []
+
+
 MISMATCH_HEARTBEATS = 3             # consecutive heartbeats before a contradiction counts (ADR-0142)
 FREE_VRAM_SLACK_GIB = 1.0           # rounding, driver bookkeeping and the CUDA context next to the loaded models
 IDLE_UTIL_PCT = 2                   # "GPU idle": at most this utilisation
@@ -812,6 +832,7 @@ def apply_heartbeat(node, b, now):
         else:
             log.warning("node %s: invalid TLS fingerprint: %r", node.name, fp)
     facts, dropped = plausible_gpu_facts(b)   # ADR-0137: only numbers within range and consistent with the total
+    dropped += note_ollama_runners(node, b)   # Agent >= 0.37.0 (ADR-0148): Ollama's runner processes and their memory
     node.implausible_fields = dropped
     if dropped and now - node.implausible_logged >= IMPLAUSIBLE_LOG_EVERY_S:
         node.implausible_logged = now
