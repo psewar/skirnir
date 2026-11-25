@@ -121,7 +121,10 @@ Operation. Höchstens `sync_max_waiting` synchrone Aufträge warten gleichzeitig
 Bewusst begrenzt: ein kurzer Texteingang pro Retain, keine freie Tenant-/Bank-
 Administration, kein Reflect, Append, Entity-/Chunk-Expansion, Trace oder nicht
 unterstützte Filter/Extraktionsstrategien. Solche Optionen werden abgelehnt.
-Recall bleibt serverseitig begrenzt und nutzt upstream das niedrige Suchbudget.
+Recall bleibt serverseitig begrenzt und nutzt upstream das niedrige Suchbudget. `rerank`, wie
+hindsight-client 1.x es sendet (null, oder prune/dedup null = Vorgaben der Bank), wird angenommen (seit
+Router 0.42.7; vorher ein unbekanntes Feld und 400); ein gesetztes `rerank` wird mit `error.reason`
+`unsupported gateway recall option: rerank` abgelehnt.
 Plugin-Metadaten können keine Bestätigung von Assistentenaussagen erzwingen.
 
 Identische Dokument-/Inhalts-Snapshots deduplizieren. Geänderte Snapshots werden
@@ -133,7 +136,7 @@ explizit. Ein vom Upstream entfernter Operationsstatus liefert im nativen Gatewa
 Das ist kein Nachweis erfolgreicher Extraktion oder vollständiger Löschung.
 
 Die englische Referenz dokumentiert die geprüften offiziellen API-/Plugin-
-Quellversionen. Ein Test verwendet den echten Python-SDK (getestet 0.10.3) gegen
+Quellversionen. Ein Test verwendet den echten Python-SDK (`>=0.10.1,<2`, CI-Lock 1.3.0, auch 0.10.3 getestet) gegen
 einen synthetischen HTTP-Server. Ein echter Hindsight-Modelltest und ein vollständiger
 Hermes-Agent-Lauf sind damit ausdrücklich nicht durchgeführt.
 

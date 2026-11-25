@@ -349,6 +349,30 @@ class SharedGatewayTests(MemoryHarness):
         self.assertTrue(retained["context"].endswith(f"client context: Synthetic host {PRIVATE}"))
         self.assertEqual((await self.api(path + "/memories/recall", {"query": f"What runs on {PRIVATE}?"})).status, 200)
 
+    async def test_gateway_recall_accepts_what_hindsight_client_1_sends(self):
+        # hindsight-client 1.3.0's arecall(bank, query, budget="low", max_tokens=512), as it goes over the wire: every
+        # option present, unset ones null, and the new rerank field. Before router 0.42.7 the unknown field was a 400.
+        self.shared()
+        self.results = [realistic_fact("source-1", "Synthetic project uses versioned events.")]
+        base = memory_gateway.GATEWAY + "/v1/default/banks/" + SHARED + "/memories/recall"
+        sdk1 = {"query": "Synthetic question", "budget": "low", "max_tokens": 512, "trace": False,
+                "include": {"entities": None, "chunks": None, "source_facts": None}, "tags_match": "any", "types": None,
+                "prefer_observations": None, "rerank": None, "query_timestamp": None, "tags": None, "tag_groups": None,
+                "min_scores": None, "temporal_window": None}
+        for rerank in (None, {}, {"prune": None, "dedup": None}):
+            with self.subTest(rerank=rerank):
+                response = await self.api(base, {**sdk1, "rerank": rerank})
+                self.assertEqual(response.status, 200, await response.text())
+                self.assertEqual([r["id"] for r in (await response.json())["results"]], ["source-1"])
+        # rejected: a rerank the gateway would silently drop, and an unknown rerank key
+        for rerank, reason in (({"prune": True}, "unsupported gateway recall option: rerank"),
+                               ({"dedup": False}, "unsupported gateway recall option: rerank"),
+                               ({"other": None}, "invalid object fields"), ("prune", "invalid object fields")):
+            with self.subTest(rerank=rerank):
+                response = await self.api(base, {**sdk1, "rerank": rerank})
+                self.assertEqual(response.status, 400)
+                self.assertEqual((await response.json())["error"]["reason"], reason)
+
     async def test_gateway_retain_rejection_names_its_reason(self):
         self.shared()
         await self.durable()

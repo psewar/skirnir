@@ -202,7 +202,9 @@ keeps going, and resending identical content returns the same operation. At most
 `sync_max_waiting` synchronous retains wait at once; beyond that the gateway answers
 503 without admitting the job. The separate Skirnir `/memory/retain` endpoint returns **202**.
 Recall accepts SDK default null expansions, `types` absent, `observation`, or the
-standard world/experience/observation set. Server limits cap results and upstream
+standard world/experience/observation set, and `rerank` as hindsight-client 1.x sends it (null, or prune/dedup
+null = the bank's defaults; since router 0.42.7, before it was an unknown field and 400). A set `rerank` is refused
+with `error.reason` `unsupported gateway recall option: rerank`. Server limits cap results and upstream
 search uses the low budget. Filters, expanded entities/chunks/source facts, trace,
 reflect, bank administration, extraction strategies and append are unsupported
 and rejected; retain item `tags`, `entities`, `strategy` and `resolve_entities: false`
@@ -246,8 +248,8 @@ Contracts were checked against the official
 provider blob `d194a893940490bcf0b4004db56f4dcf5e2ea4e1` (plugin 1.2.3), and
 OpenAPI blob `54f4e0fd6147825363e9a384ac08bfc493931265` in
 [vectorize-io/hindsight](https://github.com/vectorize-io/hindsight).
-The optional SDK contract test runs `hindsight-client>=0.10.1,<1` (tested 0.10.3)
-against a synthetic loopback server. A real Hindsight extraction/model smoke test
+The optional SDK contract test runs `hindsight-client>=0.10.1,<2` (CI lock 1.3.0; 0.10.3 also
+tested) against a synthetic loopback server. A real Hindsight extraction/model smoke test
 and a full Hermes agent run require an operator-provided test service and are not
 part of these CI tests.
 
