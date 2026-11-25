@@ -2,64 +2,71 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "821cd2bc5591e8f59cad1b14e21aec2cbde4ae29",
- "change_digest": "0bf87afa89d3ca39d6f4d777e8a0abf38ef8b039592162073e967839aafd13b5",
+ "base_sha": "07c811a4bf5b524af496260424ef80e297c11730",
+ "change_digest": "654c7520db1463e7bb03dec2217cdad46069faec84765d5a0a3e73ebafe6d218",
  "reviewed_paths": [
   "CHANGELOG.md",
-  "design/privacy-check.md",
-  "docs/configuration.de.md",
-  "docs/configuration.md",
-  "docs/security/risk-register.json",
-  "docs/security/threat-model.de.md",
-  "docs/security/threat-model.md",
-  "router/skirnir_router/cloud.py",
+  "design/shared-memory-interoperability.de.md",
+  "design/shared-memory-interoperability.md",
+  "requirements-ci-lock.txt",
   "router/skirnir_router/common.py",
-  "test/selftest_cloud_final_payload.py",
+  "router/skirnir_router/memory_gateway.py",
+  "test/requirements-hindsight.txt",
+  "test/selftest_interoperability.py",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/proxy.py",
-  "router/skirnir_router/privacy.py",
-  "router/skirnir_router/redactors.py",
-  "router/skirnir_router/openai_api.py",
-  "router/skirnir_router/anthropic_api.py",
+  "router/skirnir_router/session_api.py",
   "router/skirnir_router/memory.py",
-  "test/selftest_privacy_redactors.py"
+  "test/integration_live_memory.py",
+  ".github/workflows/security.yml"
  ],
  "risk_ids": [
-  "TM-05"
+  "TM-10",
+  "TM-16"
  ],
  "boundaries": [
-  "B6",
-  "B7"
+  "B1",
+  "B5",
+  "B9"
  ],
- "summary": "Router 0.42.6 closes TM-05's next action 'include tool results in the final-payload test' and, found while doing so, a gap in the credential scan (cloud.scan_secrets, used by request_block_reason when credential_scan is block, the default). cloud._texts read only message contents given as a string, prompt, system and embedding input. Traced B6: on the native chat path (/api/chat, OllamaShape) a message content given as a list of parts is forwarded unchanged by cloud._oa_messages to OpenAI-style providers (o['content'] = content), and assistant tool_calls' function.arguments go to every provider (OpenAI tool_calls, Anthropic tool_use input via parse_tool_args); neither was scanned (probe: scan_secrets returned None for a synthetic key in parts and in arguments as object and as JSON text). OpenAI- and Anthropic-format requests join text parts into strings in openai_api/anthropic_api before routing, so only the native path carried lists; tool call arguments came through every API. Now _texts also reads the text of dict parts with a string text and the arguments of each tool call (string as is, object or list as JSON text with ensure_ascii=False); malformed parts and calls are skipped, not errors (no exception path). memory.py's use of scan_secrets ({'prompt': ...}) is unchanged. Effect for operators: a request whose parts or tool-call history look like they carry a key now stays local (cloud tier skipped with the credential_scan reason) - a stricter default, noted as a possible behaviour change. B7/final payload: the new test runs proxy._Relay._via_cloud with the privacy exception on a body with memory facts, an assistant tool call, a Home Assistant live context (door sensor) and an unrecognised result; the provider receives the redacted copy (memory facts and tool result present, door sensor absent, unrecognised result unchanged per ADR-0125) and the client's body is unchanged; with unrecognised_tool_results keep_local nothing reaches the provider and the refusal is answered. Not scanned (unchanged): the client's tools definitions and format schema, which are forwarded to providers but are schemas, not conversation content.",
+ "summary": "Router 0.42.7 makes the native memory gateway's recall accept what the official hindsight-client 1.x sends. Found while checking the open item 'hindsight-client 1.x' (the CI lock stayed on 0.10.3 because of the <1 bound): with 1.3.0 the SDK contract test failed with 400 'invalid object fields'. A loopback capture showed that 1.x sends every recall option, unset ones as null, plus the new field rerank; session_api.fields refused the unknown name. Retain items already allowed all 1.x fields (resolve_entities, update_mode, strategy, observation_scopes, ...). Traced B1/B5: gateway_recall validates the client request before it calls service.recall_merged; it forwards no expansion or ranking knobs and refuses options whose meaning would be lost. The change adds rerank to the allowed names and treats it like include: null passes; an object must have only prune/dedup (else 'invalid object fields') and all values null (the bank's defaults), otherwise 'unsupported gateway recall option: rerank'. No value of rerank reaches Hindsight; the upstream request is unchanged. No other field or limit changed; authorization, scope and bank checks run before as before. Dependency (B9/TM-16): test/requirements-hindsight.txt allows <2, the CI lock moves hindsight-client 0.10.3 -> 1.3.0 (resolved on Linux, same transitive pins, hashes verified against PyPI, pip-audit clean). The SDK is a test dependency only; the router does not import it.",
  "findings": [
   {
-   "id": "CREDENTIAL-SCAN-PARTS-AND-TOOL-ARGS",
-   "evidence": "cloud._texts skipped list contents and tool_calls arguments; _oa_messages forwards list contents unchanged and both provider converters forward tool call arguments. A synthetic key there passed the credential scan (scan_secrets -> None) and would have reached a cloud provider. Pre-existing since the scan was introduced; found during this review, impact: the defence-in-depth scan against accidental secret egress missed agent tool-call histories and native content parts.",
-   "resolution": "_texts reads both; test_credential_scan_reads_every_text_a_provider_receives fails without the fix (3 of 4 places) and passes with it; malformed parts/calls are skipped.",
+   "id": "GATEWAY-RECALL-SDK1-RERANK",
+   "evidence": "hindsight-client 1.3.0 recall -> 400 invalid object fields (unknown field rerank); every recall of a client on SDK 1.x would fail. Compatibility defect, not a security weakness: the refusal was fail-safe.",
+   "resolution": "rerank accepted when it asks for nothing, refused with a named reason otherwise; test_gateway_recall_accepts_what_hindsight_client_1_sends (5 subtests fail without the fix) and the SDK contract test pass with 1.3.0 and 0.10.3.",
    "disposition": "fixed"
   }
  ],
  "tests": [
   {
-   "command": "python test/selftest_cloud_final_payload.py",
+   "command": "python test/selftest_interoperability.py (SharedGatewayTests)",
    "result": "passed",
-   "evidence": "8 tests OK. New: secret in a tool result, content parts, tool call arguments as object and as JSON text is found and the same bodies without it are clean (rejected case); instrument: _oa_messages forwards parts unchanged; malformed parts and calls skipped; final payload with memory and tool results through _via_cloud (redacted copy sent, door sensor removed, unrecognised result unchanged, client body unchanged) and keep_local (no provider call, refusal). With cloud.py from origin/main the scan test fails for content parts and both argument forms."
+   "evidence": "New test: the exact 1.3.0 recall payload (captured on loopback) with rerank null, {} and prune/dedup null -> 200 with the result; rerank {prune: true} and {dedup: false} -> 400 'unsupported gateway recall option: rerank', {other: null} and a string -> 400 'invalid object fields' (rejected cases). With memory_gateway.py from origin/main 5 subtests fail."
+  },
+  {
+   "command": "test_official_hindsight_sdk_recall_retain_and_operation_status with hindsight-client 1.3.0 and 0.10.3 (separate venv)",
+   "result": "passed",
+   "evidence": "Recall, retain (async, with context and timestamp), operation status and the 503 -> ApiException case pass with both versions; with 1.3.0 and the old gateway it failed with 400."
+  },
+  {
+   "command": "lock_requirements.py check, verify-pypi; pip-audit --require-hashes -r requirements-ci-lock.txt; pip-audit -r test/requirements-hindsight.txt",
+   "result": "passed",
+   "evidence": "0 problems; no known vulnerabilities."
   },
   {
    "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "93 commands, 0 failed (also after merging main); includes selftest_privacy_redactors (default corpus byte-identical), selftest_privacy_check, selftest_institutional_provider, selftest_security, check_control_flow."
+   "evidence": "93 commands, 0 failed (the SDK contract test is skipped there: the local Python has no SDK)."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "337 PASS, 0 failures (base 83a9fee)."
+   "evidence": "337 PASS, 0 failures on base 07c811a."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; the test's key is the existing synthetic shape assembled at runtime."
+   "evidence": "run after staging this record; synthetic test values only."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -68,9 +75,8 @@
   }
  ],
  "limitations": [
-  "The client's tools definitions and format schema are forwarded to providers and not scanned.",
-  "Secret patterns themselves are unchanged; a key format they do not know passes, as before.",
-  "No end-to-end no-egress test against a real provider; classifier quality remains TM-05's open action.",
-  "Re-reviewed after merging main with #197 (router 0.42.5, control UI styles, no overlap with cloud.py): the end-to-end suite ran before that merge on base 83a9fee; after it the workflow commands ran again."
+  "No run against a real Hindsight server or a real Hermes plugin on SDK 1.x; the live memory test needs an operator-provided service.",
+  "CI tests the SDK at the lock's version (1.3.0) only; 0.10.3 was checked locally.",
+  "The end-to-end suite failed once on base 83a9fee in 'Residency: rank-1 prewarmed again after evictor idle' (timing-sensitive, flaked before, unrelated to the memory gateway) and passed on the rerun; on base 07c811a see the end-to-end entry."
  ]
 }

@@ -1,3 +1,4 @@
 # Optional integration-test dependency, matching the official Hermes plugin floor.
 # No embedded server/model is installed; tests use only synthetic loopback HTTP.
-hindsight-client>=0.10.1,<1
+# 1.x sends recall's rerank field, which the memory gateway accepts since router 0.42.7; 0.10.x keeps working.
+hindsight-client>=0.10.1,<2

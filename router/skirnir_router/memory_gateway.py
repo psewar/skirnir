@@ -227,7 +227,7 @@ async def operation_control(request, service, principal, gateway):
 
 async def gateway_recall(service, scope, data):
     names = ("query", "budget", "max_tokens", "types", "tags", "tags_match", "tag_groups", "min_scores", "include", "trace",
-             "query_timestamp", "prefer_observations", "temporal_window")
+             "query_timestamp", "prefer_observations", "temporal_window", "rerank")
     if failed(problem := session_api.fields(data, names, ("query",))):
         return problem
     # The gateway forwards no expansion knobs. Explicitly reject filters whose
@@ -238,6 +238,13 @@ async def gateway_recall(service, scope, data):
             return problem
         if any(value is not None for value in include.values()):
             return invalid("unsupported gateway expansion")
+    # hindsight-client 1.x sends rerank (null unless set): only the bank's own prune/dedup defaults are supported.
+    rerank = data.get("rerank")
+    if rerank is not None:
+        if failed(problem := session_api.fields(rerank, ("prune", "dedup"))):
+            return problem
+        if any(value is not None for value in rerank.values()):
+            return invalid("unsupported gateway recall option: rerank")
     if any(data.get(k) for k in ("tags", "tag_groups", "min_scores", "query_timestamp", "trace", "prefer_observations", "temporal_window")):
         return invalid("unsupported gateway recall options")
     if data.get("budget", "low") not in ("low", "mid", "high") or data.get("tags_match", "any") != "any":
