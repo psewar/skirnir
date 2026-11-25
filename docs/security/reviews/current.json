@@ -2,79 +2,64 @@
  "schema_version": 1,
  "status": "completed",
  "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "83a9feea5ec085ed20c293d8daa5ecb9ec8645ca",
- "change_digest": "8ab34191a34c9ecdf568da70538e4b70f93a0d1343e7c661881b3df820ff2a0c",
+ "base_sha": "821cd2bc5591e8f59cad1b14e21aec2cbde4ae29",
+ "change_digest": "0bf87afa89d3ca39d6f4d777e8a0abf38ef8b039592162073e967839aafd13b5",
  "reviewed_paths": [
   "CHANGELOG.md",
-  "deploy/deploy.py",
-  "docs/adr/0128-the-control-ui-runs-no-inline-script.md",
-  "docs/adr/0130-the-control-ui-uses-no-inline-style.md",
-  "docs/adr/README.md",
-  "docs/install-router.de.md",
-  "docs/install-router.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
-  "docs/reference.de.md",
-  "docs/reference.md",
+  "design/privacy-check.md",
+  "docs/configuration.de.md",
+  "docs/configuration.md",
   "docs/security/risk-register.json",
   "docs/security/threat-model.de.md",
   "docs/security/threat-model.md",
-  "router/Dockerfile",
-  "router/install.sh",
-  "router/skirnir_router/admin.py",
-  "router/skirnir_router/app.py",
-  "router/skirnir_router/browser_headers.py",
+  "router/skirnir_router/cloud.py",
   "router/skirnir_router/common.py",
-  "router/ui.css",
-  "router/ui.html",
-  "router/ui.js",
-  "test/selftest_browser.py",
-  "test/selftest_install.py",
+  "test/selftest_cloud_final_payload.py",
   "docs/security/reviews/current.json",
-  "router/skirnir_router/auth.py",
-  "router/skirnir_router/common.py",
-  "docs/adr/0065-browser-headers-and-handler-escaping-for-the-control-ui.md"
+  "router/skirnir_router/proxy.py",
+  "router/skirnir_router/privacy.py",
+  "router/skirnir_router/redactors.py",
+  "router/skirnir_router/openai_api.py",
+  "router/skirnir_router/anthropic_api.py",
+  "router/skirnir_router/memory.py",
+  "test/selftest_privacy_redactors.py"
  ],
  "risk_ids": [
-  "TM-03"
+  "TM-05"
  ],
  "boundaries": [
-  "B2"
+  "B6",
+  "B7"
  ],
- "summary": "Router 0.42.5 closes TM-03's next action 'consider dropping unsafe-inline for styles' (ADR-0130, proposed, supersedes ADR-0128 whose script decision stays). Before, the control port's CSP allowed style-src 'unsafe-inline' because ui.html had a <style> element and the page plus the markup ui.js builds had 52 style attributes; injected markup could lay a disguised overlay over a control (click redirection with the operator's session) or hide/fake a warning. Now the <style> element is router/ui.css (content unchanged), loaded with <link rel=stylesheet href=ui.css>; 48 static style attributes became utility classes (merged into existing class attributes, !important so they keep a style attribute's precedence over element rules such as select {width:100%}); 3 legend colours became classes pal0..pal7 via palClass(i) with PAL's colours; the budget bar width moved to data-pct and is set through CSSOM after rendering (Number() of the attribute, so only a number reaches the style). Policy: style-src 'self' (no 'unsafe-inline' anywhere on the control port). Traced B2: /ui.css is a GET route on the control app; basic_auth_middleware exempts only /v1/, so it needs the control login like / and /ui.js (tested: 401 without login, headers on success and refusal); the handler serves one fixed path next to ui.html (no request-derived path), Content-Type text/css, Cache-Control no-store. browser_headers.install applies the CSP to the new response. ui.css loads nothing (no url(), no @import), so img-src/default-src stay untouched. Shipping: install.sh requires and copies ui.css, router/Dockerfile copies it, deploy.py uploads it with mode 0644 like ui.js. Nothing else of the control UI's behaviour changes: no action, handler or data path changed; the script change is palClass, data-pct and the CSSOM loop. Residual: script code may still set styles through CSSOM, which injected markup cannot reach; style hashes/nonces were not needed.",
+ "summary": "Router 0.42.6 closes TM-05's next action 'include tool results in the final-payload test' and, found while doing so, a gap in the credential scan (cloud.scan_secrets, used by request_block_reason when credential_scan is block, the default). cloud._texts read only message contents given as a string, prompt, system and embedding input. Traced B6: on the native chat path (/api/chat, OllamaShape) a message content given as a list of parts is forwarded unchanged by cloud._oa_messages to OpenAI-style providers (o['content'] = content), and assistant tool_calls' function.arguments go to every provider (OpenAI tool_calls, Anthropic tool_use input via parse_tool_args); neither was scanned (probe: scan_secrets returned None for a synthetic key in parts and in arguments as object and as JSON text). OpenAI- and Anthropic-format requests join text parts into strings in openai_api/anthropic_api before routing, so only the native path carried lists; tool call arguments came through every API. Now _texts also reads the text of dict parts with a string text and the arguments of each tool call (string as is, object or list as JSON text with ensure_ascii=False); malformed parts and calls are skipped, not errors (no exception path). memory.py's use of scan_secrets ({'prompt': ...}) is unchanged. Effect for operators: a request whose parts or tool-call history look like they carry a key now stays local (cloud tier skipped with the credential_scan reason) - a stricter default, noted as a possible behaviour change. B7/final payload: the new test runs proxy._Relay._via_cloud with the privacy exception on a body with memory facts, an assistant tool call, a Home Assistant live context (door sensor) and an unrecognised result; the provider receives the redacted copy (memory facts and tool result present, door sensor absent, unrecognised result unchanged per ADR-0125) and the client's body is unchanged; with unrecognised_tool_results keep_local nothing reaches the provider and the refusal is answered. Not scanned (unchanged): the client's tools definitions and format schema, which are forwarded to providers but are schemas, not conversation content.",
  "findings": [
   {
-   "id": "STYLE-IMPORTANT-PARTIAL",
-   "evidence": "The first generated ui.css put !important only on the last declaration of .flex-row-4 (display:flex; gap:4px; align-items:center !important) and none on the legend classes, so element rules could have won where the former style attribute had won.",
-   "resolution": "Every declaration of the utility and legend classes carries !important; in a browser all 91 elements with a utility or legend class have the same computed style and position as with the former style set inline.",
+   "id": "CREDENTIAL-SCAN-PARTS-AND-TOOL-ARGS",
+   "evidence": "cloud._texts skipped list contents and tool_calls arguments; _oa_messages forwards list contents unchanged and both provider converters forward tool call arguments. A synthetic key there passed the credential scan (scan_secrets -> None) and would have reached a cloud provider. Pre-existing since the scan was introduced; found during this review, impact: the defence-in-depth scan against accidental secret egress missed agent tool-call histories and native content parts.",
+   "resolution": "_texts reads both; test_credential_scan_reads_every_text_a_provider_receives fails without the fix (3 of 4 places) and passes with it; malformed parts/calls are skipped.",
    "disposition": "fixed"
   }
  ],
  "tests": [
   {
-   "command": "python test/selftest_browser.py",
+   "command": "python test/selftest_cloud_final_payload.py",
    "result": "passed",
-   "evidence": "13 tests OK. New: style-src exactly 'self' and no 'unsafe-inline' in the policy; /ui.css 200 with text/css, no-store and the control headers, 401 without login (rejected case); no style element or attribute in ui.html or ui.js and no setAttribute('style') (the same patterns find 31 + 21 attributes and the element in origin/main's files); exactly one style sheet ui.css; every utility class used is defined; legend classes equal PAL; ui.css has no url() or @import."
+   "evidence": "8 tests OK. New: secret in a tool result, content parts, tool call arguments as object and as JSON text is found and the same bodies without it are clean (rejected case); instrument: _oa_messages forwards parts unchanged; malformed parts and calls skipped; final payload with memory and tool results through _via_cloud (redacted copy sent, door sensor removed, unrecognised result unchanged, client body unchanged) and keep_local (no provider call, refusal). With cloud.py from origin/main the scan test fails for content parts and both argument forms."
   },
   {
-   "command": "browser (built-in pane, Chromium) against test/dev_env.py",
+   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check . and router.py --check router/config.example.yaml --pure",
    "result": "passed",
-   "evidence": "Response CSP style-src 'self'; only /ui.css loaded (123 rules). For each of the 91 elements with a utility or legend class: every computed property and the bounding rectangle equal those with the classes removed and the former declarations set inline through CSSOM (0 differences). Injected style attribute (full-screen red overlay) and injected <style> element were blocked as style-src-attr and style-src-elem violations; the overlay did not render (position static, no background). Fresh tab through all six tabs plus one live refresh: no console message, no violation. Budget bar with 42 % and 130 %: width 42 % and 100 % through CSSOM."
-  },
-  {
-   "command": "every python test/... and tools/... command of all workflows in .github/workflows/, except run_tests.py and check_public_changes (run separately); plus ruff check ., router.py --check router/config.example.yaml --pure and node --check router/ui.js",
-   "result": "passed",
-   "evidence": "93 commands, 0 failed; includes selftest_browser, selftest_install (its install.sh run is skipped on Windows; CI runs it on Linux), check_adr_index (130 ADRs), check_control_flow."
+   "evidence": "93 commands, 0 failed (also after merging main); includes selftest_privacy_redactors (default corpus byte-identical), selftest_privacy_check, selftest_institutional_provider, selftest_security, check_control_flow."
   },
   {
    "command": "python test/run_tests.py",
    "result": "passed",
-   "evidence": "337 PASS, 0 failures."
+   "evidence": "337 PASS, 0 failures (base 83a9fee)."
   },
   {
    "command": "python test/check_public_changes.py",
    "result": "passed",
-   "evidence": "run after staging this record; added lines are CSS, class names, code, documentation."
+   "evidence": "run after staging this record; the test's key is the existing synthetic shape assembled at runtime."
   },
   {
    "command": "python tools/security/review.py check --base origin/main --head INDEX",
@@ -83,9 +68,9 @@
   }
  ],
  "limitations": [
-  "Browser checks in Chromium only.",
-  "install.sh's copy of ui.css is exercised by selftest_install on Linux (CI), not locally on Windows; the container image build is CI's container job.",
-  "Admin access segmentation (TM-03's remaining next action) and stolen admin credentials are out of scope.",
-  "The full check run and the end-to-end suite ran on base 21ae6ac; the new base 83a9fee adds only the lock refresh (router 0.42.4, no code change), after which selftest_browser and the ADR index check were run again."
+  "The client's tools definitions and format schema are forwarded to providers and not scanned.",
+  "Secret patterns themselves are unchanged; a key format they do not know passes, as before.",
+  "No end-to-end no-egress test against a real provider; classifier quality remains TM-05's open action.",
+  "Re-reviewed after merging main with #197 (router 0.42.5, control UI styles, no overlap with cloud.py): the end-to-end suite ran before that merge on base 83a9fee; after it the workflow commands ran again."
  ]
 }

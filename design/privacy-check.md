@@ -15,7 +15,8 @@ results). Configuration: [docs/configuration.md](../docs/configuration.md#conten
 `proxy._Relay._via_cloud` calls `privacy.check` when `cloud.needs_privacy_check` says so: the client opted in
 (`clients.<c>.privacy_check: true`), its request declared no class, and the chosen provider's limit is below the
 request's class. The check sees the final payload, with memory inserted; the credential scan
-(`cloud.request_block_reason`) has already run on the request. A refusal never calls the provider; the client gets the
+(`cloud.request_block_reason`) has already run on the request, over every text the provider would receive (message
+contents and content parts, tool results, tool call arguments, prompt, system). A refusal never calls the provider; the client gets the
 configured refusal as an ordinary answer.
 
 ## Steps, in order
