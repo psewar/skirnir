@@ -178,6 +178,22 @@ class MiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.stats("single-client")["too_large"], 0)
         self.assertEqual(self.audits, [])
 
+    async def test_the_limit_also_holds_where_clone_takes_no_limit(self):
+        # aiohttp 3.8 (the oldest requirements.txt allows) has no client_max_size in clone(); with_body_limit() then sets
+        # the attribute read() checks. Forced here, since CI runs a newer aiohttp.
+        self.assertEqual(common.CLONE_TAKES_BODY_LIMIT, "client_max_size" in __import__("inspect").signature(
+            web.BaseRequest.clone).parameters)
+        previous, common.CLONE_TAKES_BODY_LIMIT = common.CLONE_TAKES_BODY_LIMIT, False
+        try:
+            self.gate.set()
+            headers = {"Authorization": "Bearer default-client"}
+            r = await self.client.post("/api/chat", data=self.chunks(17 * auth.MIB), headers=headers)
+            self.assertEqual(r.status, 413, "rejected on the fallback path as well")
+            r = await self.client.post("/api/generate", data=self.chunks(3 * auth.MIB), headers=headers)
+            self.assertEqual((r.status, (await r.json())["length"]), (200, 3 * auth.MIB))
+        finally:
+            common.CLONE_TAKES_BODY_LIMIT = previous
+
     async def test_handlers_that_stream_their_body_get_the_body_the_middleware_read(self):
         # session_api.body streams the body with its own 1 MiB bound; after the middleware read a chunked body it uses the
         # bytes on the request (BODY_PREREAD) instead of the used-up stream.

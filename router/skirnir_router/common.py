@@ -1,6 +1,7 @@
 """Constants, logger, and pure stateless helpers. Imported by name."""
 
 import base64
+import inspect
 import json
 import logging
 import os
@@ -156,6 +157,20 @@ BODY_UNREADABLE = "unreadable"  # the connection failed while reading; the handl
 # Request state set by the client middleware when it has read the body (ADR-0128): the stream is used up, the bytes are
 # on the request (request.read()). A handler that streams the body itself checks this fact instead of the stream.
 BODY_PREREAD = "body_preread"
+# aiohttp 3.9 and later take client_max_size in BaseRequest.clone(); 3.8 (Debian 12's python3-aiohttp, the oldest version
+# requirements.txt allows) does not. A fact checked once, so with_body_limit() takes the public way where it exists.
+CLONE_TAKES_BODY_LIMIT = "client_max_size" in inspect.signature(web.BaseRequest.clone).parameters
+
+
+def with_body_limit(request, limit):
+    """A copy of the request whose read() stops with HTTPRequestEntityTooLarge past `limit` bytes (ADR-0128)."""
+    if CLONE_TAKES_BODY_LIMIT:
+        return request.clone(client_max_size=limit)
+    limited = request.clone()
+    # aiohttp 3.8 offers no public way to set it: read() checks this attribute (there with >=, so a body of exactly the
+    # limit is refused too; 3.9+ refuses only above it).
+    limited._client_max_size = limit
+    return limited
 
 
 async def read_body_bounded(request):

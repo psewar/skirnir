@@ -45,7 +45,9 @@ one place every API request passes, with aiohttp's own size check.
   unlimited, per-client counters and peak gauges.
 * New: when a configured client's request has a body without a declared length, the middleware takes the client's slot
   first, then reads the body through a copy of the request whose `client_max_size` is the client's `max_body_mib`
-  (`common.read_body_bounded`). aiohttp checks the size while it reads. Past the limit the request gets 413 with the
+  (`common.with_body_limit`, `common.read_body_bounded`). aiohttp checks the size while it reads. aiohttp 3.8, the
+  oldest version `requirements.txt` allows (Debian 12), cannot pass the limit to `clone()`; `with_body_limit` checks
+  which applies once and there sets the attribute `read()` checks. Past the limit the request gets 413 with the
   same text as for a declared size, the counter `too_large` and the audit line `body_too_large` (with `chunked: true`).
   Within the limit the handler gets that copy with the body already read and the fact `BODY_PREREAD` on it. A
   connection that fails while the body arrives is passed on; the handler's own read reports it as before.
@@ -55,7 +57,8 @@ one place every API request passes, with aiohttp's own size check.
 ### Consequences
 
 * Good, because a client's limit now holds for chunked bodies: 17 MiB chunked for a 16 MiB client is refused while it
-  arrives, and memory per client stays at most `max_concurrent` bodies of `max_body_mib`.
+  arrives, and memory per client stays bounded by `max_concurrent` bodies of at most about twice `max_body_mib` (aiohttp
+  appends a read chunk, up to the limit in size, before it checks).
 * Good, because handlers, formats and all limits for declared sizes stay as they were.
 * Bad, because a chunked body is now read before the handler starts. The one handler that streams its body
   (`session_api.body`) uses the bytes the middleware read; a future streaming handler has to do the same (the self-test

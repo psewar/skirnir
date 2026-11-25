@@ -13,7 +13,7 @@ from aiohttp import web
 
 from . import state
 from .common import (BODY_PREREAD, BODY_READ, BODY_TOO_LARGE, anthropic_error, basic_credentials, log, ollama_error,
-                     open_private, openai_error, read_body_bounded)
+                     open_private, openai_error, read_body_bounded, with_body_limit)
 from .outcome import Problem
 
 
@@ -222,7 +222,7 @@ async def client_auth_middleware(request, handler):
             # ADR-0128: a chunked body declares no size, so read it here, within the client's limit and inside its
             # concurrency slot (a client cannot hold more than max_concurrent bodies in memory). The handler gets the
             # request with the body already read, and the fact that it was (BODY_PREREAD).
-            request = request.clone(client_max_size=max_body)
+            request = with_body_limit(request, max_body)
             outcome = await read_body_bounded(request)
             if outcome == BODY_TOO_LARGE:
                 st["too_large"] += 1
