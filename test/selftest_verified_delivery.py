@@ -10,6 +10,7 @@ from uuid import UUID, uuid4, uuid5
 import selftest_interoperability as shared
 import selftest_memory as fixture
 from skirnir_router import memory, memory_gateway, memory_outbox, state
+from skirnir_router.memory_backend import unavailable_as
 from skirnir_router.outcome import conflict
 from skirnir_router.reliability_store import OPERATION_NOT_FOUND
 
@@ -145,6 +146,19 @@ class VerifiedDeliveryTests(Harness):
         await memory_outbox.step(self.service)
         self.assertEqual((self.store.jobs[second]["state"], self.store.jobs[second]["last_error"]), ("dead", "remote_pending"))
 
+    async def test_unreadable_operation_expires_without_resending(self):
+        operation = await self.retain()
+        await memory_outbox.step(self.service)
+        job = self.store.jobs[operation]
+        self.service.backend.operation = lambda *args, **kwargs: _value(unavailable_as("transport"))
+        self.store.release(operation)
+        await memory_outbox.step(self.service)
+        self.assertEqual((job["state"], job["last_error"]), ("accepted", "transport"))
+        job["accepted_at"] = (datetime.now(timezone.utc) - timedelta(seconds=self.service.cfg.verify_timeout_s + 1)).isoformat()
+        self.store.release(operation)
+        await memory_outbox.step(self.service)
+        self.assertEqual((job["state"], job["last_error"], job["attempts"]), ("dead", "transport", 1))
+
     async def test_pending_extraction_is_checked_again_with_growing_delay(self):
         operation = await self.retain()
         await memory_outbox.step(self.service)
@@ -158,17 +172,17 @@ class VerifiedDeliveryTests(Harness):
         self.assertEqual(delays, sorted(delays))
         self.assertGreater(delays[-1], delays[0])
 
-    async def test_delete_after_upstream_failure_does_not_wait_forever(self):
-        operation = await self.retain()
-        await memory_outbox.step(self.service)
-        await self.store.outbox_delete("client-a", UUID(operation), {})
-        self.store.jobs[operation]["scope"] = {**self.store.jobs[operation]["scope"], "__bank": self.service.bank(memory.scope_for_principal("client-a", shared.SHARED))}
-        self.store.jobs[operation]["scope"].update(principal="client-a", project=shared.SHARED, data_class="personal", read=True,
-                                                   write=True, allow_cloud=False, shared_scope="example-team", delete=True, strategy="legacy")
-        self.operation_state = "failed"
-        await memory_outbox.step(self.service)
-        self.assertEqual(self.store.jobs[operation]["state"], "deleted")
-        self.assertEqual(self.deleted_documents[-1][1], operation)
+    async def test_delete_after_terminal_extraction(self):
+        for status in ("failed", "cancelled"):
+            with self.subTest(status=status):
+                operation = await self.retain(status)
+                await memory_outbox.step(self.service)
+                scope = self.store.jobs[operation]["scope"]
+                await self.store.outbox_delete("client-a", UUID(operation), scope)
+                self.operation_state = status
+                await memory_outbox.step(self.service)
+                self.assertEqual(self.store.jobs[operation]["state"], "deleted")
+                self.assertEqual(self.deleted_documents[-1][1], operation)
 
 
 class SynchronousGatewayTests(Harness):

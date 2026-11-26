@@ -247,6 +247,16 @@ class SharedGatewayTests(MemoryHarness):
         items = (await rest.json())["items"]
         self.assertEqual([(i["source"], i.get("project")) for i in items], [("p1", None), ("s1", SHARED), ("p2", None)])
 
+    async def test_missing_private_bank_still_reports_available_team_memory(self):
+        own, team, url = self.owned_with_shared()
+        self.results_by_bank[own] = 404
+        body = await (await self.api(url, {"query": "Synthetic"}, "client-owned")).json()
+        self.assertEqual((body["memory_state"], body["aggregate_state"]), ("bank_missing", "available"))
+        self.assertTrue(body["results"])
+        self.results_by_bank[team] = 404
+        empty = await (await self.api(url, {"query": "Synthetic"}, "client-owned")).json()
+        self.assertEqual((empty["results"], empty["aggregate_state"]), ([], "bank_missing"))
+
     async def test_recall_with_shared_failure_keeps_the_private_answer(self):
         own, team, url = self.owned_with_shared()
         self.results_by_bank[team] = 503
@@ -254,6 +264,7 @@ class SharedGatewayTests(MemoryHarness):
         self.assertEqual([r["text"] for r in body["results"]], ["Private fact one.", "Private fact two."])
         self.assertEqual(body["memory_state"], "available")
         self.assertTrue(body["also"][0]["memory_state"].startswith("unavailable"), body["also"])
+        self.assertEqual(body["aggregate_state"], "partial")
         # the shared grant is withdrawn: reported as denied, never read
         state.CFG.client_auth["clients"]["client-owned"]["memory"]["projects"][SHARED]["read"] = False
         self.calls.clear()

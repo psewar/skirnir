@@ -1,96 +1,68 @@
 {
- "schema_version": 1,
- "status": "completed",
- "reviewer": "Claude Code (Opus 5.5) repository security review",
- "base_sha": "25a3d3f5e5fb0143e452b4aefa1b44669845ffed",
- "change_digest": "544b5c1946b1060f1cce65298ed8f0e3089c1992136006af0b28b8298a825003",
- "reviewed_paths": [
-  ".github/workflows/ci.yml",
-  "CHANGELOG.md",
-  "agent/README.md",
-  "agent/gpuproc_other.go",
-  "agent/gpuproc_windows.go",
-  "agent/heartbeat.go",
-  "agent/ollamarunners.go",
-  "agent/ollamarunners_test.go",
-  "agent/ollamarunners_windows_test.go",
-  "agent/protocol_conformance_test.go",
-  "agent/supervisor_windows_test.go",
-  "design/routing-algorithm.md",
-  "docs/adr/0148-the-agent-reports-ollamas-runner-processes-and-their-memory.md",
-  "docs/adr/0149-an-admin-unload-answers-once-the-runner-memory-is-released.md",
-  "docs/adr/README.md",
-  "docs/operations.de.md",
-  "docs/operations.md",
-  "docs/protocol.de.md",
-  "docs/protocol.md",
-  "docs/protocol/heartbeat.schema.json",
-  "docs/reference.de.md",
-  "docs/reference.md",
-  "docs/security/risk-register.json",
-  "docs/security/threat-model.de.md",
-  "docs/security/threat-model.md",
-  "router/skirnir_router/app.py",
-  "router/skirnir_router/common.py",
-  "router/skirnir_router/metrics.py",
-  "router/skirnir_router/nodes.py",
-  "router/skirnir_router/poll.py",
-  "router/skirnir_router/unload.py",
-  "test/selftest_ollama_runners.py",
-  "test/selftest_protocol.py",
-  "docs/security/reviews/current.json",
-  "router/skirnir_router/auth.py",
-  "router/skirnir_router/quiet.py",
-  "router/skirnir_router/perf.py",
-  "agent/supervisor.go",
-  "agent/platform_windows.go",
-  "agent/procmem_windows.go",
-  "agent/game_windows.go"
- ],
- "risk_ids": [
-  "TM-03",
-  "TM-07",
-  "TM-08"
- ],
- "boundaries": [
-  "B2",
-  "B3",
-  "B8",
-  "B9"
- ],
- "summary": "Implements ADR-0148 and ADR-0149 (proposed). Agent 0.37.0 adds the heartbeat block ollama_runners {count, private_mib}: Supervisor.ollamaRunners sums, over every running child whose program is Ollama, the processes of its job object except the child's own pid and the system console host (GetSystemDirectory + conhost.exe, compared by full path), with their private working sets (procMemory). Agent side (B8): only read queries with PROCESS_QUERY_LIMITED_INFORMATION (QueryFullProcessImageName, K32GetProcessMemoryInfo) on pids taken from the agent's own job; the job is created without a breakaway flag (platform_windows.go newKillOnCloseJob), so a runner cannot leave it to hide; the only excluded program is the system's console host at the system path, which an unprivileged Ollama cannot replace. procTree.members now says whether the job was listed in full; a failed or partial query gives no fact (pids() keeps its old behaviour for existing callers). Unreadable processes still count, so the fact errs towards 'still held'. Router side, agent data (B3, TM-07): poll.note_ollama_runners accepts only a dict with integer count 0..256 and integer private_mib 0..4 TiB (bool excluded), stores a new dict of these two integers (no agent string reaches /admin/state, metrics or the UI), and drops anything else as implausible (ADR-0137 pattern, logged at most every ten minutes); it never raises. Node.runners_known hides a stale value. The fact does not influence routing; it is used for display, two metrics and the unload answer. A compromised agent can therefore make only its own node's unload answer 'released' early (added to TM-07 in threat model EN/DE and the risk register). New route POST /admin/nodes/{fp}/unload (B2, TM-03): registered before the generic node action and protected like every admin write by basic_auth_middleware (every non-/v1/ path: admin_networks, Basic Auth) and the X-Skirnir-UI header check for non-GET /admin/*; tests show 401 without credentials and 403 without the header, and neither reaches Ollama. Preconditions are checked before any effect (unknown fp 404, not approved 409, offline, OpenAI upstream, no fresh runner fact, unload already running, measurement or benchmark on the node 409; malformed or non-object body 400). The action sends keep_alive 0 for the model names from that node's own /api/ps back to the same node through perf._ollama (the existing measurement path, an allowed tunnel path), then answers released only with a heartbeat received after /api/ps emptied. Resource bound (TM-08): one unload per node at a time (RUNNING set, cleared in finally also on cancellation), timeout_s at most 600, polling every 0.5 s; admin-only. Logs and journal carry node name, fixed reason values and model names. Findings fixed before publication: (1) a malformed JSON body was read as None and defaulted to an empty body, so a garbled request would still unload; now 400, tested. (2) Parallel unloads of the same node could multiply the /api/ps polling through its tunnel for up to 600 s each; now one at a time per node with 409, tested including cancellation. Pre-existing and unchanged: model names from a node's /api/ps reach the log unescaped, as in poll.busy_unload_check and perf.",
- "findings": [],
- "tests": [
-  {
-   "command": "python test/selftest_ollama_runners.py (new, in ci.yml python job)",
-   "result": "passed",
-   "evidence": "all checks pass: heartbeat block stored, 13 rejected value shapes dropped as implausible while GPU values still apply, stale heartbeat hides the fact, node view and both metrics (absent for a node without the fact); timeout_s validation (9 rejected values); every 409 refusal before Ollama is asked; release only with a heartbeat after the empty /api/ps (mutation removing the hb_ts check fails the test); timeout, timeout with loaded, not_reported, offline, 502; HTTP 404/409/400 incl. malformed JSON, 200, 503, journal entry; second concurrent unload 409 and guard cleared after the answer and after cancellation; route resolves to unload.handle_unload; 401 without credentials and 403 without X-Skirnir-UI, neither reaching Ollama."
-  },
-  {
-   "command": "go test ./... (Windows), gofmt -l ., go vet ./... with GOOS=windows and GOOS=linux, GOOS=linux go test -c",
-   "result": "passed",
-   "evidence": "new TestCountRunners, TestOllamaRunnersWireForm, TestOllamaRunnersNeedAnOllamaChild (all platforms) and TestOllamaRunnersInARealJob, TestConsoleHostIsNoRunner, TestOllamaRunnersSumOverOllamaChildren (Windows, real job objects) pass; TestConsoleHostIsNoRunner shows Windows puts conhost.exe into the job of a console program with its own console; protocol conformance tests fail until the schema documents the block, then pass."
-  },
-  {
-   "command": "every python test/... and tools/... command of all workflows (Windows), before the rebase onto 25a3d3f",
-   "result": "passed",
-   "evidence": "108 commands, 106 OK; the two failures are local only: check_public_changes.py needs PUBLIC_CHANGES_BASE from CI (run without it: 0 findings), and lock_requirements.py outdated refuses Windows by design. python test/run_tests.py (end-to-end) 0 failures."
-  },
-  {
-   "command": "every python test/... and tools/... command of all workflows (Windows), after the rebase onto 25a3d3f",
-   "result": "passed",
-   "evidence": "109 commands, 107 OK; the same two local-only failures as before (PUBLIC_CHANGES_BASE missing outside CI, run without it: 0 findings; lock_requirements.py outdated is Linux only). python test/run_tests.py (end-to-end): 337 PASS, 0 failures."
-  },
-  {
-   "command": "Linux execution of the Go tests, router container self-tests",
-   "result": "not_run",
-   "evidence": "no Go toolchain in the local WSL distribution and no container run here; CI's go (Linux and Windows) and container jobs run them."
-  }
- ],
- "limitations": [
-  "No real Ollama was used (the task forbids testing against personal infrastructure): the runner classification is tested with the test binary as server and runner in real job objects, not with ollama.exe and its runners; a future Ollama helper process in the job would keep the count above 0 (safe direction, unload then times out).",
-  "The agent's fact cannot be verified by the router; a compromised agent can claim its own node's memory released early (TM-07).",
-  "The count is node-wide; per-model attribution is out of scope (ADR-0148).",
-  "Linux agents report no block, so the unload is refused there with 409."
- ]
+  "schema_version": 1,
+  "status": "completed",
+  "reviewer": "Codex repository review",
+  "base_sha": "e3d9119800c087db365b095d192a797a65a2f4c6",
+  "change_digest": "096db19832ec33a2b34b8b1e923fcb8cecbbf24f74fac8a2fe3411013d062e14",
+  "reviewed_paths": [
+    "CHANGELOG.md",
+    "design/shared-memory-interoperability.md",
+    "docs/adr/0150-report-the-aggregate-state-of-multi-project-recall.md",
+    "docs/adr/README.md",
+    "docs/clients.de.md",
+    "docs/clients.md",
+    "router/skirnir_router/common.py",
+    "router/skirnir_router/memory.py",
+    "router/skirnir_router/memory_backend.py",
+    "router/skirnir_router/memory_gateway.py",
+    "router/skirnir_router/memory_outbox.py",
+    "router/skirnir_router/provenance.py",
+    "test/selftest_interoperability.py",
+    "test/selftest_verified_delivery.py",
+    "router/skirnir_router/reliability_store.py",
+    "router/skirnir_router/hindsight.py"
+  ],
+  "risk_ids": [
+    "TM-08",
+    "TM-09",
+    "TM-10",
+    "TM-12"
+  ],
+  "boundaries": [
+    "B4",
+    "B5"
+  ],
+  "summary": "Reviewed the changed memory ingress, outbox and recall paths. Unconfirmed operation status stays distinct from a successful extraction. A timed-out verification records the last bounded backend error without initiating a new write. The deletion worker retains the bank binding, current scope check, delete grant and pre-dispatch authorization, and only deletes the immutable operation document after a terminal upstream result. Unknown and in-progress results still defer deletion. The multi-project summary is computed only from existing authorized recall outcomes and includes no new fact or project identifier. Provenance validation retains its allowlist and derives the writer from the authenticated principal.",
+  "findings": [],
+  "tests": [
+    {
+      "command": "python test/selftest_verified_delivery.py",
+      "result": "passed",
+      "evidence": "12 tests including expired unreadable status, single send, and document deletion after terminal cancellation."
+    },
+    {
+      "command": "python test/selftest_interoperability.py",
+      "result": "passed",
+      "evidence": "42 passed, optional SDK case skipped. Includes missing private bank, missing team bank, partial response, revoked grants and provenance validation."
+    },
+    {
+      "command": "python test/selftest_memory_backend.py and python test/selftest_memory.py",
+      "result": "passed",
+      "evidence": "20 adapter contract and 47 memory tests passed against synthetic fixtures."
+    },
+    {
+      "command": "python test/selftest_memory_review.py and python test/integration_deletion_lifecycle.py",
+      "result": "passed",
+      "evidence": "13 review tests and seven deletion lifecycle integration tests passed. Optional database cases skipped."
+    },
+    {
+      "command": "python test/selftest_deletion_lifecycle.py",
+      "result": "passed",
+      "evidence": "Deletion lifecycle self-checks passed."
+    }
+  ],
+  "limitations": [
+    "Live backend cancellation semantics were not exercised. Safe deletion relies on the adapter reporting cancelled only once that attempt can no longer write.",
+    "No disposable PostgreSQL server or official Hindsight SDK used locally. Review scope is the changed shared-memory paths."
+  ]
 }

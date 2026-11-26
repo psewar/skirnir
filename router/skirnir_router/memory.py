@@ -195,6 +195,15 @@ def recall_response(body, recalled):
         return web.json_response({"error": {"message": "memory query refused", "type": "memory_query_filtered", "reason": QUERY_FILTERED},
                                   "memory_state": recalled.state}, status=403, headers={"Cache-Control": "no-store"})
     extra = {"also": list(recalled.also)} if recalled.also else {}
+    if recalled.also:
+        # memory_state describes the primary bank. The merged view can still contain usable facts.
+        states = (recalled.state, *(entry["memory_state"] for entry in recalled.also))
+        if all(state == "bank_missing" for state in states):
+            extra["aggregate_state"] = "bank_missing"
+        elif all(state in ("available", "bank_missing") for state in states):
+            extra["aggregate_state"] = "available"
+        else:
+            extra["aggregate_state"] = "partial"
     return web.json_response({**body, "memory_state": recalled.state, "trimmed": recalled.trimmed, "duplicates": recalled.duplicates,
                               "limited_by": recalled.limited_by, **extra}, headers={"Cache-Control": "no-store"})
 
@@ -421,7 +430,7 @@ class MemoryService:
             count("retain", "filtered")
             return FILTERED
         operation = self.operation(scope, event_id)
-        from .memory_gateway import provenance as make_provenance
+        from .provenance import make_provenance
         origin = provenance or make_provenance({}, scope.principal, confirmed=confirmed)
         if failed(origin):
             return origin
@@ -565,8 +574,8 @@ async def _api_result(request, service, write):
         return event_id
     if data["confirmed"] is not True:
         return invalid("only explicitly confirmed client knowledge may be retained through this endpoint")
-    from .memory_gateway import provenance
-    origin = provenance(data.get("provenance", {}), scope.principal, confirmed=True)
+    from .provenance import make_provenance
+    origin = make_provenance(data.get("provenance", {}), scope.principal, confirmed=True)
     if failed(origin):
         return origin
     operation = await service.submit(scope, event_id, data["content"], confirmed=True, provenance=origin)
@@ -789,8 +798,8 @@ class Capture:
     async def flush(self, outcome):
         if self.service.outbox is None or not self.eligible(outcome):
             return
-        from .memory_gateway import provenance
-        origin = provenance({}, self.scope.principal, confirmed=False)
+        from .provenance import make_provenance
+        origin = make_provenance({}, self.scope.principal, confirmed=False)
         result = origin if failed(origin) else await self.service.submit(self.scope, self.event_id, "".join(self.parts),
                                                                         confirmed=False, provenance=origin,
                                                                         session_id=self.session_id)

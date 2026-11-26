@@ -48,7 +48,7 @@ async def submit(service, scope, event_id, content, confirmed, provenance=None, 
     if failed(operation):
         return operation
     from .memory import rejected_content, review_for
-    from .memory_gateway import provenance as make_provenance
+    from .provenance import make_provenance
     origin = provenance or make_provenance({}, scope.principal, confirmed=confirmed)
     if failed(origin):
         return origin
@@ -82,7 +82,7 @@ async def deliver(service, scope, operation, row):
         if failed(upstream):
             return ("revoked", "policy_changed") if upstream.status == 403 else ("retry", upstream.kind)
         # Delete only when no write can follow: the extraction is completed, or the backend gave up on it.
-        if upstream.status not in (COMPLETED, FAILED):
+        if upstream.status not in (COMPLETED, FAILED, CANCELLED):
             return "retry", "remote_pending"
         deleted = await service.backend.delete_document(service.bank(scope), str(operation), authorize=lambda: service.current(scope))
         if failed(deleted):
@@ -113,7 +113,7 @@ async def verify(service, scope, operation, row):
     if failed(upstream):
         if upstream.status == 403:
             return "revoked", "policy_changed", 0, None
-        return "accepted", upstream.kind, verify_delay(cfg, row), None   # status not readable right now: check again later
+        return unconfirmed(cfg, row, upstream.kind)
     status = upstream.status
     if status == COMPLETED:
         return "completed", None, 0, None
@@ -124,11 +124,16 @@ async def verify(service, scope, operation, row):
         return "pending", "upstream_failed", resubmit_delay(cfg, attempt - (row.get("upstream_base") or 0)), attempt
     if status == NOT_FOUND:   # the backend no longer knows the operation: completion cannot be confirmed
         return "dead", "remote_unknown", 0, None
+    return unconfirmed(cfg, row, None)
+
+
+def unconfirmed(cfg, row, error):
+    """Bound verification even when the backend cannot answer the status request."""
     # The value comes from our own record(): always an ISO timestamp with time zone once the job was accepted.
     accepted_at = datetime.fromisoformat(row["accepted_at"])
-    if (datetime.now(timezone.utc) - accepted_at).total_seconds() > cfg.verify_timeout_s:
-        return "dead", "remote_pending", 0, None
-    return "accepted", None, verify_delay(cfg, row), None
+    if (datetime.now(timezone.utc) - accepted_at).total_seconds() >= cfg.verify_timeout_s:
+        return "dead", error or "remote_pending", 0, None
+    return "accepted", error, verify_delay(cfg, row), None
 
 
 async def step(service):
