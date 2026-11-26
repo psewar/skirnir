@@ -81,8 +81,10 @@ async def deliver(service, scope, operation, row):
         upstream = await service.backend.operation(service.bank(scope), upstream_id(operation, row), authorize=lambda: service.current(scope))
         if failed(upstream):
             return ("revoked", "policy_changed") if upstream.status == 403 else ("retry", upstream.kind)
-        # Delete only when no write can follow: the extraction is completed, or the backend gave up on it.
-        if upstream.status not in (COMPLETED, FAILED, CANCELLED):
+        # Delete only when no write can follow: the extraction is completed, or the backend gave up on it. Not after
+        # CANCELLED: Hindsight cancels running work cooperatively, so its worker may still write once the status says
+        # cancelled (ADR-0152); the deletion waits and, if the status never changes, ends as a visible dead letter.
+        if upstream.status not in (COMPLETED, FAILED):
             return "retry", "remote_pending"
         deleted = await service.backend.delete_document(service.bank(scope), str(operation), authorize=lambda: service.current(scope))
         if failed(deleted):
@@ -128,9 +130,12 @@ async def verify(service, scope, operation, row):
 
 
 def unconfirmed(cfg, row, error):
-    """Bound verification even when the backend cannot answer the status request."""
-    # The value comes from our own record(): always an ISO timestamp with time zone once the job was accepted.
-    accepted_at = datetime.fromisoformat(row["accepted_at"])
+    """Bound verification even when the backend cannot answer the status request (ADR-0151): the job becomes dead once
+    verify_timeout_s has passed since its acceptance, with the last lookup error as its reason."""
+    # The values come from our own record(): ISO timestamps with time zone. A row accepted before the column existed
+    # (PostgreSQL migration 4) has no accepted_at; its creation time is the earlier, safe bound for the same deadline.
+    started = row.get("accepted_at") or row["created_at"]
+    accepted_at = datetime.fromisoformat(started)
     if (datetime.now(timezone.utc) - accepted_at).total_seconds() >= cfg.verify_timeout_s:
         return "dead", error or "remote_pending", 0, None
     return "accepted", error, verify_delay(cfg, row), None

@@ -172,17 +172,38 @@ class VerifiedDeliveryTests(Harness):
         self.assertEqual(delays, sorted(delays))
         self.assertGreater(delays[-1], delays[0])
 
-    async def test_delete_after_terminal_extraction(self):
-        for status in ("failed", "cancelled"):
-            with self.subTest(status=status):
-                operation = await self.retain(status)
-                await memory_outbox.step(self.service)
-                scope = self.store.jobs[operation]["scope"]
-                await self.store.outbox_delete("client-a", UUID(operation), scope)
-                self.operation_state = status
-                await memory_outbox.step(self.service)
-                self.assertEqual(self.store.jobs[operation]["state"], "deleted")
-                self.assertEqual(self.deleted_documents[-1][1], operation)
+    async def test_delete_only_after_an_extraction_that_can_no_longer_write(self):
+        operation = await self.retain("failed")
+        await memory_outbox.step(self.service)
+        scope = self.store.jobs[operation]["scope"]
+        await self.store.outbox_delete("client-a", UUID(operation), scope)
+        self.operation_state = "failed"
+        await memory_outbox.step(self.service)
+        self.assertEqual(self.store.jobs[operation]["state"], "deleted")
+        self.assertEqual(self.deleted_documents[-1][1], operation)
+        # ADR-0152: Hindsight cancels running work cooperatively, so "cancelled" may still be followed by a write.
+        # The deletion waits instead of deleting a document the worker could fill again afterwards.
+        operation = await self.retain("cancelled")
+        await memory_outbox.step(self.service)
+        await self.store.outbox_delete("client-a", UUID(operation), self.store.jobs[operation]["scope"])
+        self.operation_state = "cancelled"
+        before = len(self.deleted_documents)
+        await memory_outbox.step(self.service)
+        self.assertEqual((self.store.jobs[operation]["state"], self.store.jobs[operation]["last_error"]),
+                         ("delete_pending", "remote_pending"))
+        self.assertEqual(len(self.deleted_documents), before)
+
+    async def test_a_row_without_accepted_at_is_bounded_by_its_creation_time(self):
+        # A row accepted before PostgreSQL migration 4 has no accepted_at: verification must neither crash nor run forever.
+        operation = await self.retain()
+        await memory_outbox.step(self.service)
+        job = self.store.jobs[operation]
+        job["accepted_at"] = None
+        job["created_at"] = (datetime.now(timezone.utc) - timedelta(seconds=self.service.cfg.verify_timeout_s + 1)).isoformat()
+        self.service.backend.operation = lambda *args, **kwargs: _value(unavailable_as("transport"))
+        self.store.release(operation)
+        await memory_outbox.step(self.service)
+        self.assertEqual((job["state"], job["last_error"]), ("dead", "transport"))
 
 
 class SynchronousGatewayTests(Harness):

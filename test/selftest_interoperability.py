@@ -270,6 +270,7 @@ class SharedGatewayTests(MemoryHarness):
         self.calls.clear()
         body = await (await self.api(url, {"query": "Synthetic"}, "client-owned")).json()
         self.assertEqual(body["also"], [{"project": SHARED, "memory_state": "denied", "items": 0}])
+        self.assertEqual(body["aggregate_state"], "partial")   # ADR-0150: a further project that was not searched
         self.assertEqual({c[0] for c in self.calls}, {own})
         # the private bank fails: the answer fails, whatever the shared one has
         state.CFG.client_auth["clients"]["client-owned"]["memory"]["projects"][SHARED]["read"] = True

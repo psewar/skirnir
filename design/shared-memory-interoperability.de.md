@@ -1,7 +1,10 @@
 # Gemeinsames Gedächtnis, Agent-Übergaben und Zuverlässigkeit
 
 > Entscheidungen (warum): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md),
-> [ADR-0145](../docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md) (Prüfung, bevor ein Eintrag eine gemeinsame Bank erreicht)
+> [ADR-0145](../docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md) (Prüfung, bevor ein Eintrag eine gemeinsame Bank erreicht),
+> [ADR-0150](../docs/adr/0150-report-the-aggregate-state-of-multi-project-recall.md) (Gesamtzustand eines projektübergreifenden Recalls),
+> [ADR-0151](../docs/adr/0151-verification-of-an-accepted-memory-write-ends-at-its-deadline-also-when-its-status-is-unreadable.md) (Prüffrist auch bei unlesbarem Status),
+> [ADR-0152](../docs/adr/0152-a-deletion-does-not-proceed-after-an-upstream-cancellation.md) (kein Löschen nach einem Abbruch im Backend, verworfen)
 
 [Englische Referenz mit vollständigem Konfigurationsbeispiel](shared-memory-interoperability.md).
 Die Erweiterung nutzt den bestehenden Session Store, den Hindsight-Adapter und die
@@ -246,11 +249,14 @@ einer **neuen Upstream-Operations-ID** mit **gleicher Dokument-ID** neu ein, wei
 Hindsight eine bekannte Operations-ID nur mit ihrem alten Zustand beantwortet. Höchstens
 `upstream_attempts` Neueinreichungen je Runde, danach `dead` mit `upstream_failed`.
 Unbekannte Operation: `dead` (`remote_unknown`); `verify_timeout_s` lang unbestätigt:
-`dead` (`remote_pending`). Der Payload eines angenommenen Auftrags bleibt bis zur
+`dead`, mit `remote_pending` bei lesbarem wartendem Zustand, sonst mit dem letzten Abfragefehler (ADR-0151). Auch ein
+dauerhaft unlesbarer Status endet so; er löst nie selbst eine Neueinreichung aus. Der Payload eines angenommenen Auftrags bleibt bis zur
 Fertigstellung erhalten.
 
 Vor gezielter Löschung muss Hindsight `completed` melden (oder `failed`, danach folgt
-kein Schreiben mehr). Erst dann wird das
+kein Schreiben mehr). Nicht nach `cancelled`: Hindsight bricht laufende Arbeit kooperativ ab, sein Worker kann danach
+noch schreiben (ADR-0152); eine solche Löschung wartet weiter und wird, wenn sich der Status nie ändert, ein Dead
+Letter, gezählt in `skirnir_memory_deletions_stuck`. Erst dann wird das
 eigene unveränderliche UUID-Dokument gelöscht. Fehlender/unklarer Status bleibt
 wartend beziehungsweise Dead Letter. Andere Quellen und die gemeinsame Bank werden
 nicht pauschal gelöscht; die Rekonsolidierung verbleibender Quellen übernimmt

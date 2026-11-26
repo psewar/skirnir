@@ -1,7 +1,10 @@
 # Shared memory, agent exchange and reliability
 
 > Decisions (why): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md),
-> [ADR-0145](../docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md) (review before a write reaches a shared bank)
+> [ADR-0145](../docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md) (review before a write reaches a shared bank),
+> [ADR-0150](../docs/adr/0150-report-the-aggregate-state-of-multi-project-recall.md) (aggregate state of a multi-project recall),
+> [ADR-0151](../docs/adr/0151-verification-of-an-accepted-memory-write-ends-at-its-deadline-also-when-its-status-is-unreadable.md) (verification deadline also for an unreadable status),
+> [ADR-0152](../docs/adr/0152-a-deletion-does-not-proceed-after-an-upstream-cancellation.md) (no deletion after an upstream cancellation, rejected)
 
 [Deutsche Anleitung](shared-memory-interoperability.de.md). This extends the existing
 [session store](session-store.md), [memory adapter](hindsight-memory.md) and
@@ -350,8 +353,10 @@ the resubmission counter, so no failed upstream id is reused. The payload of an
 accepted job is kept until it is completed. The gateway status reports an accepted
 job whose upstream extraction failed as still `processing`, since it will be resubmitted.
 
-The deletion worker first requires upstream status `completed` (or `failed` or terminal `cancelled`, after
-which no write can follow), then deletes only its immutable UUID document.
+The deletion worker first requires upstream status `completed` (or `failed`, after
+which no write can follow), then deletes only its immutable UUID document. Not after `cancelled`: Hindsight cancels
+running work cooperatively, so its worker may still write after the status changed (ADR-0152); such a deletion keeps
+waiting and, if the status never changes, becomes a dead letter counted in `skirnir_memory_deletions_stuck`.
 Unknown/pending upstream operations are retried and can become dead letters; they
 are not labelled erased. HTTP 404 on the document
 DELETE is repeatably absent only after that completion check. Source deletion does

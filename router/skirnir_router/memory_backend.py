@@ -68,8 +68,9 @@ class MemoryPage:
 
 @dataclass(frozen=True)
 class OpState:
-    """Upstream state of a retain operation. COMPLETED, FAILED and CANCELLED mean that this attempt can no longer
-    write to the document. An adapter must report a cancellation still in progress as PROCESSING."""
+    """Upstream state of a retain operation: one of OPERATION_STATUSES, or another state string as the backend reported
+    it. COMPLETED and FAILED mean that this attempt can no longer write to the document. CANCELLED does not: Hindsight
+    cancels running work cooperatively, and its worker may still write after the status changed (ADR-0152)."""
     status: str
 
 
