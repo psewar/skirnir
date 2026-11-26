@@ -138,6 +138,8 @@ Größenlimits vor dem Backend (413): `max_images` 16, `max_tools` 128, `max_mes
 
 ## Gedächtnis und Sitzungen
 
+Bei erfolgreichem projektübergreifendem Recall über REST oder das Hindsight-Gateway beschreibt `memory_state` die primäre Bank. Für die gesamte Suche gilt `aggregate_state`. Fehlt die private Bank und antwortet die Teambank, lautet der Wert `available`. Fehlen alle Banken, lautet er `bank_missing`. Wird eine zusätzliche Abfrage verweigert oder gefiltert oder ist eine zusätzliche Bank unerreichbar, lautet er `partial`. Das Array `also` nennt die betroffenen Projekte.
+
 Persistente Sitzungen, Langzeitgedächtnis (`routing.memory`), verwalteter Kontext und gemeinsames Gedächtnis sind optional und
 standardmäßig aus. Überblick und Links zu den Einrichtungsanleitungen:
 [reference.de.md](reference.de.md#optionaler-persistenter-session-speicher).

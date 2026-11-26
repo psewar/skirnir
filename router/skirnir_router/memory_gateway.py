@@ -20,6 +20,7 @@ from aiohttp import web
 from . import auth, memory, session_api
 from .common import log
 from .memory_outbox import upstream_id
+from .provenance import make_provenance as provenance
 from . import deletion_journal
 from .outcome import Problem, bad_gateway, denied, failed, invalid, unavailable
 from .reliability_store import OPERATION_NOT_FOUND
@@ -50,26 +51,6 @@ def event_time(value):
              and int(match["hour"]) <= 23 and int(match["minute"]) <= 59 and int(match["second"] or 0) <= 59
              and int(match["offset_hour"] or 0) <= 14 and int(match["offset_minute"] or 0) <= 59)
     return datetime.fromisoformat(value).isoformat() if valid else INVALID_EVENT_TIME
-
-
-def provenance(raw, principal, *, confirmed):
-    """Server-side provenance record, or a Problem."""
-    if failed(problem := session_api.fields(raw, ("source_refs", "kind", "version", "supersedes"))):
-        return problem
-    refs = raw.get("source_refs", [])
-    if not isinstance(refs, list) or len(refs) > 16 or any(not isinstance(x, str) or len(x) > 256 for x in refs):
-        return invalid("invalid provenance references")
-    kind = raw.get("kind", "confirmed_information" if confirmed else "assistant_derivation")
-    if kind not in ("user_assertion", "confirmed_information", "assistant_derivation") or (not confirmed and kind == "confirmed_information"):
-        return invalid("invalid knowledge kind")
-    result = {"kind": kind, "origin_client": principal, "source_refs": json.dumps(refs), "confirmed": str(confirmed).lower()}
-    # Wall-clock time is added on dispatch; it is not part of an event fingerprint.
-    for key in ("version", "supersedes"):
-        if key in raw:
-            if failed(value := session_api.text(raw[key], key)):
-                return value
-            result[key] = value
-    return result
 
 
 def register(app):

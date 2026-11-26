@@ -135,5 +135,7 @@ Size limits before the backend (413): `max_images` 16, `max_tools` 128, `max_mes
 
 ## Memory and sessions
 
+For successful multi-project recall through REST or the Hindsight gateway, `memory_state` describes the primary bank. Use `aggregate_state` for the whole lookup. A missing private bank and a responding team bank give `available`. If every bank is missing, the value is `bank_missing`. A denied, filtered or unavailable secondary lookup gives `partial`. The `also` array identifies the affected projects.
+
 Persistent sessions, long-term memory (`routing.memory`), managed context and shared memory are optional and off by default.
 Overview and links to the setup guides: [reference.md](reference.md#optional-persistent-session-api).

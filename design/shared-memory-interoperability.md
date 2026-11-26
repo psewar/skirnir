@@ -1,7 +1,10 @@
 # Shared memory, agent exchange and reliability
 
 > Decisions (why): [ADR-0030](../docs/adr/0030-shared-memory-scopes-and-agent-interoperability.md),
-> [ADR-0145](../docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md) (review before a write reaches a shared bank)
+> [ADR-0145](../docs/adr/0145-writes-into-a-shared-memory-scope-can-wait-for-a-reviewer.md) (review before a write reaches a shared bank),
+> [ADR-0150](../docs/adr/0150-report-the-aggregate-state-of-multi-project-recall.md) (aggregate state of a multi-project recall),
+> [ADR-0151](../docs/adr/0151-verification-of-an-accepted-memory-write-ends-at-its-deadline-also-when-its-status-is-unreadable.md) (verification deadline also for an unreadable status),
+> [ADR-0152](../docs/adr/0152-a-deletion-does-not-proceed-after-an-upstream-cancellation.md) (no deletion after an upstream cancellation, rejected)
 
 [Deutsche Anleitung](shared-memory-interoperability.de.md). This extends the existing
 [session store](session-store.md), [memory adapter](hindsight-memory.md) and
@@ -120,7 +123,7 @@ statement present in both banks is passed on once. Facts from a further project 
 project as `also: [{project, memory_state, items}]`; a further project that is
 unavailable, missing or no longer readable adds nothing (`denied` when the grant is
 gone) and never turns the private answer into an error, while a failing primary bank
-fails the whole recall as before. Each name must be another project of the same
+fails the whole recall as before. Successful multi-project responses include `aggregate_state`: `bank_missing` when all banks are missing, `available` when all banks answered or were missing and at least one answered, and `partial` when a further bank was denied, filtered or unavailable. Each name must be another project of the same
 client with `read: true` (max 4); loading refuses anything else. Writing is not
 affected: retains go only to the addressed project. Automatic recall for inference
 (`routing.memory`, strategies `auto`/`hybrid`) is not affected either.
@@ -345,13 +348,15 @@ with the **same document id**, because Hindsight answers a known operation id wi
 old state; at most `upstream_attempts` resubmissions per round, then `dead` with
 `upstream_failed`. An operation Hindsight no longer knows becomes `dead`
 (`remote_unknown`); one unconfirmed for `verify_timeout_s` becomes `dead`
-(`remote_pending`). Each resubmission starts a new send round. A retry round keeps
+(`remote_pending` for a readable pending state, otherwise the last lookup error). Unreadable status alone never triggers an automatic resubmission. Each resubmission starts a new send round. A retry round keeps
 the resubmission counter, so no failed upstream id is reused. The payload of an
 accepted job is kept until it is completed. The gateway status reports an accepted
 job whose upstream extraction failed as still `processing`, since it will be resubmitted.
 
 The deletion worker first requires upstream status `completed` (or `failed`, after
-which no write can follow), then deletes only its immutable UUID document.
+which no write can follow), then deletes only its immutable UUID document. Not after `cancelled`: Hindsight cancels
+running work cooperatively, so its worker may still write after the status changed (ADR-0152); such a deletion keeps
+waiting and, if the status never changes, becomes a dead letter counted in `skirnir_memory_deletions_stuck`.
 Unknown/pending upstream operations are retried and can become dead letters; they
 are not labelled erased. HTTP 404 on the document
 DELETE is repeatably absent only after that completion check. Source deletion does
